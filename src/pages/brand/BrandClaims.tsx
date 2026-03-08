@@ -61,9 +61,9 @@ const BrandClaims = () => {
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                    <button className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground" title="View">
+                    <Link to={`/brand/claims/${claim.id}`} className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground" title="View">
                       <Eye className="h-4 w-4" />
-                    </button>
+                    </Link>
                     {claim.status === "Under Review" && (
                       <>
                         <button className="rounded-md p-1.5 text-success transition-colors hover:bg-success/10" title="Approve">
