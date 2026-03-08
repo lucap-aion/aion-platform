@@ -11,7 +11,7 @@ const BrandSettings = () => {
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
         <div className="glass-card p-6">
           <h2 className="font-serif text-lg font-semibold text-foreground mb-4">Brand Information</h2>
-          <div className="grid grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>
               <label className="text-sm font-medium text-foreground mb-1.5 block">Brand Name</label>
               <input type="text" defaultValue="Pomellato" className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary" />
