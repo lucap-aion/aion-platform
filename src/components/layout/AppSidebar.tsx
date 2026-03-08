@@ -84,11 +84,11 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
     <Sidebar collapsible="icon" className="border-r border-border bg-card">
       <SidebarHeader className={collapsed ? "p-2" : "p-4"}>
         <div className={`flex items-center ${collapsed ? "justify-center" : "px-2"}`}>
-          <img
-            src={collapsed ? tenant.logoIconUrl : tenant.logoUrl}
-            alt={tenant.name}
-            className={collapsed ? "h-9 w-9 object-contain dark:brightness-0 dark:invert" : "h-16 object-contain max-w-[180px] dark:brightness-0 dark:invert"}
-          />
+          {collapsed ? (
+            <span className="text-lg font-serif font-bold text-foreground">{tenant.logoInitial}</span>
+          ) : (
+            <span className="text-2xl font-serif font-bold text-foreground tracking-tight">{tenant.name}</span>
+          )}
         </div>
       </SidebarHeader>
 
