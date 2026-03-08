@@ -124,7 +124,7 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
               </NavLink>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-red-600 focus:text-red-600 cursor-pointer">
+            <DropdownMenuItem className="focus:text-destructive cursor-pointer">
               <LogOut className="mr-2 h-4 w-4" />
               <span>Logout</span>
             </DropdownMenuItem>
