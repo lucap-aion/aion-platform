@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 import necklaceImg from "@/assets/product-necklace.png";
 import ringImg from "@/assets/product-ring.png";
 import braceletImg from "@/assets/product-bracelet.png";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { Badge } from "@/components/ui/badge";
 
 const covers = [
