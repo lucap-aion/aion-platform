@@ -17,7 +17,7 @@ const CustomerCovers = () => {
   const [view, setView] = useState<"list" | "grid">("list");
 
   return (
-    <div className="max-w-5xl mx-auto animate-fade-in">
+    <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
       <div className="mb-6 md:mb-8 flex items-start justify-between">
         <div>
           <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">My Covers</h1>
