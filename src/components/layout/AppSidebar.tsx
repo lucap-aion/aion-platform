@@ -87,7 +87,7 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
           <img
             src={collapsed ? tenant.logoIconUrl : tenant.logoUrl}
             alt={tenant.name}
-            className={collapsed ? "h-8 w-8 object-contain" : "h-12 object-contain max-w-[160px] dark:brightness-0 dark:invert"}
+            className={collapsed ? "h-9 w-9 object-contain dark:brightness-0 dark:invert" : "h-16 object-contain max-w-[180px] dark:brightness-0 dark:invert"}
           />
         </div>
       </SidebarHeader>
