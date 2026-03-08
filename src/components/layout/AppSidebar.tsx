@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, ChevronRight } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, ChevronRight, UserCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface AppSidebarProps {
@@ -10,6 +10,7 @@ const customerLinks = [
   { to: "/home", icon: Home, label: "Home" },
   { to: "/covers", icon: Shield, label: "My Covers" },
   { to: "/claims", icon: FileText, label: "My Claims" },
+  { to: "/profile", icon: UserCircle, label: "My Profile" },
 ];
 
 const brandLinks = [
