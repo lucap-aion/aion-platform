@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Plus, Clock, CheckCircle2, XCircle, LayoutGrid, List, Pencil, Trash2 } from "lucide-react";
+import { Plus, Clock, CheckCircle2, XCircle, LayoutGrid, List, Pencil, Trash2, Camera } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/contexts/LanguageContext";
