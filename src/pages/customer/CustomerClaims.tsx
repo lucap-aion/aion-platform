@@ -406,6 +406,17 @@ const CustomerClaims = () => {
                 required
               />
             </div>
+            <div>
+              <label className="text-xs font-medium text-foreground mb-1.5 block">
+                {locale === "en" ? "Files" : "File"}{" "}
+                <span className="font-normal text-muted-foreground">
+                  ({locale === "en" ? "upload evidence that can speed up review" : "carica prove per velocizzare la revisione"})
+                </span>
+              </label>
+              <div className="flex h-20 w-20 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-border transition-colors hover:border-primary/50 hover:bg-primary/5">
+                <Camera className="h-6 w-6 text-muted-foreground" />
+              </div>
+            </div>
             <div className="flex gap-3">
               <button
                 type="button"
