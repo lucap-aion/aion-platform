@@ -126,7 +126,10 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
             </div>
             <p className="text-xs text-muted-foreground mb-3">Contact our support team anytime.</p>
             <div className="flex flex-col gap-2">
-              <button className="w-full rounded-lg bg-primary py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+              <button
+                onClick={() => setSupportOpen(true)}
+                className="w-full rounded-lg bg-primary py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
                 Contact Support
               </button>
               <button
