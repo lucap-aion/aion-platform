@@ -1,29 +1,37 @@
 import { motion } from "framer-motion";
 import { Users, Shield } from "lucide-react";
 import { Link } from "react-router-dom";
-import heroImage from "@/assets/hero-jewelry.jpg";
+import { useTenant } from "@/contexts/TenantContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const PortalSelector = () => {
+  const tenant = useTenant();
+  const { t, locale } = useLanguage();
+
   return (
     <div className="min-h-screen bg-background flex">
-      {/* Left - Image */}
+      {/* Left - Tenant branded image */}
       <div className="hidden lg:block lg:w-1/2 relative">
-        <img src={heroImage} alt="Luxury jewelry" className="h-full w-full object-cover" />
+        <img src={tenant.authBackgroundUrl} alt={tenant.name} className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-r from-charcoal/60 to-charcoal/30" />
         <div className="absolute bottom-16 left-16">
           <h1 className="font-serif text-5xl font-bold text-cream-light mb-3">
-            AION <span className="font-light">Cover</span>
+            {tenant.name}
           </h1>
-          <p className="text-cream-light/70 text-lg max-w-md">Global Protection for Luxury Products</p>
+          <p className="text-cream-light/70 text-lg max-w-md">{tenant.tagline}</p>
         </div>
       </div>
 
       {/* Right - Selection */}
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-md">
-          <h2 className="font-serif text-3xl font-bold text-foreground mb-2 lg:hidden">AION Cover</h2>
-          <h3 className="font-serif text-2xl font-semibold text-foreground mb-2">Welcome back</h3>
-          <p className="text-muted-foreground mb-10">Select your portal to continue, or <Link to="/login" className="font-semibold text-primary hover:underline">sign in</Link> to your account.</p>
+          <h2 className="font-serif text-3xl font-bold text-foreground mb-2 lg:hidden">{tenant.name}</h2>
+          <h3 className="font-serif text-2xl font-semibold text-foreground mb-2">{t("auth.welcomeBack")}</h3>
+          <p className="text-muted-foreground mb-10">
+            {locale === "en"
+              ? <>Select your portal to continue, or <Link to="/login" className="font-semibold text-primary hover:underline">sign in</Link> to your account.</>
+              : <>Seleziona il tuo portale per continuare, oppure <Link to="/login" className="font-semibold text-primary hover:underline">accedi</Link> al tuo account.</>}
+          </p>
 
           <div className="space-y-4">
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
@@ -35,8 +43,12 @@ const PortalSelector = () => {
                   <Shield className="h-7 w-7 text-primary" />
                 </div>
                 <div>
-                  <h4 className="font-serif text-lg font-semibold text-foreground">Customer Portal</h4>
-                  <p className="text-sm text-muted-foreground">Track covers & manage claims</p>
+                  <h4 className="font-serif text-lg font-semibold text-foreground">
+                    {locale === "en" ? "Customer Portal" : "Portale Cliente"}
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    {locale === "en" ? "Track covers & manage claims" : "Monitora coperture e gestisci reclami"}
+                  </p>
                 </div>
               </Link>
             </motion.div>
@@ -50,8 +62,12 @@ const PortalSelector = () => {
                   <Users className="h-7 w-7 text-primary" />
                 </div>
                 <div>
-                  <h4 className="font-serif text-lg font-semibold text-foreground">Brand Portal</h4>
-                  <p className="text-sm text-muted-foreground">Manage customers, covers & claims</p>
+                  <h4 className="font-serif text-lg font-semibold text-foreground">
+                    {locale === "en" ? "Brand Portal" : "Portale Brand"}
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    {locale === "en" ? "Manage customers, covers & claims" : "Gestisci clienti, coperture e reclami"}
+                  </p>
                 </div>
               </Link>
             </motion.div>

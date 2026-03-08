@@ -20,11 +20,8 @@ const AppLayout = ({ mode }: AppLayoutProps) => {
             <div className="flex items-center">
               <SidebarTrigger className="mr-4" />
               <span className="font-serif text-sm font-medium text-muted-foreground md:hidden">
-                {tenant.name === "AION Cover" ? (
-                  <>AION <span className="text-primary">Cover</span></>
-                ) : (
-                  tenant.name
-                )}
+                {tenant.name}
+              </span>
               </span>
             </div>
             <HeaderControls />

@@ -30,11 +30,9 @@ const Login = () => {
         <div className="absolute inset-0 bg-gradient-to-r from-charcoal/60 to-charcoal/30" />
         <div className="absolute bottom-16 left-16">
           <h1 className="font-serif text-5xl font-bold text-cream-light mb-3">
-            {tenant.name === "AION Cover" ? (
-              <>AION <span className="font-light">Cover</span></>
-            ) : (
-              tenant.name
-            )}
+            {tenant.name}
+          </h1>
+          <p className="text-cream-light/70 text-lg max-w-md">{tenant.tagline}</p>
           </h1>
           <p className="text-cream-light/70 text-lg max-w-md">Global Protection for Luxury Products</p>
         </div>

@@ -83,7 +83,7 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2 px-2">
           <span className="font-serif text-xl font-bold tracking-wide text-foreground">
-            {collapsed ? "A" : <>AION <span className="font-light text-primary">Cover</span></>}
+            {collapsed ? tenant.logoInitial : tenant.name}
           </span>
         </div>
       </SidebarHeader>
