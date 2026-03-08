@@ -1,4 +1,4 @@
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import AppSidebar from "./AppSidebar";
 import HeaderControls from "./HeaderControls";
@@ -8,8 +8,12 @@ interface AppLayoutProps {
   mode: "customer" | "brand";
 }
 
+const fullBleedRoutes = ["/home"];
+
 const AppLayout = ({ mode }: AppLayoutProps) => {
   const tenant = useTenant();
+  const location = useLocation();
+  const isFullBleed = fullBleedRoutes.includes(location.pathname);
 
   return (
     <SidebarProvider>
@@ -25,7 +29,7 @@ const AppLayout = ({ mode }: AppLayoutProps) => {
             </div>
             <HeaderControls />
           </header>
-          <main className="flex-1 p-4 md:p-8">
+          <main className={isFullBleed ? "flex-1" : "flex-1 p-4 md:p-8"}>
             <Outlet />
           </main>
         </div>
