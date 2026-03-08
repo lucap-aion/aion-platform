@@ -2,10 +2,18 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { LayoutGrid, List } from "lucide-react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import necklaceImg from "@/assets/product-necklace.png";
 import ringImg from "@/assets/product-ring.png";
 import braceletImg from "@/assets/product-bracelet.png";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 const covers = [
   { id: "1", product: "Collana con pendente Nudo Petit", brand: "Pomellato", image: necklaceImg, startDate: "Mar 08, 2026", expirationDate: "Mar 12, 2027", status: "active" },
@@ -15,6 +23,21 @@ const covers = [
 
 const CustomerCovers = () => {
   const [view, setView] = useState<"list" | "grid">("list");
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferCover, setTransferCover] = useState<typeof covers[0] | null>(null);
+  const [transferEmail, setTransferEmail] = useState("");
+
+  const handleTransfer = (cover: typeof covers[0]) => {
+    setTransferCover(cover);
+    setTransferEmail("");
+    setTransferOpen(true);
+  };
+
+  const handleTransferSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTransferOpen(false);
+    toast.success(`Transfer initiated to ${transferEmail}`);
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
