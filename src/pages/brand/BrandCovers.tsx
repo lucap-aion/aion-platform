@@ -15,9 +15,9 @@ const covers = [
 const BrandCovers = () => {
   return (
     <div className="max-w-6xl mx-auto animate-fade-in">
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-6 md:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="font-serif text-3xl font-bold text-foreground">Covers</h1>
+          <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">Covers</h1>
           <p className="mt-1 text-sm text-muted-foreground">All product covers across your customer base.</p>
         </div>
         <div className="flex items-center gap-3">
@@ -47,11 +47,11 @@ const BrandCovers = () => {
               <p className="text-sm font-semibold text-foreground">{cover.product}</p>
               <p className="text-xs text-muted-foreground">{cover.customer}</p>
             </div>
-            <div className="text-center">
+            <div className="hidden md:block text-center">
               <p className="text-sm text-foreground">{cover.start}</p>
               <p className="text-xs text-muted-foreground">Start</p>
             </div>
-            <div className="text-center">
+            <div className="hidden md:block text-center">
               <p className="text-sm text-foreground">{cover.end}</p>
               <p className="text-xs text-muted-foreground">Expiration</p>
             </div>

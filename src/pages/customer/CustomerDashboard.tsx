@@ -6,12 +6,12 @@ import heroImage from "@/assets/hero-jewelry.jpg";
 
 const CustomerDashboard = () => {
   return (
-    <div className="max-w-5xl mx-auto space-y-8 animate-fade-in">
+    <div className="max-w-5xl mx-auto space-y-6 md:space-y-8 animate-fade-in">
       {/* Profile Completion */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-card flex items-center justify-between p-6"
+        className="glass-card flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 md:p-6"
       >
         <div className="flex items-center gap-6">
           <ProgressRing value={91} />
@@ -59,7 +59,7 @@ const CustomerDashboard = () => {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="grid grid-cols-3 gap-5"
+        className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-5"
       >
         {[
           { label: "Active Covers", value: "3", icon: Shield },
@@ -81,7 +81,7 @@ const CustomerDashboard = () => {
         className="glass-card p-8"
       >
         <h3 className="font-serif text-xl font-semibold text-foreground mb-6">How It Works</h3>
-        <div className="grid grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 md:gap-8">
           {[
             { step: "01", title: "Coverage at Checkout", desc: "Complimentary coverage included with your luxury purchase." },
             { step: "02", title: "Simple Activation", desc: "Activate your coverage effortlessly in just a few clicks." },

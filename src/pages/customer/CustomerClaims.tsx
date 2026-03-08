@@ -22,9 +22,9 @@ const statusConfig = {
 const CustomerClaims = () => {
   return (
     <div className="max-w-5xl mx-auto animate-fade-in">
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-6 md:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="font-serif text-3xl font-bold text-foreground">My Claims</h1>
+          <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">My Claims</h1>
           <p className="mt-1 text-sm text-muted-foreground">Track your submitted claims and their status.</p>
         </div>
         <Link
@@ -51,10 +51,10 @@ const CustomerClaims = () => {
                 transition={{ delay: i * 0.08 }}
                 className="glass-card p-6"
               >
-                <div className="flex items-start justify-between mb-3">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 mb-3">
                   <div>
-                    <div className="flex items-center gap-3">
-                      <h3 className="font-serif text-base font-semibold text-foreground">{claim.product}</h3>
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                      <h3 className="font-serif text-sm md:text-base font-semibold text-foreground">{claim.product}</h3>
                       <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${status.className}`}>
                         <status.icon className="h-3.5 w-3.5" />
                         {status.label}
