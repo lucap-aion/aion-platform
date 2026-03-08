@@ -5,7 +5,6 @@ import { Link } from "react-router-dom";
 import necklaceImg from "@/assets/product-necklace.png";
 import ringImg from "@/assets/product-ring.png";
 import braceletImg from "@/assets/product-bracelet.png";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 
 const covers = [
@@ -15,7 +14,7 @@ const covers = [
 ];
 
 const CustomerCovers = () => {
-  const [view, setView] = useState<"card" | "table">("card");
+  const [view, setView] = useState<"list" | "grid">("list");
 
   return (
     <div className="max-w-5xl mx-auto animate-fade-in">
@@ -26,21 +25,21 @@ const CustomerCovers = () => {
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-border p-1 bg-card">
           <button
-            onClick={() => setView("card")}
-            className={`rounded-md p-2 transition-colors ${view === "card" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            <LayoutGrid className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => setView("table")}
-            className={`rounded-md p-2 transition-colors ${view === "table" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setView("list")}
+            className={`rounded-md p-2 transition-colors ${view === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             <List className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setView("grid")}
+            className={`rounded-md p-2 transition-colors ${view === "grid" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <LayoutGrid className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      {view === "card" ? (
+      {view === "list" ? (
         <div className="space-y-4">
           {covers.map((cover, i) => (
             <motion.div
@@ -97,55 +96,48 @@ const CustomerCovers = () => {
           ))}
         </div>
       ) : (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="glass-card overflow-hidden"
-        >
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-16">Image</TableHead>
-                <TableHead>Product</TableHead>
-                <TableHead className="hidden md:table-cell">Brand</TableHead>
-                <TableHead className="hidden md:table-cell">Start Date</TableHead>
-                <TableHead className="hidden sm:table-cell">Expiration</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {covers.map((cover) => (
-                <TableRow key={cover.id}>
-                  <TableCell>
-                    <div className="h-10 w-10 overflow-hidden rounded-md bg-secondary/50 p-1">
-                      <img src={cover.image} alt={cover.product} className="h-full w-full object-contain" />
-                    </div>
-                  </TableCell>
-                  <TableCell className="font-serif font-medium text-foreground">{cover.product}</TableCell>
-                  <TableCell className="hidden md:table-cell text-muted-foreground">{cover.brand}</TableCell>
-                  <TableCell className="hidden md:table-cell text-muted-foreground">{cover.startDate}</TableCell>
-                  <TableCell className="hidden sm:table-cell text-muted-foreground">{cover.expirationDate}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5 capitalize">
-                      {cover.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Link to={`/claims/new?cover=${cover.id}`} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90">
-                        Claim
-                      </Link>
-                      <button className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary">
-                        Transfer
-                      </button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </motion.div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {covers.map((cover, i) => (
+            <motion.div
+              key={cover.id}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.08 }}
+              className="glass-card overflow-hidden transition-shadow hover:shadow-md flex flex-col"
+            >
+              <div className="flex items-center justify-center bg-secondary/30 p-6">
+                <img src={cover.image} alt={cover.product} className="h-32 w-32 object-contain" />
+              </div>
+              <div className="p-4 flex-1 flex flex-col">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-muted-foreground">{cover.brand}</p>
+                  <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5 capitalize text-[10px]">
+                    {cover.status}
+                  </Badge>
+                </div>
+                <h3 className="font-serif text-sm font-semibold text-foreground mb-3">{cover.product}</h3>
+                <div className="space-y-1 mb-4">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Start</span>
+                    <span className="text-foreground font-medium">{cover.startDate}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Expiration</span>
+                    <span className="text-foreground font-medium">{cover.expirationDate}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-auto">
+                  <Link to={`/claims/new?cover=${cover.id}`} className="flex-1 text-center rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">
+                    Open Claim
+                  </Link>
+                  <button className="flex-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary">
+                    Transfer
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
       )}
     </div>
   );
