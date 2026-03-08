@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { Search, Filter, Eye, CheckCircle2, XCircle } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const claims = [
   { id: "CLM-047", customer: "Allegra Bianchi", product: "Anello Nudo Classic", type: "Accidental Damage", date: "Mar 07, 2026", status: "Under Review" },
@@ -60,9 +61,9 @@ const BrandClaims = () => {
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                    <button className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground" title="View">
+                    <Link to={`/brand/claims/${claim.id}`} className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground" title="View">
                       <Eye className="h-4 w-4" />
-                    </button>
+                    </Link>
                     {claim.status === "Under Review" && (
                       <>
                         <button className="rounded-md p-1.5 text-success transition-colors hover:bg-success/10" title="Approve">

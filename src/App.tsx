@@ -19,6 +19,7 @@ import BrandCustomers from "./pages/brand/BrandCustomers";
 import BrandCovers from "./pages/brand/BrandCovers";
 import BrandClaims from "./pages/brand/BrandClaims";
 import BrandSettings from "./pages/brand/BrandSettings";
+import BrandClaimDetail from "./pages/brand/BrandClaimDetail";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -51,6 +52,7 @@ const App = () => (
             <Route path="/brand/customers" element={<BrandCustomers />} />
             <Route path="/brand/covers" element={<BrandCovers />} />
             <Route path="/brand/claims" element={<BrandClaims />} />
+            <Route path="/brand/claims/:claimId" element={<BrandClaimDetail />} />
             <Route path="/brand/settings" element={<BrandSettings />} />
           </Route>
 
