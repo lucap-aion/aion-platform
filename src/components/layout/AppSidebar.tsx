@@ -1,6 +1,19 @@
-import { NavLink, useLocation } from "react-router-dom";
-import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, ChevronRight, UserCircle } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, UserCircle, LogOut } from "lucide-react";
+import { useLocation } from "react-router-dom";
+import { NavLink } from "@/components/NavLink";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarFooter,
+  SidebarHeader,
+  useSidebar,
+} from "@/components/ui/sidebar";
 
 interface AppSidebarProps {
   mode: "customer" | "brand";
@@ -22,66 +35,79 @@ const brandLinks = [
 ];
 
 const AppSidebar = ({ mode }: AppSidebarProps) => {
+  const { state } = useSidebar();
+  const collapsed = state === "collapsed";
   const location = useLocation();
   const links = mode === "customer" ? customerLinks : brandLinks;
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-72 flex-col border-r border-border bg-card">
-      {/* Logo */}
-      <div className="flex h-20 items-center px-8">
-        <h1 className="font-serif text-2xl font-bold tracking-wide text-foreground">
-          AION <span className="font-light text-primary">Cover</span>
-        </h1>
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 space-y-1 px-4 py-4">
-        {links.map((link) => {
-          const isActive = location.pathname === link.to;
-          return (
-            <NavLink
-              key={link.to}
-              to={link.to}
-              className={cn(
-                "group flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-all duration-200",
-                isActive
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
-            >
-              <link.icon className={cn("h-5 w-5", isActive && "text-primary")} />
-              <span>{link.label}</span>
-            </NavLink>
-          );
-        })}
-      </nav>
-
-      {/* Help Card */}
-      <div className="mx-4 mb-4 rounded-xl border border-border bg-secondary/50 p-5">
-        <div className="flex items-center gap-2 mb-2">
-          <HelpCircle className="h-4 w-4 text-primary" />
-          <span className="text-sm font-semibold text-foreground">Need Help?</span>
+    <Sidebar collapsible="icon" className="border-r border-border bg-card">
+      <SidebarHeader className="p-4">
+        <div className="flex items-center gap-2 px-2">
+          <span className="font-serif text-xl font-bold tracking-wide text-foreground">
+            {collapsed ? "A" : <>AION <span className="font-light text-primary">Cover</span></>}
+          </span>
         </div>
-        <p className="text-xs text-muted-foreground mb-3">Contact our support team anytime.</p>
-        <button className="w-full rounded-lg bg-primary py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
-          Contact Support
-        </button>
-      </div>
+      </SidebarHeader>
 
-      {/* User */}
-      <div className="border-t border-border px-4 py-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-            <span className="text-sm font-semibold text-primary">AB</span>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-xs uppercase tracking-widest text-muted-foreground">
+            {collapsed ? "" : mode === "customer" ? "Menu" : "Management"}
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {links.map((link) => {
+                const isActive = location.pathname === link.to;
+                return (
+                  <SidebarMenuItem key={link.to}>
+                    <SidebarMenuButton asChild isActive={isActive} tooltip={link.label}>
+                      <NavLink
+                        to={link.to}
+                        end
+                        className="gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:bg-secondary hover:text-foreground"
+                        activeClassName="bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary"
+                      >
+                        <link.icon className="h-5 w-5 shrink-0" />
+                        {!collapsed && <span>{link.label}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Help Card - only when expanded */}
+        {!collapsed && (
+          <div className="mx-3 mt-auto rounded-xl border border-border bg-secondary/50 p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <HelpCircle className="h-4 w-4 text-primary" />
+              <span className="text-sm font-semibold text-foreground">Need Help?</span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">Contact our support team anytime.</p>
+            <button className="w-full rounded-lg bg-primary py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+              Contact Support
+            </button>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground truncate">Allegra Bianchi</p>
-            <p className="text-xs text-muted-foreground truncate">allegra@email.com</p>
+        )}
+      </SidebarContent>
+
+      <SidebarFooter className="p-3">
+        <div className="flex items-center gap-3 rounded-lg px-2 py-2">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+            <span className="text-xs font-semibold text-primary">AB</span>
           </div>
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          {!collapsed && (
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">Allegra Bianchi</p>
+              <p className="text-xs text-muted-foreground truncate">allegra@email.com</p>
+            </div>
+          )}
         </div>
-      </div>
-    </aside>
+      </SidebarFooter>
+    </Sidebar>
   );
 };
 
