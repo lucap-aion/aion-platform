@@ -40,7 +40,7 @@ const NewClaim = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             {/* Claim Type */}
             <div>
               <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">

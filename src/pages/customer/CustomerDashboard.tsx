@@ -81,7 +81,7 @@ const CustomerDashboard = () => {
         className="glass-card p-8"
       >
         <h3 className="font-serif text-xl font-semibold text-foreground mb-6">How It Works</h3>
-        <div className="grid grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 md:gap-8">
           {[
             { step: "01", title: "Coverage at Checkout", desc: "Complimentary coverage included with your luxury purchase." },
             { step: "02", title: "Simple Activation", desc: "Activate your coverage effortlessly in just a few clicks." },

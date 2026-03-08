@@ -114,7 +114,7 @@ const CustomerProfile = () => {
               <Separator />
 
               <h3 className="font-serif text-lg font-semibold text-foreground">Address</h3>
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div className="col-span-2 space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Street Address</Label>
                   <div className="relative">

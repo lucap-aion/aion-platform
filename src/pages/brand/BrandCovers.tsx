@@ -47,11 +47,11 @@ const BrandCovers = () => {
               <p className="text-sm font-semibold text-foreground">{cover.product}</p>
               <p className="text-xs text-muted-foreground">{cover.customer}</p>
             </div>
-            <div className="text-center">
+            <div className="hidden md:block text-center">
               <p className="text-sm text-foreground">{cover.start}</p>
               <p className="text-xs text-muted-foreground">Start</p>
             </div>
-            <div className="text-center">
+            <div className="hidden md:block text-center">
               <p className="text-sm text-foreground">{cover.end}</p>
               <p className="text-xs text-muted-foreground">Expiration</p>
             </div>

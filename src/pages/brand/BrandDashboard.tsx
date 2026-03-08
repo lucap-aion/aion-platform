@@ -23,7 +23,7 @@ const BrandDashboard = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-5 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5 mb-8">
         {stats.map((stat, i) => (
           <motion.div
             key={i}
