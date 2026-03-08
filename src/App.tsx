@@ -4,6 +4,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import PortalSelector from "./pages/PortalSelector";
+import Login from "./pages/auth/Login";
+import Signup from "./pages/auth/Signup";
+import ForgotPassword from "./pages/auth/ForgotPassword";
+import ResetPassword from "./pages/auth/ResetPassword";
 import AppLayout from "./components/layout/AppLayout";
 import CustomerDashboard from "./pages/customer/CustomerDashboard";
 import CustomerCovers from "./pages/customer/CustomerCovers";
@@ -26,6 +30,10 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<PortalSelector />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           
           {/* Customer Portal */}
           <Route element={<AppLayout mode="customer" />}>

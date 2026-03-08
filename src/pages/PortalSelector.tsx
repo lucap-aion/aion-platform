@@ -23,7 +23,7 @@ const PortalSelector = () => {
         <div className="w-full max-w-md">
           <h2 className="font-serif text-3xl font-bold text-foreground mb-2 lg:hidden">AION Cover</h2>
           <h3 className="font-serif text-2xl font-semibold text-foreground mb-2">Welcome back</h3>
-          <p className="text-muted-foreground mb-10">Select your portal to continue.</p>
+          <p className="text-muted-foreground mb-10">Select your portal to continue, or <Link to="/login" className="font-semibold text-primary hover:underline">sign in</Link> to your account.</p>
 
           <div className="space-y-4">
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
