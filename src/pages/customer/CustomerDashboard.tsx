@@ -77,7 +77,7 @@ const CustomerDashboard = () => {
   const [comment, setComment] = useState("");
 
   return (
-    <div className="max-w-6xl mx-auto space-y-0 animate-fade-in -m-4 md:-m-8">
+    <div className="max-w-full mx-auto space-y-0 animate-fade-in">
       {/* Profile Completion */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
