@@ -111,7 +111,7 @@ const CustomerCovers = () => {
                 <Link to={`/claims/new?cover=${cover.id}`} className="flex-1 text-center rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground">
                   Open Claim
                 </Link>
-                <button className="flex-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground">
+                <button onClick={() => handleTransfer(cover)} className="flex-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground">
                   Transfer
                 </button>
               </div>
