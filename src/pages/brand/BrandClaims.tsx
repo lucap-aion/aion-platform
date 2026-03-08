@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { Search, Filter, Eye, CheckCircle2, XCircle } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const claims = [
   { id: "CLM-047", customer: "Allegra Bianchi", product: "Anello Nudo Classic", type: "Accidental Damage", date: "Mar 07, 2026", status: "Under Review" },
