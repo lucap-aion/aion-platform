@@ -77,6 +77,7 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
   const collapsed = state === "collapsed";
   const location = useLocation();
   const links = mode === "customer" ? customerLinks : brandLinks;
+  const tenant = useTenant();
 
   return (
     <>
