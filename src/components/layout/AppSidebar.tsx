@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useTenant } from "@/contexts/TenantContext";
