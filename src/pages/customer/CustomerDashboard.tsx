@@ -15,6 +15,7 @@ import sectionTheft from "@/assets/section-theft.jpg";
 import sectionDamage from "@/assets/section-damage.jpg";
 import sectionFaq from "@/assets/section-faq.jpg";
 import sectionFeedback from "@/assets/section-feedback.jpg";
+import sectionHowItWorks from "@/assets/section-how-it-works.jpg";
 
 const faqItems = [
   {
@@ -44,7 +45,7 @@ const StarRating = ({ label }: { label: string }) => {
   const [hover, setHover] = useState(0);
 
   return (
-    <div className="mb-4">
+    <div className="mb-5">
       <p className="text-sm text-muted-foreground mb-2">{label}</p>
       <div className="flex gap-1">
         {[1, 2, 3, 4, 5].map((star) => (
@@ -57,7 +58,7 @@ const StarRating = ({ label }: { label: string }) => {
             className="transition-colors"
           >
             <Star
-              className={`h-5 w-5 ${
+              className={`h-6 w-6 ${
                 star <= (hover || rating)
                   ? "fill-primary text-primary"
                   : "text-muted-foreground/30"
@@ -76,12 +77,12 @@ const CustomerDashboard = () => {
   const [comment, setComment] = useState("");
 
   return (
-    <div className="animate-fade-in">
-      {/* Profile Completion */}
+    <div className="animate-fade-in space-y-4 p-4 md:p-6">
+      {/* Profile Completion Card */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 px-6 md:px-10 py-5 border-b border-border"
+        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl bg-card p-6"
       >
         <div className="flex items-center gap-5">
           <ProgressRing value={91} />
@@ -90,32 +91,36 @@ const CustomerDashboard = () => {
             <p className="text-sm text-muted-foreground">{t("dashboard.completeProfileDesc")}</p>
           </div>
         </div>
-        <button className="rounded-lg border border-primary bg-primary/5 px-6 py-2.5 text-sm font-medium text-primary transition-all hover:bg-primary hover:text-primary-foreground">
+        <button className="rounded-lg border border-primary bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:bg-primary/90 whitespace-nowrap">
           {t("dashboard.completeProfileBtn")}
         </button>
       </motion.div>
 
-      {/* Hero Banner - dark bg with text overlay */}
+      {/* Hero Banner */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.1 }}
-        className="bg-charcoal px-6 md:px-10 py-10 md:py-16"
+        className="relative rounded-xl overflow-hidden"
       >
-        <h2 className="font-serif text-2xl md:text-4xl font-bold text-cream-light mb-3">
-          {tenant.name} {locale === "en" ? "Prestige Service" : "Servizio Prestige"}
-        </h2>
-        <p className="max-w-lg text-sm text-cream-light/70 mb-6 leading-relaxed">
-          {locale === "en"
-            ? `Inspired by its passion for customer experience, ${tenant.name} is pleased to introduce an exclusive cover service.`
-            : `Ispirato dalla passione per l'esperienza del cliente, ${tenant.name} è lieto di presentare un servizio di copertura esclusivo.`}
-        </p>
-        <Link
-          to="/covers"
-          className="inline-flex w-fit items-center gap-2 rounded-lg border border-cream-light/30 px-5 py-2.5 text-sm font-medium text-cream-light transition-all hover:bg-cream-light/10"
-        >
-          {locale === "en" ? "See my products" : "Vedi i miei prodotti"} <ArrowRight className="h-4 w-4" />
-        </Link>
+        <img src={sectionHowItWorks} alt="" className="w-full h-56 md:h-72 object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-r from-charcoal/80 via-charcoal/50 to-transparent" />
+        <div className="absolute inset-0 flex flex-col justify-center p-8 md:p-12">
+          <h2 className="font-serif text-2xl md:text-4xl font-bold text-cream-light mb-3">
+            {tenant.name} {locale === "en" ? "Prestige Service" : "Servizio Prestige"}
+          </h2>
+          <p className="max-w-md text-sm text-cream-light/80 mb-6 leading-relaxed">
+            {locale === "en"
+              ? `Inspired by its passion for customer excellence, ${tenant.name} is pleased to introduce an exclusive cover service.`
+              : `Ispirato dalla passione per l'esperienza del cliente, ${tenant.name} è lieto di presentare un servizio di copertura esclusivo.`}
+          </p>
+          <Link
+            to="/covers"
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-cream-light/40 px-5 py-2.5 text-sm font-medium text-cream-light transition-all hover:bg-cream-light/10"
+          >
+            {locale === "en" ? "See All Products" : "Vedi tutti i prodotti"}
+          </Link>
+        </div>
       </motion.div>
 
       {/* How it works */}
@@ -123,47 +128,45 @@ const CustomerDashboard = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.2 }}
-        className="bg-charcoal border-t border-charcoal-light/20"
+        className="rounded-xl bg-card p-6 md:p-8"
       >
-        <div className="px-6 md:px-10 py-8 md:py-12">
-          <h3 className="font-serif text-xl md:text-2xl font-bold text-cream-light mb-2">
-            {t("dashboard.howItWorks")}
-          </h3>
-          <p className="text-sm text-cream-light/60 max-w-xl mb-8 leading-relaxed">
-            {locale === "en"
-              ? `The ${tenant.name} Prestige Service is a complimentary 2-year program designed to protect your jewelry against theft and accidental damage.`
-              : `Il Servizio Prestige di ${tenant.name} è un programma gratuito di 2 anni progettato per proteggere i tuoi gioielli da furto e danni accidentali.`}
-          </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div>
+            <h3 className="font-serif text-xl md:text-2xl font-bold text-foreground mb-3">
+              {t("dashboard.howItWorks")}
+            </h3>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {locale === "en"
+                ? `The ${tenant.name} Prestige Service is a complimentary 2-year program designed to protect your ${tenant.name} jewelry against theft and accidental damage.`
+                : `Il Servizio Prestige di ${tenant.name} è un programma gratuito di 2 anni progettato per proteggere i tuoi gioielli ${tenant.name} da furto e danni accidentali.`}
+            </p>
+          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-            <div className="relative rounded-xl overflow-hidden group">
-              <img src={sectionTheft} alt="Theft protection" className="h-48 md:h-56 w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-              <div className="absolute inset-0 bg-gradient-to-t from-charcoal/90 via-charcoal/30 to-transparent" />
-              <div className="absolute bottom-0 left-0 right-0 p-5">
-                <h4 className="font-serif text-lg font-semibold text-cream-light mb-1">
-                  {locale === "en" ? "Theft" : "Furto"}
-                </h4>
-                <p className="text-xs text-cream-light/70 leading-relaxed">
-                  {locale === "en"
-                    ? `In the event of theft, ${tenant.name} team will carefully review your case. If all prerequisites are met, ${tenant.name} may, at its sole discretion, offer a replacement jewelry of equal value via a digital voucher.`
-                    : `In caso di furto, il team ${tenant.name} esaminerà attentamente il tuo caso. Se tutti i prerequisiti sono soddisfatti, ${tenant.name} può, a sua esclusiva discrezione, offrire un gioiello sostitutivo di pari valore tramite un voucher digitale.`}
-                </p>
-              </div>
+          <div className="rounded-xl overflow-hidden border border-border">
+            <img src={sectionTheft} alt="Theft protection" className="h-40 w-full object-cover" />
+            <div className="p-4">
+              <h4 className="font-serif text-base font-semibold text-foreground mb-1">
+                {locale === "en" ? "Theft" : "Furto"}
+              </h4>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {locale === "en"
+                  ? `In the event of theft, ${tenant.name} team will carefully review your case. If all prerequisites are met, ${tenant.name} may, at its sole discretion, offer a replacement jewelry of equal value via a digital voucher.`
+                  : `In caso di furto, il team ${tenant.name} esaminerà attentamente il tuo caso. Se tutti i prerequisiti sono soddisfatti, ${tenant.name} può, a sua esclusiva discrezione, offrire un gioiello sostitutivo di pari valore tramite un voucher digitale.`}
+              </p>
             </div>
+          </div>
 
-            <div className="relative rounded-xl overflow-hidden group">
-              <img src={sectionDamage} alt="Accidental damage protection" className="h-48 md:h-56 w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-              <div className="absolute inset-0 bg-gradient-to-t from-charcoal/90 via-charcoal/30 to-transparent" />
-              <div className="absolute bottom-0 left-0 right-0 p-5">
-                <h4 className="font-serif text-lg font-semibold text-cream-light mb-1">
-                  {locale === "en" ? "Accidental Damage" : "Danni Accidentali"}
-                </h4>
-                <p className="text-xs text-cream-light/70 leading-relaxed">
-                  {locale === "en"
-                    ? `In the event of irreparable accidental damage, ${tenant.name} will carefully review your case. If all prerequisites are met, ${tenant.name} may, at its sole discretion, offer a replacement jewelry of equal value via a digital voucher.`
-                    : `In caso di danni accidentali irreparabili, ${tenant.name} esaminerà attentamente il tuo caso. Se tutti i prerequisiti sono soddisfatti, ${tenant.name} può, a sua esclusiva discrezione, offrire un gioiello sostitutivo di pari valore tramite un voucher digitale.`}
-                </p>
-              </div>
+          <div className="rounded-xl overflow-hidden border border-border">
+            <img src={sectionDamage} alt="Accidental damage protection" className="h-40 w-full object-cover" />
+            <div className="p-4">
+              <h4 className="font-serif text-base font-semibold text-foreground mb-1">
+                {locale === "en" ? "Accidental damage" : "Danni Accidentali"}
+              </h4>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {locale === "en"
+                  ? `In the event of irreparable accidental damage, ${tenant.name} will carefully review your case. If all prerequisites are met, ${tenant.name} may, at its sole discretion, offer a replacement jewelry of equal value via a digital voucher.`
+                  : `In caso di danni accidentali irreparabili, ${tenant.name} esaminerà attentamente il tuo caso. Se tutti i prerequisiti sono soddisfatti, ${tenant.name} può, a sua esclusiva discrezione, offrire un gioiello sostitutivo di pari valore tramite un voucher digitale.`}
+              </p>
             </div>
           </div>
         </div>
@@ -174,12 +177,12 @@ const CustomerDashboard = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.3 }}
-        className="grid grid-cols-1 md:grid-cols-2"
+        className="grid grid-cols-1 md:grid-cols-2 rounded-xl overflow-hidden"
       >
         <div className="hidden md:block">
           <img src={sectionFaq} alt="FAQ" className="h-full w-full object-cover" />
         </div>
-        <div className="bg-background px-6 md:px-10 py-8 md:py-12 flex flex-col justify-center">
+        <div className="bg-card p-6 md:p-8 flex flex-col justify-center">
           <h3 className="font-serif text-lg font-semibold text-foreground mb-1">FAQ</h3>
           <Accordion type="single" collapsible className="w-full">
             {faqItems.map((item, i) => (
@@ -207,9 +210,9 @@ const CustomerDashboard = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.4 }}
-        className="grid grid-cols-1 md:grid-cols-2"
+        className="grid grid-cols-1 md:grid-cols-2 rounded-xl overflow-hidden"
       >
-        <div className="bg-background px-6 md:px-10 py-8 md:py-12 border-t border-border">
+        <div className="bg-card p-6 md:p-8">
           <h3 className="font-serif text-lg font-semibold text-foreground mb-6">
             {locale === "en"
               ? `Please rate ${tenant.name} Prestige Service`
@@ -223,7 +226,7 @@ const CustomerDashboard = () => {
           />
           <StarRating
             label={locale === "en"
-              ? `Does the Prestige Service provide you with peace of mind when using your items?`
+              ? `Does the Prestige Service provide you with peace of mind when using your item?`
               : `Il Servizio Prestige ti offre tranquillità quando utilizzi i tuoi articoli?`}
           />
           <StarRating
@@ -240,8 +243,8 @@ const CustomerDashboard = () => {
               rows={4}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder={locale === "en" ? "Enter a comment" : "Inserisci un commento"}
-              className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+              placeholder={locale === "en" ? "Enter comment" : "Inserisci un commento"}
+              className="w-full rounded-lg border border-border bg-card px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
             />
           </div>
           <div className="flex justify-end mt-3">
@@ -260,7 +263,7 @@ const CustomerDashboard = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
-        className="bg-background px-6 md:px-10 py-10 md:py-14 border-t border-border"
+        className="rounded-xl bg-card p-6 md:p-8"
       >
         <h3 className="font-serif text-xl md:text-2xl font-bold text-foreground mb-2">
           {locale === "en" ? "Continue Shopping" : "Continua lo Shopping"}
@@ -276,16 +279,14 @@ const CustomerDashboard = () => {
         >
           {locale === "en" ? "Continue Shopping" : "Continua lo Shopping"}
         </a>
+        <div className="flex justify-end mt-6">
+          <img
+            src={tenant.logoUrl}
+            alt={tenant.name}
+            className="h-10 object-contain opacity-40"
+          />
+        </div>
       </motion.div>
-
-      {/* Footer with brand logo */}
-      <div className="flex items-center justify-end px-6 md:px-10 py-6 border-t border-border">
-        <img
-          src={tenant.logoUrl}
-          alt={tenant.name}
-          className="h-8 object-contain opacity-50"
-        />
-      </div>
     </div>
   );
 };
