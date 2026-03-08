@@ -1,4 +1,5 @@
-import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, UserCircle, LogOut } from "lucide-react";
+import { useState } from "react";
+import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, UserCircle, LogOut, BookOpen } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import {
@@ -21,6 +22,26 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+
+const faqItems = [
+  { q: "What does my cover include?", a: "Your cover protects against theft, accidental damage, and loss for the duration of the coverage period." },
+  { q: "How do I file a claim?", a: "Navigate to My Covers, select the covered item, and click 'Open Claim'. Follow the guided steps to submit your claim." },
+  { q: "How long does claim processing take?", a: "Most claims are reviewed within 5–7 business days. You'll receive updates via email and in your dashboard." },
+  { q: "Can I transfer my cover to someone else?", a: "Yes, you can transfer coverage by clicking the 'Transfer' button on any active cover and entering the recipient's details." },
+  { q: "What happens when my cover expires?", a: "You'll be notified 30 days before expiration. You can renew directly from the My Covers page." },
+];
 
 interface AppSidebarProps {
   mode: "customer" | "brand";
@@ -41,12 +62,14 @@ const brandLinks = [
 ];
 
 const AppSidebar = ({ mode }: AppSidebarProps) => {
+  const [faqOpen, setFaqOpen] = useState(false);
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
   const links = mode === "customer" ? customerLinks : brandLinks;
 
   return (
+    <>
     <Sidebar collapsible="icon" className="border-r border-border bg-card">
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2 px-2">
@@ -93,9 +116,18 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
               <span className="text-sm font-semibold text-foreground">Need Help?</span>
             </div>
             <p className="text-xs text-muted-foreground mb-3">Contact our support team anytime.</p>
-            <button className="w-full rounded-lg bg-primary py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
-              Contact Support
-            </button>
+            <div className="flex flex-col gap-2">
+              <button className="w-full rounded-lg bg-primary py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+                Contact Support
+              </button>
+              <button
+                onClick={() => setFaqOpen(true)}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                Check our FAQ
+              </button>
+            </div>
           </div>
         )}
       </SidebarContent>
@@ -131,6 +163,23 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
         </DropdownMenu>
       </SidebarFooter>
     </Sidebar>
+
+    <Sheet open={faqOpen} onOpenChange={setFaqOpen}>
+      <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+        <SheetHeader className="mb-6">
+          <SheetTitle className="font-serif text-xl">Frequently Asked Questions</SheetTitle>
+        </SheetHeader>
+        <Accordion type="single" collapsible className="w-full">
+          {faqItems.map((item, i) => (
+            <AccordionItem key={i} value={`faq-${i}`}>
+              <AccordionTrigger className="text-sm text-left font-medium">{item.q}</AccordionTrigger>
+              <AccordionContent className="text-sm text-muted-foreground leading-relaxed">{item.a}</AccordionContent>
+            </AccordionItem>
+          ))}
+        </Accordion>
+      </SheetContent>
+    </Sheet>
+    </>
   );
 };
 
