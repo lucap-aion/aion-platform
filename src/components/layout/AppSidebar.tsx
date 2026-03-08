@@ -154,10 +154,13 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
                 <span className="text-sm font-semibold text-primary">AB</span>
               </div>
               {!collapsed && (
-                <div className="flex-1 min-w-0 text-left">
-                  <p className="text-sm font-semibold text-foreground truncate">Allegra Bianchi</p>
-                  <p className="text-xs text-muted-foreground truncate">allegra@email.com</p>
-                </div>
+                <>
+                  <div className="flex-1 min-w-0 text-left">
+                    <p className="text-sm font-semibold text-foreground truncate">Allegra Bianchi</p>
+                    <p className="text-xs text-muted-foreground truncate">allegra@email.com</p>
+                  </div>
+                  <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </>
               )}
             </button>
           </DropdownMenuTrigger>
