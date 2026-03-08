@@ -32,14 +32,14 @@ const NewClaim = () => {
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-6 md:p-8">
         <h1 className="font-serif text-2xl font-bold text-foreground mb-1">New Claim</h1>
 
-        <div className="rounded-lg bg-secondary/50 p-4 mb-8">
-          <p className="text-xs text-muted-foreground mb-1">Cover</p>
+        <div className="rounded-lg bg-secondary/50 p-3 mb-6">
+          <p className="text-xs text-muted-foreground mb-0.5">Cover</p>
           <p className="text-sm font-semibold text-foreground">
             Collana con pendente Nudo Petit by Pomellato bought at Boutique Pomellato on Mar 08, 2026.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             {/* Claim Type */}
             <div>
