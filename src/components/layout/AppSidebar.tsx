@@ -70,6 +70,7 @@ const brandLinks = [
 
 const AppSidebar = ({ mode }: AppSidebarProps) => {
   const [faqOpen, setFaqOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   const [faqSearch, setFaqSearch] = useState("");
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
