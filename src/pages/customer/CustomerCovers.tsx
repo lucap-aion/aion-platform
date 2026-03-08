@@ -100,7 +100,7 @@ const CustomerCovers = () => {
                   <Link to={`/claims/new?cover=${cover.id}`} className="rounded-lg bg-primary px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
                     Open Claim
                   </Link>
-                  <button className="rounded-lg border border-border px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                  <button onClick={() => handleTransfer(cover)} className="rounded-lg border border-border px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
                     Transfer
                   </button>
                 </div>
