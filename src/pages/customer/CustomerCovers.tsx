@@ -162,6 +162,38 @@ const CustomerCovers = () => {
           ))}
         </div>
       )}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-xl">Transfer Cover</DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              Enter the email address of the person you'd like to transfer
+              {transferCover ? ` "${transferCover.product}"` : ""} to.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleTransferSubmit} className="space-y-4 mt-2">
+            <div>
+              <label className="text-xs font-medium text-foreground mb-1.5 block">Recipient Email</label>
+              <input
+                type="email"
+                placeholder="recipient@email.com"
+                value={transferEmail}
+                onChange={(e) => setTransferEmail(e.target.value)}
+                className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => setTransferOpen(false)} className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                Cancel
+              </button>
+              <button type="submit" className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+                Transfer
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
