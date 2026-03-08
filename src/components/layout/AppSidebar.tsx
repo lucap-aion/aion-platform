@@ -7,7 +7,7 @@ interface AppSidebarProps {
 }
 
 const customerLinks = [
-  { to: "/", icon: Home, label: "Home" },
+  { to: "/home", icon: Home, label: "Home" },
   { to: "/covers", icon: Shield, label: "My Covers" },
   { to: "/claims", icon: FileText, label: "My Claims" },
 ];
