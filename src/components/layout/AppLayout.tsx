@@ -25,7 +25,7 @@ const AppLayout = ({ mode }: AppLayoutProps) => {
             </div>
             <HeaderControls />
           </header>
-          <main className={isFullBleed ? "flex-1" : "flex-1 p-4 md:p-8"}>
+          <main className="flex-1">
             <Outlet />
           </main>
         </div>
