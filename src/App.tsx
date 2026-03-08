@@ -19,6 +19,7 @@ import BrandCustomers from "./pages/brand/BrandCustomers";
 import BrandCovers from "./pages/brand/BrandCovers";
 import BrandClaims from "./pages/brand/BrandClaims";
 import BrandSettings from "./pages/brand/BrandSettings";
+import BrandClaimDetail from "./pages/brand/BrandClaimDetail";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
