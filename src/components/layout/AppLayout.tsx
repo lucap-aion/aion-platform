@@ -22,7 +22,6 @@ const AppLayout = ({ mode }: AppLayoutProps) => {
               <span className="font-serif text-sm font-medium text-muted-foreground md:hidden">
                 {tenant.name}
               </span>
-              </span>
             </div>
             <HeaderControls />
           </header>

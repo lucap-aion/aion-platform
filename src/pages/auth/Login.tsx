@@ -33,8 +33,6 @@ const Login = () => {
             {tenant.name}
           </h1>
           <p className="text-cream-light/70 text-lg max-w-md">{tenant.tagline}</p>
-          </h1>
-          <p className="text-cream-light/70 text-lg max-w-md">Global Protection for Luxury Products</p>
         </div>
       </div>
 
