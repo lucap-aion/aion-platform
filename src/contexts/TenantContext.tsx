@@ -1,4 +1,10 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
+import logoAion from "@/assets/logo-aion.png";
+import logoIconAion from "@/assets/logo-icon-aion.png";
+import logoPomellato from "@/assets/logo-pomellato.png";
+import logoIconPomellato from "@/assets/logo-icon-pomellato.png";
+import logoRc from "@/assets/logo-rc.png";
+import logoIconRc from "@/assets/logo-icon-rc.png";
 
 export interface TenantConfig {
   slug: string;
@@ -16,8 +22,8 @@ const tenantConfigs: Record<string, TenantConfig> = {
     slug: "pomellato",
     name: "Pomellato",
     tagline: "Luxury Protection by Pomellato",
-    logoUrl: "/placeholder.svg",
-    logoIconUrl: "/placeholder.svg",
+    logoUrl: logoPomellato,
+    logoIconUrl: logoIconPomellato,
     logoInitial: "P",
     authBackgroundUrl: "https://images.unsplash.com/photo-1515562141589-67f0d569b6c6?w=1920&q=80",
     primaryHsl: "38 55% 55%",
@@ -26,8 +32,8 @@ const tenantConfigs: Record<string, TenantConfig> = {
     slug: "rc",
     name: "Roberto Coin",
     tagline: "Protection by Roberto Coin",
-    logoUrl: "/placeholder.svg",
-    logoIconUrl: "/placeholder.svg",
+    logoUrl: logoRc,
+    logoIconUrl: logoIconRc,
     logoInitial: "RC",
     authBackgroundUrl: "https://images.unsplash.com/photo-1617038220319-276d3cfab638?w=1920&q=80",
     primaryHsl: "210 40% 40%",
@@ -36,8 +42,8 @@ const tenantConfigs: Record<string, TenantConfig> = {
     slug: "default",
     name: "AION Cover",
     tagline: "Global Protection for Luxury Products",
-    logoUrl: "/placeholder.svg",
-    logoIconUrl: "/placeholder.svg",
+    logoUrl: logoAion,
+    logoIconUrl: logoIconAion,
     logoInitial: "A",
     authBackgroundUrl: "https://images.unsplash.com/photo-1515562141589-67f0d569b6c6?w=1920&q=80",
     primaryHsl: "38 55% 55%",
@@ -46,12 +52,10 @@ const tenantConfigs: Record<string, TenantConfig> = {
 
 function getTenantSlug(): string {
   const hostname = window.location.hostname;
-  // e.g. pomellato.app.aioncover.com → "pomellato"
   const parts = hostname.split(".");
   if (parts.length >= 3 && parts[1] === "app") {
     return parts[0];
   }
-  // For localhost / preview, check query param ?tenant=pomellato
   const params = new URLSearchParams(window.location.search);
   return params.get("tenant") || "default";
 }
