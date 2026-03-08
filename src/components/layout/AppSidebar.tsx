@@ -22,6 +22,26 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+
+const faqItems = [
+  { q: "What does my cover include?", a: "Your cover protects against theft, accidental damage, and loss for the duration of the coverage period." },
+  { q: "How do I file a claim?", a: "Navigate to My Covers, select the covered item, and click 'Open Claim'. Follow the guided steps to submit your claim." },
+  { q: "How long does claim processing take?", a: "Most claims are reviewed within 5–7 business days. You'll receive updates via email and in your dashboard." },
+  { q: "Can I transfer my cover to someone else?", a: "Yes, you can transfer coverage by clicking the 'Transfer' button on any active cover and entering the recipient's details." },
+  { q: "What happens when my cover expires?", a: "You'll be notified 30 days before expiration. You can renew directly from the My Covers page." },
+];
 
 interface AppSidebarProps {
   mode: "customer" | "brand";
