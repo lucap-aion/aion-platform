@@ -6,7 +6,7 @@ import heroImage from "@/assets/hero-jewelry.jpg";
 
 const CustomerDashboard = () => {
   return (
-    <div className="max-w-5xl mx-auto space-y-8 animate-fade-in">
+    <div className="max-w-5xl mx-auto space-y-6 md:space-y-8 animate-fade-in">
       {/* Profile Completion */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
