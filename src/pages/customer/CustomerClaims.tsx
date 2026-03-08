@@ -71,7 +71,7 @@ const CustomerClaims = () => {
   const [claims, setClaims] = useState(initialClaims);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editClaim, setEditClaim] = useState<typeof initialClaims[0] | null>(null);
-  const [editForm, setEditForm] = useState({ type: "", description: "" });
+  const [editForm, setEditForm] = useState({ type: "", description: "", incidentDate: "", incidentCity: "", incidentCountry: "" });
   const { locale } = useLanguage();
 
   const isEditable = (status: string) => status === "under_review";
