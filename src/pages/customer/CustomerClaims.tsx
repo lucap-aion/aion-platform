@@ -335,17 +335,64 @@ const CustomerClaims = () => {
             }}
             className="space-y-4 mt-2"
           >
-            <div>
-              <label className="text-xs font-medium text-foreground mb-1.5 block">
-                {locale === "en" ? "Claim Type" : "Tipo di Reclamo"}
-              </label>
-              <input
-                type="text"
-                value={editForm.type}
-                onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
-                className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                required
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-medium text-foreground mb-1.5 block">
+                  {locale === "en" ? "Claim Type" : "Tipo di Reclamo"}
+                </label>
+                <select
+                  value={editForm.type}
+                  onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  required
+                >
+                  <option value="">Select Type</option>
+                  {["Theft", "Accidental Damage", "Loss", "Other"].map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-foreground mb-1.5 block">
+                  {locale === "en" ? "Incident Date" : "Data Incidente"}
+                </label>
+                <input
+                  type="date"
+                  value={editForm.incidentDate}
+                  onChange={(e) => setEditForm({ ...editForm, incidentDate: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-foreground mb-1.5 block">
+                  {locale === "en" ? "Incident City" : "Città Incidente"}
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter city"
+                  value={editForm.incidentCity}
+                  onChange={(e) => setEditForm({ ...editForm, incidentCity: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-foreground mb-1.5 block">
+                  {locale === "en" ? "Incident Country" : "Paese Incidente"}
+                </label>
+                <select
+                  value={editForm.incidentCountry}
+                  onChange={(e) => setEditForm({ ...editForm, incidentCountry: e.target.value })}
+                  className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  required
+                >
+                  <option value="">Select Country</option>
+                  {["Italy", "France", "United Kingdom", "Germany", "Switzerland", "United States", "Other"].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div>
               <label className="text-xs font-medium text-foreground mb-1.5 block">
