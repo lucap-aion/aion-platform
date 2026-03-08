@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, ChevronRight } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, ChevronRight, UserCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface AppSidebarProps {
