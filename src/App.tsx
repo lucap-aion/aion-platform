@@ -13,6 +13,7 @@ import CustomerDashboard from "./pages/customer/CustomerDashboard";
 import CustomerCovers from "./pages/customer/CustomerCovers";
 import CustomerClaims from "./pages/customer/CustomerClaims";
 import NewClaim from "./pages/customer/NewClaim";
+import CustomerProfile from "./pages/customer/CustomerProfile";
 import BrandDashboard from "./pages/brand/BrandDashboard";
 import BrandCustomers from "./pages/brand/BrandCustomers";
 import BrandCovers from "./pages/brand/BrandCovers";
