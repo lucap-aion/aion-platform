@@ -170,8 +170,24 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
         <SheetHeader className="mb-6">
           <SheetTitle className="font-serif text-xl">Frequently Asked Questions</SheetTitle>
         </SheetHeader>
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search questions..."
+            value={faqSearch}
+            onChange={(e) => setFaqSearch(e.target.value)}
+            className="w-full rounded-lg border border-border bg-secondary/50 py-2.5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
         <Accordion type="single" collapsible className="w-full">
-          {faqItems.map((item, i) => (
+          {faqItems
+            .filter((item) => {
+              if (!faqSearch.trim()) return true;
+              const s = faqSearch.toLowerCase();
+              return item.q.toLowerCase().includes(s) || item.a.toLowerCase().includes(s);
+            })
+            .map((item, i) => (
             <AccordionItem key={i} value={`faq-${i}`}>
               <AccordionTrigger className="text-sm text-left font-medium">{item.q}</AccordionTrigger>
               <AccordionContent className="text-sm text-muted-foreground leading-relaxed">{item.a}</AccordionContent>
