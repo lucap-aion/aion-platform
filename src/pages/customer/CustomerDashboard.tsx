@@ -11,7 +11,7 @@ const CustomerDashboard = () => {
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-card flex items-center justify-between p-6"
+        className="glass-card flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 md:p-6"
       >
         <div className="flex items-center gap-6">
           <ProgressRing value={91} />
