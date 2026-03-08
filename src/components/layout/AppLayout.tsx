@@ -8,12 +8,8 @@ interface AppLayoutProps {
   mode: "customer" | "brand";
 }
 
-const fullBleedRoutes = ["/home"];
-
 const AppLayout = ({ mode }: AppLayoutProps) => {
   const tenant = useTenant();
-  const location = useLocation();
-  const isFullBleed = fullBleedRoutes.includes(location.pathname);
 
   return (
     <SidebarProvider>
