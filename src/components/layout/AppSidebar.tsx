@@ -104,13 +104,13 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
       <SidebarFooter className="p-3">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex w-full items-center gap-3 rounded-lg px-2 py-2 hover:bg-secondary transition-colors cursor-pointer">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                <span className="text-xs font-semibold text-primary">AB</span>
+            <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-secondary transition-colors cursor-pointer">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                <span className="text-sm font-semibold text-primary">AB</span>
               </div>
               {!collapsed && (
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">Allegra Bianchi</p>
+                <div className="flex-1 min-w-0 text-left">
+                  <p className="text-sm font-semibold text-foreground truncate">Allegra Bianchi</p>
                   <p className="text-xs text-muted-foreground truncate">allegra@email.com</p>
                 </div>
               )}
