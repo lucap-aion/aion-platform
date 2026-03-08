@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { Home, Shield, FileText, Users, BarChart3, Settings, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
+import { useTenant } from "@/contexts/TenantContext";
 import {
   Sidebar,
   SidebarContent,
@@ -76,6 +77,7 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
   const collapsed = state === "collapsed";
   const location = useLocation();
   const links = mode === "customer" ? customerLinks : brandLinks;
+  const tenant = useTenant();
 
   return (
     <>
@@ -83,7 +85,7 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2 px-2">
           <span className="font-serif text-xl font-bold tracking-wide text-foreground">
-            {collapsed ? "A" : <>AION <span className="font-light text-primary">Cover</span></>}
+            {collapsed ? tenant.logoInitial : tenant.name}
           </span>
         </div>
       </SidebarHeader>
