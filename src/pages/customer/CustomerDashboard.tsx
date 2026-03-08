@@ -104,7 +104,7 @@ const CustomerDashboard = () => {
         className="relative rounded-xl overflow-hidden"
       >
         <img src={sectionHowItWorks} alt="" className="w-full h-56 md:h-72 object-cover" />
-        <div className="absolute inset-0 bg-charcoal/60" />
+        <div className="absolute inset-0 bg-charcoal/75" />
         <div className="absolute inset-0 flex flex-col justify-center p-8 md:p-12">
           <h2 className="font-serif text-2xl md:text-4xl font-bold text-cream-light mb-3">
             {tenant.name} {locale === "en" ? "Prestige Service" : "Servizio Prestige"}
