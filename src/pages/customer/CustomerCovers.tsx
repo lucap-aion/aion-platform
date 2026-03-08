@@ -2,10 +2,18 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { LayoutGrid, List } from "lucide-react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import necklaceImg from "@/assets/product-necklace.png";
 import ringImg from "@/assets/product-ring.png";
 import braceletImg from "@/assets/product-bracelet.png";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 const covers = [
   { id: "1", product: "Collana con pendente Nudo Petit", brand: "Pomellato", image: necklaceImg, startDate: "Mar 08, 2026", expirationDate: "Mar 12, 2027", status: "active" },
@@ -15,6 +23,21 @@ const covers = [
 
 const CustomerCovers = () => {
   const [view, setView] = useState<"list" | "grid">("list");
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferCover, setTransferCover] = useState<typeof covers[0] | null>(null);
+  const [transferEmail, setTransferEmail] = useState("");
+
+  const handleTransfer = (cover: typeof covers[0]) => {
+    setTransferCover(cover);
+    setTransferEmail("");
+    setTransferOpen(true);
+  };
+
+  const handleTransferSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTransferOpen(false);
+    toast.success(`Transfer initiated to ${transferEmail}`);
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
@@ -77,7 +100,7 @@ const CustomerCovers = () => {
                   <Link to={`/claims/new?cover=${cover.id}`} className="rounded-lg bg-primary px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
                     Open Claim
                   </Link>
-                  <button className="rounded-lg border border-border px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
+                  <button onClick={() => handleTransfer(cover)} className="rounded-lg border border-border px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
                     Transfer
                   </button>
                 </div>
@@ -88,7 +111,7 @@ const CustomerCovers = () => {
                 <Link to={`/claims/new?cover=${cover.id}`} className="flex-1 text-center rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground">
                   Open Claim
                 </Link>
-                <button className="flex-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground">
+                <button onClick={() => handleTransfer(cover)} className="flex-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground">
                   Transfer
                 </button>
               </div>
@@ -130,7 +153,7 @@ const CustomerCovers = () => {
                   <Link to={`/claims/new?cover=${cover.id}`} className="flex-1 text-center rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">
                     Open Claim
                   </Link>
-                  <button className="flex-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary">
+                  <button onClick={() => handleTransfer(cover)} className="flex-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary">
                     Transfer
                   </button>
                 </div>
@@ -139,6 +162,38 @@ const CustomerCovers = () => {
           ))}
         </div>
       )}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-xl">Transfer Cover</DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              Enter the email address of the person you'd like to transfer
+              {transferCover ? ` "${transferCover.product}"` : ""} to.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleTransferSubmit} className="space-y-4 mt-2">
+            <div>
+              <label className="text-xs font-medium text-foreground mb-1.5 block">Recipient Email</label>
+              <input
+                type="email"
+                placeholder="recipient@email.com"
+                value={transferEmail}
+                onChange={(e) => setTransferEmail(e.target.value)}
+                className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => setTransferOpen(false)} className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                Cancel
+              </button>
+              <button type="submit" className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+                Transfer
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
