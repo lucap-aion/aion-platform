@@ -83,7 +83,7 @@ const CustomerClaims = () => {
 
   const handleEditOpen = (claim: typeof initialClaims[0]) => {
     setEditClaim(claim);
-    setEditForm({ type: claim.type, description: claim.description });
+    setEditForm({ type: claim.type, description: claim.description, incidentDate: claim.date, incidentCity: "", incidentCountry: "" });
   };
 
   const handleEditSave = () => {
