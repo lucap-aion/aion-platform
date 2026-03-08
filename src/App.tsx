@@ -42,6 +42,7 @@ const App = () => (
             <Route path="/covers" element={<CustomerCovers />} />
             <Route path="/claims" element={<CustomerClaims />} />
             <Route path="/claims/new" element={<NewClaim />} />
+            <Route path="/profile" element={<CustomerProfile />} />
           </Route>
 
           {/* Brand Portal */}
