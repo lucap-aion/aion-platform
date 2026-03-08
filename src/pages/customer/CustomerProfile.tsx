@@ -86,7 +86,7 @@ const CustomerProfile = () => {
           <TabsContent value="personal" className="space-y-6">
             <div className="glass-card p-6 space-y-6">
               <h3 className="font-serif text-lg font-semibold text-foreground">Personal Information</h3>
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">First Name</Label>
                   <Input value={profile.firstName} onChange={(e) => handleProfileChange("firstName", e.target.value)} />
