@@ -59,7 +59,7 @@ const CustomerDashboard = () => {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="grid grid-cols-3 gap-5"
+        className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-5"
       >
         {[
           { label: "Active Covers", value: "3", icon: Shield },
