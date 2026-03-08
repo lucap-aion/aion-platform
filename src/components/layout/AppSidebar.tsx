@@ -62,12 +62,14 @@ const brandLinks = [
 ];
 
 const AppSidebar = ({ mode }: AppSidebarProps) => {
+  const [faqOpen, setFaqOpen] = useState(false);
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
   const links = mode === "customer" ? customerLinks : brandLinks;
 
   return (
+    <>
     <Sidebar collapsible="icon" className="border-r border-border bg-card">
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2 px-2">
