@@ -30,7 +30,6 @@ const customerLinks = [
   { to: "/home", icon: Home, label: "Home" },
   { to: "/covers", icon: Shield, label: "My Covers" },
   { to: "/claims", icon: FileText, label: "My Claims" },
-  { to: "/profile", icon: UserCircle, label: "My Profile" },
 ];
 
 const brandLinks = [
