@@ -11,7 +11,6 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import sectionHowItWorks from "@/assets/section-how-it-works.jpg";
 import sectionTheft from "@/assets/section-theft.jpg";
 import sectionDamage from "@/assets/section-damage.jpg";
 import sectionFaq from "@/assets/section-faq.jpg";
@@ -77,12 +76,12 @@ const CustomerDashboard = () => {
   const [comment, setComment] = useState("");
 
   return (
-    <div className="max-w-full mx-auto space-y-0 animate-fade-in">
+    <div className="animate-fade-in">
       {/* Profile Completion */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 px-6 md:px-10 py-5 bg-card border-b border-border"
+        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 px-6 md:px-10 py-5 border-b border-border"
       >
         <div className="flex items-center gap-5">
           <ProgressRing value={91} />
@@ -96,35 +95,27 @@ const CustomerDashboard = () => {
         </button>
       </motion.div>
 
-      {/* Hero Banner */}
+      {/* Hero Banner - dark bg with text overlay */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.1 }}
-        className="relative overflow-hidden"
+        className="bg-charcoal px-6 md:px-10 py-10 md:py-16"
       >
-        <img
-          src={sectionHowItWorks}
-          alt={tenant.name}
-          className="h-56 md:h-72 w-full object-cover"
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-charcoal/85 via-charcoal/60 to-charcoal/30" />
-        <div className="absolute inset-0 flex flex-col justify-center px-6 md:px-10">
-          <h2 className="font-serif text-2xl md:text-4xl font-bold text-cream-light mb-2">
-            {tenant.name} {locale === "en" ? "Prestige Service" : "Servizio Prestige"}
-          </h2>
-          <p className="max-w-lg text-sm text-cream-light/80 mb-5 leading-relaxed">
-            {locale === "en"
-              ? `Inspired by its passion for customer experience, ${tenant.name} is pleased to introduce an exclusive cover service.`
-              : `Ispirato dalla passione per l'esperienza del cliente, ${tenant.name} è lieto di presentare un servizio di copertura esclusivo.`}
-          </p>
-          <Link
-            to="/covers"
-            className="inline-flex w-fit items-center gap-2 rounded-lg border border-cream-light/30 px-5 py-2.5 text-sm font-medium text-cream-light backdrop-blur-sm transition-all hover:bg-cream-light/10"
-          >
-            {locale === "en" ? "See my products" : "Vedi i miei prodotti"} <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
+        <h2 className="font-serif text-2xl md:text-4xl font-bold text-cream-light mb-3">
+          {tenant.name} {locale === "en" ? "Prestige Service" : "Servizio Prestige"}
+        </h2>
+        <p className="max-w-lg text-sm text-cream-light/70 mb-6 leading-relaxed">
+          {locale === "en"
+            ? `Inspired by its passion for customer experience, ${tenant.name} is pleased to introduce an exclusive cover service.`
+            : `Ispirato dalla passione per l'esperienza del cliente, ${tenant.name} è lieto di presentare un servizio di copertura esclusivo.`}
+        </p>
+        <Link
+          to="/covers"
+          className="inline-flex w-fit items-center gap-2 rounded-lg border border-cream-light/30 px-5 py-2.5 text-sm font-medium text-cream-light transition-all hover:bg-cream-light/10"
+        >
+          {locale === "en" ? "See my products" : "Vedi i miei prodotti"} <ArrowRight className="h-4 w-4" />
+        </Link>
       </motion.div>
 
       {/* How it works */}
@@ -132,23 +123,22 @@ const CustomerDashboard = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.2 }}
-        className="bg-charcoal text-cream-light"
+        className="bg-charcoal border-t border-charcoal-light/20"
       >
         <div className="px-6 md:px-10 py-8 md:py-12">
-          <h3 className="font-serif text-xl md:text-2xl font-bold mb-2">
+          <h3 className="font-serif text-xl md:text-2xl font-bold text-cream-light mb-2">
             {t("dashboard.howItWorks")}
           </h3>
-          <p className="text-sm text-cream-light/70 max-w-xl mb-8 leading-relaxed">
+          <p className="text-sm text-cream-light/60 max-w-xl mb-8 leading-relaxed">
             {locale === "en"
               ? `The ${tenant.name} Prestige Service is a complimentary 2-year program designed to protect your jewelry against theft and accidental damage.`
               : `Il Servizio Prestige di ${tenant.name} è un programma gratuito di 2 anni progettato per proteggere i tuoi gioielli da furto e danni accidentali.`}
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-            {/* Theft card */}
             <div className="relative rounded-xl overflow-hidden group">
-              <img src={sectionTheft} alt="Theft protection" className="h-52 md:h-64 w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-              <div className="absolute inset-0 bg-gradient-to-t from-charcoal/90 via-charcoal/40 to-transparent" />
+              <img src={sectionTheft} alt="Theft protection" className="h-48 md:h-56 w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+              <div className="absolute inset-0 bg-gradient-to-t from-charcoal/90 via-charcoal/30 to-transparent" />
               <div className="absolute bottom-0 left-0 right-0 p-5">
                 <h4 className="font-serif text-lg font-semibold text-cream-light mb-1">
                   {locale === "en" ? "Theft" : "Furto"}
@@ -161,10 +151,9 @@ const CustomerDashboard = () => {
               </div>
             </div>
 
-            {/* Accidental Damage card */}
             <div className="relative rounded-xl overflow-hidden group">
-              <img src={sectionDamage} alt="Accidental damage protection" className="h-52 md:h-64 w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-              <div className="absolute inset-0 bg-gradient-to-t from-charcoal/90 via-charcoal/40 to-transparent" />
+              <img src={sectionDamage} alt="Accidental damage protection" className="h-48 md:h-56 w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+              <div className="absolute inset-0 bg-gradient-to-t from-charcoal/90 via-charcoal/30 to-transparent" />
               <div className="absolute bottom-0 left-0 right-0 p-5">
                 <h4 className="font-serif text-lg font-semibold text-cream-light mb-1">
                   {locale === "en" ? "Accidental Damage" : "Danni Accidentali"}
@@ -185,12 +174,12 @@ const CustomerDashboard = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.3 }}
-        className="grid grid-cols-1 md:grid-cols-2 gap-0"
+        className="grid grid-cols-1 md:grid-cols-2"
       >
         <div className="hidden md:block">
           <img src={sectionFaq} alt="FAQ" className="h-full w-full object-cover" />
         </div>
-        <div className="bg-card px-6 md:px-10 py-8 md:py-12 flex flex-col justify-center">
+        <div className="bg-background px-6 md:px-10 py-8 md:py-12 flex flex-col justify-center">
           <h3 className="font-serif text-lg font-semibold text-foreground mb-1">FAQ</h3>
           <Accordion type="single" collapsible className="w-full">
             {faqItems.map((item, i) => (
@@ -218,9 +207,9 @@ const CustomerDashboard = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.4 }}
-        className="grid grid-cols-1 md:grid-cols-2 gap-0"
+        className="grid grid-cols-1 md:grid-cols-2"
       >
-        <div className="bg-card px-6 md:px-10 py-8 md:py-12">
+        <div className="bg-background px-6 md:px-10 py-8 md:py-12 border-t border-border">
           <h3 className="font-serif text-lg font-semibold text-foreground mb-6">
             {locale === "en"
               ? `Please rate ${tenant.name} Prestige Service`
@@ -271,30 +260,30 @@ const CustomerDashboard = () => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
-        className="bg-charcoal px-6 md:px-10 py-10 md:py-14"
+        className="bg-background px-6 md:px-10 py-10 md:py-14 border-t border-border"
       >
-        <h3 className="font-serif text-xl md:text-2xl font-bold text-cream-light mb-2">
+        <h3 className="font-serif text-xl md:text-2xl font-bold text-foreground mb-2">
           {locale === "en" ? "Continue Shopping" : "Continua lo Shopping"}
         </h3>
-        <p className="text-sm text-cream-light/70 max-w-lg mb-6 leading-relaxed">
+        <p className="text-sm text-muted-foreground max-w-lg mb-6 leading-relaxed">
           {locale === "en"
             ? `Continue shopping our finest pieces of jewelry, enjoying peace of mind with our exclusive cover service.`
             : `Continua a fare shopping tra i nostri migliori gioielli, godendo della tranquillità del nostro esclusivo servizio di copertura.`}
         </p>
         <a
           href="#"
-          className="inline-flex items-center gap-2 rounded-lg border border-cream-light/30 px-5 py-2.5 text-sm font-medium text-cream-light transition-all hover:bg-cream-light/10"
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-5 py-2.5 text-sm font-medium text-foreground transition-all hover:bg-secondary"
         >
           {locale === "en" ? "Continue Shopping" : "Continua lo Shopping"}
         </a>
       </motion.div>
 
       {/* Footer with brand logo */}
-      <div className="flex items-center justify-end px-6 md:px-10 py-6 bg-background border-t border-border">
+      <div className="flex items-center justify-end px-6 md:px-10 py-6 border-t border-border">
         <img
           src={tenant.logoUrl}
           alt={tenant.name}
-          className="h-8 object-contain opacity-60"
+          className="h-8 object-contain opacity-50"
         />
       </div>
     </div>
