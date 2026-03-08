@@ -207,6 +207,50 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
         </Accordion>
       </SheetContent>
     </Sheet>
+
+    <Dialog open={supportOpen} onOpenChange={setSupportOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-serif text-xl">Contact Support</DialogTitle>
+          <DialogDescription className="text-sm text-muted-foreground">
+            Describe your issue and our team will get back to you within 24 hours.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setSupportOpen(false);
+          }}
+          className="space-y-4 mt-2"
+        >
+          <div>
+            <label className="text-xs font-medium text-foreground mb-1.5 block">Subject</label>
+            <input
+              type="text"
+              placeholder="Brief summary of your issue"
+              className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              required
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-foreground mb-1.5 block">Message</label>
+            <textarea
+              rows={4}
+              placeholder="Describe your issue in detail..."
+              className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            <Send className="h-4 w-4" />
+            Send Message
+          </button>
+        </form>
+      </DialogContent>
+    </Dialog>
     </>
   );
 };
