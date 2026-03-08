@@ -117,6 +117,13 @@ const AppSidebar = ({ mode }: AppSidebarProps) => {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem asChild>
+              <NavLink to="/profile" end className="flex cursor-default">
+                <UserCircle className="mr-2 h-4 w-4" />
+                <span>My Profile</span>
+              </NavLink>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem className="focus:text-destructive cursor-pointer">
               <LogOut className="mr-2 h-4 w-4" />
               <span>Logout</span>
