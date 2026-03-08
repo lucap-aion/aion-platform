@@ -22,9 +22,9 @@ const statusConfig = {
 const CustomerClaims = () => {
   return (
     <div className="max-w-5xl mx-auto animate-fade-in">
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-6 md:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="font-serif text-3xl font-bold text-foreground">My Claims</h1>
+          <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">My Claims</h1>
           <p className="mt-1 text-sm text-muted-foreground">Track your submitted claims and their status.</p>
         </div>
         <Link
