@@ -883,6 +883,9 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_my_brand_id: { Args: never; Returns: number }
+      get_my_profile_id: { Args: never; Returns: string }
+      get_my_role: { Args: never; Returns: string }
       mark_policies_expired: { Args: never; Returns: undefined }
     }
     Enums: {

@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Globe } from "lucide-react";
 import { useTenant } from "@/contexts/TenantContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 const Signup = () => {
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", password: "", confirmPassword: "" });
@@ -11,14 +13,30 @@ const Signup = () => {
   const [isLoading, setIsLoading] = useState(false);
   const tenant = useTenant();
   const { t, locale, setLocale } = useLanguage();
+  const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (form.password !== form.confirmPassword) {
+      toast.error(locale === "en" ? "Passwords do not match" : "Le password non coincidono");
+      return;
+    }
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      window.location.href = "/";
-    }, 1000);
+    const { error } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
+      options: {
+        emailRedirectTo: window.location.origin,
+        data: { first_name: form.firstName, last_name: form.lastName },
+      },
+    });
+    setIsLoading(false);
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success(locale === "en" ? "Check your email to confirm your account" : "Controlla la tua email per confermare il tuo account");
+      navigate("/login");
+    }
   };
 
   return (
