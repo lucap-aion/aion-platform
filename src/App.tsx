@@ -26,6 +26,12 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+const ProtectedLayout = ({ mode }: { mode: "customer" | "brand" }) => (
+  <ProtectedRoute>
+    <AppLayout mode={mode} />
+  </ProtectedRoute>
+);
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -41,7 +47,7 @@ const App = () => (
             <Route path="/reset-password" element={<ResetPassword />} />
             
             {/* Customer Portal */}
-            <Route element={<ProtectedRoute><AppLayout mode="customer" /></ProtectedRoute>}>
+            <Route element={<ProtectedLayout mode="customer" />}>
               <Route path="/home" element={<CustomerDashboard />} />
               <Route path="/covers" element={<CustomerCovers />} />
               <Route path="/claims" element={<CustomerClaims />} />
@@ -50,7 +56,7 @@ const App = () => (
             </Route>
 
             {/* Brand Portal */}
-            <Route element={<ProtectedRoute><AppLayout mode="brand" /></ProtectedRoute>}>
+            <Route element={<ProtectedLayout mode="brand" />}>
               <Route path="/brand" element={<BrandDashboard />} />
               <Route path="/brand/customers" element={<BrandCustomers />} />
               <Route path="/brand/covers" element={<BrandCovers />} />
