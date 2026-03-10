@@ -1,112 +1,121 @@
-import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, Download, CheckCircle2, XCircle, Clock, Send, Paperclip, User, Calendar, Shield, Package } from "lucide-react";
+import { ArrowLeft, XCircle, Clock, CheckCircle2, Paperclip, User, Package, Image, FileText, File } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-
-const claimsData: Record<string, {
-  id: string; customer: string; email: string; phone: string;
-  product: string; coverPlan: string; type: string; date: string;
-  status: "Under Review" | "Approved" | "Rejected";
-  description: string;
-  files: { name: string; size: string; type: string }[];
-  notes: { author: string; date: string; text: string }[];
-}> = {
-  "CLM-047": {
-    id: "CLM-047", customer: "Allegra Bianchi", email: "allegra@email.com", phone: "+39 331 234 5678",
-    product: "Anello Nudo Classic", coverPlan: "Premium Protection", type: "Accidental Damage",
-    date: "Mar 07, 2026", status: "Under Review",
-    description: "The ring was accidentally dropped on a marble floor, resulting in a visible chip on the gemstone and a slight bend in the band. The damage occurred at home during routine wear.",
-    files: [
-      { name: "damage-photo-1.jpg", size: "2.4 MB", type: "image" },
-      { name: "damage-photo-2.jpg", size: "1.8 MB", type: "image" },
-      { name: "purchase-receipt.pdf", size: "340 KB", type: "document" },
-    ],
-    notes: [
-      { author: "System", date: "Mar 07, 2026 — 10:15", text: "Claim submitted by customer via the portal." },
-      { author: "Maria Conti", date: "Mar 07, 2026 — 14:30", text: "Photos reviewed. Damage consistent with accidental impact. Forwarding to appraisal team." },
-    ],
-  },
-  "CLM-046": {
-    id: "CLM-046", customer: "Marco Rossi", email: "marco.rossi@email.com", phone: "+39 342 567 8901",
-    product: "Bracciale Iconica", coverPlan: "Complete Cover", type: "Theft",
-    date: "Mar 05, 2026", status: "Approved",
-    description: "Bracelet was stolen during a break-in at the customer's residence. Police report has been filed and attached.",
-    files: [
-      { name: "police-report.pdf", size: "520 KB", type: "document" },
-      { name: "insurance-declaration.pdf", size: "180 KB", type: "document" },
-    ],
-    notes: [
-      { author: "System", date: "Mar 05, 2026 — 09:00", text: "Claim submitted by customer via the portal." },
-      { author: "Luca Verdi", date: "Mar 05, 2026 — 11:45", text: "Police report verified. Claim meets all criteria for approval." },
-      { author: "Maria Conti", date: "Mar 06, 2026 — 09:20", text: "Approved. Replacement order initiated." },
-    ],
-  },
-};
+import { useAuth } from "@/contexts/AuthContext";
+import { useBrandClaim } from "@/hooks/use-claims";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuthSlug } from "@/hooks/useAuthSlug";
 
 const statusConfig = {
-  "Under Review": { color: "bg-warning/10 text-warning border-warning/20", icon: Clock },
-  "Approved": { color: "bg-success/10 text-success border-success/20", icon: CheckCircle2 },
-  "Rejected": { color: "bg-destructive/10 text-destructive border-destructive/20", icon: XCircle },
+  open: { color: "bg-amber-50 text-amber-700 border-amber-200", icon: Clock, label: "Open" },
+  closed: { color: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2, label: "Closed" },
+} as const;
+
+const normalizeStatus = (value?: string | null): keyof typeof statusConfig =>
+  value === "closed" ? "closed" : "open";
+
+const toLabel = (s: string | null | undefined) =>
+  s ? s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "—";
+
+const getFileName = (url: string) => {
+  try {
+    const raw = url.split("/").pop()?.split("?")[0] || url;
+    return decodeURIComponent(raw);
+  } catch {
+    return url;
+  }
+};
+
+const FileIcon = ({ name }: { name: string }) => {
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+  if (["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"].includes(ext))
+    return <Image className="h-7 w-7" />;
+  if (ext === "pdf") return <FileText className="h-7 w-7" />;
+  return <File className="h-7 w-7" />;
 };
 
 const BrandClaimDetail = () => {
   const { claimId } = useParams();
+  const navigate = useNavigate();
   const { toast } = useToast();
-  const [newNote, setNewNote] = useState("");
+  const { data: claim, isLoading, refetch } = useBrandClaim(claimId);
+  const { profile, canWrite } = useAuth();
+  const slugPrefix = useAuthSlug();
+  const statusKey = normalizeStatus((claim as any)?.status);
+  const status = statusConfig[statusKey];
+  const policy = (claim as any)?.policies as any;
 
-  const claim = claimsData[claimId || ""] || claimsData["CLM-047"];
-  const { icon: StatusIcon, color: statusColor } = statusConfig[claim.status];
-
-  const handleAddNote = () => {
-    if (!newNote.trim()) return;
-    toast({ title: "Note added", description: "Your note has been saved to this claim." });
-    setNewNote("");
+  const handleClose = async () => {
+    if (!claim?.id) return;
+    const { error } = await supabase.from("claims").update({ status: "closed" }).eq("id", claim.id);
+    if (error) { toast({ title: "Update failed", description: error.message }); return; }
+    await refetch();
+    toast({ title: "Claim closed", description: `Claim #${claim.id} has been closed.` });
   };
 
-  const handleStatusChange = (newStatus: string) => {
-    toast({ title: `Claim ${newStatus}`, description: `Claim ${claim.id} has been ${newStatus.toLowerCase()}.` });
-  };
+
+  if (isLoading) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in flex items-center justify-center min-h-[300px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
+  if (!claim) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+        <div className="glass-card p-6">
+          <p className="text-sm text-muted-foreground">Claim not found.</p>
+          <button
+            type="button"
+            onClick={() => navigate(`${slugPrefix}/claims`)}
+            className="mt-4 inline-flex rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+          >
+            Back to claims
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const attachments = Array.isArray((claim as any).media) ? (claim as any).media : [];
+  const customerName = `${policy?.profiles?.first_name || ""} ${policy?.profiles?.last_name || ""}`.trim() || policy?.profiles?.email || "Unknown customer";
+  const productName = policy?.catalogues?.name || "Unknown product";
 
   return (
-    <div className="max-w-5xl mx-auto animate-fade-in">
-      {/* Header */}
+    <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
       <div className="mb-6 md:mb-8">
-        <Link to="/brand/claims" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4">
+        <Link to={`${slugPrefix}/claims`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4">
           <ArrowLeft className="h-4 w-4" /> Back to Claims
         </Link>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">{claim.id}</h1>
-              <Badge className={`${statusColor} border`}>
-                <StatusIcon className="h-3 w-3 mr-1" /> {claim.status}
+              <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">Claim #{claim.id}</h1>
+              <Badge className={`${status.color} border`}>
+                <status.icon className="h-3 w-3 mr-1" /> {status.label}
               </Badge>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">Submitted on {claim.date}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Submitted on {(claim as any).created_at ? new Date((claim as any).created_at).toLocaleDateString() : "—"}
+            </p>
           </div>
-          {claim.status === "Under Review" && (
-            <div className="flex items-center gap-2">
-              <Button variant="outline" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => handleStatusChange("Rejected")}>
-                <XCircle className="h-4 w-4 mr-1.5" /> Reject
-              </Button>
-              <Button className="bg-success hover:bg-success/90 text-white" onClick={() => handleStatusChange("Approved")}>
-                <CheckCircle2 className="h-4 w-4 mr-1.5" /> Approve
-              </Button>
-            </div>
+          {canWrite && statusKey === "open" && (
+            <Button variant="outline" onClick={handleClose}>
+              <XCircle className="h-4 w-4 mr-1.5" /> Close Claim
+            </Button>
           )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main content */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Claim description */}
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
             <Card className="glass-card border-border">
               <CardHeader>
@@ -114,80 +123,52 @@ const BrandClaimDetail = () => {
               </CardHeader>
               <CardContent>
                 <div className="flex items-center gap-2 mb-3">
-                  <Badge variant="outline" className="text-xs">{claim.type}</Badge>
+                  <Badge variant="outline" className="text-xs">{toLabel((claim as any).type) || "General"}</Badge>
                 </div>
-                <p className="text-sm text-muted-foreground leading-relaxed">{claim.description}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{(claim as any).description || "No description provided."}</p>
+                <p className="mt-4 text-xs text-muted-foreground">
+                  Incident: { (claim as any).incident_city ? `${(claim as any).incident_city}, ${(claim as any).incident_country || ""}`.trim() : "Unknown" }
+                  { (claim as any).incident_date ? ` · ${new Date((claim as any).incident_date).toLocaleDateString()}` : "" }
+                </p>
               </CardContent>
             </Card>
           </motion.div>
 
-          {/* Attached files */}
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
             <Card className="glass-card border-border">
               <CardHeader>
                 <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <Paperclip className="h-4 w-4" /> Attached Files ({claim.files.length})
+                  <Paperclip className="h-4 w-4" /> Attached Files ({attachments.length})
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2">
-                  {claim.files.map((file, i) => (
-                    <div key={i} className="flex items-center justify-between rounded-lg border border-border p-3 transition-colors hover:bg-secondary/30">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
-                          {file.type === "image" ? "🖼" : "📄"}
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-foreground">{file.name}</p>
-                          <p className="text-xs text-muted-foreground">{file.size}</p>
-                        </div>
-                      </div>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {/* Notes & Comments */}
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-            <Card className="glass-card border-border">
-              <CardHeader>
-                <CardTitle className="text-base font-semibold">Notes & Comments</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {claim.notes.map((note, i) => (
-                  <div key={i} className="relative pl-4 border-l-2 border-border">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-medium text-foreground">{note.author}</span>
-                      <span className="text-xs text-muted-foreground">{note.date}</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{note.text}</p>
+                {attachments.length ? (
+                  <div className="flex flex-wrap gap-3">
+                    {attachments.map((file: string, i: number) => {
+                      const name = getFileName(file);
+                      return (
+                        <a
+                          key={i}
+                          href={file}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={name}
+                          className="flex h-16 w-16 items-center justify-center rounded-xl border border-border bg-secondary/30 text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+                        >
+                          <FileIcon name={name} />
+                        </a>
+                      );
+                    })}
                   </div>
-                ))}
-
-                <Separator />
-
-                <div className="space-y-3">
-                  <Textarea
-                    placeholder="Add a note or comment..."
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
-                    className="min-h-[80px] bg-background"
-                  />
-                  <Button onClick={handleAddNote} disabled={!newNote.trim()} size="sm">
-                    <Send className="h-3.5 w-3.5 mr-1.5" /> Add Note
-                  </Button>
-                </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No files attached.</p>
+                )}
               </CardContent>
             </Card>
           </motion.div>
+
         </div>
 
-        {/* Sidebar info */}
         <div className="space-y-6">
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
             <Card className="glass-card border-border">
@@ -196,18 +177,18 @@ const BrandClaimDetail = () => {
                   <User className="h-4 w-4" /> Customer
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
+              <CardContent className="space-y-3 text-sm overflow-hidden">
                 <div>
                   <p className="text-muted-foreground text-xs">Name</p>
-                  <p className="font-medium text-foreground">{claim.customer}</p>
+                  <p className="font-medium text-foreground">{customerName}</p>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="text-muted-foreground text-xs">Email</p>
-                  <p className="font-medium text-foreground">{claim.email}</p>
+                  <p className="font-medium text-foreground break-all">{policy?.profiles?.email || "—"}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground text-xs">Phone</p>
-                  <p className="font-medium text-foreground">{claim.phone}</p>
+                  <p className="font-medium text-foreground">{policy?.profiles?.phone_number || "—"}</p>
                 </div>
               </CardContent>
             </Card>
@@ -221,26 +202,37 @@ const BrandClaimDetail = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
+                {policy?.catalogues?.picture && (
+                  <div className="h-20 w-20 rounded-xl overflow-hidden bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-2 mb-1">
+                    <img
+                      src={policy.catalogues.picture}
+                      alt={productName}
+                      className="h-full w-full object-contain mix-blend-multiply"
+                    />
+                  </div>
+                )}
                 <div>
-                  <p className="text-muted-foreground text-xs">Item</p>
-                  <p className="font-medium text-foreground">{claim.product}</p>
+                  <p className="text-muted-foreground text-xs">Name</p>
+                  <p className="font-medium text-foreground">{productName}</p>
                 </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">Cover Plan</p>
-                  <p className="font-medium text-foreground flex items-center gap-1.5">
-                    <Shield className="h-3.5 w-3.5 text-primary" /> {claim.coverPlan}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">Claim Type</p>
-                  <p className="font-medium text-foreground">{claim.type}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">Submitted</p>
-                  <p className="font-medium text-foreground flex items-center gap-1.5">
-                    <Calendar className="h-3.5 w-3.5 text-muted-foreground" /> {claim.date}
-                  </p>
-                </div>
+                {policy?.catalogues?.category && (
+                  <div>
+                    <p className="text-muted-foreground text-xs">Category</p>
+                    <p className="font-medium text-foreground">{toLabel(policy.catalogues.category)}</p>
+                  </div>
+                )}
+                {policy?.catalogues?.collection && (
+                  <div>
+                    <p className="text-muted-foreground text-xs">Collection</p>
+                    <p className="font-medium text-foreground">{policy.catalogues.collection}</p>
+                  </div>
+                )}
+                {(policy?.catalogues as any)?.sku && (
+                  <div>
+                    <p className="text-muted-foreground text-xs">SKU</p>
+                    <p className="font-medium text-foreground font-mono text-xs tracking-wide">{(policy.catalogues as any).sku}</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </motion.div>

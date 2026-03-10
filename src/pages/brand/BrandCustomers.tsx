@@ -1,121 +1,622 @@
 import { motion } from "framer-motion";
-import { Search, Filter } from "lucide-react";
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { Search, ChevronDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, ArrowUpDown } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
+
+type SortKey = "newest" | "oldest" | "name";
+
+type CustomerForm = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  country: string;
+  postcode: string;
+};
+
+const EMPTY_FORM: CustomerForm = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  phone: "",
+  address: "",
+  city: "",
+  country: "",
+  postcode: "",
+};
+
+const Field = ({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) => (
+  <div>
+    <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1.5 block">
+      {label}
+    </label>
+    {children}
+  </div>
+);
+
+const inputCls =
+  "w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
+
+const PAGE_SIZE = 25;
 
 const BrandCustomers = () => {
   const [search, setSearch] = useState("");
-  const { profile } = useAuth();
+  const [sortBy, setSortBy] = useState<SortKey>("newest");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<CustomerForm>(EMPTY_FORM);
+  const [isSaving, setIsSaving] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const { profile, canWrite } = useAuth();
 
-  const { data: customers, isLoading } = useQuery({
-    queryKey: ["brand-customers", profile?.brand_id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, first_name, last_name, email, created_at, role")
-        .eq("role", "customer")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+  const sortMap: Record<SortKey, { col: string; asc: boolean }> = {
+    newest: { col: "created_at", asc: false },
+    oldest: { col: "created_at", asc: true },
+    name: { col: "first_name", asc: true },
+  };
 
-      // For each customer, get policy and claim counts
-      const enriched = await Promise.all(
-        (data || []).map(async (c) => {
-          const [policiesRes, claimsRes] = await Promise.all([
-            supabase.from("policies").select("id, selling_price", { count: "exact" }).eq("customer_id", c.id),
-            supabase.from("claims").select("id", { count: "exact" }).in(
+  const fetchCustomers = useCallback(async () => {
+    if (!profile?.brand_id) return;
+    setIsLoading(true);
+
+    const { col, asc } = sortMap[sortBy];
+
+    const { data, count, error } = await supabase
+      .from("profiles")
+      .select(
+        "id, first_name, last_name, email, phone_number, address, city, country, postcode, created_at, avatar",
+        { count: "exact" }
+      )
+      .eq("role", "customer")
+      .eq("brand_id", profile.brand_id)
+      .order(col, { ascending: asc })
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+
+    if (error) {
+      toast.error(error.message);
+      setIsLoading(false);
+      return;
+    }
+
+    const enriched = await Promise.all(
+      (data || []).map(async (c) => {
+        const [policiesRes, claimsRes] = await Promise.all([
+          supabase
+            .from("policies")
+            .select("id, selling_price", { count: "exact" })
+            .eq("customer_id", c.id),
+          supabase
+            .from("claims")
+            .select("id", { count: "exact" })
+            .in(
               "policy_id",
-              (await supabase.from("policies").select("id").eq("customer_id", c.id)).data?.map((p) => p.id) || []
+              (
+                await supabase
+                  .from("policies")
+                  .select("id")
+                  .eq("customer_id", c.id)
+              ).data?.map((p) => p.id) || []
             ),
-          ]);
-          const totalValue = policiesRes.data?.reduce((sum, p) => sum + (p.selling_price || 0), 0) || 0;
-          return {
-            ...c,
-            covers: policiesRes.count || 0,
-            claims: claimsRes.count || 0,
-            value: totalValue,
-          };
-        })
-      );
-      return enriched;
-    },
-    enabled: !!profile,
-  });
+        ]);
+        const totalValue =
+          policiesRes.data?.reduce(
+            (sum, p) => sum + (p.selling_price || 0),
+            0
+          ) || 0;
+        return {
+          ...c,
+          covers: policiesRes.count || 0,
+          claims: claimsRes.count || 0,
+          value: totalValue,
+        };
+      })
+    );
 
-  const filtered = customers?.filter((c) => {
+    setCustomers(enriched);
+    setTotal(count ?? 0);
+    setIsLoading(false);
+  }, [profile?.brand_id, page, sortBy]);
+
+  useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
+
+  // Client-side text search within current page
+  const filtered = customers.filter((c) => {
+    if (!search) return true;
     const name = `${c.first_name || ""} ${c.last_name || ""} ${c.email}`;
     return name.toLowerCase().includes(search.toLowerCase());
   });
 
-  if (isLoading) {
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const set = (field: keyof CustomerForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((p) => ({ ...p, [field]: e.target.value }));
+
+  const openAdd = () => {
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+    setModalOpen(true);
+  };
+
+  const openEdit = (c: any) => {
+    setEditingId(c.id);
+    setForm({
+      firstName: c.first_name || "",
+      lastName: c.last_name || "",
+      email: c.email || "",
+      phone: c.phone_number || "",
+      address: c.address || "",
+      city: c.city || "",
+      country: c.country || "",
+      postcode: c.postcode || "",
+    });
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!profile?.brand_id) return;
+    if (!editingId && !form.email) {
+      toast.error("Email is required.");
+      return;
+    }
+    setIsSaving(true);
+
+    if (editingId) {
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          first_name: form.firstName || null,
+          last_name: form.lastName || null,
+          phone_number: form.phone || null,
+          address: form.address || null,
+          city: form.city || null,
+          country: form.country || null,
+          postcode: form.postcode || null,
+        })
+        .eq("id", editingId);
+      if (error) {
+        toast.error(error.message);
+        setIsSaving(false);
+        return;
+      }
+      toast.success("Customer updated.");
+    } else {
+      const { error } = await supabase.from("profiles").insert({
+        brand_id: profile.brand_id,
+        first_name: form.firstName || null,
+        last_name: form.lastName || null,
+        email: form.email,
+        phone_number: form.phone || null,
+        address: form.address || null,
+        city: form.city || null,
+        country: form.country || null,
+        postcode: form.postcode || null,
+        role: "customer",
+        status: "pending",
+      });
+      if (error) {
+        toast.error(error.message);
+        setIsSaving(false);
+        return;
+      }
+      toast.success("Customer added. They can now register with this email.");
+    }
+
+    setIsSaving(false);
+    setModalOpen(false);
+    fetchCustomers();
+  };
+
+  const handleDelete = async (id: string) => {
+    const { error } = await supabase.from("profiles").delete().eq("id", id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setConfirmDeleteId(null);
+    toast.success("Customer removed.");
+    fetchCustomers();
+  };
+
+  if (isLoading && customers.length === 0) {
     return (
-      <div className="max-w-6xl mx-auto flex items-center justify-center min-h-[300px]">
+      <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 flex items-center justify-center min-h-[300px]">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto animate-fade-in">
-      <div className="mb-6 md:mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">Customers</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Manage your brand's customer base.</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input type="text" placeholder="Search customers..." value={search} onChange={(e) => setSearch(e.target.value)} className="rounded-lg border border-input bg-background py-2 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary" />
+    <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+      <div className="mb-6 md:mb-8 flex flex-col gap-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">
+              Customers
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Manage your brand's customer base.
+            </p>
           </div>
-          <button className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary">
-            <Filter className="h-4 w-4" /> Filter
-          </button>
+          {canWrite && (
+            <button
+              onClick={openAdd}
+              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 shrink-0"
+            >
+              <Plus className="h-4 w-4" /> Add Customer
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[160px]">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search customers..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background py-2 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+          <div className="relative">
+            <select
+              value={sortBy}
+              onChange={(e) => { setSortBy(e.target.value as SortKey); setPage(0); }}
+              className="appearance-none rounded-lg border border-input bg-background py-2 pl-3 pr-8 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name">Name A–Z</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          </div>
         </div>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="glass-card overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Customer</th>
-              <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Covers</th>
-              <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Claims</th>
-              <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Protected Value</th>
-              <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Joined</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {!filtered?.length ? (
-              <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">No customers found.</td>
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="glass-card overflow-hidden"
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px]">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Customer
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Covers
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Claims
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Protected Value
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <div className="flex items-center gap-1">
+                    Joined
+                    <ArrowUpDown className="h-3 w-3 opacity-40" />
+                  </div>
+                </th>
+                {canWrite && (
+                  <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Actions
+                  </th>
+                )}
               </tr>
-            ) : (
-              filtered.map((c) => (
-                <tr key={c.id} className="cursor-pointer transition-colors hover:bg-secondary/30">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                        {(c.first_name?.[0] || "")}{(c.last_name?.[0] || "")}
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-foreground">{c.first_name} {c.last_name}</p>
-                        <p className="text-xs text-muted-foreground">{c.email}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-foreground">{c.covers}</td>
-                  <td className="px-6 py-4 text-sm text-foreground">{c.claims}</td>
-                  <td className="px-6 py-4 text-sm font-medium text-foreground">€{c.value.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-sm text-muted-foreground">
-                    {c.created_at ? new Date(c.created_at).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "—"}
+            </thead>
+            <tbody className="divide-y divide-border">
+              {isLoading ? (
+                <tr>
+                  <td colSpan={canWrite ? 6 : 5} className="px-6 py-12 text-center">
+                    <div className="flex justify-center"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" /></div>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : !filtered.length ? (
+                <tr>
+                  <td
+                    colSpan={canWrite ? 6 : 5}
+                    className="px-6 py-12 text-center text-muted-foreground"
+                  >
+                    No customers found.
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((c) => (
+                  <tr
+                    key={c.id}
+                    className="transition-colors hover:bg-secondary/30"
+                  >
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0 overflow-hidden">
+                          {c.avatar
+                            ? <img src={c.avatar} alt="" className="h-full w-full object-cover" />
+                            : <>{c.first_name?.[0] || ""}{c.last_name?.[0] || ""}</>}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">
+                            {c.first_name} {c.last_name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {c.email}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-foreground">
+                      {c.covers}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-foreground">
+                      {c.claims}
+                    </td>
+                    <td className="px-6 py-4 text-sm font-medium text-foreground">
+                      €{c.value.toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                      {c.created_at
+                        ? new Date(c.created_at).toLocaleDateString("en-US", {
+                            month: "short",
+                            year: "numeric",
+                          })
+                        : "—"}
+                    </td>
+                    {canWrite && (
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => openEdit(c)}
+                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                            title="Edit"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(c.id)}
+                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-border px-6 py-3">
+            <p className="text-xs text-muted-foreground">
+              {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="px-3 text-sm text-foreground">
+                {page + 1} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={page >= totalPages - 1}
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </motion.div>
+
+      {/* Add / Edit modal */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setModalOpen(false)}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="glass-card w-full max-w-lg max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border/50">
+              <div>
+                <h2 className="font-serif text-lg font-semibold text-foreground">
+                  {editingId ? "Edit Customer" : "Add Customer"}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {editingId
+                    ? "Update contact details and address."
+                    : "New customers can register using the email you provide."}
+                </p>
+              </div>
+              <button
+                onClick={() => setModalOpen(false)}
+                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-5">
+              {/* Personal Information */}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                  Personal Information
+                </p>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="First Name">
+                      <input
+                        type="text"
+                        value={form.firstName}
+                        onChange={set("firstName")}
+                        placeholder="First name"
+                        className={inputCls}
+                      />
+                    </Field>
+                    <Field label="Last Name">
+                      <input
+                        type="text"
+                        value={form.lastName}
+                        onChange={set("lastName")}
+                        placeholder="Last name"
+                        className={inputCls}
+                      />
+                    </Field>
+                  </div>
+                  <Field label="Email">
+                    <input
+                      type="email"
+                      value={form.email}
+                      onChange={set("email")}
+                      placeholder="customer@email.com"
+                      disabled={!!editingId}
+                      className={`${inputCls} disabled:opacity-50 disabled:cursor-not-allowed`}
+                    />
+                  </Field>
+                  <Field label="Phone">
+                    <input
+                      type="tel"
+                      value={form.phone}
+                      onChange={set("phone")}
+                      placeholder="+1 555 000 0000"
+                      className={inputCls}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              {/* Address */}
+              <div className="border-t border-border/50 pt-5">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                  Address
+                </p>
+                <div className="space-y-3">
+                  <Field label="Street Address">
+                    <input
+                      type="text"
+                      value={form.address}
+                      onChange={set("address")}
+                      placeholder="123 Main St"
+                      className={inputCls}
+                    />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="City">
+                      <input
+                        type="text"
+                        value={form.city}
+                        onChange={set("city")}
+                        placeholder="Milan"
+                        className={inputCls}
+                      />
+                    </Field>
+                    <Field label="Postal Code">
+                      <input
+                        type="text"
+                        value={form.postcode}
+                        onChange={set("postcode")}
+                        placeholder="20100"
+                        className={inputCls}
+                      />
+                    </Field>
+                  </div>
+                  <Field label="Country">
+                    <input
+                      type="text"
+                      value={form.country}
+                      onChange={set("country")}
+                      placeholder="Italy"
+                      className={inputCls}
+                    />
+                  </Field>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-border/50">
+              <button
+                onClick={() => setModalOpen(false)}
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              >
+                {isSaving
+                  ? "Saving..."
+                  : editingId
+                  ? "Save Changes"
+                  : "Add Customer"}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {confirmDeleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmDeleteId(null)}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="glass-card w-full max-w-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-5 border-b border-border/50">
+              <h2 className="font-serif text-lg font-semibold text-foreground">
+                Remove customer?
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                This will permanently remove the customer and all their data
+                from your brand.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 px-6 py-4">
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDelete(confirmDeleteId)}
+                className="rounded-lg bg-destructive px-5 py-2.5 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
+              >
+                Remove
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

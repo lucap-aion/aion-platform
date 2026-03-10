@@ -1,1 +1,23 @@
 project_id = "tlmdlskiubfdhywmzgzb"
+
+[auth]
+site_url = "https://app.aioncover.com"
+additional_redirect_urls = [
+  "https://app.aioncover.com/**",
+  "http://localhost:3000/**",
+  "http://localhost:4173/**",
+  "http://localhost:5173/**",
+  "http://localhost:5174/**",
+  "http://localhost:8080/**",
+  "http://localhost:8081/**",
+  "http://localhost:8082/**",
+  "http://localhost:8083/**",
+]
+
+[auth.email]
+enable_confirmations = true
+
+[auth.hook.send_email]
+enabled = true
+uri = "https://tlmdlskiubfdhywmzgzb.supabase.co/functions/v1/auth-email-hook"
+secrets = "v1,whsec_YWlvbmNvdmVyLXdlYmhvb2stc2VjcmV0LWtleS0xMjM="

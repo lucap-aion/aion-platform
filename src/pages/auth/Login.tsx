@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Globe } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
+import HeaderControls from "@/components/layout/HeaderControls";
 import { useTenant } from "@/contexts/TenantContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
+import { isBrandRole } from "@/contexts/AuthContext";
+import SmartLogo from "@/components/SmartLogo";
+import AuthPanel from "@/components/AuthPanel";
 import { toast } from "sonner";
+import { useAuthSlug } from "@/hooks/useAuthSlug";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -15,44 +20,86 @@ const Login = () => {
   const tenant = useTenant();
   const { t, locale, setLocale } = useLanguage();
   const navigate = useNavigate();
+  const slugPrefix = useAuthSlug();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!tenant.id) {
+      toast.error(locale === "en" ? "Invalid brand portal." : "Portale brand non valido.");
+      return;
+    }
+
     setIsLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    // Pre-login check: verify email has access to this brand portal
+    const { data: eligibility } = await supabase.rpc("check_brand_eligibility", {
+      p_email: email,
+      p_brand_id: tenant.id,
+    });
+
+    if (eligibility === "is_admin") {
+      setIsLoading(false);
+      toast.error(
+        locale === "en"
+          ? "Admin accounts cannot access brand portals. Please use the admin portal."
+          : "Gli account admin non possono accedere ai portali brand. Usa il portale admin."
+      );
+      return;
+    }
+
+    if (eligibility === "unconfirmed") {
+      setIsLoading(false);
+      toast.error(
+        locale === "en"
+          ? "Please confirm your email before signing in."
+          : "Conferma la tua email prima di accedere."
+      );
+      return;
+    }
+
+    if (eligibility !== "ok") {
+      setIsLoading(false);
+      toast.error(
+        locale === "en"
+          ? "You don't have access to this brand portal."
+          : "Non hai accesso a questo portale brand."
+      );
+      return;
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     setIsLoading(false);
+
     if (error) {
       toast.error(error.message);
+      return;
+    }
+
+    // Filter by brand_id so multi-brand users are routed correctly for this portal
+    const { data: profileData } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("user_id", data.user.id)
+      .eq("brand_id", tenant.id)
+      .maybeSingle();
+
+    const role = profileData?.role ?? "customer";
+    if (isBrandRole(role)) {
+      navigate(`${slugPrefix}/dashboard`);
     } else {
-      navigate("/home");
+      navigate(`${slugPrefix}/home`);
     }
   };
 
   return (
-    <div className="min-h-screen bg-background flex">
-      {/* Left - Tenant branded image */}
-      <div className="hidden lg:block lg:w-1/2 relative">
-        <img src={tenant.authBackgroundUrl} alt={tenant.name} className="h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-r from-charcoal/60 to-charcoal/30" />
-        <div className="absolute bottom-16 left-16">
-          <h1 className="font-serif text-5xl font-bold text-cream-light mb-3">
-            {tenant.name}
-          </h1>
-          <p className="text-cream-light/70 text-lg max-w-md">{tenant.tagline}</p>
-        </div>
-      </div>
+    <div className="h-screen overflow-hidden bg-background flex">
+      <AuthPanel logoUrl={tenant.logoUrl} bgUrl={tenant.authBackgroundUrl} name={tenant.name} />
 
       {/* Right - Form */}
       <div className="flex-1 flex flex-col">
-        {/* Language switcher */}
         <div className="flex justify-end p-4">
-          <button
-            onClick={() => setLocale(locale === "en" ? "it" : "en")}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          >
-            <Globe className="h-4 w-4" />
-            <span className="uppercase">{locale}</span>
-          </button>
+          <HeaderControls />
         </div>
 
         <div className="flex-1 flex items-center justify-center p-8">
@@ -61,9 +108,7 @@ const Login = () => {
             animate={{ opacity: 1, y: 0 }}
             className="w-full max-w-md"
           >
-            <h2 className="font-serif text-3xl font-bold text-foreground mb-2 lg:hidden">
-              {tenant.name}
-            </h2>
+            <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-12 object-contain mb-8 block mx-auto" />
             <h3 className="font-serif text-2xl font-semibold text-foreground mb-2">{t("auth.welcomeBack")}</h3>
             <p className="text-muted-foreground mb-8">
               {locale === "en" ? "Sign in to your account to continue." : "Accedi al tuo account per continuare."}
@@ -85,7 +130,7 @@ const Login = () => {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-sm font-medium text-foreground">{t("auth.password")}</label>
-                  <Link to="/forgot-password" className="text-xs font-medium text-primary hover:underline">
+                  <Link to={`${slugPrefix}/forgot-password`} className="text-xs font-medium text-primary hover:underline">
                     {t("auth.forgotPassword")}
                   </Link>
                 </div>
@@ -121,7 +166,7 @@ const Login = () => {
 
             <p className="mt-8 text-center text-sm text-muted-foreground">
               {t("auth.noAccount")}{" "}
-              <Link to="/signup" className="font-semibold text-primary hover:underline">
+              <Link to={`${slugPrefix}/signup`} className="font-semibold text-primary hover:underline">
                 {t("auth.signup")}
               </Link>
             </p>

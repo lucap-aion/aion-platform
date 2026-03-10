@@ -1,0 +1,304 @@
+import { useEffect, useRef, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import AdminTable, { StatusBadge, type FilterDef } from "./_components/AdminTable";
+import AdminDrawer from "./_components/AdminDrawer";
+import ConfirmDialog from "./_components/ConfirmDialog";
+import { FormField, Input, Select, SaveBar } from "./_components/FormField";
+import { SearchableSelect } from "./_components/SearchableSelect";
+import { fmtDate } from "./_components/fmtDate";
+import { sendEmail } from "@/utils/sendEmail";
+import { siteUrl } from "@/utils/siteUrl";
+
+interface Customer {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string;
+  city: string | null;
+  country: string | null;
+  phone_number: string | null;
+  address: string | null;
+  postcode: string | null;
+  status: string | null;
+  created_at: string | null;
+  registered_at: string | null;
+  email_confirmed_at: string | null;
+  brand_id: number | null;
+  role: string | null;
+  brand_name?: string;
+  brand_logo?: string | null;
+  avatar?: string | null;
+}
+
+interface BrandOption { id: number; name: string | null; }
+
+type Mode = "view" | "edit" | "add";
+
+const PAGE_SIZE = 25;
+
+const empty = (): Partial<Customer> => ({
+  first_name: "", last_name: "", email: "", city: "", country: "",
+  phone_number: "", address: "", postcode: "", status: "pending",
+  brand_id: null, role: "customer",
+});
+
+const AdminCustomers = () => {
+  const { toast } = useToast();
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [brands, setBrands] = useState<BrandOption[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [search, setSearch] = useState("");
+  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
+  const [sortKey, setSortKey] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [loading, setLoading] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [mode, setMode] = useState<Mode>("view");
+  const [editing, setEditing] = useState<Partial<Customer>>({});
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const fetchData = () => {
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    setLoading(true);
+    let query = supabase
+      .from("profiles")
+      .select("id, first_name, last_name, email, city, country, phone_number, address, postcode, status, created_at, registered_at, email_confirmed_at, brand_id, role, avatar, brands(name, logo_small)", { count: "exact" })
+      .eq("role", "customer")
+      .order(sortKey, { ascending: sortDir === "asc" })
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%`);
+    if (filterValues.brand_id) query = query.eq("brand_id", Number(filterValues.brand_id));
+    if (filterValues.status) query = query.eq("status", filterValues.status);
+    query.then(({ data, count, error }) => {
+      if (error?.name === "AbortError") return;
+      setCustomers((data ?? []).map((p: any) => ({
+        ...p,
+        brand_name: p.brands?.name ?? "—",
+        brand_logo: p.brands?.logo_small ?? null,
+        avatar: p.avatar ?? null,
+      })));
+      setTotal(count ?? 0);
+      setLoading(false);
+    });
+  };
+
+  useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir]);
+
+  useEffect(() => {
+    supabase.from("brands").select("id, name").order("name").then(({ data }) => setBrands((data as BrandOption[]) ?? []));
+  }, []);
+
+  const openAdd = () => { setEditing(empty()); setMode("add"); setDrawerOpen(true); };
+  const openView = (row: Record<string, unknown>) => { setEditing({ ...row } as Partial<Customer>); setMode("view"); setDrawerOpen(true); };
+  const openEdit = (row: Record<string, unknown>) => { setEditing({ ...row } as Partial<Customer>); setMode("edit"); setDrawerOpen(true); };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    if (mode === "add") {
+      const { error } = await supabase.from("profiles").insert({
+        first_name: editing.first_name ?? null, last_name: editing.last_name ?? null,
+        email: editing.email!, city: editing.city ?? null, country: editing.country ?? null,
+        phone_number: editing.phone_number ?? null, address: editing.address ?? null,
+        postcode: editing.postcode ?? null, status: "pending",
+        brand_id: editing.brand_id ?? null, role: editing.role ?? "customer",
+      });
+      setSaving(false);
+      if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+      toast({ title: "Customer created" });
+      // Send invite email — fire-and-forget
+      if (editing.brand_id) {
+        const { data: brandData } = await supabase.from("brands").select("name, slug, logo_small").eq("id", editing.brand_id).single();
+        if (brandData) {
+          const url = `${siteUrl()}/${brandData.slug}/signup`;
+          sendEmail("customer_invite", {
+            customer: { email: editing.email, first_name: editing.first_name ?? null },
+            brand: { name: brandData.name, logo_small: brandData.logo_small },
+            url,
+          });
+        }
+      }
+    } else {
+      const { error } = await supabase.from("profiles").update({
+        first_name: editing.first_name ?? null, last_name: editing.last_name ?? null,
+        city: editing.city ?? null, country: editing.country ?? null,
+        phone_number: editing.phone_number ?? null, address: editing.address ?? null,
+        postcode: editing.postcode ?? null, status: editing.status ?? null,
+        brand_id: editing.brand_id ?? null,
+      }).eq("id", editing.id!);
+      setSaving(false);
+      if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+      toast({ title: "Customer updated" });
+    }
+    setDrawerOpen(false);
+    fetchData();
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const { error } = await supabase.from("profiles").delete().eq("id", deleteTarget.id);
+    setDeleting(false); setDeleteTarget(null);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Customer deleted" });
+    fetchData();
+  };
+
+  const set = (k: keyof Customer, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
+  const ro = mode === "view";
+  const drawerTitle = mode === "add" ? "New Customer" : mode === "edit" ? "Edit Customer" : "View Customer";
+
+  return (
+    <>
+      <AdminTable
+        title="Customers"
+        data={customers as unknown as Record<string, unknown>[]}
+        loading={loading}
+        total={total}
+        page={page}
+        pageSize={PAGE_SIZE}
+        onPageChange={setPage}
+        onSearch={(q) => { setSearch(q); setPage(0); }}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onAdd={openAdd} addLabel="New Customer"
+        onView={openView} onEdit={openEdit}
+        onDelete={(row) => setDeleteTarget(row as unknown as Customer)}
+        filters={[
+          { key: "brand_id", label: "Brand", options: brands.map((b) => ({ value: String(b.id), label: b.name ?? "" })) },
+          { key: "status", label: "Status", options: [{ value: "pending", label: "Pending" }, { value: "verified", label: "Verified" }, { value: "blocked", label: "Blocked" }] },
+        ]}
+        filterValues={filterValues}
+        onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        columns={[
+          {
+            key: "first_name", label: "Name", sortable: true, width: 220,
+            render: (row) => {
+              const r = row as unknown as Customer;
+              const name = [r.first_name, r.last_name].filter(Boolean).join(" ") || "—";
+              const initials = `${(r.first_name?.[0] || r.email?.[0] || "?").toUpperCase()}${(r.last_name?.[0] || "").toUpperCase()}`;
+              return (
+                <div className="flex items-center gap-2.5">
+                  <div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
+                    {r.avatar ? <img src={r.avatar} alt={name} className="h-full w-full object-cover" /> : initials}
+                  </div>
+                  <div><p className="font-medium text-foreground">{name}</p><p className="text-xs text-muted-foreground">{r.email}</p></div>
+                </div>
+              );
+            },
+          },
+          {
+            key: "brand_name", label: "Brand",
+            render: (row) => {
+              const r = row as unknown as Customer;
+              return (
+                <div className="flex items-center gap-2">
+                  {r.brand_logo
+                    ? <div className="h-6 w-6 rounded bg-white flex items-center justify-center shrink-0 border border-border/30"><img src={r.brand_logo} alt={r.brand_name} className="h-5 w-5 object-contain" /></div>
+                    : <div className="h-6 w-6 rounded bg-secondary shrink-0" />}
+                  <span className="text-sm text-foreground">{r.brand_name}</span>
+                </div>
+              );
+            },
+          },
+          {
+            key: "city", label: "Location", sortable: true,
+            render: (row) => { const r = row as unknown as Customer; return [r.city, r.country].filter(Boolean).join(", ") || "—"; },
+          },
+          {
+            key: "created_at", label: "Creation Date", sortable: true,
+            render: (row) => { const r = row as unknown as Customer; return fmtDate(r.created_at); },
+          },
+          {
+            key: "registered_at", label: "Sign Up Date", sortable: true,
+            render: (row) => { const r = row as unknown as Customer; return fmtDate(r.registered_at); },
+          },
+          {
+            key: "email_confirmed_at", label: "Confirmation Date", sortable: true,
+            render: (row) => { const r = row as unknown as Customer; return fmtDate(r.email_confirmed_at); },
+          },
+          {
+            key: "status", label: "Status", sortable: true,
+            render: (row) => { const r = row as unknown as Customer; return r.status ? <StatusBadge status={r.status} /> : <span className="text-muted-foreground">—</span>; },
+          },
+        ]}
+      />
+
+      <AdminDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={drawerTitle}>
+        <form onSubmit={handleSave} className="space-y-4">
+          <FormField label="Email" required={mode === "add"}>
+            <Input type="email" disabled={mode !== "add"} value={editing.email ?? ""} onChange={(e) => set("email", e.target.value)} required={mode === "add"} />
+          </FormField>
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="First Name"><Input disabled={ro} value={editing.first_name ?? ""} onChange={(e) => set("first_name", e.target.value)} /></FormField>
+            <FormField label="Last Name"><Input disabled={ro} value={editing.last_name ?? ""} onChange={(e) => set("last_name", e.target.value)} /></FormField>
+          </div>
+          <FormField label="Brand" required={mode === "add"}>
+            {ro ? <Input disabled value={(editing as any).brand_name ?? ""} /> : (
+              <SearchableSelect
+                value={editing.brand_id}
+                onChange={(v) => set("brand_id", v ? Number(v) : null)}
+                options={brands.map((b) => ({ value: b.id, label: b.name ?? "" }))}
+                placeholder="Select brand…"
+                required={mode === "add"}
+              />
+            )}
+          </FormField>
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="City"><Input disabled={ro} value={editing.city ?? ""} onChange={(e) => set("city", e.target.value)} /></FormField>
+            <FormField label="Country"><Input disabled={ro} value={editing.country ?? ""} onChange={(e) => set("country", e.target.value)} /></FormField>
+          </div>
+          <FormField label="Phone"><Input disabled={ro} value={editing.phone_number ?? ""} onChange={(e) => set("phone_number", e.target.value)} /></FormField>
+          <FormField label="Address"><Input disabled={ro} value={editing.address ?? ""} onChange={(e) => set("address", e.target.value)} /></FormField>
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="Postcode"><Input disabled={ro} value={editing.postcode ?? ""} onChange={(e) => set("postcode", e.target.value)} /></FormField>
+            {mode !== "add" && (
+              <FormField label="Status">
+                {ro ? <Input disabled value={editing.status ?? ""} /> : (
+                  <Select value={editing.status ?? ""} onChange={(e) => set("status", e.target.value)}>
+                    <option value="pending">Pending</option>
+                    <option value="verified">Verified</option>
+                    <option value="blocked">Blocked</option>
+                  </Select>
+                )}
+              </FormField>
+            )}
+          </div>
+          {ro && (
+            <div className="grid grid-cols-3 gap-4">
+              <FormField label="Creation Date"><Input disabled value={fmtDate(editing.created_at)} /></FormField>
+              <FormField label="Sign Up Date"><Input disabled value={fmtDate(editing.registered_at)} /></FormField>
+              <FormField label="Confirmation Date"><Input disabled value={fmtDate(editing.email_confirmed_at)} /></FormField>
+            </div>
+          )}
+          {ro ? (
+            <div className="flex justify-between gap-2 pt-4 border-t border-border mt-4">
+              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors">Close</button>
+              <button type="button" onClick={() => setMode("edit")} className="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">Edit</button>
+            </div>
+          ) : (
+            <SaveBar onCancel={() => setDrawerOpen(false)} loading={saving} label={mode === "add" ? "Create Customer" : "Save Changes"} />
+          )}
+        </form>
+      </AdminDrawer>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Customer"
+        description={`Delete customer "${[deleteTarget?.first_name, deleteTarget?.last_name].filter(Boolean).join(" ") || deleteTarget?.email}"? This cannot be undone.`}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+        loading={deleting}
+      />
+    </>
+  );
+};
+
+export default AdminCustomers;

@@ -4,7 +4,13 @@ import { ArrowRight, Star, ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import ProgressRing from "@/components/ui/progress-ring";
 import { useTenant } from "@/contexts/TenantContext";
+import SmartLogo from "@/components/SmartLogo";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { useAuthSlug } from "@/hooks/useAuthSlug";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { sendEmail } from "@/utils/sendEmail";
 import {
   Accordion,
   AccordionContent,
@@ -17,7 +23,7 @@ import sectionFaq from "@/assets/section-faq.jpg";
 import sectionFeedback from "@/assets/section-feedback.jpg";
 import sectionHowItWorks from "@/assets/section-how-it-works.jpg";
 
-const faqItems = [
+const FALLBACK_FAQ = [
   {
     q: { en: "What is the scope of the Prestige Service?", it: "Qual è l'ambito del Servizio Prestige?" },
     a: { en: "The Prestige Service is a complimentary 2-year program designed to protect your jewelry against theft and accidental damage.", it: "Il Servizio Prestige è un programma gratuito di 2 anni progettato per proteggere i tuoi gioielli da furto e danni accidentali." },
@@ -40,8 +46,15 @@ const faqItems = [
   },
 ];
 
-const StarRating = ({ label }: { label: string }) => {
-  const [rating, setRating] = useState(0);
+const StarRating = ({
+  label,
+  value,
+  onChange,
+}: { 
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) => {
   const [hover, setHover] = useState(0);
 
   return (
@@ -52,14 +65,14 @@ const StarRating = ({ label }: { label: string }) => {
           <button
             key={star}
             type="button"
-            onClick={() => setRating(star)}
+            onClick={() => onChange(star)}
             onMouseEnter={() => setHover(star)}
             onMouseLeave={() => setHover(0)}
             className="transition-colors"
           >
             <Star
               className={`h-6 w-6 ${
-                star <= (hover || rating)
+                star <= (hover || value)
                   ? "fill-primary text-primary"
                   : "text-muted-foreground/30"
               }`}
@@ -74,27 +87,132 @@ const StarRating = ({ label }: { label: string }) => {
 const CustomerDashboard = () => {
   const tenant = useTenant();
   const { t, locale } = useLanguage();
+  const { profile } = useAuth();
+  const slugPrefix = useAuthSlug();
+
+  // Profile completion
+  const profileFields = [
+    profile?.first_name,
+    profile?.last_name,
+    profile?.email,
+    profile?.phone_number,
+    profile?.address,
+    profile?.city,
+    profile?.country,
+    profile?.postcode,
+    profile?.avatar,
+  ];
+  const filledCount = profileFields.filter(Boolean).length;
+  const completionPct = Math.round((filledCount / profileFields.length) * 100);
+
+  // Images: use brand images from DB, fall back to static assets
+  const imgHero = tenant.topBannerImage || sectionHowItWorks;
+  const imgTheft = tenant.theftImage || sectionTheft;
+  const imgDamage = tenant.damageImage || sectionDamage;
+  const imgFaq = tenant.faqImage || sectionFaq;
+  const imgFeedback = tenant.feedbackImage || sectionFeedback;
+
+  // FAQ: use brand JSON from DB, fall back to hardcoded
+  const faqItems = (() => {
+    const source = locale === "it" ? tenant.faqIt : tenant.faqEn;
+    if (Array.isArray(source) && source.length > 0) {
+      return (source as any[]).slice(0, 5).map((item) => {
+        const question = item.title ?? item.question ?? "";
+        const answer = item.content?.blocks
+          ? (item.content.blocks as any[])
+              .filter((b: any) => b.text)
+              .map((b: any) => b.text)
+              .join(" ")
+          : (item.answer ?? "");
+        return {
+          q: { en: question, it: question },
+          a: { en: answer, it: answer },
+        };
+      });
+    }
+    return FALLBACK_FAQ;
+  })();
   const [comment, setComment] = useState("");
+  const [satisfactionRate, setSatisfactionRate] = useState(0);
+  const [peaceOfMindRate, setPeaceOfMindRate] = useState(0);
+  const [recommendationRate, setRecommendationRate] = useState(0);
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+
+  const submitFeedback = async () => {
+    if (!profile?.id || !profile?.brand_id) {
+      toast.error(locale === "en" ? "Sign in again to send feedback." : "Accedi di nuovo per inviare feedback.");
+      return;
+    }
+
+    if (!comment.trim() && !satisfactionRate && !peaceOfMindRate && !recommendationRate) {
+      toast.error(locale === "en" ? "Add at least one rating or a comment." : "Aggiungi almeno una valutazione o un commento.");
+      return;
+    }
+
+    setIsSubmittingFeedback(true);
+    const { error } = await supabase.from("feedback").insert({
+      brand_id: profile.brand_id,
+      user_id: profile.id,
+      comment: comment.trim() || null,
+      satisfaction_rate: satisfactionRate || null,
+      peace_of_mind_rate: peaceOfMindRate || null,
+      recommendation_rate: recommendationRate || null,
+    });
+    setIsSubmittingFeedback(false);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    sendEmail("feedback_submitted", {
+      feedback: {
+        customer: {
+          first_name: profile.first_name ?? null,
+          last_name: profile.last_name ?? null,
+          email: profile.email,
+        },
+        satisfaction_rate: satisfactionRate || null,
+        recommendation_rate: recommendationRate || null,
+        peace_of_mind_rate: peaceOfMindRate || null,
+        comment: comment.trim() || null,
+      },
+    });
+    toast.success(locale === "en" ? "Feedback submitted." : "Feedback inviato.");
+    setComment("");
+    setSatisfactionRate(0);
+    setPeaceOfMindRate(0);
+    setRecommendationRate(0);
+  };
+
+  const handleCompleteProfile = () => {
+    window.location.href = `${slugPrefix}/profile`;
+  };
 
   return (
     <div className="animate-fade-in space-y-4 p-4 md:p-6">
-      {/* Profile Completion Card */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl bg-card p-6"
-      >
-        <div className="flex items-center gap-5">
-          <ProgressRing value={91} />
-          <div>
-            <h3 className="font-serif text-base font-semibold text-foreground">{t("dashboard.completeProfile")}</h3>
-            <p className="text-sm text-muted-foreground">{t("dashboard.completeProfileDesc")}</p>
+      {/* Profile Completion Card — hidden when 100% */}
+      {completionPct < 100 && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl bg-card p-6"
+        >
+          <div className="flex items-center gap-5">
+            <ProgressRing value={completionPct} />
+            <div>
+              <h3 className="font-serif text-base font-semibold text-foreground">{t("dashboard.completeProfile")}</h3>
+              <p className="text-sm text-muted-foreground">{t("dashboard.completeProfileDesc")}</p>
+            </div>
           </div>
-        </div>
-        <button className="rounded-lg border border-primary bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:bg-primary/90 whitespace-nowrap">
-          {t("dashboard.completeProfileBtn")}
-        </button>
-      </motion.div>
+          <button
+            onClick={handleCompleteProfile}
+            className="rounded-lg border border-primary bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-all hover:bg-primary/90 whitespace-nowrap"
+          >
+            {t("dashboard.completeProfileBtn")}
+          </button>
+        </motion.div>
+      )}
 
       {/* Hero Banner */}
       <motion.div
@@ -103,7 +221,7 @@ const CustomerDashboard = () => {
         transition={{ delay: 0.1 }}
         className="relative rounded-xl overflow-hidden"
       >
-        <img src={sectionHowItWorks} alt="" className="w-full h-56 md:h-72 object-cover" />
+        <img src={imgHero} alt="" className="w-full h-56 md:h-72 object-cover object-[50%_70%]" />
         <div className="absolute inset-0 bg-charcoal/75" />
         <div className="absolute inset-0 flex flex-col justify-center p-8 md:p-12">
           <h2 className="font-serif text-2xl md:text-4xl font-bold text-cream-light mb-3">
@@ -115,7 +233,7 @@ const CustomerDashboard = () => {
               : `Ispirato dalla passione per l'esperienza del cliente, ${tenant.name} è lieto di presentare un servizio di copertura esclusivo.`}
           </p>
           <Link
-            to="/covers"
+            to={`${slugPrefix}/covers`}
             className="inline-flex w-fit items-center gap-2 rounded-lg border border-cream-light/40 px-5 py-2.5 text-sm font-medium text-cream-light transition-all hover:bg-cream-light/10"
           >
             {locale === "en" ? "See All Products" : "Vedi tutti i prodotti"}
@@ -143,7 +261,7 @@ const CustomerDashboard = () => {
           </div>
 
           <div className="rounded-xl overflow-hidden border border-border">
-            <img src={sectionTheft} alt="Theft protection" className="h-40 w-full object-cover" />
+            <img src={imgTheft} alt="Theft protection" className="h-40 w-full object-cover" />
             <div className="p-4">
               <h4 className="font-serif text-base font-semibold text-foreground mb-1">
                 {locale === "en" ? "Theft" : "Furto"}
@@ -157,7 +275,7 @@ const CustomerDashboard = () => {
           </div>
 
           <div className="rounded-xl overflow-hidden border border-border">
-            <img src={sectionDamage} alt="Accidental damage protection" className="h-40 w-full object-cover" />
+            <img src={imgDamage} alt="Accidental damage protection" className="h-40 w-full object-cover" />
             <div className="p-4">
               <h4 className="font-serif text-base font-semibold text-foreground mb-1">
                 {locale === "en" ? "Accidental damage" : "Danni Accidentali"}
@@ -179,10 +297,10 @@ const CustomerDashboard = () => {
         transition={{ delay: 0.3 }}
         className="grid grid-cols-1 md:grid-cols-2 rounded-xl overflow-hidden"
       >
-        <div className="hidden md:block">
-          <img src={sectionFaq} alt="FAQ" className="h-full w-full object-cover" />
+        <div className="hidden md:relative md:block overflow-hidden">
+          <img src={imgFaq} alt="FAQ" className="absolute inset-0 h-full w-full object-cover" />
         </div>
-        <div className="bg-card p-6 md:p-8 flex flex-col justify-center">
+        <div className="bg-card p-6 md:p-8 flex flex-col justify-start">
           <h3 className="font-serif text-lg font-semibold text-foreground mb-1">FAQ</h3>
           <Accordion type="single" collapsible className="w-full">
             {faqItems.map((item, i) => (
@@ -223,16 +341,22 @@ const CustomerDashboard = () => {
             label={locale === "en"
               ? `How satisfied are you with the ${tenant.name} Prestige Service?`
               : `Quanto sei soddisfatto del Servizio Prestige di ${tenant.name}?`}
+            value={satisfactionRate}
+            onChange={setSatisfactionRate}
           />
           <StarRating
             label={locale === "en"
               ? `Does the Prestige Service provide you with peace of mind when using your item?`
               : `Il Servizio Prestige ti offre tranquillità quando utilizzi i tuoi articoli?`}
+            value={peaceOfMindRate}
+            onChange={setPeaceOfMindRate}
           />
           <StarRating
             label={locale === "en"
               ? `Would you recommend ${tenant.name} to others because of this new service?`
               : `Consiglieresti ${tenant.name} ad altri grazie a questo nuovo servizio?`}
+            value={recommendationRate}
+            onChange={setRecommendationRate}
           />
 
           <div className="mt-4">
@@ -248,13 +372,18 @@ const CustomerDashboard = () => {
             />
           </div>
           <div className="flex justify-end mt-3">
-            <button className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+            <button
+              type="button"
+              onClick={submitFeedback}
+              disabled={isSubmittingFeedback}
+              className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
               {locale === "en" ? "Submit" : "Invia"}
             </button>
           </div>
         </div>
         <div className="hidden md:block">
-          <img src={sectionFeedback} alt="Feedback" className="h-full w-full object-cover" />
+          <img src={imgFeedback} alt="Feedback" className="h-full w-full object-cover" />
         </div>
       </motion.div>
 
@@ -266,7 +395,7 @@ const CustomerDashboard = () => {
         className="rounded-xl bg-card p-6 md:p-8"
       >
         <h3 className="font-serif text-xl md:text-2xl font-bold text-foreground mb-2">
-          {locale === "en" ? "Continue Shopping" : "Continua lo Shopping"}
+          {locale === "en" ? "Continue Shopping" : "Continua lo shopping"}
         </h3>
         <p className="text-sm text-muted-foreground max-w-lg mb-6 leading-relaxed">
           {locale === "en"
@@ -274,14 +403,15 @@ const CustomerDashboard = () => {
             : `Continua a fare shopping tra i nostri migliori gioielli, godendo della tranquillità del nostro esclusivo servizio di copertura.`}
         </p>
         <a
-          href="#"
+          href={tenant.website ?? "#"}
+          target={tenant.website ? "_blank" : undefined}
+          rel="noopener noreferrer"
           className="inline-flex items-center gap-2 rounded-lg border border-border px-5 py-2.5 text-sm font-medium text-foreground transition-all hover:bg-secondary"
         >
-          {locale === "en" ? "Continue Shopping" : "Continua lo Shopping"}
+          {locale === "en" ? "Continue Shopping" : "Continua lo shopping"}
         </a>
         <div className="flex justify-end mt-6">
-          <img
-            src={tenant.logoUrl}
+          <SmartLogo src={tenant.logoUrl}
             alt={tenant.name}
             className="h-10 object-contain opacity-40"
           />

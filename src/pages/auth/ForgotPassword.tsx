@@ -6,6 +6,11 @@ import { useTenant } from "@/contexts/TenantContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import SmartLogo from "@/components/SmartLogo";
+import AuthPanel from "@/components/AuthPanel";
+import HeaderControls from "@/components/layout/HeaderControls";
+import { useAuthSlug } from "@/hooks/useAuthSlug";
+import { siteUrl } from "@/utils/siteUrl";
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState("");
@@ -13,12 +18,13 @@ const ForgotPassword = () => {
   const [sent, setSent] = useState(false);
   const tenant = useTenant();
   const { t, locale } = useLanguage();
+  const slugPrefix = useAuthSlug();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: `${siteUrl()}/${tenant.slug}/reset-password`,
     });
     setIsLoading(false);
     if (error) {
@@ -29,19 +35,17 @@ const ForgotPassword = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex">
-      <div className="hidden lg:block lg:w-1/2 relative">
-        <img src={tenant.authBackgroundUrl} alt={tenant.name} className="h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-r from-charcoal/60 to-charcoal/30" />
-        <div className="absolute bottom-16 left-16">
-          <h1 className="font-serif text-5xl font-bold text-cream-light mb-3">{tenant.name}</h1>
-          <p className="text-cream-light/70 text-lg max-w-md">{tenant.tagline}</p>
-        </div>
-      </div>
+    <div className="h-screen overflow-hidden bg-background flex">
+      <AuthPanel logoUrl={tenant.logoUrl} bgUrl={tenant.authBackgroundUrl} name={tenant.name} />
 
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="flex-1 flex flex-col">
+        <div className="flex justify-end p-4">
+          <HeaderControls />
+        </div>
+        <div className="flex-1 flex items-center justify-center p-8">
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
-          <Link to="/login" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-8">
+          <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-12 object-contain mb-8 block mx-auto" />
+          <Link to={`${slugPrefix}/login`} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-8">
             <ArrowLeft className="h-4 w-4" /> {locale === "en" ? "Back to Sign In" : "Torna al Login"}
           </Link>
 
@@ -59,7 +63,7 @@ const ForgotPassword = () => {
                   : <>Abbiamo inviato un link di ripristino a <span className="font-semibold text-foreground">{email}</span></>}
               </p>
               <Link
-                to="/login"
+                to={`${slugPrefix}/login`}
                 className="inline-block rounded-lg bg-primary px-8 py-3 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
               >
                 {locale === "en" ? "Back to Sign In" : "Torna al Login"}
@@ -100,6 +104,7 @@ const ForgotPassword = () => {
             </>
           )}
         </motion.div>
+        </div>
       </div>
     </div>
   );

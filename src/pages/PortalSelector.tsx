@@ -2,22 +2,45 @@ import { motion } from "framer-motion";
 import { Users, Shield } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTenant } from "@/contexts/TenantContext";
+import SmartLogo from "@/components/SmartLogo";
+import HeaderControls from "@/components/layout/HeaderControls";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { isBrandRole, isCustomerRole } from "@/contexts/AuthContext";
+import { Navigate } from "react-router-dom";
 
 const PortalSelector = () => {
   const tenant = useTenant();
   const { t, locale } = useLanguage();
+  const { user, profile, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
+  if (user) {
+    if (isCustomerRole(profile?.role)) return <Navigate to="/home" replace />;
+    if (isBrandRole(profile?.role)) return <Navigate to="/brand" replace />;
+  }
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="h-screen overflow-hidden bg-background flex flex-col">
+      <div className="flex justify-end px-4 pt-4 shrink-0">
+        <HeaderControls />
+      </div>
+      <div className="flex-1 overflow-hidden flex">
       {/* Left - Tenant branded image */}
       <div className="hidden lg:block lg:w-1/2 relative">
         <img src={tenant.authBackgroundUrl} alt={tenant.name} className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-r from-charcoal/60 to-charcoal/30" />
+        <div className="absolute top-10 left-10">
+          <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-10 object-contain" />
+        </div>
         <div className="absolute bottom-16 left-16">
-          <h1 className="font-serif text-5xl font-bold text-cream-light mb-3">
-            {tenant.name}
-          </h1>
           <p className="text-cream-light/70 text-lg max-w-md">{tenant.tagline}</p>
         </div>
       </div>
@@ -25,7 +48,7 @@ const PortalSelector = () => {
       {/* Right - Selection */}
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-md">
-          <h2 className="font-serif text-3xl font-bold text-foreground mb-2 lg:hidden">{tenant.name}</h2>
+          <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-10 object-contain mb-8" />
           <h3 className="font-serif text-2xl font-semibold text-foreground mb-2">{t("auth.welcomeBack")}</h3>
           <p className="text-muted-foreground mb-10">
             {locale === "en"
@@ -47,7 +70,7 @@ const PortalSelector = () => {
                     {locale === "en" ? "Customer Portal" : "Portale Cliente"}
                   </h4>
                   <p className="text-sm text-muted-foreground">
-                    {locale === "en" ? "Track covers & manage claims" : "Monitora coperture e gestisci reclami"}
+                    {locale === "en" ? "Track covers & manage claims" : "Monitora coperture e gestisci incidenti"}
                   </p>
                 </div>
               </Link>
@@ -66,13 +89,14 @@ const PortalSelector = () => {
                     {locale === "en" ? "Brand Portal" : "Portale Brand"}
                   </h4>
                   <p className="text-sm text-muted-foreground">
-                    {locale === "en" ? "Manage customers, covers & claims" : "Gestisci clienti, coperture e reclami"}
+                    {locale === "en" ? "Manage customers, covers & claims" : "Gestisci clienti, coperture e incidenti"}
                   </p>
                 </div>
               </Link>
             </motion.div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

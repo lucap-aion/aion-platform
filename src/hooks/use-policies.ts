@@ -6,9 +6,9 @@ export const useCustomerPolicies = () => {
   const { profile } = useAuth();
 
   return useQuery({
-    queryKey: ["customer-policies", profile?.id],
+    queryKey: ["customer-policies", profile?.id, profile?.brand_id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const query = supabase
         .from("policies")
         .select(`
           id,
@@ -18,6 +18,10 @@ export const useCustomerPolicies = () => {
           selling_price,
           recommended_retail_price,
           brand_id,
+          claims (
+            id,
+            status
+          ),
           catalogues!insured_items_item_id_fkey (
             id,
             name,
@@ -32,10 +36,16 @@ export const useCustomerPolicies = () => {
         `)
         .order("created_at", { ascending: false });
 
+      if (profile?.brand_id) {
+        query.eq("brand_id", profile.brand_id);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data;
     },
     enabled: !!profile,
+    staleTime: 5 * 60 * 1000,
   });
 };
 

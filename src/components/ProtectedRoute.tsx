@@ -1,8 +1,19 @@
-import { Navigate } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
+import { Navigate, useLocation } from "react-router-dom";
+import { isBrandRole, isCustomerRole, useAuth } from "@/contexts/AuthContext";
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, loading } = useAuth();
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+  mode?: "customer" | "brand";
+}
+
+const getSlugPrefix = () => {
+  const s = sessionStorage.getItem("aion_tenant_slug");
+  return s && s !== "default" ? `/${s}` : "";
+};
+
+const ProtectedRoute = ({ children, mode }: ProtectedRouteProps) => {
+  const { user, profile, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -13,7 +24,16 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    const p = getSlugPrefix();
+    return <Navigate to={`${p}/login`} replace state={{ from: location }} />;
+  }
+
+  if (mode === "customer" && !isCustomerRole(profile?.role)) {
+    return <Navigate to={`${getSlugPrefix()}/dashboard`} replace />;
+  }
+
+  if (mode === "brand" && !isBrandRole(profile?.role)) {
+    return <Navigate to={`${getSlugPrefix()}/home`} replace />;
   }
 
   return <>{children}</>;
