@@ -2,6 +2,25 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge, toTitleCase } from "./_components/AdminTable";
+import type { ExportColumn } from "./_utils/exportCsv";
+
+const CLAIMS_SCHEMA: ExportColumn[] = [
+  { key: "id",                            label: "ID" },
+  { key: "policies_brands_name",          label: "Brand" },
+  { key: "policies_catalogues_name",      label: "Item Name" },
+  { key: "policies_catalogues_sku",       label: "Item SKU" },
+  { key: "policies_profiles_email",       label: "Customer Email" },
+  { key: "policies_profiles_first_name",  label: "Customer First Name" },
+  { key: "policies_profiles_last_name",   label: "Customer Last Name" },
+  { key: "policy_id",                     label: "Policy ID" },
+  { key: "type",                          label: "Type" },
+  { key: "status",                        label: "Status" },
+  { key: "incident_date",                 label: "Incident Date" },
+  { key: "incident_city",                 label: "Incident City" },
+  { key: "incident_country",              label: "Incident Country" },
+  { key: "description",                   label: "Description" },
+  { key: "created_at",                    label: "Created At" },
+];
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, TextArea, SaveBar } from "./_components/FormField";
@@ -143,6 +162,20 @@ const AdminClaims = () => {
     fetchData();
   };
 
+  const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    let q = supabase
+      .from("claims")
+      .select("id, policy_id, type, status, incident_date, incident_city, incident_country, created_at, description, policies(brands(name), catalogues(name, sku), profiles(email, first_name, last_name))")
+      .order(sortKey, { ascending: sortDir === "asc" })
+      .limit(10000);
+    if (search) q = q.or(`type.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%`);
+    if (filterValues.status) q = q.eq("status", filterValues.status);
+    if (filterValues.type) q = q.eq("type", filterValues.type);
+    if (filterValues.brand_id) q = q.eq("policies.brand_id", Number(filterValues.brand_id));
+    const { data } = await q;
+    return (data ?? []) as Record<string, unknown>[];
+  };
+
   const set = (k: keyof Claim, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
   const ro = mode === "view";
   const drawerTitle = mode === "add" ? "New Claim" : mode === "edit" ? `Edit Claim #${editing.id}` : `Claim #${editing.id}`;
@@ -161,6 +194,7 @@ const AdminClaims = () => {
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onExport={handleExport} exportFilename="claims" exportSchema={CLAIMS_SCHEMA}
         onAdd={openAdd} addLabel="New Claim"
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Claim)}

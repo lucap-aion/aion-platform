@@ -4,6 +4,20 @@ import { sendEmail } from "@/utils/sendEmail";
 import { siteUrl } from "@/utils/siteUrl";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
+import type { ExportColumn } from "./_utils/exportCsv";
+
+const ADMINS_SCHEMA: ExportColumn[] = [
+  { key: "id",            label: "ID" },
+  { key: "first_name",    label: "First Name" },
+  { key: "last_name",     label: "Last Name" },
+  { key: "email",         label: "Email" },
+  { key: "role",          label: "Role" },
+  { key: "status",        label: "Status" },
+  { key: "phone_number",  label: "Phone" },
+  { key: "city",          label: "City" },
+  { key: "country",       label: "Country" },
+  { key: "registered_at", label: "Registered At" },
+];
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, SaveBar } from "./_components/FormField";
@@ -112,6 +126,18 @@ const AdminAdmins = () => {
     fetchData();
   };
 
+  const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    let q = supabase
+      .from("admins")
+      .select("id, first_name, last_name, email, role, status, phone_number, city, country, registered_at")
+      .order(sortKey, { ascending: sortDir === "asc" })
+      .limit(10000);
+    if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%`);
+    if (filterValues.status) q = q.eq("status", filterValues.status);
+    const { data } = await q;
+    return (data ?? []) as Record<string, unknown>[];
+  };
+
   const set = (k: keyof Admin, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
   const ro = mode === "view";
   const displayName = (r: Partial<Admin>) => [r.first_name, r.last_name].filter(Boolean).join(" ") || r.email || "";
@@ -131,6 +157,7 @@ const AdminAdmins = () => {
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onExport={handleExport} exportFilename="admins" exportSchema={ADMINS_SCHEMA}
         onAdd={openAdd} addLabel="New Admin"
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Admin)}

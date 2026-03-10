@@ -2,6 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
+import type { ExportColumn } from "./_utils/exportCsv";
+
+const BRANDS_SCHEMA: ExportColumn[] = [
+  { key: "id",                    label: "ID" },
+  { key: "name",                  label: "Brand Name" },
+  { key: "slug",                  label: "Slug" },
+  { key: "email",                 label: "Email" },
+  { key: "website",               label: "Website" },
+  { key: "hq_country",            label: "HQ Country" },
+  { key: "status",                label: "Status" },
+  { key: "activation_fee",        label: "Activation Fee" },
+  { key: "insurance_premium",     label: "Insurance Premium" },
+  { key: "aion_premium_fee",      label: "AION Premium Fee" },
+  { key: "enable_chubb_reporting",label: "Chubb Reporting" },
+  { key: "chubb_policy_prefix",   label: "Chubb Policy Prefix" },
+];
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, TextArea, SaveBar } from "./_components/FormField";
@@ -176,6 +192,18 @@ const AdminBrands = () => {
     fetchData();
   };
 
+  const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    let q = supabase
+      .from("brands")
+      .select("id, name, slug, email, website, hq_country, status, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee")
+      .order(sortKey, { ascending: sortDir === "asc" })
+      .limit(10000);
+    if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%,slug.ilike.%${search}%,hq_country.ilike.%${search}%`);
+    if (filterValues.status) q = q.eq("status", filterValues.status);
+    const { data } = await q;
+    return (data ?? []) as Record<string, unknown>[];
+  };
+
   const set = (k: keyof Brand, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
   const ro = mode === "view";
   const brandId = editing.id ?? `new-${Date.now()}`;
@@ -195,6 +223,7 @@ const AdminBrands = () => {
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onExport={handleExport} exportFilename="brands" exportSchema={BRANDS_SCHEMA}
         onAdd={openAdd} addLabel="New Brand"
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Brand)}

@@ -2,6 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
+import type { ExportColumn } from "./_utils/exportCsv";
+
+const SHOPS_SCHEMA: ExportColumn[] = [
+  { key: "id",          label: "ID" },
+  { key: "name",        label: "Shop Name" },
+  { key: "brands_name", label: "Brand" },
+  { key: "address",     label: "Address" },
+  { key: "city",        label: "City" },
+  { key: "country",     label: "Country" },
+  { key: "contact",     label: "Contact" },
+  { key: "status",      label: "Status" },
+  { key: "brand_id",    label: "Brand ID" },
+];
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, SaveBar } from "./_components/FormField";
@@ -107,6 +120,18 @@ const AdminShops = () => {
     fetchData();
   };
 
+  const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    let q = supabase
+      .from("shops")
+      .select("id, name, address, city, country, contact, status, brand_id, brands(name)")
+      .order(sortKey, { ascending: sortDir === "asc" })
+      .limit(10000);
+    if (search) q = q.or(`name.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%`);
+    if (filterValues.brand_id) q = q.eq("brand_id", Number(filterValues.brand_id));
+    const { data } = await q;
+    return (data ?? []) as Record<string, unknown>[];
+  };
+
   const set = (k: keyof Shop, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
   const ro = mode === "view";
   const drawerTitle = mode === "add" ? "New Shop" : mode === "edit" ? `Edit: ${editing.name ?? ""}` : `Shop: ${editing.name ?? ""}`;
@@ -125,6 +150,7 @@ const AdminShops = () => {
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onExport={handleExport} exportFilename="shops" exportSchema={SHOPS_SCHEMA}
         onAdd={openAdd} addLabel="New Shop"
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Shop)}

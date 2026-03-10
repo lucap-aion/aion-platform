@@ -2,6 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge, toTitleCase } from "./_components/AdminTable";
+import type { ExportColumn } from "./_utils/exportCsv";
+
+const ASSISTANTS_SCHEMA: ExportColumn[] = [
+  { key: "id",                  label: "ID" },
+  { key: "first_name",          label: "First Name" },
+  { key: "last_name",           label: "Last Name" },
+  { key: "email",               label: "Email" },
+  { key: "brands_name",         label: "Brand" },
+  { key: "shops_name",          label: "Shop" },
+  { key: "is_master",           label: "Master User" },
+  { key: "status",              label: "Status" },
+  { key: "created_at",          label: "Created At" },
+  { key: "registered_at",       label: "Registered At" },
+  { key: "email_confirmed_at",  label: "Email Confirmed At" },
+  { key: "brand_id",            label: "Brand ID" },
+  { key: "shop_id",             label: "Shop ID" },
+];
 import { Mail } from "lucide-react";
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
@@ -173,6 +190,21 @@ const AdminShopAssistants = () => {
     else toast({ title: "Invite email sent", description: r.email });
   };
 
+  const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    let q = supabase
+      .from("profiles")
+      .select("id, first_name, last_name, email, role, is_master, status, brand_id, shop_id, created_at, registered_at, email_confirmed_at, brands(name), shops(name)")
+      .eq("role", "brand")
+      .order(sortKey, { ascending: sortDir === "asc" })
+      .limit(10000);
+    if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`);
+    if (filterValues.brand_id) q = q.eq("brand_id", Number(filterValues.brand_id));
+    if (filterValues.status) q = q.eq("status", filterValues.status);
+    if (filterValues.is_master !== undefined && filterValues.is_master !== "") q = q.eq("is_master", filterValues.is_master === "true");
+    const { data } = await q;
+    return (data ?? []) as Record<string, unknown>[];
+  };
+
   const set = (k: keyof Assistant, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
   const filteredShops = editing.brand_id ? shops.filter((s) => s.brand_id === Number(editing.brand_id)) : shops;
   const ro = mode === "view";
@@ -193,6 +225,7 @@ const AdminShopAssistants = () => {
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onExport={handleExport} exportFilename="shop-assistants" exportSchema={ASSISTANTS_SCHEMA}
         onAdd={openAdd} addLabel="New Assistant"
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Assistant)}

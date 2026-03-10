@@ -2,6 +2,25 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge, type FilterDef } from "./_components/AdminTable";
+import type { ExportColumn } from "./_utils/exportCsv";
+
+const CUSTOMERS_SCHEMA: ExportColumn[] = [
+  { key: "id",                  label: "ID" },
+  { key: "first_name",          label: "First Name" },
+  { key: "last_name",           label: "Last Name" },
+  { key: "email",               label: "Email" },
+  { key: "brands_name",         label: "Brand" },
+  { key: "status",              label: "Status" },
+  { key: "phone_number",        label: "Phone" },
+  { key: "city",                label: "City" },
+  { key: "country",             label: "Country" },
+  { key: "address",             label: "Address" },
+  { key: "postcode",            label: "Postcode" },
+  { key: "created_at",          label: "Created At" },
+  { key: "registered_at",       label: "Registered At" },
+  { key: "email_confirmed_at",  label: "Email Confirmed At" },
+  { key: "brand_id",            label: "Brand ID" },
+];
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, SaveBar } from "./_components/FormField";
@@ -150,6 +169,20 @@ const AdminCustomers = () => {
     fetchData();
   };
 
+  const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    let q = supabase
+      .from("profiles")
+      .select("id, first_name, last_name, email, city, country, phone_number, address, postcode, status, created_at, registered_at, email_confirmed_at, brand_id, brands(name)")
+      .eq("role", "customer")
+      .order(sortKey, { ascending: sortDir === "asc" })
+      .limit(10000);
+    if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%`);
+    if (filterValues.brand_id) q = q.eq("brand_id", Number(filterValues.brand_id));
+    if (filterValues.status) q = q.eq("status", filterValues.status);
+    const { data } = await q;
+    return (data ?? []) as Record<string, unknown>[];
+  };
+
   const set = (k: keyof Customer, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
   const ro = mode === "view";
   const drawerTitle = mode === "add" ? "New Customer" : mode === "edit" ? "Edit Customer" : "View Customer";
@@ -168,6 +201,7 @@ const AdminCustomers = () => {
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onExport={handleExport} exportFilename="customers" exportSchema={CUSTOMERS_SCHEMA}
         onAdd={openAdd} addLabel="New Customer"
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Customer)}

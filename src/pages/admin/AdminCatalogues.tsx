@@ -2,6 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable from "./_components/AdminTable";
+import type { ExportColumn } from "./_utils/exportCsv";
+
+const CATALOGUES_SCHEMA: ExportColumn[] = [
+  { key: "id",            label: "ID" },
+  { key: "name",          label: "Item Name" },
+  { key: "brands_name",   label: "Brand" },
+  { key: "brand_item_id", label: "Brand Item ID" },
+  { key: "sku",           label: "SKU" },
+  { key: "slug",          label: "Slug" },
+  { key: "category",      label: "Category" },
+  { key: "collection",    label: "Collection" },
+  { key: "composition",   label: "Composition" },
+  { key: "description",   label: "Description" },
+  { key: "brand_id",      label: "Brand ID" },
+];
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, TextArea, SaveBar } from "./_components/FormField";
@@ -113,6 +128,18 @@ const AdminCatalogues = () => {
     fetchData();
   };
 
+  const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    let q = supabase
+      .from("catalogues")
+      .select("id, name, brand_id, brand_item_id, sku, slug, category, collection, composition, description, brands(name)")
+      .order(sortKey, { ascending: sortDir === "asc" })
+      .limit(10000);
+    if (search) q = q.or(`name.ilike.%${search}%,sku.ilike.%${search}%,category.ilike.%${search}%,collection.ilike.%${search}%,brand_item_id.ilike.%${search}%`);
+    if (filterValues.brand_id) q = q.eq("brand_id", Number(filterValues.brand_id));
+    const { data } = await q;
+    return (data ?? []) as Record<string, unknown>[];
+  };
+
   const set = (k: keyof Catalogue, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
   const ro = mode === "view";
   const drawerTitle = mode === "add" ? "New Catalogue Item" : mode === "edit" ? `Edit: ${editing.name ?? ""}` : `${editing.name ?? ""}`;
@@ -131,6 +158,7 @@ const AdminCatalogues = () => {
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onExport={handleExport} exportFilename="catalogues" exportSchema={CATALOGUES_SCHEMA}
         onAdd={openAdd} addLabel="New Item"
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Catalogue)}

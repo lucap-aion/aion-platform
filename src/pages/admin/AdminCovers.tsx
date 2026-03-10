@@ -2,6 +2,33 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
+import type { ExportColumn } from "./_utils/exportCsv";
+
+const COVERS_SCHEMA: ExportColumn[] = [
+  { key: "id",                         label: "ID" },
+  { key: "brand_sale_id",              label: "Brand Sale ID" },
+  { key: "brands_name",                label: "Brand" },
+  { key: "catalogues_name",            label: "Item Name" },
+  { key: "catalogues_sku",             label: "Item SKU" },
+  { key: "profiles_email",             label: "Customer Email" },
+  { key: "profiles_first_name",        label: "Customer First Name" },
+  { key: "profiles_last_name",         label: "Customer Last Name" },
+  { key: "profiles_created_at",        label: "Customer Created At" },
+  { key: "profiles_registered_at",     label: "Customer Registered At" },
+  { key: "profiles_email_confirmed_at",label: "Customer Email Confirmed At" },
+  { key: "status",                     label: "Status" },
+  { key: "selling_price",              label: "Selling Price" },
+  { key: "recommended_retail_price",   label: "RRP" },
+  { key: "cogs",                       label: "COGS" },
+  { key: "quantity",                   label: "Quantity" },
+  { key: "start_date",                 label: "Start Date" },
+  { key: "expiration_date",            label: "Expiration Date" },
+  { key: "created_at",                 label: "Created At" },
+  { key: "brand_id",                   label: "Brand ID" },
+  { key: "customer_id",                label: "Customer ID" },
+  { key: "item_id",                    label: "Item ID" },
+];
+import { flattenSupabaseRow } from "./_utils/flattenRow";
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, SaveBar } from "./_components/FormField";
@@ -21,10 +48,20 @@ interface Cover {
   brand_id: number | null;
   customer_id: string | null;
   item_id: number | null;
-  brand_name?: string;
-  brand_logo?: string | null;
-  item_name?: string;
-  customer_email?: string;
+  created_at?: string | null;
+  // Flattened FK fields — {table}_{field}
+  brands_name?: string;
+  brands_logo_small?: string | null;
+  catalogues_name?: string;
+  catalogues_sku?: string | null;
+  catalogues_picture?: string | null;
+  profiles_email?: string;
+  profiles_first_name?: string | null;
+  profiles_last_name?: string | null;
+  profiles_avatar?: string | null;
+  profiles_created_at?: string | null;
+  profiles_registered_at?: string | null;
+  profiles_email_confirmed_at?: string | null;
 }
 
 interface BrandOption { id: number; name: string | null; }
@@ -80,7 +117,7 @@ const AdminCovers = () => {
     setLoading(true);
     let query = supabase
       .from("policies")
-      .select("id, brand_sale_id, status, start_date, expiration_date, selling_price, cogs, recommended_retail_price, quantity, brand_id, customer_id, item_id, created_at, brands(name, logo_small), catalogues(name, sku, picture), profiles(email, first_name, last_name, avatar)", { count: "exact" })
+      .select("id, brand_sale_id, status, start_date, expiration_date, selling_price, cogs, recommended_retail_price, quantity, brand_id, customer_id, item_id, created_at, brands(name, logo_small), catalogues(name, sku, picture), profiles(email, first_name, last_name, avatar, created_at, registered_at, email_confirmed_at)", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .order(sortKey, { ascending: sortDir === "asc" })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
@@ -89,19 +126,7 @@ const AdminCovers = () => {
     if (filterValues.status) query = query.eq("status", filterValues.status);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
-      setCovers((data ?? []).map((p: any) => ({
-        ...p,
-        brand_name: p.brands?.name ?? "—",
-        brand_logo: p.brands?.logo_small ?? null,
-        item_name: p.catalogues?.name ?? "—",
-        item_sku: p.catalogues?.sku ?? null,
-        item_picture: p.catalogues?.picture ?? null,
-        customer_email: p.profiles?.email ?? "—",
-        customer_first: p.profiles?.first_name ?? null,
-        customer_last: p.profiles?.last_name ?? null,
-        customer_avatar: p.profiles?.avatar ?? null,
-        customer_name: [p.profiles?.first_name, p.profiles?.last_name].filter(Boolean).join(" ") || null,
-      })));
+      setCovers((data ?? []).map((p: any) => flattenSupabaseRow(p) as unknown as Cover));
       setTotal(count ?? 0);
       setLoading(false);
     });
@@ -189,6 +214,19 @@ const AdminCovers = () => {
 
   const ro = mode === "view";
 
+  const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    let q = supabase
+      .from("policies")
+      .select("id, brand_sale_id, status, start_date, expiration_date, selling_price, cogs, recommended_retail_price, quantity, brand_id, customer_id, item_id, created_at, brands(name), catalogues(name, sku), profiles(email, first_name, last_name, created_at, registered_at, email_confirmed_at)")
+      .order(sortKey, { ascending: sortDir === "asc" })
+      .limit(10000);
+    if (search) q = q.or(`brand_sale_id.ilike.%${search}%`);
+    if (filterValues.brand_id) q = q.eq("brand_id", Number(filterValues.brand_id));
+    if (filterValues.status) q = q.eq("status", filterValues.status);
+    const { data } = await q;
+    return (data ?? []) as Record<string, unknown>[];
+  };
+
   // Cascading filters
   const filteredCatalogues = editing.brand_id
     ? catalogues.filter((c) => c.brand_id === Number(editing.brand_id))
@@ -213,6 +251,7 @@ const AdminCovers = () => {
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onExport={handleExport} exportFilename="covers" exportSchema={COVERS_SCHEMA}
         onAdd={openAdd} addLabel="New Cover"
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Cover)}
@@ -226,52 +265,73 @@ const AdminCovers = () => {
           { key: "id", label: "ID", sortable: true, width: 64, render: (row) => <span className="text-muted-foreground text-xs">#{(row as unknown as Cover).id}</span> },
           { key: "brand_sale_id", label: "Sale ID", sortable: true },
           {
-            key: "brand_name", label: "Brand", width: 164,
+            key: "brands_name", label: "Brand", width: 164,
             render: (row) => {
               const r = row as unknown as Cover;
               return (
                 <div className="flex items-center gap-2">
-                  {r.brand_logo
-                    ? <div className="h-6 w-6 rounded bg-white flex items-center justify-center shrink-0 border border-border/30"><img src={r.brand_logo} alt={r.brand_name} className="h-5 w-5 object-contain" /></div>
+                  {r.brands_logo_small
+                    ? <div className="h-6 w-6 rounded bg-white flex items-center justify-center shrink-0 border border-border/30"><img src={r.brands_logo_small} alt={r.brands_name} className="h-5 w-5 object-contain" /></div>
                     : <div className="h-6 w-6 rounded bg-secondary shrink-0" />}
-                  <span className="text-sm text-foreground">{r.brand_name}</span>
+                  <span className="text-sm text-foreground">{r.brands_name}</span>
                 </div>
               );
             },
           },
           {
-            key: "item_name", label: "Item", width: 210,
+            key: "catalogues_name", label: "Item", width: 210,
             render: (row) => {
-              const r = row as any;
+              const r = row as unknown as Cover;
               return (
                 <div className="flex items-center gap-3">
-                  {r.item_picture ? (
+                  {r.catalogues_picture ? (
                     <div className="h-10 w-10 shrink-0 rounded-lg overflow-hidden bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-1">
-                      <img src={r.item_picture} alt={r.item_name} className="h-full w-full object-contain mix-blend-multiply" />
+                      <img src={r.catalogues_picture} alt={r.catalogues_name} className="h-full w-full object-contain mix-blend-multiply" />
                     </div>
                   ) : (
                     <div className="h-10 w-10 shrink-0 rounded-lg bg-secondary" />
                   )}
                   <div>
-                    <p className="text-sm text-foreground">{r.item_name}</p>
-                    {r.item_sku && <p className="text-xs text-muted-foreground">{r.item_sku}</p>}
+                    <p className="text-sm text-foreground">{r.catalogues_name}</p>
+                    {r.catalogues_sku && <p className="text-xs text-muted-foreground">{r.catalogues_sku}</p>}
                   </div>
                 </div>
               );
             },
           },
-          { key: "customer_email", label: "Customer", width: 210, render: (row) => { const r = row as any; const initials = `${(r.customer_first?.[0] || r.customer_email?.[0] || "?").toUpperCase()}${(r.customer_last?.[0] || "").toUpperCase()}`; return <div className="flex items-center gap-2.5"><div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">{r.customer_avatar ? <img src={r.customer_avatar} alt="" className="h-full w-full object-cover" /> : initials}</div><div><p className="text-sm text-foreground">{r.customer_name || r.customer_email}</p>{r.customer_name && <p className="text-xs text-muted-foreground">{r.customer_email}</p>}</div></div>; } },
+          {
+            key: "profiles_email", label: "Customer", width: 210,
+            render: (row) => {
+              const r = row as unknown as Cover;
+              const fullName = [r.profiles_first_name, r.profiles_last_name].filter(Boolean).join(" ");
+              const initials = `${(r.profiles_first_name?.[0] || r.profiles_email?.[0] || "?").toUpperCase()}${(r.profiles_last_name?.[0] || "").toUpperCase()}`;
+              return (
+                <div className="flex items-center gap-2.5">
+                  <div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
+                    {r.profiles_avatar ? <img src={r.profiles_avatar} alt="" className="h-full w-full object-cover" /> : initials}
+                  </div>
+                  <div>
+                    <p className="text-sm text-foreground">{fullName || r.profiles_email}</p>
+                    {fullName && <p className="text-xs text-muted-foreground">{r.profiles_email}</p>}
+                  </div>
+                </div>
+              );
+            },
+          },
+          { key: "profiles_created_at", label: "Customer Created", sortable: false, render: (row) => fmtDate((row as unknown as Cover).profiles_created_at) },
+          { key: "profiles_registered_at", label: "Customer Registered", sortable: false, render: (row) => fmtDate((row as unknown as Cover).profiles_registered_at) },
+          { key: "profiles_email_confirmed_at", label: "Email Confirmed", sortable: false, render: (row) => fmtDate((row as unknown as Cover).profiles_email_confirmed_at) },
           {
             key: "recommended_retail_price", label: "RRP", sortable: true,
-            render: (row) => { const r = row as unknown as Cover; return r.recommended_retail_price != null ? `€${r.recommended_retail_price.toLocaleString("en-EU", { minimumFractionDigits: 2 })}` : "—"; },
+            render: (row) => { const r = row as unknown as Cover; return r.recommended_retail_price != null ? `€${r.recommended_retail_price.toLocaleString("en-EU", { minimumFractionDigits: 0 })}` : "—"; },
           },
           {
             key: "selling_price", label: "Selling Price", sortable: true,
-            render: (row) => { const r = row as unknown as Cover; return r.selling_price != null ? `€${r.selling_price.toLocaleString("en-EU", { minimumFractionDigits: 2 })}` : "—"; },
+            render: (row) => { const r = row as unknown as Cover; return r.selling_price != null ? `€${r.selling_price.toLocaleString("en-EU", { minimumFractionDigits: 0 })}` : "—"; },
           },
           {
             key: "cogs", label: "COGS", sortable: true,
-            render: (row) => { const r = row as unknown as Cover; return r.cogs != null ? `€${r.cogs.toLocaleString("en-EU", { minimumFractionDigits: 2 })}` : "—"; },
+            render: (row) => { const r = row as unknown as Cover; return r.cogs != null ? `€${r.cogs.toLocaleString("en-EU", { minimumFractionDigits: 0 })}` : "—"; },
           },
           {
             key: "start_date", label: "Start", sortable: true,
@@ -309,7 +369,7 @@ const AdminCovers = () => {
 
           {/* Brand */}
           <FormField label="Brand" required={!ro}>
-            {ro ? <Input disabled value={(editing as any).brand_name ?? ""} /> : (
+            {ro ? <Input disabled value={(editing as any).brands_name ?? ""} /> : (
               <SearchableSelect
                 value={editing.brand_id}
                 onChange={(v) => { set("brand_id", v ? Number(v) : null); set("item_id", null); set("customer_id", null); }}
@@ -322,7 +382,7 @@ const AdminCovers = () => {
 
           {/* Customer (filtered by brand) */}
           <FormField label="Customer" required={!ro}>
-            {ro ? <Input disabled value={(editing as any).customer_email ?? ""} /> : (
+            {ro ? <Input disabled value={(editing as any).profiles_email ?? ""} /> : (
               <SearchableSelect
                 value={editing.customer_id}
                 onChange={(v) => set("customer_id", v || null)}
@@ -338,7 +398,7 @@ const AdminCovers = () => {
 
           {/* Item (filtered by brand) */}
           <FormField label="Item (Catalogue)" required={!ro}>
-            {ro ? <Input disabled value={(editing as any).item_name ?? ""} /> : (
+            {ro ? <Input disabled value={(editing as any).catalogues_name ?? ""} /> : (
               <SearchableSelect
                 value={editing.item_id}
                 onChange={(v) => set("item_id", v ? Number(v) : null)}
