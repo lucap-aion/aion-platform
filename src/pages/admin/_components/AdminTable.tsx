@@ -496,7 +496,10 @@ function AdminTable<T extends Record<string, unknown>>({
     if (!onExport) return;
     setExporting(true);
     try {
-      exportToCsv(await onExport(), exportFilename, exportSchema);
+      const activeSchema = exportSchema
+        ? exportSchema.filter((col) => !settings.hidden.includes(col.key))
+        : undefined;
+      exportToCsv(await onExport(), exportFilename, activeSchema);
     } finally {
       setExporting(false);
     }
