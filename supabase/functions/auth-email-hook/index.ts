@@ -27,16 +27,32 @@ const S = {
   small:   `margin:20px 0 0;font-size:12px;line-height:1.6;color:#B0A090`,
 };
 
+// ─── DB helpers ───────────────────────────────────────────────────────────────
+
+async function fetchBrandLogo(brandName: string | null): Promise<string | null> {
+  if (!brandName || brandName === "AION Cover") return null;
+  const { data } = await supabaseAdmin
+    .from("brands")
+    .select("logo_big, logo_small")
+    .eq("name", brandName)
+    .maybeSingle();
+  return (data as any)?.logo_big || (data as any)?.logo_small || null;
+}
+
 // ─── Logo helpers ─────────────────────────────────────────────────────────────
 // Table-based layout so logos scale correctly in all email clients regardless
 // of the image's natural dimensions.
+// Notes:
+//  - Outlook (Word engine) needs explicit width/height HTML attributes, not just CSS.
+//  - Dark-mode switching via CSS class is unsupported in Outlook → the .aion-light
+//    img is wrapped in <!--[if !mso]><!--> so Outlook never renders it.
+//  - border="0" prevents blue link borders in legacy clients.
 
 function soloLogo(src: string, alt: string): string {
   return `
   <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:36px">
     <tr><td align="center">
-      <img src="${src}" alt="${alt}"
-           width="auto" height="auto"
+      <img src="${src}" alt="${alt}" width="160" height="40" border="0"
            style="display:block;max-height:48px;max-width:180px;width:auto;height:auto" />
     </td></tr>
   </table>`;
@@ -49,14 +65,12 @@ function dualLogo(brandName: string, brandLogoUrl: string): string {
       <table cellpadding="0" cellspacing="0" style="border-collapse:collapse">
         <tr>
           <td style="padding-right:20px;border-right:1px solid #EDE5D8;vertical-align:middle">
-            <img src="${brandLogoUrl}" alt="${brandName}"
-                 width="auto" height="auto"
-                 style="display:block;max-height:44px;max-width:160px;width:auto;height:auto" />
+            <img src="${brandLogoUrl}" alt="${brandName}" height="44" border="0"
+                 style="display:block;max-height:44px;max-width:180px;width:auto;height:auto" />
           </td>
           <td style="padding-left:20px;vertical-align:middle">
-            <img src="${AION_LOGO}" alt="AION Cover"
-                 width="auto" height="auto"
-                 style="display:block;max-height:28px;max-width:120px;width:auto;height:auto" />
+            <img src="${AION_LOGO}" alt="AION Cover" width="80" height="20" border="0"
+                 style="display:block;max-height:20px;max-width:90px;width:auto;height:auto" />
           </td>
         </tr>
       </table>
@@ -75,8 +89,26 @@ const autoNote = `<p style="${S.small}">This is an automated message — please 
 const copyright = `<p style="${S.footer}">© AION Cover · All rights reserved</p>`;
 
 function wrap(inner: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="${S.body}"><div style="${S.wrap}"><div style="${S.card}">${inner}</div>${copyright}</div></body></html>`;
+}
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi, "$2 ( $1 )")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<\/td>/gi, "  ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/<!--.*?-->/gs, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 // ─── Templates ────────────────────────────────────────────────────────────────
@@ -155,7 +187,7 @@ Deno.serve(async (req) => {
 
     const firstName: string | null = meta.first_name ?? null;
     const brandName: string = meta.brand_name ?? "AION Cover";
-    const brandLogoUrl: string | null = meta.brand_logo_url ?? null;
+    const brandLogoUrl: string | null = await fetchBrandLogo(brandName);
 
     const actionType: string = email_data?.email_action_type ?? "";
     const tokenHash: string = email_data?.token_hash ?? "";
@@ -207,6 +239,7 @@ Deno.serve(async (req) => {
       to: [email],
       subject,
       html,
+      text: htmlToText(html),
     });
 
     return new Response(JSON.stringify({ ok: true }), {

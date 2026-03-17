@@ -142,7 +142,7 @@ const AdminShopAssistants = () => {
         const { data: brandData } = await supabase.from("brands").select("name, slug").eq("id", editing.brand_id).single();
         if (brandData) {
           const emailError = await sendEmail("brand_user_invite", {
-            brandUser: { email: editing.email, first_name: editing.first_name ?? null, brand_name: brandData.name },
+            brandUser: { email: editing.email, first_name: editing.first_name ?? null, brand_name: brandData.name, brand_id: editing.brand_id },
             url: `${siteUrl()}/${brandData.slug}/signup`,
           });
           if (emailError) toast({ title: "Invite email failed", description: emailError, variant: "destructive" });
@@ -183,7 +183,7 @@ const AdminShopAssistants = () => {
     const { data: brandData } = await supabase.from("brands").select("name, slug").eq("id", r.brand_id).single();
     if (!brandData) { toast({ title: "Brand not found", variant: "destructive" }); return; }
     const emailError = await sendEmail("brand_user_invite", {
-      brandUser: { email: r.email, first_name: r.first_name ?? null, brand_name: brandData.name },
+      brandUser: { email: r.email, first_name: r.first_name ?? null, brand_name: brandData.name, brand_id: r.brand_id },
       url: `${siteUrl()}/${brandData.slug}/signup`,
     });
     if (emailError) toast({ title: "Invite email failed", description: emailError, variant: "destructive" });

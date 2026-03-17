@@ -8,7 +8,7 @@ export const useCustomerPolicies = () => {
   return useQuery({
     queryKey: ["customer-policies", profile?.id, profile?.brand_id],
     queryFn: async () => {
-      const query = supabase
+      let query = supabase
         .from("policies")
         .select(`
           id,
@@ -31,13 +31,15 @@ export const useCustomerPolicies = () => {
           ),
           brands!policies_brand_id_fkey (
             name,
-            logo_small
+            logo_small,
+            logo_big
           )
         `)
+        .eq("customer_id", profile!.id)
         .order("created_at", { ascending: false });
 
       if (profile?.brand_id) {
-        query.eq("brand_id", profile.brand_id);
+        query = query.eq("brand_id", profile.brand_id);
       }
 
       const { data, error } = await query;
@@ -46,6 +48,7 @@ export const useCustomerPolicies = () => {
     },
     enabled: !!profile,
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 };
 
@@ -75,11 +78,13 @@ export const useBrandPolicies = () => {
             email
           )
         `)
+        .eq("brand_id", profile?.brand_id || -1)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
       return data;
     },
-    enabled: !!profile,
+    enabled: !!profile?.brand_id,
+    staleTime: 5 * 60 * 1000,
   });
 };

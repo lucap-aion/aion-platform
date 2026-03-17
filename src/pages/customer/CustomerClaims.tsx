@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Plus, Clock, CheckCircle2, LayoutGrid, List, Pencil, Trash2, FileText, Search } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Clock, CheckCircle2, LayoutGrid, List, Pencil, Trash2, FileText } from "lucide-react";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { Link, useSearchParams } from "react-router-dom";
 import SearchableSelect from "@/components/SearchableSelect";
@@ -10,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import { sendEmail } from "@/utils/sendEmail";
 import { useCustomerClaims } from "@/hooks/use-claims";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -32,6 +32,7 @@ type ClaimRow = {
   created_at: string | null;
   policies: {
     id: number;
+    brand_id: number | null;
     catalogues: { name: string | null; picture: string | null } | null;
     brands: { name: string | null } | null;
   } | null;
@@ -58,8 +59,6 @@ const formatDate = (value: string | null | undefined) => {
 
 const CustomerClaims = () => {
   const [view, setView] = useState<"list" | "grid">("list");
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [editClaim, setEditClaim] = useState<ClaimRow | null>(null);
   const [editForm, setEditForm] = useState({ type: "", description: "", incidentDate: "", incidentCity: "", incidentCountry: "" });
@@ -79,14 +78,8 @@ const CustomerClaims = () => {
   }, [claims, searchParams]);
 
   const orderedClaims = useMemo(() => {
-    return (claims || []).filter(Boolean).filter((claim) => {
-      const product = claim.policies?.catalogues?.name || "";
-      const matchesSearch = !search || product.toLowerCase().includes(search.toLowerCase()) || (claim.type || "").toLowerCase().includes(search.toLowerCase());
-      const key = getStatusKey(claim.status);
-      const matchesStatus = !statusFilter || key === statusFilter;
-      return matchesSearch && matchesStatus;
-    });
-  }, [claims, search, statusFilter]);
+    return (claims || []).filter(Boolean);
+  }, [claims]);
 
 
   const handleDelete = async () => {
@@ -139,6 +132,22 @@ const CustomerClaims = () => {
     await queryClient.invalidateQueries({ queryKey: ["customer-claims", profile?.id] });
     setEditClaim(null);
     toast.success("Claim updated");
+
+    sendEmail("claim_updated", {
+      claim: {
+        claimId: editClaim.id,
+        customerFirstName: profile?.first_name ?? "",
+        customerLastName: profile?.last_name ?? "",
+        customerEmail: profile?.email ?? "",
+        product: editClaim.policies?.catalogues?.name ?? "Unknown Product",
+        brand: editClaim.policies?.brands?.name ?? "Unknown Brand",
+        brand_id: editClaim.policies?.brand_id ?? null,
+        brandEmail: null,
+        type: editForm.type,
+        description: editForm.description,
+        incidentDate: editForm.incidentDate || null,
+      },
+    });
   };
 
   const getProduct = (claim: ClaimRow | null | undefined) => claim?.policies?.catalogues?.name || "Unknown Product";
@@ -187,26 +196,6 @@ const CustomerClaims = () => {
           </Link>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[180px]">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search by product or type..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-lg border border-input bg-background py-2 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-          </div>
-          <Select value={statusFilter || "all"} onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-[140px] rounded-lg border border-input bg-background text-sm">
-              <SelectValue placeholder="All Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="open">Open</SelectItem>
-              <SelectItem value="closed">Closed</SelectItem>
-            </SelectContent>
-          </Select>
           <div className="flex items-center gap-1 rounded-lg border border-border p-1 bg-card">
             <button
               onClick={() => setView("list")}

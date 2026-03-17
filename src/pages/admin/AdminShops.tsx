@@ -139,7 +139,7 @@ const AdminShops = () => {
   return (
     <>
       <AdminTable
-        title="Shops"
+        title="Stores"
         data={shops as unknown as Record<string, unknown>[]}
         loading={loading}
         total={total}

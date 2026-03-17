@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Upload, X, FileText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge, toTitleCase } from "./_components/AdminTable";
@@ -78,6 +79,8 @@ const AdminClaims = () => {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Claim | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = () => {
@@ -129,22 +132,43 @@ const AdminClaims = () => {
     });
   }, []);
 
-  const openAdd = () => { setEditing(empty()); setMode("add"); setDrawerOpen(true); };
-  const openView = (row: Record<string, unknown>) => { setEditing({ ...row } as Partial<Claim>); setMode("view"); setDrawerOpen(true); };
-  const openEdit = (row: Record<string, unknown>) => { setEditing({ ...row } as Partial<Claim>); setMode("edit"); setDrawerOpen(true); };
+  const openAdd = () => { setEditing(empty()); setPendingFiles([]); setMode("add"); setDrawerOpen(true); };
+  const openView = (row: Record<string, unknown>) => { setEditing({ ...row } as Partial<Claim>); setPendingFiles([]); setMode("view"); setDrawerOpen(true); };
+  const openEdit = (row: Record<string, unknown>) => { setEditing({ ...row } as Partial<Claim>); setPendingFiles([]); setMode("edit"); setDrawerOpen(true); };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+
+    // Upload any pending files to claims_media bucket
+    let uploadedUrls: string[] = [];
+    if (pendingFiles.length > 0) {
+      const uploads = await Promise.all(
+        pendingFiles.map(async (file) => {
+          const ext = file.name.split(".").pop();
+          const path = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+          const { error: upErr } = await supabase.storage.from("claims_media").upload(path, file);
+          if (upErr) return null;
+          const { data: { publicUrl } } = supabase.storage.from("claims_media").getPublicUrl(path);
+          return publicUrl;
+        })
+      );
+      uploadedUrls = uploads.filter(Boolean) as string[];
+    }
+
+    const existingMedia: string[] = Array.isArray(editing.media) ? (editing.media as string[]) : [];
+    const mergedMedia = [...existingMedia, ...uploadedUrls];
+
     const payload = {
       policy_id: editing.policy_id ?? null, type: editing.type ?? null,
       status: editing.status ?? null, incident_date: editing.incident_date ?? null,
       incident_city: editing.incident_city ?? null, incident_country: editing.incident_country ?? null,
       description: editing.description ?? null,
+      media: mergedMedia.length > 0 ? mergedMedia : null,
     };
     const { error } = mode === "add"
       ? await supabase.from("claims").insert(payload)
-      : await supabase.from("claims").update({ status: editing.status ?? null }).eq("id", editing.id!);
+      : await supabase.from("claims").update({ status: editing.status ?? null, media: mergedMedia.length > 0 ? mergedMedia : (editing.media ?? null) }).eq("id", editing.id!);
     setSaving(false);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
     toast({ title: mode === "add" ? "Claim created" : "Claim updated" });
@@ -290,7 +314,7 @@ const AdminClaims = () => {
           {/* Dates & Location */}
           <div className="grid grid-cols-2 gap-4">
             <FormField label="Incident Date">
-              <Input type="date" disabled={ro} value={editing.incident_date ? editing.incident_date.slice(0, 10) : ""} onChange={(e) => set("incident_date", e.target.value || null)} />
+              <Input type="date" disabled={ro} max={new Date().toISOString().split("T")[0]} value={editing.incident_date ? editing.incident_date.slice(0, 10) : ""} onChange={(e) => set("incident_date", e.target.value || null)} />
             </FormField>
             {ro && (
               <FormField label="Opened">
@@ -309,9 +333,9 @@ const AdminClaims = () => {
             <TextArea disabled={ro} value={editing.description ?? ""} onChange={(e) => set("description", e.target.value)} rows={3} placeholder="Describe the incident…" />
           </FormField>
 
-          {/* Attached Files (view only) */}
-          {ro && Array.isArray((editing as Claim).media) && ((editing as Claim).media?.length ?? 0) > 0 && (
-            <FormField label="Attached Files">
+          {/* Attached Files */}
+          {(ro || mode === "edit") && Array.isArray((editing as Claim).media) && ((editing as Claim).media?.length ?? 0) > 0 && (
+            <FormField label={ro ? "Attached Files" : "Existing Files"}>
               <div className="flex flex-wrap gap-2 mt-1">
                 {((editing as Claim).media as string[]).map((url, idx) => {
                   const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
@@ -331,6 +355,53 @@ const AdminClaims = () => {
                   );
                 })}
               </div>
+            </FormField>
+          )}
+
+          {/* File Upload (add/edit only) */}
+          {!ro && (
+            <FormField label="Attach Files">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,.pdf,.doc,.docx"
+                className="hidden"
+                onChange={(e) => {
+                  const selected = Array.from(e.target.files ?? []);
+                  if (selected.length) setPendingFiles((p) => [...p, ...selected]);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-secondary/30 px-4 py-5 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors"
+              >
+                <Upload className="h-4 w-4" />
+                Click to upload files
+              </button>
+              {pendingFiles.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {pendingFiles.map((file, idx) => {
+                    const isImage = file.type.startsWith("image/");
+                    return (
+                      <div key={idx} className="relative h-16 w-16 shrink-0 rounded-lg border border-border bg-secondary/40 overflow-hidden flex items-center justify-center">
+                        {isImage
+                          ? <img src={URL.createObjectURL(file)} alt={file.name} className="h-full w-full object-cover" />
+                          : <FileText className="h-6 w-6 text-muted-foreground" />}
+                        <button
+                          type="button"
+                          onClick={() => setPendingFiles((p) => p.filter((_, i) => i !== idx))}
+                          className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full bg-background/80 flex items-center justify-center hover:bg-destructive hover:text-white transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </FormField>
           )}
 

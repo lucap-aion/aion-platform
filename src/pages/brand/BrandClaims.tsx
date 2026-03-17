@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { Search, Eye, XCircle, ChevronDown, Trash2, Plus, Pencil, X, ChevronLeft, ChevronRight, ArrowUpDown, FileText } from "lucide-react";
+import { Search, Eye, XCircle, ChevronDown, Trash2, Plus, Pencil, X, ChevronLeft, ChevronRight, ArrowUpDown, FileText, Upload } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { parseError } from "@/utils/parseError";
 import SearchableSelect from "@/components/SearchableSelect";
 
 const CLAIM_TYPES = ["Accidental Damage", "Robbery", "Theft"];
@@ -52,14 +53,16 @@ const inputCls =
 
 const Field = ({
   label,
+  required,
   children,
 }: {
   label: string;
+  required?: boolean;
   children: React.ReactNode;
 }) => (
   <div>
     <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1.5 block">
-      {label}
+      {label}{required && <span className="text-destructive ml-0.5">*</span>}
     </label>
     {children}
   </div>
@@ -70,57 +73,74 @@ const PAGE_SIZE = 25;
 
 const BrandClaims = () => {
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "open" | "closed">("");
   const [typeFilter, setTypeFilter] = useState("");
-  const [claims, setClaims] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const slugPrefix = useAuthSlug();
   const { profile, canWrite } = useAuth();
+  const queryClient = useQueryClient();
+
+  // Debounce search → reset page and trigger server refetch
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(0); }, 400);
+    return () => clearTimeout(t);
+  }, [search]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ClaimForm>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
   const [editingMedia, setEditingMedia] = useState<string[]>([]);
+  const [newFiles, setNewFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchClaims = useCallback(async () => {
-    if (!profile?.brand_id) return;
-    setIsLoading(true);
+  const claimsQueryKey = ["brand-claims", profile?.brand_id, page, sortKey, sortDir, statusFilter, typeFilter, debouncedSearch];
 
-    let query = supabase
-      .from("claims")
-      .select(
-        `id, type, status, created_at, incident_date, incident_city, incident_country, description, policy_id, media,
-        policies!claims_policy_id_fkey!inner(
-          id, brand_id,
-          catalogues!insured_items_item_id_fkey(name, picture),
-          profiles!insured_items_customer_id_fkey(first_name, last_name, email, avatar)
-        )`,
-        { count: "exact" }
-      )
-      .eq("policies.brand_id", profile.brand_id)
-      .order(sortKey, { ascending: sortDir === "asc" })
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+  const { data: queryData, isFetching } = useQuery({
+    queryKey: claimsQueryKey,
+    queryFn: async () => {
+      let query = supabase
+        .from("claims")
+        .select(
+          `id, type, status, created_at, incident_date, incident_city, incident_country, description, policy_id, media,
+          policies!claims_policy_id_fkey!inner(
+            id, brand_id,
+            catalogues!insured_items_item_id_fkey(name, picture),
+            profiles!insured_items_customer_id_fkey(first_name, last_name, email, avatar)
+          )`,
+          { count: "exact" }
+        )
+        .eq("policies.brand_id", profile!.brand_id)
+        .order(sortKey, { ascending: sortDir === "asc" })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-    if (statusFilter) query = query.eq("status", statusFilter);
-    if (typeFilter) query = query.eq("type", typeFilter);
+      if (statusFilter) query = query.eq("status", statusFilter);
+      if (typeFilter) query = query.eq("type", typeFilter);
+      if (debouncedSearch.trim()) {
+        const s = debouncedSearch.trim();
+        const num = Number(s);
+        if (!isNaN(num) && Number.isInteger(num) && s.length > 0) {
+          query = query.eq("id", num);
+        } else {
+          query = query.or(`type.ilike.%${s}%,description.ilike.%${s}%`);
+        }
+      }
 
-    const { data, count, error } = await query;
-    if (error) {
-      toast.error(error.message);
-      setIsLoading(false);
-      return;
-    }
-    setClaims(data || []);
-    setTotal(count ?? 0);
-    setIsLoading(false);
-  }, [profile?.brand_id, page, sortKey, sortDir, statusFilter, typeFilter]);
+      const { data, count, error } = await query;
+      if (error) throw error;
+      return { claims: data || [], total: count ?? 0 };
+    },
+    enabled: !!profile?.brand_id,
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
+  });
 
-  useEffect(() => { fetchClaims(); }, [fetchClaims]);
+  const claims = queryData?.claims ?? [];
+  const total = queryData?.total ?? 0;
+  const isLoading = isFetching && !queryData;
 
   // Lazy-load covers (policies) for the claim form
   const { data: policies } = useQuery({
@@ -150,39 +170,44 @@ const BrandClaims = () => {
     setPage(0);
   };
 
+  const invalidateClaims = () =>
+    queryClient.invalidateQueries({ queryKey: ["brand-claims", profile?.brand_id] });
+
   const handleClose = async (claimId: number) => {
     const { error } = await supabase
       .from("claims")
       .update({ status: "closed" })
       .eq("id", claimId);
     if (error) {
-      toast.error(`Unable to close claim #${claimId}: ${error.message}`);
+      toast.error(parseError(error));
       return;
     }
-    fetchClaims();
+    invalidateClaims();
     toast.success(`Claim #${claimId} closed`);
   };
 
   const handleDelete = async (claimId: number) => {
     const { error } = await supabase.from("claims").delete().eq("id", claimId);
     if (error) {
-      toast.error(error.message);
+      toast.error(parseError(error));
       return;
     }
     setConfirmDeleteId(null);
-    fetchClaims();
+    invalidateClaims();
     toast.success(`Claim #${claimId} deleted`);
   };
 
   const openAdd = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setNewFiles([]);
     setModalOpen(true);
   };
 
   const openEdit = (claim: any) => {
     setEditingId(claim.id);
     setEditingMedia(Array.isArray(claim.media) ? claim.media : []);
+    setNewFiles([]);
     setForm({
       policyId: claim.policies?.id ? String(claim.policies.id) : "",
       type: claim.type || "",
@@ -196,17 +221,36 @@ const BrandClaims = () => {
   };
 
   const handleSave = async () => {
-    if (!editingId && !form.policyId) {
-      toast.error("Please select a cover.");
-      return;
-    }
-    if (!form.type || !form.incidentDate || !form.incidentCity || !form.incidentCountry || !form.description) {
-      toast.error("Please complete all required fields.");
+    const missing: string[] = [];
+    if (!editingId && !form.policyId) missing.push("Cover");
+    if (!form.type) missing.push("Claim Type");
+    if (!form.incidentDate) missing.push("Incident Date");
+    if (!form.incidentCity) missing.push("City");
+    if (!form.incidentCountry) missing.push("Country");
+    if (!form.description) missing.push("Description");
+    if (missing.length) {
+      toast.error(`Please fill in: ${missing.join(", ")}.`);
       return;
     }
     setIsSaving(true);
 
+    // Upload new files
+    const uploadedUrls: string[] = [];
+    for (const file of newFiles) {
+      const ext = file.name.split(".").pop();
+      const path = `${profile?.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("claims_media").upload(path, file);
+      if (uploadError) {
+        toast.error(`Upload failed: ${uploadError.message}`);
+        setIsSaving(false);
+        return;
+      }
+      const { data: { publicUrl } } = supabase.storage.from("claims_media").getPublicUrl(path);
+      uploadedUrls.push(publicUrl);
+    }
+
     if (editingId) {
+      const mergedMedia = [...editingMedia, ...uploadedUrls];
       const { error } = await supabase
         .from("claims")
         .update({
@@ -217,10 +261,11 @@ const BrandClaims = () => {
           incident_country: form.incidentCountry,
           description: form.description,
           status: form.status,
+          media: mergedMedia,
         })
         .eq("id", editingId);
       if (error) {
-        toast.error(error.message);
+        toast.error(parseError(error));
         setIsSaving(false);
         return;
       }
@@ -234,9 +279,10 @@ const BrandClaims = () => {
         incident_country: form.incidentCountry,
         description: form.description,
         status: "open",
+        media: uploadedUrls,
       });
       if (error) {
-        toast.error(error.message);
+        toast.error(parseError(error));
         setIsSaving(false);
         return;
       }
@@ -245,16 +291,8 @@ const BrandClaims = () => {
 
     setIsSaving(false);
     setModalOpen(false);
-    fetchClaims();
+    invalidateClaims();
   };
-
-  // Client-side text search within current page
-  const filtered = claims.filter((claim: any) => {
-    if (!search) return true;
-    const product = claim.policies?.catalogues?.name || "";
-    const customer = `${claim.policies?.profiles?.first_name || ""} ${claim.policies?.profiles?.last_name || ""} ${claim.policies?.profiles?.email || ""}`.toLowerCase();
-    return `${claim.id} ${product} ${claim.type || ""} ${customer}`.toLowerCase().includes(search.toLowerCase());
-  });
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -270,10 +308,51 @@ const BrandClaims = () => {
     </th>
   );
 
-  if (isLoading && claims.length === 0) {
+  if (isFetching) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 flex items-center justify-center min-h-[300px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+        <div className="mb-8 flex items-center justify-between">
+          <div className="space-y-2">
+            <div className="h-8 w-32 rounded-lg bg-secondary/60 animate-pulse" />
+            <div className="h-4 w-52 rounded bg-secondary/40 animate-pulse" />
+          </div>
+        </div>
+        <div className="glass-card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px]">
+              <thead>
+                <tr className="border-b border-border">
+                  {["ID", "Customer", "Product", "Type", "Date", "Status", "Actions"].map((h) => (
+                    <th key={h} className="px-6 py-4 text-left">
+                      <div className="h-3 w-16 rounded bg-secondary/60 animate-pulse" />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={i}>
+                    <td className="px-6 py-4"><div className="h-3.5 w-8 rounded bg-secondary/40 animate-pulse" /></td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-9 w-9 rounded-full bg-secondary/60 animate-pulse shrink-0" />
+                        <div className="space-y-1.5">
+                          <div className="h-3.5 w-28 rounded bg-secondary/60 animate-pulse" />
+                          <div className="h-3 w-36 rounded bg-secondary/40 animate-pulse" />
+                        </div>
+                      </div>
+                    </td>
+                    {[1, 2, 3, 4, 5].map((j) => (
+                      <td key={j} className="px-6 py-4">
+                        <div className="h-3.5 w-20 rounded bg-secondary/40 animate-pulse" />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     );
   }
@@ -363,20 +442,14 @@ const BrandClaims = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {isLoading ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center">
-                    <div className="flex justify-center"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" /></div>
-                  </td>
-                </tr>
-              ) : !filtered.length ? (
+              {!claims.length ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground">
                     No claims found.
                   </td>
                 </tr>
               ) : (
-                filtered.map((claim: any) => {
+                claims.map((claim: any) => {
                   const key = getStatus(claim.status);
                   const state = statusMap[key];
                   return (
@@ -537,7 +610,7 @@ const BrandClaims = () => {
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
                   Cover
                 </p>
-                <Field label="Select Cover">
+                <Field label="Select Cover" required>
                   <SearchableSelect
                     value={form.policyId}
                     onChange={(v) => setForm((p) => ({ ...p, policyId: v }))}
@@ -557,7 +630,7 @@ const BrandClaims = () => {
                   Claim Information
                 </p>
                 <div className="space-y-3">
-                  <Field label="Claim Type">
+                  <Field label="Claim Type" required>
                     <SearchableSelect
                       value={form.type}
                       onChange={(v) => setForm((p) => ({ ...p, type: v }))}
@@ -566,7 +639,7 @@ const BrandClaims = () => {
                       options={CLAIM_TYPES.map((t) => ({ value: t, label: t }))}
                     />
                   </Field>
-                  <Field label="Description">
+                  <Field label="Description" required>
                     <textarea
                       value={form.description}
                       onChange={(e) =>
@@ -587,10 +660,11 @@ const BrandClaims = () => {
                   Incident Details
                 </p>
                 <div className="space-y-3">
-                  <Field label="Incident Date">
+                  <Field label="Incident Date" required>
                     <input
                       type="date"
                       value={form.incidentDate}
+                      max={new Date().toISOString().split("T")[0]}
                       onChange={(e) =>
                         setForm((p) => ({ ...p, incidentDate: e.target.value }))
                       }
@@ -598,7 +672,7 @@ const BrandClaims = () => {
                     />
                   </Field>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="City">
+                    <Field label="City" required>
                       <input
                         type="text"
                         value={form.incidentCity}
@@ -612,7 +686,7 @@ const BrandClaims = () => {
                         className={inputCls}
                       />
                     </Field>
-                    <Field label="Country">
+                    <Field label="Country" required>
                       <SearchableSelect
                         value={form.incidentCountry}
                         onChange={(v) =>
@@ -627,33 +701,96 @@ const BrandClaims = () => {
                 </div>
               </div>
 
-              {/* Attached Files (edit/view only) */}
-              {editingId && editingMedia.length > 0 && (
-                <div className="border-t border-border/50 pt-5">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                    Attached Files
-                  </p>
-                  <div className="flex flex-wrap gap-2">
+              {/* Media Upload */}
+              <div className="border-t border-border/50 pt-5">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                  Attached Files
+                </p>
+
+                {/* Existing media (edit mode) */}
+                {editingId && editingMedia.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-3">
                     {editingMedia.map((url, idx) => {
                       const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
                       const isImage = ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"].includes(ext);
                       return (
-                        <a
-                          key={idx}
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="h-16 w-16 shrink-0 rounded-lg border border-border overflow-hidden bg-secondary/40 flex items-center justify-center hover:border-primary/40 transition-colors"
-                        >
-                          {isImage
-                            ? <img src={url} alt="" className="h-full w-full object-cover" />
-                            : <FileText className="h-6 w-6 text-muted-foreground" />}
-                        </a>
+                        <div key={idx} className="relative group">
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="h-16 w-16 shrink-0 rounded-lg border border-border overflow-hidden bg-secondary/40 flex items-center justify-center hover:border-primary/40 transition-colors"
+                          >
+                            {isImage
+                              ? <img src={url} alt="" className="h-full w-full object-cover" />
+                              : <FileText className="h-6 w-6 text-muted-foreground" />}
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => setEditingMedia((m) => m.filter((_, i) => i !== idx))}
+                            className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
-                </div>
-              )}
+                )}
+
+                {/* New files queued */}
+                {newFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {newFiles.map((file, idx) => {
+                      const isImage = file.type.startsWith("image/");
+                      return (
+                        <div key={idx} className="relative group">
+                          <div className="h-16 w-16 shrink-0 rounded-lg border border-primary/40 overflow-hidden bg-primary/5 flex items-center justify-center">
+                            {isImage
+                              ? <img src={URL.createObjectURL(file)} alt="" className="h-full w-full object-cover" />
+                              : <FileText className="h-6 w-6 text-primary" />}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setNewFiles((f) => f.filter((_, i) => i !== idx))}
+                            className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,.pdf,.doc,.docx"
+                  className="hidden"
+                  onChange={(e) => {
+                    const incoming = e.target.files;
+                    if (!incoming) return;
+                    setNewFiles((prev) => {
+                      const next = [...prev];
+                      Array.from(incoming).forEach((f) => {
+                        if (!next.find((x) => x.name === f.name && x.size === f.size)) next.push(f);
+                      });
+                      return next;
+                    });
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-2 rounded-lg border border-dashed border-input px-4 py-2.5 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors w-full justify-center"
+                >
+                  <Upload className="h-4 w-4" />
+                  {newFiles.length > 0 ? `${newFiles.length} file${newFiles.length > 1 ? "s" : ""} selected — add more` : "Upload files"}
+                </button>
+              </div>
 
               {/* Status (edit only) */}
               {editingId && (

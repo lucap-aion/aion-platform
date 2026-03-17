@@ -133,12 +133,12 @@ const AdminCustomers = () => {
       toast({ title: "Customer created" });
       // Send invite email — fire-and-forget
       if (editing.brand_id) {
-        const { data: brandData } = await supabase.from("brands").select("name, slug, logo_small").eq("id", editing.brand_id).single();
+        const { data: brandData } = await supabase.from("brands").select("name, slug, logo_small, logo_big").eq("id", editing.brand_id).single();
         if (brandData) {
           const url = `${siteUrl()}/${brandData.slug}/signup`;
           sendEmail("customer_invite", {
             customer: { email: editing.email, first_name: editing.first_name ?? null },
-            brand: { name: brandData.name, logo_small: brandData.logo_small },
+            brand: { name: brandData.name, id: editing.brand_id },
             url,
           });
         }

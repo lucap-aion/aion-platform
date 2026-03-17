@@ -38,6 +38,8 @@ import { fmtDate } from "./_components/fmtDate";
 interface Cover {
   id: number;
   brand_sale_id: string;
+  row_id: string | null;
+  sub_order_code: string | null;
   status: string | null;
   start_date: string;
   expiration_date: string | null;
@@ -82,7 +84,8 @@ const addTwoYears = (dateStr: string): string => {
 const empty = (): Partial<Cover> => {
   const today = new Date().toISOString().slice(0, 10);
   return {
-    brand_sale_id: "", status: "live", start_date: today,
+    brand_sale_id: "", row_id: null, sub_order_code: null,
+    status: "live", start_date: today,
     expiration_date: addTwoYears(today),
     selling_price: null, cogs: null, recommended_retail_price: null,
     quantity: null, brand_id: null, customer_id: null, item_id: null,
@@ -157,6 +160,8 @@ const AdminCovers = () => {
     setSaving(true);
     const payload = {
       brand_sale_id: editing.brand_sale_id ?? "",
+      row_id: editing.row_id ?? null,
+      sub_order_code: editing.sub_order_code ?? null,
       status: editing.status ?? null,
       start_date: editing.start_date ?? null,
       expiration_date: editing.expiration_date ?? null,
@@ -257,7 +262,7 @@ const AdminCovers = () => {
         onDelete={(row) => setDeleteTarget(row as unknown as Cover)}
         filters={[
           { key: "brand_id", label: "Brand", options: brands.map((b) => ({ value: String(b.id), label: b.name ?? "" })) },
-          { key: "status", label: "Status", options: [{ value: "live", label: "Live" }, { value: "pending", label: "Pending" }, { value: "blocked", label: "Blocked" }, { value: "cancelled", label: "Cancelled" }] },
+          { key: "status", label: "Status", options: [{ value: "live", label: "Live" }, { value: "pending", label: "Pending" }, { value: "blocked", label: "Blocked" }, { value: "cancelled", label: "Cancelled" }, { value: "expired", label: "Expired" }] },
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
@@ -350,23 +355,6 @@ const AdminCovers = () => {
 
       <AdminDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={drawerTitle}>
         <form onSubmit={handleSave} className="space-y-4">
-          {/* Sale ID + Status */}
-          <div className="grid grid-cols-2 gap-4">
-            <FormField label="Sale ID" required={!ro}>
-              <Input disabled={ro} value={editing.brand_sale_id ?? ""} onChange={(e) => set("brand_sale_id", e.target.value)} required={!ro} />
-            </FormField>
-            <FormField label="Status">
-              {ro ? <Input disabled value={editing.status ?? ""} /> : (
-                <Select value={editing.status ?? ""} onChange={(e) => set("status", e.target.value)}>
-                  <option value="live">Live</option>
-                  <option value="pending">Pending</option>
-                  <option value="blocked">Blocked</option>
-                  <option value="cancelled">Cancelled</option>
-                </Select>
-              )}
-            </FormField>
-          </div>
-
           {/* Brand */}
           <FormField label="Brand" required={!ro}>
             {ro ? <Input disabled value={(editing as any).brands_name ?? ""} /> : (
@@ -409,6 +397,34 @@ const AdminCovers = () => {
             )}
           </FormField>
 
+          {/* Sale ID + Row ID */}
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="Sale ID" required={!ro}>
+              <Input disabled={ro} value={editing.brand_sale_id ?? ""} onChange={(e) => set("brand_sale_id", e.target.value)} required={!ro} />
+            </FormField>
+            <FormField label="Row ID" required={!ro}>
+              <Input disabled={ro} value={editing.row_id ?? ""} onChange={(e) => set("row_id", e.target.value || null)} required={!ro} />
+            </FormField>
+          </div>
+
+          {/* Sub Order Code + Status */}
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="Sub Order Code">
+              <Input disabled={ro} value={editing.sub_order_code ?? ""} onChange={(e) => set("sub_order_code", e.target.value || null)} />
+            </FormField>
+            <FormField label="Status">
+              {ro ? <Input disabled value={editing.status ?? ""} /> : (
+                <Select value={editing.status ?? ""} onChange={(e) => set("status", e.target.value)}>
+                  <option value="live">Live</option>
+                  <option value="pending">Pending</option>
+                  <option value="blocked">Blocked</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="expired">Expired</option>
+                </Select>
+              )}
+            </FormField>
+          </div>
+
           {/* Dates */}
           <div className="grid grid-cols-2 gap-4">
             <FormField label="Start Date" required={!ro}>
@@ -430,22 +446,22 @@ const AdminCovers = () => {
             </FormField>
           </div>
 
-          {/* Prices */}
+          {/* Prices — order: Selling Price | RRP | COGS */}
           <div className="grid grid-cols-3 gap-3">
-            <FormField label="Selling Price">
-              <Input type="number" step="0.01" disabled={ro} value={editing.selling_price ?? ""} onChange={(e) => set("selling_price", e.target.value ? Number(e.target.value) : null)} />
+            <FormField label="Selling Price" required={!ro}>
+              <Input type="number" step="0.01" disabled={ro} value={editing.selling_price ?? ""} onChange={(e) => set("selling_price", e.target.value ? Number(e.target.value) : null)} required={!ro} />
+            </FormField>
+            <FormField label="RRP" required={!ro}>
+              <Input type="number" step="0.01" disabled={ro} value={editing.recommended_retail_price ?? ""} onChange={(e) => set("recommended_retail_price", e.target.value ? Number(e.target.value) : null)} required={!ro} />
             </FormField>
             <FormField label="COGS (auto)">
               <Input type="number" step="0.01" disabled value={editing.cogs ?? ""} readOnly />
             </FormField>
-            <FormField label="RRP">
-              <Input type="number" step="0.01" disabled={ro} value={editing.recommended_retail_price ?? ""} onChange={(e) => set("recommended_retail_price", e.target.value ? Number(e.target.value) : null)} />
-            </FormField>
           </div>
 
           {/* Quantity */}
-          <FormField label="Quantity">
-            <Input type="number" disabled={ro} value={editing.quantity ?? ""} onChange={(e) => set("quantity", e.target.value ? Number(e.target.value) : null)} />
+          <FormField label="Quantity" required={!ro}>
+            <Input type="number" disabled={ro} value={editing.quantity ?? ""} onChange={(e) => set("quantity", e.target.value ? Number(e.target.value) : null)} required={!ro} />
           </FormField>
 
           {ro ? (

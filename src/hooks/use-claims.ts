@@ -50,18 +50,23 @@ export const useCustomerClaims = () => {
           incident_country,
           media,
           created_at,
-          policies!claims_policy_id_fkey (
+          policies!claims_policy_id_fkey!inner (
             id,
+            brand_id,
+            customer_id,
             catalogues!insured_items_item_id_fkey ( name, picture ),
             brands!policies_brand_id_fkey ( name )
           )
         `)
+        .eq("policies.customer_id", profile!.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
       return data;
     },
     enabled: !!profile,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 };
 
@@ -116,7 +121,8 @@ export const useBrandClaims = (limit?: number) => {
       if (error) throw error;
       return data;
     },
-    enabled: !!profile,
+    enabled: !!profile?.brand_id,
+    staleTime: 5 * 60 * 1000,
   });
 };
 

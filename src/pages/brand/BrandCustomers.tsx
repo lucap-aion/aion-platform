@@ -1,9 +1,11 @@
 import { motion } from "framer-motion";
 import { Search, ChevronDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, ArrowUpDown } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { parseError } from "@/utils/parseError";
 
 type SortKey = "newest" | "oldest" | "name";
 
@@ -31,14 +33,16 @@ const EMPTY_FORM: CustomerForm = {
 
 const Field = ({
   label,
+  required,
   children,
 }: {
   label: string;
+  required?: boolean;
   children: React.ReactNode;
 }) => (
   <div>
     <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1.5 block">
-      {label}
+      {label}{required && <span className="text-destructive ml-0.5">*</span>}
     </label>
     {children}
   </div>
@@ -51,17 +55,22 @@ const PAGE_SIZE = 25;
 
 const BrandCustomers = () => {
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("newest");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CustomerForm>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const { profile, canWrite } = useAuth();
+  const queryClient = useQueryClient();
+
+  // Debounce search → reset page and trigger server refetch
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(0); }, 400);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const sortMap: Record<SortKey, { col: string; asc: boolean }> = {
     newest: { col: "created_at", asc: false },
@@ -69,76 +78,64 @@ const BrandCustomers = () => {
     name: { col: "first_name", asc: true },
   };
 
-  const fetchCustomers = useCallback(async () => {
-    if (!profile?.brand_id) return;
-    setIsLoading(true);
+  const queryKey = ["brand-customers", profile?.brand_id, page, sortBy, debouncedSearch];
 
-    const { col, asc } = sortMap[sortBy];
+  const { data: queryData, isFetching } = useQuery({
+    queryKey,
+    queryFn: async () => {
+      const { col, asc } = sortMap[sortBy];
 
-    const { data, count, error } = await supabase
-      .from("profiles")
-      .select(
-        "id, first_name, last_name, email, phone_number, address, city, country, postcode, created_at, avatar",
-        { count: "exact" }
-      )
-      .eq("role", "customer")
-      .eq("brand_id", profile.brand_id)
-      .order(col, { ascending: asc })
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      let query = supabase
+        .from("profiles")
+        .select(
+          "id, first_name, last_name, email, phone_number, address, city, country, postcode, created_at, avatar",
+          { count: "exact" }
+        )
+        .eq("role", "customer")
+        .eq("brand_id", profile!.brand_id)
+        .order(col, { ascending: asc })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-    if (error) {
-      toast.error(error.message);
-      setIsLoading(false);
-      return;
-    }
+      if (debouncedSearch.trim()) {
+        const s = `%${debouncedSearch.trim()}%`;
+        query = query.or(`first_name.ilike.${s},last_name.ilike.${s},email.ilike.${s}`);
+      }
 
-    const enriched = await Promise.all(
-      (data || []).map(async (c) => {
-        const [policiesRes, claimsRes] = await Promise.all([
-          supabase
-            .from("policies")
-            .select("id, selling_price", { count: "exact" })
-            .eq("customer_id", c.id),
-          supabase
-            .from("claims")
-            .select("id", { count: "exact" })
-            .in(
+      const { data, count, error } = await query;
+      if (error) throw error;
+
+      const customerIds = (data || []).map((c) => c.id);
+      const [policiesRes, claimsRes] = customerIds.length
+        ? await Promise.all([
+            supabase.from("policies").select("id, customer_id, selling_price").in("customer_id", customerIds),
+            supabase.from("claims").select("id, policy_id").in(
               "policy_id",
-              (
-                await supabase
-                  .from("policies")
-                  .select("id")
-                  .eq("customer_id", c.id)
-              ).data?.map((p) => p.id) || []
+              (await supabase.from("policies").select("id").in("customer_id", customerIds)).data?.map((p) => p.id) || []
             ),
-        ]);
-        const totalValue =
-          policiesRes.data?.reduce(
-            (sum, p) => sum + (p.selling_price || 0),
-            0
-          ) || 0;
-        return {
-          ...c,
-          covers: policiesRes.count || 0,
-          claims: claimsRes.count || 0,
-          value: totalValue,
-        };
-      })
-    );
+          ])
+        : [{ data: [] }, { data: [] }];
 
-    setCustomers(enriched);
-    setTotal(count ?? 0);
-    setIsLoading(false);
-  }, [profile?.brand_id, page, sortBy]);
+      const allPolicies = policiesRes.data || [];
+      const allClaims = claimsRes.data || [];
 
-  useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
+      const enriched = (data || []).map((c) => {
+        const cPolicies = allPolicies.filter((p) => p.customer_id === c.id);
+        const cPolicyIds = new Set(cPolicies.map((p) => p.id));
+        const cClaims = allClaims.filter((cl) => cPolicyIds.has(cl.policy_id));
+        const totalValue = cPolicies.reduce((sum, p) => sum + (p.selling_price || 0), 0);
+        return { ...c, covers: cPolicies.length, claims: cClaims.length, value: totalValue };
+      });
 
-  // Client-side text search within current page
-  const filtered = customers.filter((c) => {
-    if (!search) return true;
-    const name = `${c.first_name || ""} ${c.last_name || ""} ${c.email}`;
-    return name.toLowerCase().includes(search.toLowerCase());
+      return { customers: enriched, total: count ?? 0 };
+    },
+    enabled: !!profile?.brand_id,
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
   });
+
+  const customers = queryData?.customers ?? [];
+  const total = queryData?.total ?? 0;
+  const isLoading = isFetching && !queryData;
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -169,7 +166,7 @@ const BrandCustomers = () => {
   const handleSave = async () => {
     if (!profile?.brand_id) return;
     if (!editingId && !form.email) {
-      toast.error("Email is required.");
+      toast.error("Please fill in: Email.");
       return;
     }
     setIsSaving(true);
@@ -188,7 +185,7 @@ const BrandCustomers = () => {
         })
         .eq("id", editingId);
       if (error) {
-        toast.error(error.message);
+        toast.error(parseError(error));
         setIsSaving(false);
         return;
       }
@@ -208,7 +205,7 @@ const BrandCustomers = () => {
         status: "pending",
       });
       if (error) {
-        toast.error(error.message);
+        toast.error(parseError(error));
         setIsSaving(false);
         return;
       }
@@ -217,24 +214,64 @@ const BrandCustomers = () => {
 
     setIsSaving(false);
     setModalOpen(false);
-    fetchCustomers();
+    queryClient.invalidateQueries({ queryKey: ["brand-customers", profile?.brand_id] });
   };
 
   const handleDelete = async (id: string) => {
     const { error } = await supabase.from("profiles").delete().eq("id", id);
     if (error) {
-      toast.error(error.message);
+      toast.error(parseError(error));
       return;
     }
     setConfirmDeleteId(null);
     toast.success("Customer removed.");
-    fetchCustomers();
+    queryClient.invalidateQueries({ queryKey: ["brand-customers", profile?.brand_id] });
   };
 
-  if (isLoading && customers.length === 0) {
+  if (isLoading) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 flex items-center justify-center min-h-[300px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+        <div className="mb-8 flex items-center justify-between">
+          <div className="space-y-2">
+            <div className="h-8 w-40 rounded-lg bg-secondary/60 animate-pulse" />
+            <div className="h-4 w-56 rounded bg-secondary/40 animate-pulse" />
+          </div>
+        </div>
+        <div className="glass-card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px]">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Customer", "Covers", "Claims", "Protected Value", "Joined"].map((h) => (
+                    <th key={h} className="px-6 py-4 text-left">
+                      <div className="h-3 w-20 rounded bg-secondary/60 animate-pulse" />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={i}>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-full bg-secondary/60 animate-pulse shrink-0" />
+                        <div className="space-y-1.5">
+                          <div className="h-3.5 w-32 rounded bg-secondary/60 animate-pulse" />
+                          <div className="h-3 w-44 rounded bg-secondary/40 animate-pulse" />
+                        </div>
+                      </div>
+                    </td>
+                    {[1, 2, 3, 4].map((j) => (
+                      <td key={j} className="px-6 py-4">
+                        <div className="h-3.5 w-12 rounded bg-secondary/40 animate-pulse" />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     );
   }
@@ -321,13 +358,7 @@ const BrandCustomers = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {isLoading ? (
-                <tr>
-                  <td colSpan={canWrite ? 6 : 5} className="px-6 py-12 text-center">
-                    <div className="flex justify-center"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" /></div>
-                  </td>
-                </tr>
-              ) : !filtered.length ? (
+              {!customers.length ? (
                 <tr>
                   <td
                     colSpan={canWrite ? 6 : 5}
@@ -337,7 +368,7 @@ const BrandCustomers = () => {
                   </td>
                 </tr>
               ) : (
-                filtered.map((c) => (
+                customers.map((c) => (
                   <tr
                     key={c.id}
                     className="transition-colors hover:bg-secondary/30"
@@ -488,7 +519,7 @@ const BrandCustomers = () => {
                       />
                     </Field>
                   </div>
-                  <Field label="Email">
+                  <Field label="Email" required>
                     <input
                       type="email"
                       value={form.email}

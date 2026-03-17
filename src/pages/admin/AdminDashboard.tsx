@@ -25,6 +25,25 @@ const toPct = (v: unknown): number => {
   return hasPercent || n > 1 ? n / 100 : n;
 };
 
+// ISO week helpers
+const isoWeeksInYear = (year: number) => {
+  const dec31 = new Date(year, 11, 31);
+  const dow = dec31.getDay() || 7;
+  return dow >= 4 ? 53 : 52;
+};
+
+const getWeekRange = (year: number, week: number) => {
+  const jan4 = new Date(year, 0, 4);
+  const dow = jan4.getDay() || 7;
+  const monday = new Date(jan4);
+  monday.setDate(jan4.getDate() - (dow - 1) + (week - 1) * 7);
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  return { from: monday.toISOString(), to: sunday.toISOString() };
+};
+
 interface Brand { id: number; name: string; slug: string | null; activation_fee: unknown; insurance_premium: unknown; aion_premium_fee: unknown; }
 
 interface Statistics {
@@ -125,9 +144,11 @@ export default function AdminDashboard() {
 
   const [allBrands, setAllBrands] = useState<Brand[]>([]);
   const [selectedBrandId, setSelectedBrandId] = useState<number | "all">("all");
-  const [period, setPeriod] = useState<"all" | "year" | "month">("all");
+  const [period, setPeriod] = useState<"all" | "week" | "month" | "year">("all");
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
+  const [selectedWeek, setSelectedWeek] = useState<number>(1);
+  const [customerType, setCustomerType] = useState<"all" | "new" | "returning">("all");
   const [stats, setStats] = useState<Statistics>(emptyStats());
   const [loading, setLoading] = useState(true);
 
@@ -142,8 +163,18 @@ export default function AdminDashboard() {
       const result = emptyStats();
       let fromDate: string | undefined;
       let toDate: string | undefined;
-      if (period === "year") { fromDate = new Date(selectedYear, 0, 1).toISOString(); toDate = new Date(selectedYear, 11, 31, 23, 59, 59, 999).toISOString(); }
-      else if (period === "month") { fromDate = new Date(selectedYear, selectedMonth - 1, 1).toISOString(); toDate = new Date(selectedYear, selectedMonth, 0, 23, 59, 59, 999).toISOString(); }
+
+      if (period === "year") {
+        fromDate = new Date(selectedYear, 0, 1).toISOString();
+        toDate = new Date(selectedYear, 11, 31, 23, 59, 59, 999).toISOString();
+      } else if (period === "month") {
+        fromDate = new Date(selectedYear, selectedMonth - 1, 1).toISOString();
+        toDate = new Date(selectedYear, selectedMonth, 0, 23, 59, 59, 999).toISOString();
+      } else if (period === "week") {
+        const range = getWeekRange(selectedYear, selectedWeek);
+        fromDate = range.from;
+        toDate = range.to;
+      }
 
       const brandIds = selectedBrandId === "all" ? allBrands.map((b) => b.id) : [selectedBrandId];
       const brandRates = new Map<number, { activation_fee: number; insurance_premium: number; aion_premium_fee: number }>();
@@ -151,10 +182,46 @@ export default function AdminDashboard() {
         if (brandIds.includes(b.id)) brandRates.set(b.id, { activation_fee: toPct(b.activation_fee), insurance_premium: toPct(b.insurance_premium), aion_premium_fee: toPct(b.aion_premium_fee) });
       }
 
+      // Phase 1: Resolve eligible customer IDs (for new/returning filter) + static counts in parallel
+      const eligibleCustomerIdsPromise: Promise<string[] | null> =
+        customerType !== "all" && fromDate
+          ? (async () => {
+              let q = supabase.from("profiles").select("id").eq("role", "customer");
+              if (selectedBrandId !== "all") q = q.in("brand_id", [selectedBrandId]);
+              else if (brandIds.length > 0) q = q.in("brand_id", brandIds);
+              if (customerType === "new") {
+                q = q.gte("created_at", fromDate!);
+                if (toDate) q = q.lte("created_at", toDate);
+              } else {
+                q = q.lt("created_at", fromDate!);
+              }
+              const { data } = await q;
+              return (data ?? []).map((c: any) => c.id as string);
+            })()
+          : Promise.resolve<string[] | null>(null);
+
+      const [eligibleIds, { count: brandsCount }, { count: shopsCount }] = await Promise.all([
+        eligibleCustomerIdsPromise,
+        supabase.from("brands").select("id", { count: "exact", head: true }),
+        supabase.from("shops").select("id", { count: "exact", head: true }),
+      ]);
+
+      // Phase 2: Policies query (filtered by date, brand, and optional customer type)
       let polQ = supabase.from("policies").select("id, customer_id, brand_id, start_date, quantity, recommended_retail_price, selling_price, cogs");
       if (brandIds.length > 0) polQ = polQ.in("brand_id", brandIds);
       if (fromDate) polQ = polQ.gte("start_date", fromDate);
       if (toDate) polQ = polQ.lte("start_date", toDate);
+      if (eligibleIds !== null) {
+        if (eligibleIds.length > 0) polQ = polQ.in("customer_id", eligibleIds);
+        else {
+          // No matching customers → empty result
+          result.brands = brandsCount ?? 0;
+          result.shops = shopsCount ?? 0;
+          result.customers = 0;
+          setStats(result);
+          return;
+        }
+      }
       const { data: policies = [] } = await polQ;
 
       result.covers = (policies as any[]).length;
@@ -180,29 +247,32 @@ export default function AdminDashboard() {
       result.effectiveActivationFeePct = result.rrpTotal > 0 ? result.aionActivationFee / result.rrpTotal : null;
       result.effectiveAionPremiumFeePct = result.netPremium > 0 ? result.aionPremiumFee / result.netPremium : null;
 
+      // Phase 3: Customer count + claims (parallel)
       const policyIds = (policies as any[]).map((p) => p.id);
-      const claimsQ = policyIds.length > 0 ? supabase.from("claims").select("id, status", { count: "exact" }).in("policy_id", policyIds) : Promise.resolve({ data: [], count: 0, error: null });
-      const openClaimsQ = policyIds.length > 0 ? supabase.from("claims").select("id", { count: "exact", head: true }).in("policy_id", policyIds).eq("status", "open") : Promise.resolve({ count: 0, data: null, error: null });
-      const closedClaimsQ = policyIds.length > 0 ? supabase.from("claims").select("id", { count: "exact", head: true }).in("policy_id", policyIds).eq("status", "closed") : Promise.resolve({ count: 0, data: null, error: null });
 
-      const [
-        { count: brandsCount },
-        { count: customersCount },
-        { count: claimsCount },
-        { count: openClaimsCount },
-        { count: closedClaimsCount },
-        { count: shopsCount },
-      ] = await Promise.all([
-        supabase.from("brands").select("id", { count: "exact", head: true }),
-        supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer"),
-        claimsQ,
-        openClaimsQ,
-        closedClaimsQ,
-        supabase.from("shops").select("id", { count: "exact", head: true }),
-      ]);
+      const customerCountPromise = eligibleIds !== null
+        ? Promise.resolve(eligibleIds.length)
+        : (async () => {
+            let q = supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer");
+            const { count } = await q;
+            return count ?? 0;
+          })();
+
+      const claimsQ = policyIds.length > 0
+        ? supabase.from("claims").select("id", { count: "exact", head: true }).in("policy_id", policyIds)
+        : Promise.resolve({ count: 0, data: null, error: null });
+      const openClaimsQ = policyIds.length > 0
+        ? supabase.from("claims").select("id", { count: "exact", head: true }).in("policy_id", policyIds).eq("status", "open")
+        : Promise.resolve({ count: 0, data: null, error: null });
+      const closedClaimsQ = policyIds.length > 0
+        ? supabase.from("claims").select("id", { count: "exact", head: true }).in("policy_id", policyIds).eq("status", "closed")
+        : Promise.resolve({ count: 0, data: null, error: null });
+
+      const [customersCount, { count: claimsCount }, { count: openClaimsCount }, { count: closedClaimsCount }] =
+        await Promise.all([customerCountPromise, claimsQ, openClaimsQ, closedClaimsQ]);
 
       result.brands = brandsCount ?? 0;
-      result.customers = customersCount ?? 0;
+      result.customers = customersCount;
       result.claims = claimsCount ?? 0;
       result.openClaims = openClaimsCount ?? 0;
       result.closedClaims = closedClaimsCount ?? 0;
@@ -211,7 +281,7 @@ export default function AdminDashboard() {
 
       setStats(result);
     } finally { setLoading(false); }
-  }, [allBrands, selectedBrandId, period, selectedYear, selectedMonth]);
+  }, [allBrands, selectedBrandId, period, selectedYear, selectedMonth, selectedWeek, customerType]);
 
   useEffect(() => {
     if (allBrands.length > 0 || selectedBrandId === "all") void computeStats();
@@ -221,6 +291,8 @@ export default function AdminDashboard() {
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
   const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const now = new Date();
+  const maxWeeks = isoWeeksInYear(selectedYear);
+  const weeks = Array.from({ length: maxWeeks }, (_, i) => i + 1);
 
   return (
     <div className="p-6 md:p-8 space-y-6">
@@ -235,6 +307,7 @@ export default function AdminDashboard() {
         </div>
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Brand filter */}
           <div className="relative">
             <select className={selectCls} value={selectedBrandId} onChange={(e) => setSelectedBrandId(e.target.value === "all" ? "all" : Number(e.target.value))}>
               <option value="all">All Brands</option>
@@ -242,14 +315,19 @@ export default function AdminDashboard() {
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           </div>
+
+          {/* Period filter */}
           <div className="relative">
             <select className={selectCls} value={period} onChange={(e) => setPeriod(e.target.value as typeof period)}>
               <option value="all">All Time</option>
-              <option value="year">Year</option>
+              <option value="week">Week</option>
               <option value="month">Month</option>
+              <option value="year">Year</option>
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           </div>
+
+          {/* Year selector (for week/month/year) */}
           {period !== "all" && (
             <div className="relative">
               <select className={selectCls} value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}>
@@ -258,6 +336,18 @@ export default function AdminDashboard() {
               <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             </div>
           )}
+
+          {/* Week selector */}
+          {period === "week" && (
+            <div className="relative">
+              <select className={selectCls} value={selectedWeek} onChange={(e) => setSelectedWeek(Number(e.target.value))}>
+                {weeks.map((w) => <option key={w} value={w}>Week {w}</option>)}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            </div>
+          )}
+
+          {/* Month selector */}
           {period === "month" && (
             <div className="relative">
               <select className={selectCls} value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))}>
@@ -266,6 +356,16 @@ export default function AdminDashboard() {
               <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             </div>
           )}
+
+          {/* Customer type filter */}
+          <div className="relative">
+            <select className={selectCls} value={customerType} onChange={(e) => setCustomerType(e.target.value as typeof customerType)}>
+              <option value="all">All Customers</option>
+              <option value="new">New Customers</option>
+              <option value="returning">Returning Customers</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          </div>
         </div>
       </div>
 
@@ -278,14 +378,14 @@ export default function AdminDashboard() {
               <MetricCardSkeleton icon={Shield} label="Brands" />
               <MetricCardSkeleton icon={Users} label="Customers" />
               <MetricCardSkeleton icon={Package} label="Covers" />
-              <MetricCardSkeleton icon={Store} label="Shops" />
+              <MetricCardSkeleton icon={Store} label="Stores" />
             </>
           ) : (
             <>
               <MetricCard icon={Shield} label="Brands" value={fmtN(stats.brands)} href="/admin/brands" />
-              <MetricCard icon={Users} label="Customers" value={fmtN(stats.customers)} href="/admin/customers" />
+              <MetricCard icon={Users} label={customerType === "new" ? "New Customers" : customerType === "returning" ? "Returning Customers" : "Customers"} value={fmtN(stats.customers)} href="/admin/customers" />
               <MetricCard icon={Package} label="Covers" value={fmtN(stats.covers)} href="/admin/covers" />
-              <MetricCard icon={Store} label="Shops" value={fmtN(stats.shops)} href="/admin/shops" />
+              <MetricCard icon={Store} label="Stores" value={fmtN(stats.shops)} href="/admin/stores" />
             </>
           )}
         </div>

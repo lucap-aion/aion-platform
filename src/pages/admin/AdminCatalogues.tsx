@@ -224,7 +224,7 @@ const AdminCatalogues = () => {
             )}
           </FormField>
           <div className="grid grid-cols-2 gap-4">
-            <FormField label="SKU"><Input disabled={ro} value={editing.sku ?? ""} onChange={(e) => set("sku", e.target.value)} /></FormField>
+            <FormField label="SKU" required={!ro}><Input disabled={ro} value={editing.sku ?? ""} onChange={(e) => set("sku", e.target.value)} required={!ro} /></FormField>
             <FormField label="Slug"><Input disabled={ro} value={editing.slug ?? ""} onChange={(e) => set("slug", e.target.value)} /></FormField>
           </div>
           <div className="grid grid-cols-2 gap-4">

@@ -261,7 +261,7 @@ const CustomerDashboard = () => {
           </div>
 
           <div className="rounded-xl overflow-hidden border border-border">
-            <img src={imgTheft} alt="Theft protection" className="h-40 w-full object-cover" />
+            <img src={imgTheft} alt="Theft protection" className="w-full aspect-[4/3] object-cover" />
             <div className="p-4">
               <h4 className="font-serif text-base font-semibold text-foreground mb-1">
                 {locale === "en" ? "Theft" : "Furto"}
@@ -275,7 +275,7 @@ const CustomerDashboard = () => {
           </div>
 
           <div className="rounded-xl overflow-hidden border border-border">
-            <img src={imgDamage} alt="Accidental damage protection" className="h-40 w-full object-cover" />
+            <img src={imgDamage} alt="Accidental damage protection" className="w-full aspect-[4/3] object-cover" />
             <div className="p-4">
               <h4 className="font-serif text-base font-semibold text-foreground mb-1">
                 {locale === "en" ? "Accidental damage" : "Danni Accidentali"}
@@ -413,7 +413,7 @@ const CustomerDashboard = () => {
         <div className="flex justify-end mt-6">
           <SmartLogo src={tenant.logoUrl}
             alt={tenant.name}
-            className="h-10 object-contain opacity-40"
+            className="h-10 object-contain opacity-100 dark:opacity-80"
           />
         </div>
       </motion.div>

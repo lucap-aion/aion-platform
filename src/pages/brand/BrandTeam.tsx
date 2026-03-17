@@ -37,10 +37,10 @@ const EMPTY_FORM: MemberForm = {
 const inputCls =
   "w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary";
 
-const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
+const Field = ({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) => (
   <div>
     <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1.5 block">
-      {label}
+      {label}{required && <span className="text-destructive ml-0.5">*</span>}
     </label>
     {children}
   </div>
@@ -72,6 +72,7 @@ const BrandTeam = () => {
       return (data || []) as TeamMember[];
     },
     enabled: !!profile?.brand_id,
+    staleTime: 5 * 60 * 1000,
   });
 
   const filtered = members?.filter((m) => {
@@ -100,7 +101,7 @@ const BrandTeam = () => {
   const handleSave = async () => {
     if (!profile?.brand_id) return;
     if (!editingId && !form.email) {
-      toast.error("Email is required.");
+      toast.error("Please fill in: Email.");
       return;
     }
     setIsSaving(true);
@@ -142,6 +143,7 @@ const BrandTeam = () => {
           email: form.email,
           first_name: form.firstName || null,
           brand_name: tenant.name,
+          brand_id: profile?.brand_id,
         },
         url: `${siteUrl()}/${tenant.slug}/signup`,
       });
@@ -172,6 +174,7 @@ const BrandTeam = () => {
         email: m.email,
         first_name: m.first_name ?? null,
         brand_name: tenant.name,
+        brand_id: profile?.brand_id,
       },
       url: `${siteUrl()}/${tenant.slug}/signup`,
     });
@@ -388,7 +391,7 @@ const BrandTeam = () => {
                       />
                     </Field>
                   </div>
-                  <Field label="Email">
+                  <Field label="Email" required>
                     <input
                       type="email"
                       value={form.email}

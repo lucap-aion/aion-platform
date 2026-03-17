@@ -33,13 +33,6 @@ const NotFound = () => {
         <div className="absolute inset-0 bg-gradient-to-b from-background/60 via-background/80 to-background" />
       </div>
 
-      {/* Logo top-left */}
-      <div className="absolute top-6 left-6 md:top-8 md:left-8">
-        <Link to="/">
-          <img src={logoAion} alt="AION" className="h-7 object-contain opacity-70 hover:opacity-100 transition-opacity" />
-        </Link>
-      </div>
-
       {/* Content */}
       <motion.div
         initial={{ opacity: 0, y: 24 }}

@@ -146,8 +146,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setAdminRecord(null);
   };
 
-  const hydrateSession = async (nextSession: Session | null) => {
-    setLoading(true);
+  const hydrateSession = async (nextSession: Session | null, showLoading = true) => {
+    if (showLoading) setLoading(true);
     setSession(nextSession);
     setUser(nextSession?.user ?? null);
     try {
@@ -161,7 +161,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setProfile(null);
       setAdminRecord(null);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
@@ -170,12 +170,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     let initialized = false;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (initialized) void hydrateSession(nextSession);
+      // After initial boot, all auth events (including tab-focus token refreshes) are silent
+      if (initialized) void hydrateSession(nextSession, false);
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       initialized = true;
-      void hydrateSession(session);
+      void hydrateSession(session, true); // show spinner only on first boot
     });
 
     return () => subscription.unsubscribe();

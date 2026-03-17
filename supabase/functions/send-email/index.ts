@@ -31,16 +31,37 @@ const S = {
   small:   `margin:20px 0 0;font-size:12px;line-height:1.6;color:#B0A090`,
 };
 
+// ─── DB helpers ───────────────────────────────────────────────────────────────
+
+async function fetchBrand(brandId: number | null): Promise<{ name: string; email: string | null; logo: string | null } | null> {
+  if (!brandId) return null;
+  const { data } = await supabaseAdmin
+    .from("brands")
+    .select("name, email, logo_big, logo_small")
+    .eq("id", brandId)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    name: (data as any).name ?? "Unknown Brand",
+    email: (data as any).email ?? null,
+    logo: (data as any).logo_big || (data as any).logo_small || null,
+  };
+}
+
 // ─── Logo helpers ─────────────────────────────────────────────────────────────
 // Table-based layout so logos scale correctly in all email clients regardless
 // of the image's natural dimensions.
+// Notes:
+//  - Outlook (Word engine) needs explicit width/height HTML attributes, not just CSS.
+//  - Dark-mode switching via CSS class is unsupported in Outlook → the .aion-light
+//    img is wrapped in <!--[if !mso]><!--> so Outlook never renders it.
+//  - border="0" prevents blue link borders in legacy clients.
 
 function soloLogo(src: string, alt: string): string {
   return `
   <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:36px">
     <tr><td align="center">
-      <img src="${src}" alt="${alt}"
-           width="auto" height="auto"
+      <img src="${src}" alt="${alt}" width="160" height="40" border="0"
            style="display:block;max-height:48px;max-width:180px;width:auto;height:auto" />
     </td></tr>
   </table>`;
@@ -54,14 +75,12 @@ function dualLogo(brandName: string, brandLogoUrl: string | null): string {
       <table cellpadding="0" cellspacing="0" style="border-collapse:collapse">
         <tr>
           <td style="padding-right:20px;border-right:1px solid #EDE5D8;vertical-align:middle">
-            <img src="${bSrc}" alt="${brandName}"
-                 width="auto" height="auto"
-                 style="display:block;max-height:44px;max-width:160px;width:auto;height:auto" />
+            <img src="${bSrc}" alt="${brandName}" height="44" border="0"
+                 style="display:block;max-height:44px;max-width:180px;width:auto;height:auto" />
           </td>
           <td style="padding-left:20px;vertical-align:middle">
-            <img src="${AION_LOGO}" alt="AION Cover"
-                 width="auto" height="auto"
-                 style="display:block;max-height:28px;max-width:120px;width:auto;height:auto" />
+            <img src="${AION_LOGO}" alt="AION Cover" width="80" height="20" border="0"
+                 style="display:block;max-height:20px;max-width:90px;width:auto;height:auto" />
           </td>
         </tr>
       </table>
@@ -75,8 +94,27 @@ const copyright = `<p style="${S.footer}">© AION Cover · All rights reserved</
 
 // ─── Wrapper ──────────────────────────────────────────────────────────────────
 function wrap(inner: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="${S.body}"><div style="${S.wrap}"><div style="${S.card}">${inner}</div>${copyright}</div></body></html>`;
+}
+
+// ─── Plain-text fallback ───────────────────────────────────────────────────────
+function htmlToText(html: string): string {
+  return html
+    .replace(/<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi, "$2 ( $1 )")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<\/td>/gi, "  ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/<!--.*?-->/gs, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 // ─── Templates ────────────────────────────────────────────────────────────────
@@ -85,13 +123,13 @@ function customerInviteHtml(firstName: string | null, brandName: string, brandLo
   const greeting = firstName ? `Dear ${firstName},` : "Hello,";
   return wrap(`
     ${dualLogo(brandName, brandLogoUrl)}
-    <h1 style="${S.title}">You're invited to AION Cover</h1>
+    <h1 style="${S.title}">You're invited to the ${brandName} Prestige Service</h1>
     <p style="${S.text}">${greeting}</p>
-    <p style="${S.text}">You've been invited to activate your AION Cover protection for items purchased at <strong>${brandName}</strong>.</p>
+    <p style="${S.text}">You've been invited to activate your <strong>${brandName} Prestige Service</strong> — an exclusive 2-year protection program for your ${brandName} purchase, powered by AION Cover.</p>
     <p style="${S.text}">Click the button below to create your account and access your coverage.</p>
     <div style="${S.btnWrap}"><a href="${url}" target="_blank" style="${S.btn}">Activate Your Cover</a></div>
     <p style="${S.text}">If you have any questions, our team is always happy to help.</p>
-    <p style="${S.text}">Best regards,<br><strong>AION Cover Team</strong></p>
+    <p style="${S.text}">Best regards,<br><strong>${brandName} &amp; AION Cover Team</strong></p>
     ${autoNote}`);
 }
 
@@ -114,10 +152,10 @@ function customerTransferHtml(oldCustomer: any, newCustomer: any, policy: any, u
     ${autoNote}`);
 }
 
-function brandUserInviteHtml(firstName: string | null, brandName: string, url: string): string {
+function brandUserInviteHtml(firstName: string | null, brandName: string, brandLogoUrl: string | null, url: string): string {
   const greeting = firstName ? `Dear ${firstName},` : "Hello,";
   return wrap(`
-    ${soloLogo(AION_LOGO, "AION Cover")}
+    ${dualLogo(brandName, brandLogoUrl)}
     <h1 style="${S.title}">You've been invited to ${brandName}</h1>
     <p style="${S.text}">${greeting}</p>
     <p style="${S.text}">You've been invited to join the <strong>${brandName}</strong> team on AION Cover. Click the button below to set up your account.</p>
@@ -139,7 +177,7 @@ function adminInviteHtml(url: string): string {
 
 function claimConfirmationHtml(claim: any): string {
   return wrap(`
-    ${soloLogo(AION_LOGO, "AION Cover")}
+    ${dualLogo(claim.policy.brand.name, claim.policy.brand.logo_big ?? null)}
     <h1 style="${S.title}">Claim received</h1>
     <p style="${S.text}">Dear ${claim.policy.customer.first_name},</p>
     <p style="${S.text}">We've received your claim for your <strong>${claim.policy.item.name}</strong> from <strong>${claim.policy.brand.name}</strong>. Our team is reviewing it and will be in touch shortly.</p>
@@ -181,10 +219,10 @@ function supportInternalHtml(message: any): string {
     ${autoNote}`);
 }
 
-function supportConfirmationHtml(user: any): string {
+function supportConfirmationHtml(user: any, brand: any): string {
   const greeting = user.firstName ? `Dear ${user.firstName},` : "Hello,";
   return wrap(`
-    ${soloLogo(AION_LOGO, "AION Cover")}
+    ${dualLogo(brand.name, brand.logo_big ?? null)}
     <h1 style="${S.title}">We received your request</h1>
     <p style="${S.text}">${greeting}</p>
     <p style="${S.text}">Thank you for reaching out to us. Our team is reviewing your request and will get back to you shortly.</p>
@@ -204,6 +242,37 @@ function transferRequestHtml(customer: any, recipientEmail: string, cover: any):
     <hr style="${S.rule}">
     <p style="${S.label}">Cover #${cover.id}</p>
     <p style="${S.value}">${cover.product} — ${cover.brand}</p>
+    ${autoNote}`);
+}
+
+function claimUpdatedCustomerHtml(claim: any): string {
+  return wrap(`
+    ${dualLogo(claim.brand, claim.brandLogoUrl ?? null)}
+    <h1 style="${S.title}">Your claim has been updated</h1>
+    <p style="${S.text}">Dear ${claim.customerFirstName},</p>
+    <p style="${S.text}">Your claim for <strong>${claim.product}</strong> from <strong>${claim.brand}</strong> has been updated.</p>
+    <hr style="${S.rule}">
+    <p style="${S.label}">Claim type</p><p style="${S.value}">${(claim.type ?? "").replaceAll("_", " ")}</p>
+    <p style="${S.label}">Description</p><p style="${S.value}">${claim.description ?? "—"}</p>
+    <hr style="${S.rule}">
+    <p style="${S.text}">Our team will be in touch shortly if any further information is required.</p>
+    <p style="${S.text}">Best regards,<br><strong>AION Cover Team</strong></p>
+    ${autoNote}`);
+}
+
+function claimUpdatedInternalHtml(claim: any): string {
+  return wrap(`
+    ${soloLogo(AION_LOGO, "AION Cover")}
+    <h1 style="${S.title}">Claim Updated by Customer</h1>
+    <hr style="${S.rule}">
+    <p style="${S.label}">Customer</p><p style="${S.value}">${claim.customerFirstName} ${claim.customerLastName} &lt;${claim.customerEmail}&gt;</p>
+    <p style="${S.label}">Claim #</p><p style="${S.value}">${claim.claimId}</p>
+    <p style="${S.label}">Brand</p><p style="${S.value}">${claim.brand}</p>
+    <p style="${S.label}">Item</p><p style="${S.value}">${claim.product}</p>
+    <hr style="${S.rule}">
+    <p style="${S.label}">Claim type</p><p style="${S.value}">${(claim.type ?? "").replaceAll("_", " ")}</p>
+    <p style="${S.label}">Incident date</p><p style="${S.value}">${claim.incidentDate ?? "—"}</p>
+    <p style="${S.label}">Description</p><p style="${S.value}">${claim.description ?? "—"}</p>
     ${autoNote}`);
 }
 
@@ -240,64 +309,82 @@ Deno.serve(async (req) => {
     switch (type) {
       case "customer_invite": {
         const { customer, brand, url } = data;
+        const brandData = await fetchBrand(brand.id ?? null);
+        const html = customerInviteHtml(customer.first_name, brandData?.name ?? brand.name, brandData?.logo ?? null, url);
         result = await resend.emails.send({
           from: "AION Cover <team@aioncover.com>",
           to: [customer.email],
           subject: `${devPrefix}You're invited to AION Cover`,
-          html: customerInviteHtml(customer.first_name, brand.name, brand.logo_small, url),
+          html,
+          text: htmlToText(html),
         });
         break;
       }
 
       case "customer_transfer_invite": {
         const { oldCustomer, newCustomer, policy, url } = data;
+        const html = customerTransferHtml(oldCustomer, newCustomer, policy, url);
         result = await resend.emails.send({
           from: "AION Cover <team@aioncover.com>",
           to: [newCustomer.email],
           subject: `${devPrefix}Item ownership transferred to you`,
-          html: customerTransferHtml(oldCustomer, newCustomer, policy, url),
+          html,
+          text: htmlToText(html),
         });
         break;
       }
 
       case "brand_user_invite": {
         const { brandUser, url } = data;
+        const brandData = await fetchBrand(brandUser.brand_id ?? null);
+        const html = brandUserInviteHtml(brandUser.first_name, brandData?.name ?? brandUser.brands?.name ?? brandUser.brand_name, brandData?.logo ?? null, url);
         result = await resend.emails.send({
           from: "AION Cover <team@aioncover.com>",
           to: [brandUser.email],
           subject: `${devPrefix}You've been invited to AION Cover`,
-          html: brandUserInviteHtml(brandUser.first_name, brandUser.brands?.name ?? brandUser.brand_name, url),
+          html,
+          text: htmlToText(html),
         });
         break;
       }
 
       case "admin_invite": {
         const { admin, url } = data;
+        const html = adminInviteHtml(url);
         result = await resend.emails.send({
           from: "AION Cover <team@aioncover.com>",
           to: [admin.email],
           subject: `${devPrefix}You've been invited as an AION admin`,
-          html: adminInviteHtml(url),
+          html,
+          text: htmlToText(html),
         });
         break;
       }
 
       case "claim_submitted": {
         const { claim } = data;
+        const brandData = await fetchBrand(claim.policy.brand.id ?? null);
+        claim.policy.brand.logo_big = brandData?.logo ?? null;
+        claim.policy.brand.name = brandData?.name ?? claim.policy.brand.name;
+        claim.policy.brand.email = brandData?.email ?? claim.policy.brand.email;
         const internalRecipients = ["team@aioncover.com", "luca@aioncover.com", "giulio@aioncover.com"];
         if (isProd) internalRecipients.unshift(claim.policy.brand.email);
+        const internalHtml = claimInternalHtml(claim);
+        const confirmHtml = claimConfirmationHtml(claim);
         const [internal, confirmation] = await Promise.all([
           resend.emails.send({
             from: "AION Cover <team@aioncover.com>",
             to: internalRecipients,
             subject: `${devPrefix}New claim — ${claim.policy.brand.name}`,
-            html: claimInternalHtml(claim),
+            html: internalHtml,
+            text: htmlToText(internalHtml),
           }),
           resend.emails.send({
             from: "AION Cover <team@aioncover.com>",
             to: [claim.policy.customer.email],
             subject: `${devPrefix}Claim received — ${claim.policy.brand.name}`,
-            html: claimConfirmationHtml(claim),
+            html: confirmHtml,
+            text: htmlToText(confirmHtml),
           }),
         ]);
         result = { internal, confirmation };
@@ -306,20 +393,28 @@ Deno.serve(async (req) => {
 
       case "support_submitted": {
         const { user, message } = data;
+        const brandData = await fetchBrand(message.brand.id ?? null);
+        message.brand.logo_big = brandData?.logo ?? null;
+        message.brand.name = brandData?.name ?? message.brand.name;
+        message.brand.email = brandData?.email ?? message.brand.email;
         const internalRecipients = ["team@aioncover.com", "luca@aioncover.com", "giulio@aioncover.com"];
         if (isProd) internalRecipients.unshift(message.brand.email);
+        const internalHtml = supportInternalHtml(message);
+        const confirmHtml = supportConfirmationHtml(user, message.brand);
         const [internal, confirmation] = await Promise.all([
           resend.emails.send({
             from: "AION Cover <team@aioncover.com>",
             to: internalRecipients,
             subject: `${devPrefix}New support request — ${message.brand.name}`,
-            html: supportInternalHtml(message),
+            html: internalHtml,
+            text: htmlToText(internalHtml),
           }),
           resend.emails.send({
             from: "AION Cover <team@aioncover.com>",
             to: [user.email],
             subject: `${devPrefix}We received your request`,
-            html: supportConfirmationHtml(user),
+            html: confirmHtml,
+            text: htmlToText(confirmHtml),
           }),
         ]);
         result = { internal, confirmation };
@@ -380,19 +475,22 @@ Deno.serve(async (req) => {
 
         const recipientSubject = `${devPrefix}${customer.first_name} wants to transfer a cover to you`;
 
+        const transferInternalHtml = transferRequestHtml(customer, recipient_email, cover);
         const [recipientResult, internalResult] = await Promise.all([
           resend.emails.send({
             from: "AION Cover <team@aioncover.com>",
             to: [recipient_email],
             subject: recipientSubject,
             html: recipientHtml,
+            text: htmlToText(recipientHtml),
           }),
           resend.emails.send({
             from: "AION Cover <team@aioncover.com>",
             to: ["team@aioncover.com"],
             bcc: ["luca@aioncover.com", "giulio@aioncover.com"],
             subject: `${devPrefix}Transfer — Cover #${cover.policy_id} (${cover.brand})`,
-            html: transferRequestHtml(customer, recipient_email, cover),
+            html: transferInternalHtml,
+            text: htmlToText(transferInternalHtml),
           }),
         ]);
 
@@ -400,14 +498,46 @@ Deno.serve(async (req) => {
         break;
       }
 
+      case "claim_updated": {
+        const { claim } = data;
+        const brandData = await fetchBrand(claim.brand_id ?? null);
+        claim.brandLogoUrl = brandData?.logo ?? null;
+        claim.brand = brandData?.name ?? claim.brand;
+        claim.brandEmail = brandData?.email ?? claim.brandEmail;
+        const internalRecipients = ["team@aioncover.com", "luca@aioncover.com", "giulio@aioncover.com"];
+        if (isProd) internalRecipients.unshift(claim.brandEmail);
+        const updatedInternalHtml = claimUpdatedInternalHtml(claim);
+        const updatedCustomerHtml = claimUpdatedCustomerHtml(claim);
+        const [internal, confirmation] = await Promise.all([
+          resend.emails.send({
+            from: "AION Cover <team@aioncover.com>",
+            to: internalRecipients,
+            subject: `${devPrefix}Claim updated — ${claim.brand}`,
+            html: updatedInternalHtml,
+            text: htmlToText(updatedInternalHtml),
+          }),
+          resend.emails.send({
+            from: "AION Cover <team@aioncover.com>",
+            to: [claim.customerEmail],
+            subject: `${devPrefix}Your claim has been updated — ${claim.brand}`,
+            html: updatedCustomerHtml,
+            text: htmlToText(updatedCustomerHtml),
+          }),
+        ]);
+        result = { internal, confirmation };
+        break;
+      }
+
       case "feedback_submitted": {
         const { feedback } = data;
+        const html = feedbackHtml(feedback);
         result = await resend.emails.send({
           from: "AION Cover <team@aioncover.com>",
           to: ["team@aioncover.com"],
           bcc: ["luca@aioncover.com", "giulio@aioncover.com"],
           subject: `${devPrefix}New feedback submission`,
-          html: feedbackHtml(feedback),
+          html,
+          text: htmlToText(html),
         });
         break;
       }

@@ -145,7 +145,7 @@ const AppSidebar = () => {
           last_name: profile.last_name ?? null,
           email: profile.email,
         },
-        brand: { name: tenant.name },
+        brand: { name: tenant.name, id: profile.brand_id },
         message: `${supportSubject.trim()}\n\n${supportMessage.trim()}`,
       },
     });

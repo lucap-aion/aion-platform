@@ -2,18 +2,28 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Users, Shield, FileText, TrendingUp } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { useBrandClaims } from "@/hooks/use-claims";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 
 const toLabel = (s: string | null | undefined) =>
   s ? s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "—";
 
+const StatCardSkeleton = () => (
+  <div className="glass-card p-6 animate-pulse">
+    <div className="flex items-center justify-between mb-3">
+      <div className="h-10 w-10 rounded-lg bg-muted" />
+    </div>
+    <div className="h-7 w-24 rounded bg-muted mb-2" />
+    <div className="h-3 w-28 rounded bg-muted" />
+  </div>
+);
+
 const BrandDashboard = () => {
   const { profile } = useAuth();
   const slugPrefix = useAuthSlug();
+  const navigate = useNavigate();
 
   const { data: metrics, isLoading: isLoadingMetrics } = useQuery({
     queryKey: ["brand-metrics", profile?.brand_id],
@@ -31,7 +41,10 @@ const BrandDashboard = () => {
       if (claims.error) throw claims.error;
       if (policies.error) throw policies.error;
 
-      const protectedValue = (policies.data || []).reduce((sum: number, policy: { selling_price: number | null }) => sum + Number(policy.selling_price || 0), 0);
+      const protectedValue = (policies.data || []).reduce(
+        (sum: number, p: { selling_price: number | null }) => sum + Number(p.selling_price || 0),
+        0
+      );
 
       return {
         customers: customers.count || 0,
@@ -40,30 +53,46 @@ const BrandDashboard = () => {
         protectedValue,
       };
     },
-    enabled: !!profile,
+    enabled: !!profile?.brand_id,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const { data: recentClaims = [], isLoading: isLoadingClaims } = useBrandClaims(5);
-  const isLoading = isLoadingMetrics || isLoadingClaims;
+  // Lightweight claims query for dashboard — no count:exact, minimal fields
+  const { data: recentClaims = [], isLoading: isLoadingClaims } = useQuery({
+    queryKey: ["brand-dashboard-claims", profile?.brand_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("claims")
+        .select(`
+          id,
+          type,
+          status,
+          created_at,
+          policies!claims_policy_id_fkey!inner (
+            brand_id,
+            catalogues!insured_items_item_id_fkey ( name ),
+            profiles!insured_items_customer_id_fkey ( first_name, last_name )
+          )
+        `)
+        .eq("policies.brand_id", profile?.brand_id || -1)
+        .order("created_at", { ascending: false })
+        .limit(5);
 
-  const totalValue = useMemo(() => {
-    return Number(metrics?.protectedValue || 0);
-  }, [metrics]);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!profile?.brand_id,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const totalValue = useMemo(() => Number(metrics?.protectedValue || 0), [metrics]);
 
   const stats = [
-    { label: "Total Customers", value: String(metrics?.customers ?? 0), change: "+0%", up: true, icon: Users },
-    { label: "Active Covers", value: String(metrics?.covers ?? 0), change: "+0%", up: true, icon: Shield },
-    { label: "Open Claims", value: String(metrics?.openClaims ?? 0), change: "+0%", up: false, icon: FileText },
-    { label: "Protected Value", value: `€${new Intl.NumberFormat().format(totalValue)}`, change: "+0%", up: true, icon: TrendingUp },
+    { label: "Total Customers", value: String(metrics?.customers ?? 0), icon: Users, to: `${slugPrefix}/customers` },
+    { label: "Active Covers", value: String(metrics?.covers ?? 0), icon: Shield, to: `${slugPrefix}/covers` },
+    { label: "Open Claims", value: String(metrics?.openClaims ?? 0), icon: FileText, to: `${slugPrefix}/claims` },
+    { label: "Protected Value", value: `€${new Intl.NumberFormat("it-IT").format(totalValue)}`, icon: TrendingUp, to: null },
   ];
-
-  if (isLoading) {
-    return (
-      <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 flex items-center justify-center min-h-[280px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
@@ -72,32 +101,40 @@ const BrandDashboard = () => {
         <p className="mt-1 text-sm text-muted-foreground">Overview of your brand's protection program.</p>
       </div>
 
+      {/* Stat Cards — shown as soon as metrics load */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5 mb-8">
-        {stats.map((stat, i) => {
-          const Icon = stat.icon;
-          return (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.06 }}
-              className="glass-card p-6"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                  <Icon className="h-5 w-5 text-primary" />
-                </div>
-                <span className={`inline-flex items-center gap-1 text-xs font-medium ${stat.up ? "text-success" : "text-destructive"}`}>
-                  {stat.change}
-                </span>
-              </div>
-              <p className="font-serif text-2xl font-bold text-foreground">{stat.value}</p>
-              <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
-            </motion.div>
-          );
-        })}
+        {isLoadingMetrics
+          ? Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
+          : stats.map((stat, i) => {
+              const Icon = stat.icon;
+              const card = (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.06 }}
+                  className={`glass-card p-6 ${stat.to ? "cursor-pointer hover:border-primary/40 transition-colors" : ""}`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                      <Icon className="h-5 w-5 text-primary" />
+                    </div>
+                  </div>
+                  <p className="font-serif text-2xl font-bold text-foreground">{stat.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
+                </motion.div>
+              );
+              return stat.to ? (
+                <Link key={i} to={stat.to} className="contents">
+                  {card}
+                </Link>
+              ) : (
+                <div key={i}>{card}</div>
+              );
+            })}
       </div>
 
+      {/* Recent Claims — independent loading */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -121,16 +158,30 @@ const BrandDashboard = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {!recentClaims.length ? (
+              {isLoadingClaims ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <tr key={i} className="animate-pulse">
+                    {Array.from({ length: 6 }).map((_, j) => (
+                      <td key={j} className="px-6 py-4">
+                        <div className="h-3 rounded bg-muted w-full max-w-[80px]" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : !recentClaims.length ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">No claims found.</td>
                 </tr>
               ) : (
                 recentClaims.map((claim: any) => {
-                  const key = claim.status === "closed" ? "closed" : "open";
-                  const statusClass = key === "closed" ? "bg-gray-100 text-gray-600" : "bg-blue-100 text-blue-700";
+                  const isOpen = claim.status !== "closed";
+                  const statusClass = isOpen ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600";
                   return (
-                    <tr key={claim.id} className="transition-colors hover:bg-secondary/30">
+                    <tr
+                      key={claim.id}
+                      className="transition-colors hover:bg-secondary/30 cursor-pointer"
+                      onClick={() => navigate(`${slugPrefix}/claims/${claim.id}`)}
+                    >
                       <td className="px-6 py-4 text-sm font-medium text-foreground">{claim.id}</td>
                       <td className="px-6 py-4 text-sm text-foreground">
                         {`${claim.policies?.profiles?.first_name || ""} ${claim.policies?.profiles?.last_name || ""}`.trim() || "Unknown"}
@@ -142,7 +193,7 @@ const BrandDashboard = () => {
                       </td>
                       <td className="px-6 py-4">
                         <span className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${statusClass}`}>
-                          {key === "closed" ? "Closed" : "Open"}
+                          {isOpen ? "Open" : "Closed"}
                         </span>
                       </td>
                     </tr>

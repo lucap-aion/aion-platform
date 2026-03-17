@@ -28,6 +28,22 @@ const NewClaim = () => {
   const [selectedPolicyId, setSelectedPolicyId] = useState(urlCoverId);
   const selectedPolicy = policies?.find((p: any) => String(p.id) === selectedPolicyId);
 
+  // Check for existing open claim on selected policy
+  const handlePolicyChange = async (id: string) => {
+    setSelectedPolicyId(id);
+    setOpenClaimWarning(null);
+    if (!id) return;
+    const { data } = await supabase
+      .from("claims")
+      .select("id")
+      .eq("policy_id", Number(id))
+      .eq("status", "open")
+      .limit(1);
+    if (data && data.length > 0) {
+      setOpenClaimWarning(`Claim #${data[0].id} is already open on this cover. You may not submit a new claim until it is resolved.`);
+    }
+  };
+
   const [form, setForm] = useState({
     claimType: "",
     incidentDate: new Date().toISOString().split("T")[0],
@@ -38,6 +54,7 @@ const NewClaim = () => {
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [openClaimWarning, setOpenClaimWarning] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = (incoming: FileList | null) => {
@@ -58,8 +75,17 @@ const NewClaim = () => {
       toast.error("Please select a cover.");
       return;
     }
+    if (openClaimWarning) {
+      toast.error("There is already an open claim on this cover. Please resolve it before submitting a new one.");
+      return;
+    }
     if (!form.claimType || !form.incidentDate || !form.incidentCity || !form.incidentCountry || !form.description) {
       toast.error("Please complete all required fields.");
+      return;
+    }
+    const today = new Date().toISOString().split("T")[0];
+    if (form.incidentDate > today) {
+      toast.error("The incident date cannot be in the future.");
       return;
     }
     if (files.length === 0) {
@@ -114,7 +140,7 @@ const NewClaim = () => {
             last_name: profile?.last_name ?? null,
             email: profile?.email ?? "",
           },
-          brand: { name: getBrand(selectedPolicy), email: null },
+          brand: { name: getBrand(selectedPolicy), id: (selectedPolicy as any)?.brand_id ?? null, email: null },
           item: { name: getProduct(selectedPolicy) },
         },
       },
@@ -152,7 +178,7 @@ const NewClaim = () => {
           </label>
           <SearchableSelect
             value={selectedPolicyId}
-            onChange={setSelectedPolicyId}
+            onChange={handlePolicyChange}
             options={(policies || []).map((p: any) => ({
               value: String(p.id),
               label: `${getProduct(p)} — ${getBrand(p)} · Policy #${p.id}`,
@@ -168,6 +194,12 @@ const NewClaim = () => {
               <p className="text-xs text-muted-foreground">
                 Valid {formatDate((selectedPolicy as any).start_date)} → {formatDate((selectedPolicy as any).expiration_date)}
               </p>
+            </div>
+          )}
+          {openClaimWarning && (
+            <div className="mt-2 rounded-lg bg-destructive/10 border border-destructive/30 px-3 py-2 flex items-start gap-2">
+              <Info className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+              <p className="text-xs text-destructive">{openClaimWarning}</p>
             </div>
           )}
         </div>

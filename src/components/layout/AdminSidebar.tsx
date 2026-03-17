@@ -1,4 +1,4 @@
-import { House, Users, Building2, ClipboardList, Store, UserCog, LogOut, ChevronsUpDown, UserCircle, Package, TrendingUp, ShieldCheck, Users2 } from "lucide-react";
+import { House, Users, Building2, ClipboardList, Store, UserCog, LogOut, ChevronsUpDown, UserCircle, Package, TrendingUp, ShieldCheck, Users2, LineChart } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,8 +32,9 @@ const adminLinks = [
   { path: "/admin/claims", icon: ClipboardList, label: "Claims" },
   { path: "/admin/covers", icon: ShieldCheck, label: "Covers" },
   { path: "/admin/customers", icon: Users, label: "Customers" },
+  { path: "/admin/insights", icon: LineChart, label: "Insights" },
   { path: "/admin/reports", icon: TrendingUp, label: "Reports" },
-  { path: "/admin/shops", icon: Store, label: "Shops" },
+  { path: "/admin/stores", icon: Store, label: "Stores" },
 ];
 
 const AdminSidebar = () => {
