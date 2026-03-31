@@ -1,9 +1,11 @@
 import { motion } from "framer-motion";
 import { Search, ChevronDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, ArrowUpDown } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { toast } from "sonner";
 import { parseError } from "@/utils/parseError";
 
@@ -65,6 +67,8 @@ const BrandCustomers = () => {
   const [page, setPage] = useState(0);
   const { profile, canWrite } = useAuth();
   const queryClient = useQueryClient();
+  const slugPrefix = useAuthSlug();
+  const navigate = useNavigate();
 
   // Debounce search → reset page and trigger server refetch
   useEffect(() => {
@@ -129,7 +133,7 @@ const BrandCustomers = () => {
       return { customers: enriched, total: count ?? 0 };
     },
     enabled: !!profile?.brand_id,
-    staleTime: 30_000,
+    staleTime: 5 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
 
@@ -350,18 +354,16 @@ const BrandCustomers = () => {
                     <ArrowUpDown className="h-3 w-3 opacity-40" />
                   </div>
                 </th>
-                {canWrite && (
-                  <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Actions
-                  </th>
-                )}
+                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {!customers.length ? (
                 <tr>
                   <td
-                    colSpan={canWrite ? 6 : 5}
+                    colSpan={6}
                     className="px-6 py-12 text-center text-muted-foreground"
                   >
                     No customers found.
@@ -371,7 +373,8 @@ const BrandCustomers = () => {
                 customers.map((c) => (
                   <tr
                     key={c.id}
-                    className="transition-colors hover:bg-secondary/30"
+                    className="transition-colors hover:bg-secondary/30 cursor-pointer"
+                    onClick={() => navigate(`${slugPrefix}/customers/${c.id}`)}
                   >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -407,9 +410,9 @@ const BrandCustomers = () => {
                           })
                         : "—"}
                     </td>
-                    {canWrite && (
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-1.5">
+                    <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1.5">
+                        {canWrite && (
                           <button
                             onClick={() => openEdit(c)}
                             className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
@@ -417,6 +420,8 @@ const BrandCustomers = () => {
                           >
                             <Pencil className="h-4 w-4" />
                           </button>
+                        )}
+                        {canWrite && (
                           <button
                             onClick={() => setConfirmDeleteId(c.id)}
                             className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
@@ -424,9 +429,9 @@ const BrandCustomers = () => {
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
-                        </div>
-                      </td>
-                    )}
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}

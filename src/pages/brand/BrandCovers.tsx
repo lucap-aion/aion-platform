@@ -1,9 +1,11 @@
 import { motion } from "framer-motion";
 import { Search, ChevronDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import SearchableSelect from "@/components/SearchableSelect";
@@ -46,7 +48,7 @@ const EMPTY_FORM: CoverForm = {
   expirationDate: "",
   sellingPrice: "",
   rrp: "",
-  quantity: "",
+  quantity: "1",
   purchaseReceipt: "",
   notes: "",
   internalNotes: "",
@@ -87,6 +89,8 @@ const BrandCovers = () => {
 
   const { profile, canWrite } = useAuth();
   const queryClient = useQueryClient();
+  const slugPrefix = useAuthSlug();
+  const navigate = useNavigate();
 
   // Debounce search
   useEffect(() => {
@@ -104,7 +108,8 @@ const BrandCovers = () => {
         .select(`
           id, start_date, expiration_date, status, selling_price, customer_id, recommended_retail_price, brand_row_id, brand_sale_id, brand_sub_order_row_code, quantity, purchase_receipt, notes, internal_notes,
           catalogues!insured_items_item_id_fkey ( id, name, picture ),
-          profiles!insured_items_customer_id_fkey ( first_name, last_name, email )
+          profiles!insured_items_customer_id_fkey ( first_name, last_name, email ),
+          shops!insured_items_shop_id_fkey ( name )
         `, { count: "exact" })
         .eq("brand_id", profile?.brand_id || -1)
         .order(col, { ascending: asc })
@@ -383,7 +388,7 @@ const BrandCovers = () => {
         </div>
       </div>
 
-      {isFetching ? (
+      {isFetching && !coversData ? (
         <div className="space-y-3">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="glass-card flex items-center gap-4 p-4">
@@ -423,7 +428,8 @@ const BrandCovers = () => {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className="glass-card flex items-center gap-4 p-4 transition-shadow hover:shadow-md"
+                className="glass-card flex items-center gap-4 p-4 transition-shadow hover:shadow-md cursor-pointer"
+                onClick={() => navigate(`${slugPrefix}/covers/${cover.id}`)}
               >
                 <div className="h-14 w-14 shrink-0 rounded-xl bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-1.5">
                   <img
@@ -440,6 +446,11 @@ const BrandCovers = () => {
                     {(cover as any).profiles?.first_name}{" "}
                     {(cover as any).profiles?.last_name}
                   </p>
+                  {(cover as any).shops?.name && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Store: {(cover as any).shops.name}
+                    </p>
+                  )}
                   <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 md:hidden">
                     <span className="text-xs text-muted-foreground">
                       Start:{" "}
@@ -453,33 +464,47 @@ const BrandCovers = () => {
                         {formatDate(cover.expiration_date)}
                       </span>
                     </span>
+                    <span className="text-xs text-muted-foreground">
+                      RRP:{" "}
+                      <span className="text-foreground font-medium">
+                        €{(cover.recommended_retail_price || 0).toLocaleString()}
+                      </span>
+                    </span>
                   </div>
                 </div>
-                <div className="hidden md:block text-center shrink-0">
-                  <p className="text-sm text-foreground">
+                <div className="hidden md:block text-center shrink-0 w-[100px]">
+                  <p className="text-sm text-foreground whitespace-nowrap">
                     {formatDate(cover.start_date)}
                   </p>
                   <p className="text-xs text-muted-foreground">Start</p>
                 </div>
-                <div className="hidden md:block text-center shrink-0">
-                  <p className="text-sm text-foreground">
+                <div className="hidden md:block text-center shrink-0 w-[100px]">
+                  <p className="text-sm text-foreground whitespace-nowrap">
                     {formatDate(cover.expiration_date)}
                   </p>
                   <p className="text-xs text-muted-foreground">Expiration</p>
                 </div>
+                <div className="hidden md:block text-center shrink-0 w-[80px]">
+                  <p className="text-sm text-foreground whitespace-nowrap">
+                    €{(cover.recommended_retail_price || 0).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground">RRP</p>
+                </div>
                 <span
-                  className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${
-                    status === "Active"
+                  className={`shrink-0 w-[80px] text-center rounded-full px-3 py-1 text-xs font-medium ${
+                    status === "Active" || status === "Live"
                       ? "bg-success/10 text-success"
                       : status === "Expiring"
                       ? "bg-warning/10 text-warning"
+                      : status === "Cancelled"
+                      ? "bg-destructive/10 text-destructive"
                       : "bg-muted text-muted-foreground"
                   }`}
                 >
                   {status}
                 </span>
-                {canWrite && (
-                  <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  {canWrite && (
                     <button
                       onClick={() => openEdit(cover)}
                       className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
@@ -487,6 +512,8 @@ const BrandCovers = () => {
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
+                  )}
+                  {canWrite && (
                     <button
                       onClick={() => setConfirmDeleteId(cover.id)}
                       className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
@@ -494,8 +521,8 @@ const BrandCovers = () => {
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </motion.div>
             );
           })}

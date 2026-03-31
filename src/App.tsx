@@ -22,11 +22,15 @@ import CustomerCovers from "./pages/customer/CustomerCovers";
 import CustomerClaims from "./pages/customer/CustomerClaims";
 import NewClaim from "./pages/customer/NewClaim";
 import CustomerProfile from "./pages/customer/CustomerProfile";
+import CustomerClaimDetail from "./pages/customer/CustomerClaimDetail";
+import CustomerCoverDetail from "./pages/customer/CustomerCoverDetail";
 import BrandDashboard from "./pages/brand/BrandDashboard";
 import BrandCustomers from "./pages/brand/BrandCustomers";
 import BrandCovers from "./pages/brand/BrandCovers";
 import BrandClaims from "./pages/brand/BrandClaims";
 import BrandClaimDetail from "./pages/brand/BrandClaimDetail";
+import BrandCustomerDetail from "./pages/brand/BrandCustomerDetail";
+import BrandCoverDetail from "./pages/brand/BrandCoverDetail";
 import BrandTeam from "./pages/brand/BrandTeam";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminBrands from "./pages/admin/AdminBrands";
@@ -200,12 +204,16 @@ const App = () => (
               <Route path="/:slug/home" element={<ProtectedRoute mode="customer"><CustomerDashboard /></ProtectedRoute>} />
               <Route path="/:slug/profile" element={<ProtectedRoute><CustomerProfile /></ProtectedRoute>} />
               <Route path="/:slug/claims/new" element={<ProtectedRoute mode="customer"><NewClaim /></ProtectedRoute>} />
+              <Route path="/:slug/claims/:claimId/view" element={<ProtectedRoute mode="customer"><CustomerClaimDetail /></ProtectedRoute>} />
+              <Route path="/:slug/covers/:coverId/view" element={<ProtectedRoute mode="customer"><CustomerCoverDetail /></ProtectedRoute>} />
 
               {/* Brand-only pages */}
               <Route path="/:slug/dashboard" element={<ProtectedRoute mode="brand"><BrandDashboard /></ProtectedRoute>} />
               <Route path="/:slug/customers" element={<ProtectedRoute mode="brand"><BrandCustomers /></ProtectedRoute>} />
               <Route path="/:slug/team" element={<ProtectedRoute mode="brand"><BrandTeam /></ProtectedRoute>} />
               <Route path="/:slug/claims/:claimId" element={<ProtectedRoute mode="brand"><BrandClaimDetail /></ProtectedRoute>} />
+              <Route path="/:slug/customers/:customerId" element={<ProtectedRoute mode="brand"><BrandCustomerDetail /></ProtectedRoute>} />
+              <Route path="/:slug/covers/:coverId" element={<ProtectedRoute mode="brand"><BrandCoverDetail /></ProtectedRoute>} />
 
               {/* Shared pages — content differs by role */}
               <Route path="/:slug/covers" element={<CoversPage />} />

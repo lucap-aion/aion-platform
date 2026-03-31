@@ -38,8 +38,8 @@ import { fmtDate } from "./_components/fmtDate";
 interface Cover {
   id: number;
   brand_sale_id: string;
-  row_id: string | null;
-  sub_order_code: string | null;
+  brand_row_id: string | null;
+  brand_sub_order_row_code: string | null;
   status: string | null;
   start_date: string;
   expiration_date: string | null;
@@ -84,7 +84,7 @@ const addTwoYears = (dateStr: string): string => {
 const empty = (): Partial<Cover> => {
   const today = new Date().toISOString().slice(0, 10);
   return {
-    brand_sale_id: "", row_id: null, sub_order_code: null,
+    brand_sale_id: "", brand_row_id: null, brand_sub_order_row_code: null,
     status: "live", start_date: today,
     expiration_date: addTwoYears(today),
     selling_price: null, cogs: null, recommended_retail_price: null,
@@ -120,7 +120,7 @@ const AdminCovers = () => {
     setLoading(true);
     let query = supabase
       .from("policies")
-      .select("id, brand_sale_id, status, start_date, expiration_date, selling_price, cogs, recommended_retail_price, quantity, brand_id, customer_id, item_id, created_at, brands(name, logo_small), catalogues(name, sku, picture), profiles(email, first_name, last_name, avatar, created_at, registered_at, email_confirmed_at)", { count: "exact" })
+      .select("id, brand_sale_id, brand_row_id, brand_sub_order_row_code, status, start_date, expiration_date, selling_price, cogs, recommended_retail_price, quantity, brand_id, customer_id, item_id, created_at, brands(name, logo_small), catalogues(name, sku, picture), profiles(email, first_name, last_name, avatar, created_at, registered_at, email_confirmed_at)", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .order(sortKey, { ascending: sortDir === "asc" })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
@@ -160,8 +160,8 @@ const AdminCovers = () => {
     setSaving(true);
     const payload = {
       brand_sale_id: editing.brand_sale_id ?? "",
-      row_id: editing.row_id ?? null,
-      sub_order_code: editing.sub_order_code ?? null,
+      brand_row_id: editing.brand_row_id ?? null,
+      brand_sub_order_row_code: editing.brand_sub_order_row_code ?? null,
       status: editing.status ?? null,
       start_date: editing.start_date ?? null,
       expiration_date: editing.expiration_date ?? null,
@@ -403,14 +403,14 @@ const AdminCovers = () => {
               <Input disabled={ro} value={editing.brand_sale_id ?? ""} onChange={(e) => set("brand_sale_id", e.target.value)} required={!ro} />
             </FormField>
             <FormField label="Row ID" required={!ro}>
-              <Input disabled={ro} value={editing.row_id ?? ""} onChange={(e) => set("row_id", e.target.value || null)} required={!ro} />
+              <Input disabled={ro} value={editing.brand_row_id ?? ""} onChange={(e) => set("brand_row_id", e.target.value || null)} required={!ro} />
             </FormField>
           </div>
 
           {/* Sub Order Code + Status */}
           <div className="grid grid-cols-2 gap-4">
             <FormField label="Sub Order Code">
-              <Input disabled={ro} value={editing.sub_order_code ?? ""} onChange={(e) => set("sub_order_code", e.target.value || null)} />
+              <Input disabled={ro} value={editing.brand_sub_order_row_code ?? ""} onChange={(e) => set("brand_sub_order_row_code", e.target.value || null)} />
             </FormField>
             <FormField label="Status">
               {ro ? <Input disabled value={editing.status ?? ""} /> : (

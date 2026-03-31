@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { Search, Eye, XCircle, ChevronDown, Trash2, Plus, Pencil, X, ChevronLeft, ChevronRight, ArrowUpDown, FileText, Upload } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Search, XCircle, ChevronDown, Trash2, Plus, Pencil, X, ChevronLeft, ChevronRight, ArrowUpDown, FileText, Upload } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { supabase } from "@/integrations/supabase/client";
@@ -80,6 +80,7 @@ const BrandClaims = () => {
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const slugPrefix = useAuthSlug();
+  const navigate = useNavigate();
   const { profile, canWrite } = useAuth();
   const queryClient = useQueryClient();
 
@@ -134,7 +135,7 @@ const BrandClaims = () => {
       return { claims: data || [], total: count ?? 0 };
     },
     enabled: !!profile?.brand_id,
-    staleTime: 30_000,
+    staleTime: 5 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
 
@@ -308,7 +309,7 @@ const BrandClaims = () => {
     </th>
   );
 
-  if (isFetching) {
+  if (isFetching && !queryData) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
         <div className="mb-8 flex items-center justify-between">
@@ -455,7 +456,8 @@ const BrandClaims = () => {
                   return (
                     <tr
                       key={claim.id}
-                      className="transition-colors hover:bg-secondary/30"
+                      className="transition-colors hover:bg-secondary/30 cursor-pointer"
+                      onClick={() => navigate(`${slugPrefix}/claims/${claim.id}`)}
                     >
                       <td className="px-6 py-4 text-sm font-medium text-foreground">
                         {claim.id}
@@ -500,15 +502,8 @@ const BrandClaims = () => {
                           {state.label}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
-                          <Link
-                            to={`${slugPrefix}/claims/${claim.id}`}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                            title="View"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Link>
                           {canWrite && (
                             <button
                               onClick={() => openEdit(claim)}

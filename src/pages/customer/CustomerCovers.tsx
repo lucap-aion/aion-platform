@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { LayoutGrid, List, Search } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { sendEmail } from "@/utils/sendEmail";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
@@ -21,7 +21,9 @@ import { format } from "date-fns";
 
 const CustomerCovers = () => {
   const slugPrefix = useAuthSlug();
-  const [view, setView] = useState<"list" | "grid">("list");
+  const navigate = useNavigate();
+  const [view, _setView] = useState<"list" | "grid">(() => (localStorage.getItem("customer-covers-view") as "list" | "grid") || "list");
+  const setView = (v: "list" | "grid") => { _setView(v); localStorage.setItem("customer-covers-view", v); };
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [transferOpen, setTransferOpen] = useState(false);
@@ -184,7 +186,7 @@ const CustomerCovers = () => {
       ) : view === "list" ? (
         <div className="space-y-4">
           {displayedPolicies.map((cover, i) => (
-            <motion.div key={cover.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }} className="glass-card p-4 md:p-5 transition-shadow hover:shadow-md">
+            <motion.div key={cover.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }} className="glass-card p-4 md:p-5 transition-shadow hover:shadow-md cursor-pointer" onClick={() => navigate(`${slugPrefix}/covers/${cover.id}/view`)}>
               <div className="flex items-center gap-4 md:gap-6">
                 <div className="h-16 w-16 md:h-20 md:w-20 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-2">
                   <img src={getImage(cover)} alt={getProductName(cover)} className="h-full w-full object-contain mix-blend-multiply" />
@@ -206,7 +208,11 @@ const CustomerCovers = () => {
                   <p className="text-sm font-semibold text-foreground">{formatDate(cover.expiration_date)}</p>
                   <p className="text-xs text-muted-foreground">Expiration</p>
                 </div>
-                <div className="hidden sm:flex items-center gap-2 md:gap-3 shrink-0">
+                <div className="hidden md:block text-center">
+                  <p className="text-sm font-semibold text-foreground">€{(cover.selling_price || 0).toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">Selling Price</p>
+                </div>
+                <div className="hidden sm:flex items-center gap-2 md:gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
                   {getOpenClaim(cover) ? (
                     <Link to={`${slugPrefix}/claims?edit=${getOpenClaim(cover)?.id}`} className="rounded-lg bg-amber-600 px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-white transition-colors hover:bg-amber-700">Manage Claim</Link>
                   ) : (
@@ -215,7 +221,7 @@ const CustomerCovers = () => {
                   <button onClick={() => handleTransfer(cover.id)} disabled={hasClaim(cover)} className="rounded-lg border border-border px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed">Transfer</button>
                 </div>
               </div>
-              <div className="flex sm:hidden gap-2 mt-3 pt-3 border-t border-border">
+              <div className="flex sm:hidden gap-2 mt-3 pt-3 border-t border-border" onClick={(e) => e.stopPropagation()}>
                 {getOpenClaim(cover) ? (
                   <Link to={`${slugPrefix}/claims?edit=${getOpenClaim(cover)?.id}`} className="flex-1 text-center rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white">Manage Claim</Link>
                 ) : (
@@ -229,7 +235,7 @@ const CustomerCovers = () => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {displayedPolicies.map((cover, i) => (
-            <motion.div key={cover.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }} className="glass-card overflow-hidden transition-shadow hover:shadow-md flex flex-col">
+            <motion.div key={cover.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }} className="glass-card overflow-hidden transition-shadow hover:shadow-md flex flex-col cursor-pointer" onClick={() => navigate(`${slugPrefix}/covers/${cover.id}/view`)}>
               <div className="flex items-center justify-center bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-6">
                 <img src={getImage(cover)} alt={getProductName(cover)} className="h-32 w-32 object-contain mix-blend-multiply" />
               </div>
@@ -243,7 +249,7 @@ const CustomerCovers = () => {
                   <div className="flex justify-between text-xs"><span className="text-muted-foreground">Start</span><span className="text-foreground font-medium">{formatDate(cover.start_date)}</span></div>
                   <div className="flex justify-between text-xs"><span className="text-muted-foreground">Expiration</span><span className="text-foreground font-medium">{formatDate(cover.expiration_date)}</span></div>
                 </div>
-                <div className="flex gap-2 mt-auto">
+                <div className="flex gap-2 mt-auto" onClick={(e) => e.stopPropagation()}>
                   {getOpenClaim(cover) ? (
                     <Link to={`${slugPrefix}/claims?edit=${getOpenClaim(cover)?.id}`} className="flex-1 text-center rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white hover:bg-amber-700">Manage Claim</Link>
                   ) : (
