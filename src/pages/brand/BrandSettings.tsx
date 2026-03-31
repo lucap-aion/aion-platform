@@ -58,8 +58,39 @@ const BrandSettings = () => {
 
   if (isLoading) {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-8 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      <div className="max-w-3xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+        <div className="mb-8 space-y-2">
+          <div className="h-8 w-32 rounded-lg bg-secondary/60 animate-pulse" />
+          <div className="h-4 w-56 rounded bg-secondary/40 animate-pulse" />
+        </div>
+        <div className="space-y-6">
+          <div className="glass-card p-6 space-y-4">
+            <div className="h-5 w-40 rounded bg-secondary/60 animate-pulse" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div className="space-y-2">
+                <div className="h-3.5 w-24 rounded bg-secondary/40 animate-pulse" />
+                <div className="h-10 w-full rounded-lg bg-secondary/40 animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3.5 w-28 rounded bg-secondary/40 animate-pulse" />
+                <div className="h-10 w-full rounded-lg bg-secondary/40 animate-pulse" />
+              </div>
+            </div>
+          </div>
+          <div className="glass-card p-6 space-y-4">
+            <div className="h-5 w-44 rounded bg-secondary/60 animate-pulse" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div className="space-y-2">
+                <div className="h-3.5 w-36 rounded bg-secondary/40 animate-pulse" />
+                <div className="h-10 w-full rounded-lg bg-secondary/40 animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3.5 w-24 rounded bg-secondary/40 animate-pulse" />
+                <div className="h-10 w-full rounded-lg bg-secondary/40 animate-pulse" />
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

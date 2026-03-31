@@ -17,7 +17,10 @@ const PortalSelector = () => {
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-12 w-32 rounded-lg bg-secondary/60 animate-pulse" />
+          <div className="h-4 w-48 rounded bg-secondary/40 animate-pulse" />
+        </div>
       </div>
     );
   }
