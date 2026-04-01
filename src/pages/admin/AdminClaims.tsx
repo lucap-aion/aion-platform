@@ -138,6 +138,20 @@ const AdminClaims = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (mode === "add") {
+      const missing: string[] = [];
+      if (!editing.policy_id) missing.push("Cover (Policy)");
+      if (!editing.type) missing.push("Type");
+      if (!editing.incident_date) missing.push("Incident Date");
+      if (!editing.incident_city) missing.push("Incident City");
+      if (!editing.incident_country) missing.push("Incident Country");
+      if (!editing.description?.trim()) missing.push("Description");
+      if (pendingFiles.length === 0) missing.push("At least one file attachment");
+      if (missing.length > 0) {
+        toast({ title: "Missing required fields", description: missing.join(", "), variant: "destructive" });
+        return;
+      }
+    }
     setSaving(true);
 
     // Upload any pending files to claims_media bucket
@@ -313,8 +327,8 @@ const AdminClaims = () => {
 
           {/* Dates & Location */}
           <div className="grid grid-cols-2 gap-4">
-            <FormField label="Incident Date">
-              <Input type="date" disabled={ro} max={new Date().toISOString().split("T")[0]} value={editing.incident_date ? editing.incident_date.slice(0, 10) : ""} onChange={(e) => set("incident_date", e.target.value || null)} />
+            <FormField label="Incident Date" required={mode === "add"}>
+              <Input type="date" disabled={ro} max={new Date().toISOString().split("T")[0]} value={editing.incident_date ? editing.incident_date.slice(0, 10) : ""} onChange={(e) => set("incident_date", e.target.value || null)} required={mode === "add"} />
             </FormField>
             {ro && (
               <FormField label="Opened">
@@ -324,13 +338,13 @@ const AdminClaims = () => {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <FormField label="Incident City"><Input disabled={ro} value={editing.incident_city ?? ""} onChange={(e) => set("incident_city", e.target.value)} /></FormField>
-            <FormField label="Incident Country"><Input disabled={ro} value={editing.incident_country ?? ""} onChange={(e) => set("incident_country", e.target.value)} /></FormField>
+            <FormField label="Incident City" required={mode === "add"}><Input disabled={ro} value={editing.incident_city ?? ""} onChange={(e) => set("incident_city", e.target.value)} required={mode === "add"} /></FormField>
+            <FormField label="Incident Country" required={mode === "add"}><Input disabled={ro} value={editing.incident_country ?? ""} onChange={(e) => set("incident_country", e.target.value)} required={mode === "add"} /></FormField>
           </div>
 
           {/* Description */}
-          <FormField label="Description">
-            <TextArea disabled={ro} value={editing.description ?? ""} onChange={(e) => set("description", e.target.value)} rows={3} placeholder="Describe the incident…" />
+          <FormField label="Description" required={mode === "add"}>
+            <TextArea disabled={ro} value={editing.description ?? ""} onChange={(e) => set("description", e.target.value)} rows={3} placeholder="Describe the incident…" required={mode === "add"} />
           </FormField>
 
           {/* Attached Files */}

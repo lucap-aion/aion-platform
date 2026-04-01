@@ -31,7 +31,7 @@ const EMPTY_FORM: MemberForm = {
   lastName: "",
   email: "",
   isMaster: false,
-  status: "active",
+  status: "pending",
 };
 
 const inputCls =
@@ -329,11 +329,13 @@ const BrandTeam = () => {
                         <span className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${
                           isPending
                             ? "bg-warning/10 text-warning"
-                            : m.status === "active"
+                            : m.status === "verified"
                             ? "bg-success/10 text-success"
+                            : m.status === "blocked"
+                            ? "bg-destructive/10 text-destructive"
                             : "bg-muted text-muted-foreground"
                         }`}>
-                          {isPending ? "Pending" : m.status === "active" ? "Active" : (m.status || "—")}
+                          {isPending ? "Pending" : m.status === "verified" ? "Verified" : m.status === "blocked" ? "Blocked" : (m.status || "—")}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -474,9 +476,9 @@ const BrandTeam = () => {
                         onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
                         className={inputCls}
                       >
-                        <option value="active">Active</option>
                         <option value="pending">Pending</option>
-                        <option value="inactive">Inactive</option>
+                        <option value="verified">Verified</option>
+                        <option value="blocked">Blocked</option>
                       </select>
                     </Field>
                   )}

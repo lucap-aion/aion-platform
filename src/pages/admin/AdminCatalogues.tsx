@@ -40,6 +40,7 @@ interface Catalogue {
 }
 
 interface BrandOption { id: number; name: string | null; }
+interface CategoryOption { brand_id: number | null; category: string | null; }
 
 type Mode = "view" | "edit" | "add";
 
@@ -67,6 +68,7 @@ const AdminCatalogues = () => {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Catalogue | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [brandCategories, setBrandCategories] = useState<CategoryOption[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = () => {
@@ -91,7 +93,13 @@ const AdminCatalogues = () => {
   useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir]);
 
   useEffect(() => {
-    supabase.from("brands").select("id, name").order("name").then(({ data }) => setBrands((data as BrandOption[]) ?? []));
+    Promise.all([
+      supabase.from("brands").select("id, name").order("name"),
+      supabase.from("manufacturing_costs").select("brand_id, category"),
+    ]).then(([{ data: brandsData }, { data: costsData }]) => {
+      setBrands((brandsData as BrandOption[]) ?? []);
+      setBrandCategories((costsData as CategoryOption[]) ?? []);
+    });
   }, []);
 
   const openAdd = () => { setEditing(empty()); setMode("add"); setDrawerOpen(true); };
@@ -143,6 +151,11 @@ const AdminCatalogues = () => {
   const set = (k: keyof Catalogue, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
   const ro = mode === "view";
   const drawerTitle = mode === "add" ? "New Catalogue Item" : mode === "edit" ? `Edit: ${editing.name ?? ""}` : `${editing.name ?? ""}`;
+
+  // Categories available for the selected brand (from manufacturing_costs)
+  const categoryOptions = editing.brand_id
+    ? [...new Set(brandCategories.filter((m) => m.brand_id === editing.brand_id && m.category).map((m) => m.category!))]
+    : [];
 
   return (
     <>
@@ -228,7 +241,16 @@ const AdminCatalogues = () => {
             <FormField label="Slug"><Input disabled={ro} value={editing.slug ?? ""} onChange={(e) => set("slug", e.target.value)} /></FormField>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <FormField label="Category"><Input disabled={ro} value={editing.category ?? ""} onChange={(e) => set("category", e.target.value)} /></FormField>
+            <FormField label="Category">
+              {ro ? <Input disabled value={editing.category ?? ""} /> : categoryOptions.length > 0 ? (
+                <Select value={editing.category ?? ""} onChange={(e) => set("category", e.target.value)}>
+                  <option value="">Select category…</option>
+                  {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                </Select>
+              ) : (
+                <Input disabled={ro} value={editing.category ?? ""} onChange={(e) => set("category", e.target.value)} placeholder={editing.brand_id ? "No categories configured" : "Select a brand first"} />
+              )}
+            </FormField>
             <FormField label="Collection"><Input disabled={ro} value={editing.collection ?? ""} onChange={(e) => set("collection", e.target.value)} /></FormField>
           </div>
           <FormField label="Brand Item ID"><Input disabled={ro} value={editing.brand_item_id ?? ""} onChange={(e) => set("brand_item_id", e.target.value)} /></FormField>

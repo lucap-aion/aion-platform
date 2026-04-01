@@ -152,11 +152,6 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState<Statistics>(emptyStats());
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee").order("name")
-      .then(({ data }) => setAllBrands((data as Brand[]) ?? []));
-  }, []);
-
   const computeStats = useCallback(async () => {
     setLoading(true);
     try {
@@ -176,19 +171,21 @@ export default function AdminDashboard() {
         toDate = range.to;
       }
 
-      const brandIds = selectedBrandId === "all" ? allBrands.map((b) => b.id) : [selectedBrandId];
-      const brandRates = new Map<number, { activation_fee: number; insurance_premium: number; aion_premium_fee: number }>();
-      for (const b of allBrands) {
-        if (brandIds.includes(b.id)) brandRates.set(b.id, { activation_fee: toPct(b.activation_fee), insurance_premium: toPct(b.insurance_premium), aion_premium_fee: toPct(b.aion_premium_fee) });
-      }
+      // Phase 1: Fetch brands, counts, and eligible customers ALL in parallel
+      const brandsPromise = allBrands.length > 0
+        ? Promise.resolve(allBrands)
+        : supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee").order("name")
+            .then(({ data }) => {
+              const b = (data as Brand[]) ?? [];
+              setAllBrands(b);
+              return b;
+            });
 
-      // Phase 1: Resolve eligible customer IDs (for new/returning filter) + static counts in parallel
       const eligibleCustomerIdsPromise: Promise<string[] | null> =
         customerType !== "all" && fromDate
           ? (async () => {
               let q = supabase.from("profiles").select("id").eq("role", "customer");
               if (selectedBrandId !== "all") q = q.in("brand_id", [selectedBrandId]);
-              else if (brandIds.length > 0) q = q.in("brand_id", brandIds);
               if (customerType === "new") {
                 q = q.gte("created_at", fromDate!);
                 if (toDate) q = q.lte("created_at", toDate);
@@ -200,82 +197,79 @@ export default function AdminDashboard() {
             })()
           : Promise.resolve<string[] | null>(null);
 
-      const [eligibleIds, { count: brandsCount }, { count: shopsCount }] = await Promise.all([
+      const [fetchedBrands, eligibleIds, { count: brandsCount }, { count: shopsCount }, { count: customersCount }] = await Promise.all([
+        brandsPromise,
         eligibleCustomerIdsPromise,
         supabase.from("brands").select("id", { count: "exact", head: true }),
         supabase.from("shops").select("id", { count: "exact", head: true }),
+        supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer"),
       ]);
 
-      // Phase 2: Policies query (filtered by date, brand, and optional customer type)
-      let polQ = supabase.from("policies").select("id, customer_id, brand_id, start_date, quantity, recommended_retail_price, selling_price, cogs");
-      if (brandIds.length > 0) polQ = polQ.in("brand_id", brandIds);
-      if (fromDate) polQ = polQ.gte("start_date", fromDate);
-      if (toDate) polQ = polQ.lte("start_date", toDate);
-      if (eligibleIds !== null) {
-        if (eligibleIds.length > 0) polQ = polQ.in("customer_id", eligibleIds);
-        else {
-          // No matching customers → empty result
-          result.brands = brandsCount ?? 0;
-          result.shops = shopsCount ?? 0;
-          result.customers = 0;
-          setStats(result);
-          return;
-        }
+      const brandIds = selectedBrandId === "all" ? fetchedBrands.map((b) => b.id) : [selectedBrandId];
+      const brandRates = new Map<number, { activation_fee: number; insurance_premium: number; aion_premium_fee: number }>();
+      for (const b of fetchedBrands) {
+        if (brandIds.includes(b.id)) brandRates.set(b.id, { activation_fee: toPct(b.activation_fee), insurance_premium: toPct(b.insurance_premium), aion_premium_fee: toPct(b.aion_premium_fee) });
       }
-      const { data: policies = [] } = await polQ;
 
-      result.covers = (policies as any[]).length;
-      let latestTs = 0;
-      for (const p of policies as any[]) {
-        const qty = Number(p.quantity) || 1;
-        const cogs = Number(p.cogs) * qty || 0;
-        const rrp = Number(p.recommended_retail_price) * qty || 0;
-        const sp = Number(p.selling_price) * qty || 0;
-        result.cogsTotal += cogs; result.rrpTotal += rrp; result.sellingPriceTotal += sp;
-        const rates = brandRates.get(Number(p.brand_id));
+      if (eligibleIds !== null && eligibleIds.length === 0) {
+        result.brands = brandsCount ?? 0;
+        result.shops = shopsCount ?? 0;
+        result.customers = 0;
+        setStats(result);
+        return;
+      }
+
+      // Phase 2: Aggregated policy stats via RPC + claims counts — ALL in parallel
+      const rpcParams: Record<string, unknown> = {};
+      if (brandIds.length > 0) rpcParams.p_brand_ids = brandIds;
+      if (fromDate) rpcParams.p_from_date = fromDate;
+      if (toDate) rpcParams.p_to_date = toDate;
+      if (eligibleIds !== null) rpcParams.p_customer_ids = eligibleIds;
+
+      const [{ data: policyStats = [] }, { count: claimsCount }, { count: openClaimsCount }, { count: closedClaimsCount }] = await Promise.all([
+        supabase.rpc("dashboard_policy_stats", rpcParams),
+        supabase.from("claims").select("id", { count: "exact", head: true }),
+        supabase.from("claims").select("id", { count: "exact", head: true }).eq("status", "open"),
+        supabase.from("claims").select("id", { count: "exact", head: true }).eq("status", "closed"),
+      ]);
+
+      // Aggregate per-brand rows into totals, applying brand-specific rates
+      for (const row of policyStats as any[]) {
+        const bid = Number(row.brand_id);
+        const cogs = Number(row.total_cogs) || 0;
+        const rrp = Number(row.total_rrp) || 0;
+        const sp = Number(row.total_selling_price) || 0;
+        result.covers += Number(row.covers) || 0;
+        result.cogsTotal += cogs;
+        result.rrpTotal += rrp;
+        result.sellingPriceTotal += sp;
+        const rates = brandRates.get(bid);
         const grossPremium = cogs * (rates?.insurance_premium ?? 0);
         const netPremium = grossPremium * (1 - GVT_FEE);
         const aionActivationFee = rrp * (rates?.activation_fee ?? 0);
         const aionPremiumFee = netPremium * (rates?.aion_premium_fee ?? 0);
-        result.grossPremium += grossPremium; result.netPremium += netPremium;
-        result.aionActivationFee += aionActivationFee; result.aionPremiumFee += aionPremiumFee;
-        const ts = p.start_date ? new Date(p.start_date).getTime() : 0;
-        if (ts > latestTs) { latestTs = ts; result.latestActivation = p.start_date; }
+        result.grossPremium += grossPremium;
+        result.netPremium += netPremium;
+        result.aionActivationFee += aionActivationFee;
+        result.aionPremiumFee += aionPremiumFee;
+        if (row.latest_start_date) {
+          const ts = new Date(row.latest_start_date).getTime();
+          if (!result.latestActivation || ts > new Date(result.latestActivation).getTime()) {
+            result.latestActivation = row.latest_start_date;
+          }
+        }
       }
       result.aionRevenue = result.aionPremiumFee + result.aionActivationFee;
       result.effectivePremiumPct = result.cogsTotal > 0 ? result.grossPremium / result.cogsTotal : null;
       result.effectiveActivationFeePct = result.rrpTotal > 0 ? result.aionActivationFee / result.rrpTotal : null;
       result.effectiveAionPremiumFeePct = result.netPremium > 0 ? result.aionPremiumFee / result.netPremium : null;
 
-      // Phase 3: Customer count + claims (parallel)
-      const policyIds = (policies as any[]).map((p) => p.id);
-
-      const customerCountPromise = eligibleIds !== null
-        ? Promise.resolve(eligibleIds.length)
-        : (async () => {
-            let q = supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer");
-            const { count } = await q;
-            return count ?? 0;
-          })();
-
-      const claimsQ = policyIds.length > 0
-        ? supabase.from("claims").select("id", { count: "exact", head: true }).in("policy_id", policyIds)
-        : Promise.resolve({ count: 0, data: null, error: null });
-      const openClaimsQ = policyIds.length > 0
-        ? supabase.from("claims").select("id", { count: "exact", head: true }).in("policy_id", policyIds).eq("status", "open")
-        : Promise.resolve({ count: 0, data: null, error: null });
-      const closedClaimsQ = policyIds.length > 0
-        ? supabase.from("claims").select("id", { count: "exact", head: true }).in("policy_id", policyIds).eq("status", "closed")
-        : Promise.resolve({ count: 0, data: null, error: null });
-
-      const [customersCount, { count: claimsCount }, { count: openClaimsCount }, { count: closedClaimsCount }] =
-        await Promise.all([customerCountPromise, claimsQ, openClaimsQ, closedClaimsQ]);
-
-      result.brands = brandsCount ?? 0;
-      result.customers = customersCount;
       result.claims = claimsCount ?? 0;
       result.openClaims = openClaimsCount ?? 0;
       result.closedClaims = closedClaimsCount ?? 0;
+
+      result.brands = brandsCount ?? 0;
+      result.customers = eligibleIds !== null ? eligibleIds.length : (customersCount ?? 0);
       result.shops = shopsCount ?? 0;
       result.claimRate = result.covers > 0 ? result.claims / result.covers : null;
 
@@ -283,9 +277,7 @@ export default function AdminDashboard() {
     } finally { setLoading(false); }
   }, [allBrands, selectedBrandId, period, selectedYear, selectedMonth, selectedWeek, customerType]);
 
-  useEffect(() => {
-    if (allBrands.length > 0 || selectedBrandId === "all") void computeStats();
-  }, [computeStats, allBrands]);
+  useEffect(() => { void computeStats(); }, [computeStats]);
 
   const name = adminRecord?.first_name || "Admin";
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);

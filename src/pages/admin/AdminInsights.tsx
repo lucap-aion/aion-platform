@@ -2,22 +2,22 @@ import { useEffect, useState, useCallback } from "react";
 import { ChevronDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  BarChart, Bar, LineChart, Line, AreaChart, Area,
-  PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 
 const selectCls = "rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground appearance-none pr-8 focus:outline-none focus:ring-2 focus:ring-primary/40";
 
-const CHART_COLORS = ["#7A5F28", "#c4a265", "#e8d5a3", "#a07840", "#4a3810", "#d4b483"];
+const CHART_COLORS = ["#7A5F28", "#c4a265", "#e8d5a3", "#a07840", "#4a3810", "#d4b483", "#8B6914", "#D4A942"];
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-EU", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
 
-const fmtShort = (n: number) =>
-  n >= 1000 ? `€${(n / 1000).toFixed(1)}k` : `€${n}`;
+const fmtN = (n: number) => new Intl.NumberFormat("en").format(n);
 
-interface Brand { id: number; name: string; activation_fee: unknown; insurance_premium: unknown; aion_premium_fee: unknown; }
+const fmtPct = (n: number) => `${(n * 100).toFixed(1)}%`;
+
+interface Brand { id: number; name: string; }
 
 type PeriodOption = "30d" | "90d" | "6m" | "1y" | "all";
 
@@ -30,30 +30,69 @@ const getPeriodFromDate = (period: PeriodOption): string | undefined => {
   return undefined;
 };
 
-const toMonthKey = (dateStr: string) => {
-  const d = new Date(dateStr);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-};
-
-const monthLabel = (key: string) => {
-  const [y, m] = key.split("-");
-  return new Date(Number(y), Number(m) - 1).toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
-};
-
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">{children}</p>
 );
 
-const ChartCard = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <div className="rounded-xl border border-border bg-card p-5">
+const ChartCard = ({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) => (
+  <div className={`rounded-xl border border-border bg-card p-5 ${className}`}>
     <p className="text-sm font-semibold text-foreground mb-4">{title}</p>
     {children}
+  </div>
+);
+
+const KpiCard = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
+  <div className="rounded-xl border border-border bg-card p-4 flex flex-col justify-between">
+    <p className="text-2xl font-bold tabular-nums text-foreground">{value}</p>
+    <p className="text-xs text-muted-foreground mt-1">{label}</p>
+    {sub && <p className="text-xs text-muted-foreground/60 mt-0.5">{sub}</p>}
   </div>
 );
 
 const ChartSkeleton = () => (
   <div className="h-56 w-full rounded-lg bg-secondary/60 animate-pulse" />
 );
+
+const KpiSkeleton = () => (
+  <div className="rounded-xl border border-border bg-card p-4">
+    <div className="h-7 w-16 rounded-md bg-secondary animate-pulse" />
+    <div className="h-3 w-24 rounded bg-secondary/60 animate-pulse mt-2" />
+  </div>
+);
+
+const BreakdownTable = ({ data, valueLabel = "Count", formatValue }: {
+  data: { name: string; count: number; value?: number }[];
+  valueLabel?: string;
+  formatValue?: (n: number) => string;
+}) => {
+  if (!data.length) return <p className="text-sm text-muted-foreground py-4 text-center">No data</p>;
+  return (
+    <div className="max-h-64 overflow-y-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border">
+            <th className="text-left py-2 text-xs font-medium text-muted-foreground">Name</th>
+            <th className="text-right py-2 text-xs font-medium text-muted-foreground">Count</th>
+            {data[0]?.value !== undefined && (
+              <th className="text-right py-2 text-xs font-medium text-muted-foreground">{valueLabel}</th>
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row) => (
+            <tr key={row.name} className="border-b border-border/50 last:border-0">
+              <td className="py-2 text-foreground">{row.name}</td>
+              <td className="py-2 text-right tabular-nums text-foreground">{fmtN(row.count)}</td>
+              {row.value !== undefined && (
+                <td className="py-2 text-right tabular-nums text-foreground">{formatValue ? formatValue(row.value) : fmt(row.value)}</td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
@@ -63,144 +102,192 @@ export default function AdminInsights() {
   const [period, setPeriod] = useState<PeriodOption>("1y");
   const [loading, setLoading] = useState(true);
 
-  // Chart data
-  const [coversOverTime, setCoversOverTime] = useState<{ month: string; covers: number }[]>([]);
-  const [claimsOverTime, setClaimsOverTime] = useState<{ month: string; open: number; closed: number }[]>([]);
-  const [claimsByType, setClaimsByType] = useState<{ name: string; value: number }[]>([]);
-  const [revenueByBrand, setRevenueByBrand] = useState<{ name: string; activationFee: number; premiumFee: number }[]>([]);
-  const [customerGrowth, setCustomerGrowth] = useState<{ month: string; customers: number }[]>([]);
-  const [protectedValueOverTime, setProtectedValueOverTime] = useState<{ month: string; value: number }[]>([]);
+  // KPIs
+  const [totalCustomers, setTotalCustomers] = useState(0);
+  const [activatedPct, setActivatedPct] = useState(0);
+  const [registeredPct, setRegisteredPct] = useState(0);
+  const [profiledPct, setProfiledPct] = useState(0);
+
+  // Breakdowns
+  const [customersByStore, setCustomersByStore] = useState<{ name: string; count: number; value: number }[]>([]);
+  const [customersByCategory, setCustomersByCategory] = useState<{ name: string; count: number; value: number }[]>([]);
+  const [customersByType, setCustomersByType] = useState<{ name: string; count: number; value: number }[]>([]);
+  const [coversByStore, setCoversByStore] = useState<{ name: string; count: number; value: number }[]>([]);
+  const [coversByCategory, setCoversByCategory] = useState<{ name: string; count: number; value: number }[]>([]);
+  const [coversByType, setCoversByType] = useState<{ name: string; count: number; value: number }[]>([]);
+  const [claimsByStatus, setClaimsByStatus] = useState<{ name: string; value: number }[]>([]);
+  const [supportCount, setSupportCount] = useState(0);
 
   useEffect(() => {
-    supabase.from("brands").select("id, name, activation_fee, insurance_premium, aion_premium_fee").order("name")
+    supabase.from("brands").select("id, name").order("name")
       .then(({ data }) => setBrands((data as Brand[]) ?? []));
   }, []);
-
-  const toPct = (v: unknown): number => {
-    if (v == null) return 0;
-    if (typeof v === "number") return Number.isFinite(v) ? (v > 1 ? v / 100 : v) : 0;
-    const s = String(v).trim();
-    const n = parseFloat(s.replace("%", ""));
-    if (!Number.isFinite(n)) return 0;
-    return s.includes("%") || n > 1 ? n / 100 : n;
-  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const fromDate = getPeriodFromDate(period);
-      const brandIds = selectedBrandId === "all" ? brands.map((b) => b.id) : [selectedBrandId];
+      const brandFilter = selectedBrandId !== "all" ? selectedBrandId : null;
 
-      // Policies query
-      let polQ = supabase
-        .from("policies")
-        .select("id, brand_id, start_date, selling_price, cogs, recommended_retail_price, quantity, customer_id");
-      if (brandIds.length > 0) polQ = polQ.in("brand_id", brandIds);
-      if (fromDate) polQ = polQ.gte("start_date", fromDate);
-
-      // Claims query
-      let clmQ = supabase
-        .from("claims")
-        .select("id, type, status, created_at, policy_id");
-      if (fromDate) clmQ = clmQ.gte("created_at", fromDate);
-
-      // Customers query
+      // ── Fetch all data in parallel ──────────────────────────────────
       let custQ = supabase
         .from("profiles")
-        .select("id, created_at, brand_id")
+        .select("id, created_at, registered_at, email_confirmed_at, first_name, last_name, shop_id, brand_id, status")
         .eq("role", "customer");
-      if (selectedBrandId !== "all") custQ = custQ.eq("brand_id", selectedBrandId);
-      if (fromDate) custQ = custQ.gte("created_at", fromDate);
+      if (brandFilter) custQ = custQ.eq("brand_id", brandFilter);
 
-      const [{ data: policies = [] }, { data: claims = [] }, { data: customers = [] }] = await Promise.all([
-        polQ, clmQ, custQ,
-      ]);
+      let polQ = supabase
+        .from("policies")
+        .select("id, customer_id, shop_id, item_id, selling_price, quantity, brand_id, start_date, catalogues(category), shops(name)");
+      if (brandFilter) polQ = polQ.eq("brand_id", brandFilter);
+      if (fromDate) polQ = polQ.gte("start_date", fromDate);
 
-      const policyIdSet = new Set((policies as any[]).map((p) => p.id));
+      let clmQ = supabase.from("claims").select("id, status, policy_id");
+      if (fromDate) clmQ = clmQ.gte("created_at", fromDate);
 
-      // --- Covers over time ---
-      const coversByMonth = new Map<string, number>();
+      let supQ = supabase.from("support_messages").select("id", { count: "exact", head: true });
+      if (brandFilter) supQ = supQ.eq("brand_id", brandFilter);
+      if (fromDate) supQ = supQ.gte("created_at", fromDate);
+
+      // Shops lookup
+      let shopsQ = supabase.from("shops").select("id, name");
+      if (brandFilter) shopsQ = shopsQ.eq("brand_id", brandFilter);
+
+      const [
+        { data: customers = [] },
+        { data: policies = [] },
+        { data: claims = [] },
+        { count: supportMsgCount },
+        { data: shops = [] },
+      ] = await Promise.all([custQ, polQ, clmQ, supQ, shopsQ]);
+
+      // ── Customer KPIs ──────────────────────────────────────────────
+      const total = (customers as any[]).length;
+      setTotalCustomers(total);
+
+      if (total > 0) {
+        const activated = (customers as any[]).filter((c: any) => c.email_confirmed_at).length;
+        const registered = (customers as any[]).filter((c: any) => c.registered_at).length;
+        const profiled = (customers as any[]).filter((c: any) => c.first_name && c.last_name).length;
+        setActivatedPct(activated / total);
+        setRegisteredPct(registered / total);
+        setProfiledPct(profiled / total);
+      } else {
+        setActivatedPct(0);
+        setRegisteredPct(0);
+        setProfiledPct(0);
+      }
+
+      // ── Build lookups ──────────────────────────────────────────────
+      const shopMap = new Map<number, string>();
+      for (const s of shops as any[]) shopMap.set(s.id, s.name ?? `Store #${s.id}`);
+
+      const policyIdSet = new Set((policies as any[]).map((p: any) => p.id));
+      const customerCreatedMap = new Map<string, string>();
+      for (const c of customers as any[]) customerCreatedMap.set(c.id, c.created_at);
+
+      // Determine new vs returning threshold
+      const isNewCustomer = (customerId: string) => {
+        if (!fromDate) return true;
+        const created = customerCreatedMap.get(customerId);
+        return created ? created >= fromDate : false;
+      };
+
+      // ── Customers by Store ─────────────────────────────────────────
+      const custByStoreMap = new Map<string, Set<string>>();
+      const custValueByStoreMap = new Map<string, number>();
+      const custByCatMap = new Map<string, Set<string>>();
+      const custValueByCatMap = new Map<string, number>();
+      const newCustomerIds = new Set<string>();
+      const returningCustomerIds = new Set<string>();
+      let newCustValue = 0;
+      let returningCustValue = 0;
+
+      // Covers by store / category / type
+      const coverByStoreMap = new Map<string, { count: number; value: number }>();
+      const coverByCatMap = new Map<string, { count: number; value: number }>();
+      let newCovers = 0, newCoverValue = 0, retCovers = 0, retCoverValue = 0;
+
       for (const p of policies as any[]) {
-        if (!p.start_date) continue;
-        const key = toMonthKey(p.start_date);
-        coversByMonth.set(key, (coversByMonth.get(key) ?? 0) + 1);
-      }
-      const sortedMonths = Array.from(coversByMonth.keys()).sort();
-      setCoversOverTime(sortedMonths.map((m) => ({ month: monthLabel(m), covers: coversByMonth.get(m)! })));
-
-      // --- Claims over time (only for filtered brand) ---
-      const filteredClaims = (claims as any[]).filter((c) => policyIdSet.has(c.policy_id));
-      const claimsOpenByMonth = new Map<string, number>();
-      const claimsClosedByMonth = new Map<string, number>();
-      for (const c of filteredClaims) {
-        if (!c.created_at) continue;
-        const key = toMonthKey(c.created_at);
-        if (c.status === "open") claimsOpenByMonth.set(key, (claimsOpenByMonth.get(key) ?? 0) + 1);
-        else claimsClosedByMonth.set(key, (claimsClosedByMonth.get(key) ?? 0) + 1);
-      }
-      const allClaimMonths = Array.from(new Set([...claimsOpenByMonth.keys(), ...claimsClosedByMonth.keys()])).sort();
-      setClaimsOverTime(allClaimMonths.map((m) => ({
-        month: monthLabel(m),
-        open: claimsOpenByMonth.get(m) ?? 0,
-        closed: claimsClosedByMonth.get(m) ?? 0,
-      })));
-
-      // --- Claims by type ---
-      const typeMap = new Map<string, number>();
-      for (const c of filteredClaims) {
-        const t = c.type ? c.type.replace(/_/g, " ").replace(/\b\w/g, (ch: string) => ch.toUpperCase()) : "Unknown";
-        typeMap.set(t, (typeMap.get(t) ?? 0) + 1);
-      }
-      setClaimsByType(Array.from(typeMap.entries()).map(([name, value]) => ({ name, value })));
-
-      // --- Revenue by brand (top 8) ---
-      const GVT_FEE = 0.2225;
-      const brandMap = new Map<number, { name: string; activationFee: number; premiumFee: number }>();
-      const brandLookup = new Map(brands.map((b) => [b.id, b]));
-      for (const p of policies as any[]) {
-        const bid = Number(p.brand_id);
-        const b = brandLookup.get(bid);
-        if (!b) continue;
-        const qty = Number(p.quantity) || 1;
-        const cogs = (Number(p.cogs) || 0) * qty;
-        const rrp = (Number(p.recommended_retail_price) || 0) * qty;
-        const grossP = cogs * toPct(b.insurance_premium);
-        const netP = grossP * (1 - GVT_FEE);
-        const actFee = rrp * toPct(b.activation_fee);
-        const premFee = netP * toPct(b.aion_premium_fee);
-        const existing = brandMap.get(bid) ?? { name: b.name, activationFee: 0, premiumFee: 0 };
-        brandMap.set(bid, { name: existing.name, activationFee: existing.activationFee + actFee, premiumFee: existing.premiumFee + premFee });
-      }
-      const topBrands = Array.from(brandMap.values())
-        .sort((a, b) => (b.activationFee + b.premiumFee) - (a.activationFee + a.premiumFee))
-        .slice(0, 8);
-      setRevenueByBrand(topBrands);
-
-      // --- Customer growth over time (cumulative) ---
-      const custByMonth = new Map<string, number>();
-      for (const c of customers as any[]) {
-        if (!c.created_at) continue;
-        const key = toMonthKey(c.created_at);
-        custByMonth.set(key, (custByMonth.get(key) ?? 0) + 1);
-      }
-      const custMonths = Array.from(custByMonth.keys()).sort();
-      let cumulative = 0;
-      setCustomerGrowth(custMonths.map((m) => {
-        cumulative += custByMonth.get(m)!;
-        return { month: monthLabel(m), customers: cumulative };
-      }));
-
-      // --- Protected value over time ---
-      const valueByMonth = new Map<string, number>();
-      for (const p of policies as any[]) {
-        if (!p.start_date) continue;
-        const key = toMonthKey(p.start_date);
         const qty = Number(p.quantity) || 1;
         const sp = (Number(p.selling_price) || 0) * qty;
-        valueByMonth.set(key, (valueByMonth.get(key) ?? 0) + sp);
+        const storeName = p.shops?.name ?? shopMap.get(p.shop_id) ?? "Unknown Store";
+        const category = p.catalogues?.category ?? "Uncategorized";
+        const custId = p.customer_id as string;
+        const isNew = isNewCustomer(custId);
+
+        // Customers by store
+        if (custId) {
+          if (!custByStoreMap.has(storeName)) custByStoreMap.set(storeName, new Set());
+          custByStoreMap.get(storeName)!.add(custId);
+          custValueByStoreMap.set(storeName, (custValueByStoreMap.get(storeName) ?? 0) + sp);
+
+          if (!custByCatMap.has(category)) custByCatMap.set(category, new Set());
+          custByCatMap.get(category)!.add(custId);
+          custValueByCatMap.set(category, (custValueByCatMap.get(category) ?? 0) + sp);
+
+          if (isNew) { newCustomerIds.add(custId); newCustValue += sp; }
+          else { returningCustomerIds.add(custId); returningCustValue += sp; }
+        }
+
+        // Covers by store
+        const storeEntry = coverByStoreMap.get(storeName) ?? { count: 0, value: 0 };
+        coverByStoreMap.set(storeName, { count: storeEntry.count + 1, value: storeEntry.value + sp });
+
+        // Covers by category
+        const catEntry = coverByCatMap.get(category) ?? { count: 0, value: 0 };
+        coverByCatMap.set(category, { count: catEntry.count + 1, value: catEntry.value + sp });
+
+        // Covers by type
+        if (isNew) { newCovers++; newCoverValue += sp; }
+        else { retCovers++; retCoverValue += sp; }
       }
-      const valueMonths = Array.from(valueByMonth.keys()).sort();
-      setProtectedValueOverTime(valueMonths.map((m) => ({ month: monthLabel(m), value: Math.round(valueByMonth.get(m)!) })));
+
+      // Set customer breakdowns
+      setCustomersByStore(
+        Array.from(custByStoreMap.entries())
+          .map(([name, ids]) => ({ name, count: ids.size, value: custValueByStoreMap.get(name) ?? 0 }))
+          .sort((a, b) => b.count - a.count)
+      );
+      setCustomersByCategory(
+        Array.from(custByCatMap.entries())
+          .map(([name, ids]) => ({ name, count: ids.size, value: custValueByCatMap.get(name) ?? 0 }))
+          .sort((a, b) => b.count - a.count)
+      );
+      setCustomersByType([
+        { name: "New Customers", count: newCustomerIds.size, value: newCustValue },
+        { name: "Returning Customers", count: returningCustomerIds.size, value: returningCustValue },
+      ]);
+
+      // Set cover breakdowns
+      setCoversByStore(
+        Array.from(coverByStoreMap.entries())
+          .map(([name, { count, value }]) => ({ name, count, value }))
+          .sort((a, b) => b.count - a.count)
+      );
+      setCoversByCategory(
+        Array.from(coverByCatMap.entries())
+          .map(([name, { count, value }]) => ({ name, count, value }))
+          .sort((a, b) => b.count - a.count)
+      );
+      setCoversByType([
+        { name: "New Customers", count: newCovers, value: newCoverValue },
+        { name: "Returning Customers", count: retCovers, value: retCoverValue },
+      ]);
+
+      // ── Claims by Status ───────────────────────────────────────────
+      const filteredClaims = brandFilter
+        ? (claims as any[]).filter((c: any) => policyIdSet.has(c.policy_id))
+        : (claims as any[]);
+      const statusMap = new Map<string, number>();
+      for (const c of filteredClaims) {
+        const s = c.status ? c.status.charAt(0).toUpperCase() + c.status.slice(1) : "Unknown";
+        statusMap.set(s, (statusMap.get(s) ?? 0) + 1);
+      }
+      setClaimsByStatus(Array.from(statusMap.entries()).map(([name, value]) => ({ name, value })));
+
+      // ── Support ────────────────────────────────────────────────────
+      setSupportCount(supportMsgCount ?? 0);
 
     } finally {
       setLoading(false);
@@ -217,7 +304,7 @@ export default function AdminInsights() {
       <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
         <p className="font-semibold text-foreground mb-1">{label}</p>
         {payload.map((p: any, i: number) => (
-          <p key={i} style={{ color: p.color }}>{p.name}: {typeof p.value === "number" && p.value > 100 ? fmt(p.value) : p.value}</p>
+          <p key={i} style={{ color: p.color }}>{p.name}: {typeof p.value === "number" && p.value > 100 ? fmt(p.value) : fmtN(p.value)}</p>
         ))}
       </div>
     );
@@ -252,135 +339,110 @@ export default function AdminInsights() {
         </div>
       </div>
 
-      {/* Covers activated */}
+      {/* ── Customer KPIs ─────────────────────────────────────────── */}
       <div>
-        <SectionTitle>Covers & Growth</SectionTitle>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ChartCard title="Covers Activated per Month">
-            {loading ? <ChartSkeleton /> : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={coversOverTime} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} allowDecimals={false} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="covers" name="Covers" fill={CHART_COLORS[0]} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </ChartCard>
+        <SectionTitle>Customer Overview</SectionTitle>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {loading ? (
+            <>
+              <KpiSkeleton /><KpiSkeleton /><KpiSkeleton /><KpiSkeleton />
+            </>
+          ) : (
+            <>
+              <KpiCard label="Total Customers" value={fmtN(totalCustomers)} />
+              <KpiCard label="% Activated" value={fmtPct(activatedPct)} sub="Email confirmed" />
+              <KpiCard label="% Registered" value={fmtPct(registeredPct)} sub="Completed registration" />
+              <KpiCard label="% Profiled" value={fmtPct(profiledPct)} sub="Name filled in" />
+            </>
+          )}
+        </div>
+      </div>
 
-          <ChartCard title="Customer Growth (Cumulative)">
-            {loading ? <ChartSkeleton /> : (
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={customerGrowth} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="custGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={CHART_COLORS[0]} stopOpacity={0.3} />
-                      <stop offset="95%" stopColor={CHART_COLORS[0]} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} allowDecimals={false} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="customers" name="Customers" stroke={CHART_COLORS[0]} fill="url(#custGrad)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
+      {/* ── Customers by dimension ────────────────────────────────── */}
+      <div>
+        <SectionTitle>Number of Customers & Customer Value</SectionTitle>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <ChartCard title="By Store">
+            {loading ? <ChartSkeleton /> : <BreakdownTable data={customersByStore} valueLabel="Value" formatValue={fmt} />}
+          </ChartCard>
+          <ChartCard title="By Category">
+            {loading ? <ChartSkeleton /> : <BreakdownTable data={customersByCategory} valueLabel="Value" formatValue={fmt} />}
+          </ChartCard>
+          <ChartCard title="By New / Returning">
+            {loading ? <ChartSkeleton /> : <BreakdownTable data={customersByType} valueLabel="Value" formatValue={fmt} />}
           </ChartCard>
         </div>
       </div>
 
-      {/* Claims */}
+      {/* ── Covers by dimension ───────────────────────────────────── */}
       <div>
-        <SectionTitle>Claims</SectionTitle>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ChartCard title="Claims Opened vs Closed per Month">
-            {loading ? <ChartSkeleton /> : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={claimsOverTime} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} allowDecimals={false} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="open" name="Open" fill={CHART_COLORS[1]} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="closed" name="Closed" fill={CHART_COLORS[2]} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
+        <SectionTitle>Number of Covers & Cover Value</SectionTitle>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <ChartCard title="By Store">
+            {loading ? <ChartSkeleton /> : <BreakdownTable data={coversByStore} valueLabel="Value" formatValue={fmt} />}
           </ChartCard>
+          <ChartCard title="By Category">
+            {loading ? <ChartSkeleton /> : <BreakdownTable data={coversByCategory} valueLabel="Value" formatValue={fmt} />}
+          </ChartCard>
+          <ChartCard title="By New / Returning Customer">
+            {loading ? <ChartSkeleton /> : <BreakdownTable data={coversByType} valueLabel="Value" formatValue={fmt} />}
+          </ChartCard>
+        </div>
+      </div>
 
-          <ChartCard title="Claims by Type">
-            {loading ? <ChartSkeleton /> : claimsByType.length === 0 ? (
+      {/* ── Claims & Support ──────────────────────────────────────── */}
+      <div>
+        <SectionTitle>Claims & Support</SectionTitle>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ChartCard title="Claims by Status">
+            {loading ? <ChartSkeleton /> : claimsByStatus.length === 0 ? (
               <div className="h-56 flex items-center justify-center text-sm text-muted-foreground">No claims in this period</div>
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={claimsByType}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={85}
-                    paddingAngle={3}
-                    dataKey="value"
-                    nameKey="name"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {claimsByType.map((_, i) => (
-                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </ChartCard>
-        </div>
-      </div>
-
-      {/* Revenue */}
-      <div>
-        <SectionTitle>Revenue</SectionTitle>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ChartCard title="Revenue by Brand">
-            {loading ? <ChartSkeleton /> : revenueByBrand.length === 0 ? (
-              <div className="h-56 flex items-center justify-center text-sm text-muted-foreground">No data</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={revenueByBrand} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis type="number" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickFormatter={fmtShort} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} width={80} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="activationFee" name="Activation Fee" fill={CHART_COLORS[0]} stackId="rev" />
-                  <Bar dataKey="premiumFee" name="Premium Fee" fill={CHART_COLORS[1]} stackId="rev" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="flex items-center gap-6">
+                <ResponsiveContainer width="50%" height={220}>
+                  <PieChart>
+                    <Pie
+                      data={claimsByStatus}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={80}
+                      paddingAngle={3}
+                      dataKey="value"
+                      nameKey="name"
+                    >
+                      {claimsByStatus.map((_, i) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<CustomTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex-1 space-y-2">
+                  {claimsByStatus.map((entry, i) => (
+                    <div key={entry.name} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }} />
+                        <span className="text-sm text-foreground">{entry.name}</span>
+                      </div>
+                      <span className="text-sm font-semibold tabular-nums text-foreground">{fmtN(entry.value)}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between pt-2 border-t border-border">
+                    <span className="text-sm font-medium text-foreground">Total</span>
+                    <span className="text-sm font-bold tabular-nums text-foreground">{fmtN(claimsByStatus.reduce((a, b) => a + b.value, 0))}</span>
+                  </div>
+                </div>
+              </div>
             )}
           </ChartCard>
 
-          <ChartCard title="Protected Value Activated per Month">
+          <ChartCard title="Customer Support Requests">
             {loading ? <ChartSkeleton /> : (
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={protectedValueOverTime} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="valGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={CHART_COLORS[3]} stopOpacity={0.3} />
-                      <stop offset="95%" stopColor={CHART_COLORS[3]} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickFormatter={fmtShort} />
-                  <Tooltip content={<CustomTooltip />} formatter={(v: number) => fmt(v)} />
-                  <Area type="monotone" dataKey="value" name="Selling Price" stroke={CHART_COLORS[3]} fill="url(#valGrad)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
+              <div className="h-56 flex flex-col items-center justify-center">
+                <p className="text-5xl font-bold tabular-nums text-foreground">{fmtN(supportCount)}</p>
+                <p className="text-sm text-muted-foreground mt-2">Total requests in period</p>
+              </div>
             )}
           </ChartCard>
         </div>
