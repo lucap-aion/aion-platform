@@ -12,12 +12,12 @@ const statusColors: Record<string, string> = {
   live: "bg-emerald-50 text-emerald-700 border-emerald-200",
   active: "bg-emerald-50 text-emerald-700 border-emerald-200",
   cancelled: "bg-red-50 text-red-700 border-red-200",
-  expired: "bg-gray-100 text-gray-600 border-gray-200",
-  pending: "bg-amber-50 text-amber-700 border-amber-200",
+  expired: "bg-muted text-gray-600 border-gray-200",
+  pending: "bg-orange-50 text-orange-700 border-orange-200",
 };
 
 const claimStatusConfig = {
-  open: { icon: Clock, className: "bg-amber-50 text-amber-700" },
+  open: { icon: Clock, className: "bg-orange-50 text-orange-700" },
   closed: { icon: CheckCircle2, className: "bg-emerald-50 text-emerald-700" },
 } as const;
 
@@ -55,16 +55,16 @@ const CustomerCoverDetail = () => {
   if (isLoading) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
-        <div className="mb-8 h-8 w-32 rounded-lg bg-secondary/60 animate-pulse" />
+        <div className="mb-8 h-8 w-32 rounded-lg bg-muted animate-pulse" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 glass-card p-6 space-y-3">
-            <div className="h-5 w-40 rounded bg-secondary/60 animate-pulse" />
-            <div className="h-4 w-full rounded bg-secondary/40 animate-pulse" />
-            <div className="h-4 w-3/4 rounded bg-secondary/40 animate-pulse" />
+            <div className="h-5 w-40 rounded bg-muted animate-pulse" />
+            <div className="h-4 w-full rounded bg-muted animate-pulse" />
+            <div className="h-4 w-3/4 rounded bg-muted animate-pulse" />
           </div>
           <div className="glass-card p-6 space-y-3">
-            <div className="h-5 w-28 rounded bg-secondary/60 animate-pulse" />
-            <div className="h-4 w-full rounded bg-secondary/40 animate-pulse" />
+            <div className="h-5 w-28 rounded bg-muted animate-pulse" />
+            <div className="h-4 w-full rounded bg-muted animate-pulse" />
           </div>
         </div>
       </div>
@@ -89,7 +89,7 @@ const CustomerCoverDetail = () => {
   const shop = (cover as any).shops;
   const claims = (cover as any).claims || [];
   const status = (cover.status || "live").toLowerCase();
-  const statusCls = statusColors[status] || "bg-gray-100 text-gray-600 border-gray-200";
+  const statusCls = statusColors[status] || "bg-muted text-gray-600 border-gray-200";
   const productName = catalogue?.name || "Unknown Product";
   const brandName = brand?.name || "";
 
@@ -102,8 +102,8 @@ const CustomerCoverDetail = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             {catalogue?.picture && (
-              <div className="h-20 w-20 shrink-0 rounded-xl bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-2">
-                <img src={catalogue.picture} alt={productName} className="h-full w-full object-contain mix-blend-multiply" />
+              <div className="h-20 w-20 shrink-0 rounded-xl bg-white p-2">
+                <img src={catalogue.picture} alt={productName} className="h-full w-full object-contain" />
               </div>
             )}
             <div>
@@ -164,7 +164,7 @@ const CustomerCoverDetail = () => {
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
               <div className="glass-card overflow-hidden">
                 <div className="px-6 py-4 border-b border-border/50 flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  <AlertTriangle className="h-4 w-4 text-orange-500" />
                   <h2 className="text-base font-semibold text-foreground">Claims ({claims.length})</h2>
                 </div>
                 <div className="divide-y divide-border">
@@ -175,7 +175,7 @@ const CustomerCoverDetail = () => {
                       <Link
                         key={claim.id}
                         to={`${slugPrefix}/claims/${claim.id}/view`}
-                        className="flex items-center justify-between px-6 py-3.5 transition-colors hover:bg-secondary/30"
+                        className="flex items-center justify-between px-6 py-3.5 transition-colors hover:bg-muted"
                       >
                         <div>
                           <p className="text-sm font-medium text-foreground">

@@ -156,7 +156,7 @@ const AdminReports = () => {
               </div>
             )}
             <div className="flex justify-end pt-6 border-t border-border mt-4">
-              <button type="button" onClick={() => setViewing(null)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors">Close</button>
+              <button type="button" onClick={() => setViewing(null)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">Close</button>
             </div>
           </div>
         )}

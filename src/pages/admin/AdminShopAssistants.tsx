@@ -240,7 +240,7 @@ const AdminShopAssistants = () => {
         extraRowAction={(row) => (
           <button
             onClick={() => handleResendInvite(row)}
-            className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title="Resend invite email"
           >
             <Mail className="h-3.5 w-3.5" />
@@ -271,7 +271,7 @@ const AdminShopAssistants = () => {
                 <div className="flex items-center gap-2">
                   {r.brand_logo
                     ? <div className="h-6 w-6 rounded bg-white flex items-center justify-center shrink-0 border border-border/30"><img src={r.brand_logo} alt={r.brand_name} className="h-5 w-5 object-contain" /></div>
-                    : <div className="h-6 w-6 rounded bg-secondary shrink-0" />}
+                    : <div className="h-6 w-6 rounded bg-muted shrink-0" />}
                   <span className="text-sm text-foreground">{r.brand_name}</span>
                 </div>
               );
@@ -284,7 +284,7 @@ const AdminShopAssistants = () => {
               const r = row as unknown as Assistant;
               return r.is_master
                 ? <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 border-purple-200">Master</span>
-                : <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 border-gray-200">Read Only</span>;
+                : <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium bg-muted text-gray-600 border-gray-200">Read Only</span>;
             },
           },
           {
@@ -359,7 +359,7 @@ const AdminShopAssistants = () => {
           )}
           {ro ? (
             <div className="flex justify-between gap-2 pt-4 border-t border-border mt-4">
-              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors">Close</button>
+              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">Close</button>
               <button type="button" onClick={() => setMode("edit")} className="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">Edit</button>
             </div>
           ) : (

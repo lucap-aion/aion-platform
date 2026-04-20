@@ -187,7 +187,7 @@ const AppSidebar = () => {
                       <NavLink
                         to={link.to}
                         end
-                        className="gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:bg-secondary hover:text-foreground"
+                        className="gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
                         activeClassName="bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary"
                       >
                         <link.icon className="h-5 w-5 shrink-0" />
@@ -217,7 +217,7 @@ const AppSidebar = () => {
                         <NavLink
                           to={link.to}
                           end
-                          className="gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:bg-secondary hover:text-foreground"
+                          className="gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
                           activeClassName="bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary"
                         >
                           <link.icon className="h-5 w-5 shrink-0" />
@@ -234,7 +234,7 @@ const AppSidebar = () => {
 
         {/* Help Card - only when expanded */}
         {!collapsed && (
-          <div className="mx-3 mt-auto rounded-xl border border-border bg-secondary/50 p-4">
+          <div className="mx-3 mt-auto rounded-xl border border-border bg-muted p-4">
             <div className="flex items-center gap-2 mb-2">
               <HelpCircle className="h-4 w-4 text-primary" />
               <span className="text-sm font-semibold text-foreground">{t("help.title")}</span>
@@ -250,7 +250,7 @@ const AppSidebar = () => {
               {mode === "customer" && (
                 <button
                   onClick={() => setFaqOpen(true)}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
                 >
                   <BookOpen className="h-3.5 w-3.5" />
                   {t("help.faq")}
@@ -264,7 +264,7 @@ const AppSidebar = () => {
       <SidebarFooter className={collapsed ? "p-1.5" : "p-3"}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className={`flex w-full items-center rounded-lg hover:bg-secondary transition-colors cursor-pointer ${collapsed ? "justify-center p-2" : "gap-3 px-3 py-2.5"}`}>
+            <button className={`flex w-full items-center rounded-lg hover:bg-muted transition-colors cursor-pointer ${collapsed ? "justify-center p-2" : "gap-3 px-3 py-2.5"}`}>
               <div className={`flex shrink-0 items-center justify-center rounded-full bg-primary/10 overflow-hidden ${collapsed ? "h-8 w-8" : "h-10 w-10"}`}>
                 {avatar ? (
                   <img src={avatar} alt="Profile" className="h-full w-full object-cover" />
@@ -312,7 +312,7 @@ const AppSidebar = () => {
             placeholder={t("faq.search")}
             value={faqSearch}
             onChange={(e) => setFaqSearch(e.target.value)}
-            className="w-full rounded-lg border border-border bg-secondary/50 py-2.5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full rounded-lg border border-border bg-muted py-2.5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
         <Accordion type="single" collapsible className="w-full">
@@ -349,7 +349,7 @@ const AppSidebar = () => {
               type="text"
               maxLength={120}
               placeholder={t("support.subjectPlaceholder")}
-              className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               required
             />
           </div>
@@ -361,7 +361,7 @@ const AppSidebar = () => {
               onChange={(e) => setSupportMessage(e.target.value)}
               maxLength={1000}
               placeholder={t("support.messagePlaceholder")}
-              className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+              className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
               required
             />
           </div>

@@ -50,13 +50,13 @@ const KpiCard = ({ label, value, sub }: { label: string; value: string; sub?: st
 );
 
 const ChartSkeleton = () => (
-  <div className="h-56 w-full rounded-lg bg-secondary/60 animate-pulse" />
+  <div className="h-56 w-full rounded-lg bg-muted/60 animate-pulse" />
 );
 
 const KpiSkeleton = () => (
   <div className="rounded-xl border border-border bg-card p-4">
-    <div className="h-7 w-16 rounded-md bg-secondary animate-pulse" />
-    <div className="h-3 w-24 rounded bg-secondary/60 animate-pulse mt-2" />
+    <div className="h-7 w-16 rounded-md bg-muted animate-pulse" />
+    <div className="h-3 w-24 rounded bg-muted/60 animate-pulse mt-2" />
   </div>
 );
 

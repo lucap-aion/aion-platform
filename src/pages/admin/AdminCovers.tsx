@@ -277,7 +277,7 @@ const AdminCovers = () => {
                 <div className="flex items-center gap-2">
                   {r.brands_logo_small
                     ? <div className="h-6 w-6 rounded bg-white flex items-center justify-center shrink-0 border border-border/30"><img src={r.brands_logo_small} alt={r.brands_name} className="h-5 w-5 object-contain" /></div>
-                    : <div className="h-6 w-6 rounded bg-secondary shrink-0" />}
+                    : <div className="h-6 w-6 rounded bg-muted shrink-0" />}
                   <span className="text-sm text-foreground">{r.brands_name}</span>
                 </div>
               );
@@ -290,11 +290,11 @@ const AdminCovers = () => {
               return (
                 <div className="flex items-center gap-3">
                   {r.catalogues_picture ? (
-                    <div className="h-10 w-10 shrink-0 rounded-lg overflow-hidden bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-1">
-                      <img src={r.catalogues_picture} alt={r.catalogues_name} className="h-full w-full object-contain mix-blend-multiply" />
+                    <div className="h-10 w-10 shrink-0 rounded-lg overflow-hidden bg-white p-1">
+                      <img src={r.catalogues_picture} alt={r.catalogues_name} className="h-full w-full object-contain" />
                     </div>
                   ) : (
-                    <div className="h-10 w-10 shrink-0 rounded-lg bg-secondary" />
+                    <div className="h-10 w-10 shrink-0 rounded-lg bg-muted" />
                   )}
                   <div>
                     <p className="text-sm text-foreground">{r.catalogues_name}</p>
@@ -466,7 +466,7 @@ const AdminCovers = () => {
 
           {ro ? (
             <div className="flex justify-between gap-2 pt-4 border-t border-border mt-4">
-              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors">Close</button>
+              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">Close</button>
               <button type="button" onClick={() => setMode("edit")} className="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">Edit</button>
             </div>
           ) : (

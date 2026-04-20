@@ -187,7 +187,7 @@ const CustomerProfile = () => {
 
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
         <Tabs defaultValue="personal" className="space-y-6">
-          <TabsList className="bg-secondary/60 border border-border/50">
+          <TabsList className="bg-muted border border-border/50">
             <TabsTrigger value="personal" className="data-[state=active]:bg-card">Personal Details</TabsTrigger>
             <TabsTrigger value="security" className="data-[state=active]:bg-card">Security</TabsTrigger>
           </TabsList>
@@ -208,7 +208,7 @@ const CustomerProfile = () => {
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Email</Label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input className="pl-10 bg-secondary/50 cursor-not-allowed" value={profile.email} readOnly disabled />
+                    <Input className="pl-10 bg-muted cursor-not-allowed" value={profile.email} readOnly disabled />
                   </div>
                 </div>
                 <div className="space-y-2">

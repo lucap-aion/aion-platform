@@ -60,7 +60,7 @@ const AuthPanel = ({ logoUrl, bgUrl, name }: AuthPanelProps) => {
   const overlayClass =
     contrast === "dark"
       ? "bg-white/40"
-      : "bg-charcoal/70";
+      : "bg-black/70";
 
   return (
     <div className="hidden lg:block lg:w-1/2 relative">

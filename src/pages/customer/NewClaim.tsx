@@ -157,30 +157,30 @@ const NewClaim = () => {
   if (isLoadingPolicies) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-6 md:px-0 md:py-8 animate-fade-in">
-        <div className="h-4 w-32 rounded bg-secondary/40 animate-pulse mb-4" />
+        <div className="h-4 w-32 rounded bg-muted animate-pulse mb-4" />
         <div className="glass-card p-6 md:p-8 space-y-6">
-          <div className="h-7 w-36 rounded bg-secondary/60 animate-pulse" />
+          <div className="h-7 w-36 rounded bg-muted animate-pulse" />
           <div className="space-y-2">
-            <div className="h-3.5 w-28 rounded bg-secondary/40 animate-pulse" />
-            <div className="h-10 w-full rounded-lg bg-secondary/40 animate-pulse" />
+            <div className="h-3.5 w-28 rounded bg-muted animate-pulse" />
+            <div className="h-10 w-full rounded-lg bg-muted animate-pulse" />
           </div>
           <div className="space-y-2">
-            <div className="h-3.5 w-24 rounded bg-secondary/40 animate-pulse" />
-            <div className="h-10 w-full rounded-lg bg-secondary/40 animate-pulse" />
+            <div className="h-3.5 w-24 rounded bg-muted animate-pulse" />
+            <div className="h-10 w-full rounded-lg bg-muted animate-pulse" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <div className="h-3.5 w-20 rounded bg-secondary/40 animate-pulse" />
-              <div className="h-10 w-full rounded-lg bg-secondary/40 animate-pulse" />
+              <div className="h-3.5 w-20 rounded bg-muted animate-pulse" />
+              <div className="h-10 w-full rounded-lg bg-muted animate-pulse" />
             </div>
             <div className="space-y-2">
-              <div className="h-3.5 w-24 rounded bg-secondary/40 animate-pulse" />
-              <div className="h-10 w-full rounded-lg bg-secondary/40 animate-pulse" />
+              <div className="h-3.5 w-24 rounded bg-muted animate-pulse" />
+              <div className="h-10 w-full rounded-lg bg-muted animate-pulse" />
             </div>
           </div>
           <div className="space-y-2">
-            <div className="h-3.5 w-20 rounded bg-secondary/40 animate-pulse" />
-            <div className="h-24 w-full rounded-lg bg-secondary/40 animate-pulse" />
+            <div className="h-3.5 w-20 rounded bg-muted animate-pulse" />
+            <div className="h-24 w-full rounded-lg bg-muted animate-pulse" />
           </div>
         </div>
       </div>
@@ -212,8 +212,8 @@ const NewClaim = () => {
             searchPlaceholder="Search covers…"
           />
           {selectedPolicy && (
-            <div className="mt-2 rounded-lg bg-secondary/50 px-3 py-2 flex items-center gap-3">
-              <div className="h-10 w-10 shrink-0 rounded-lg bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] overflow-hidden">
+            <div className="mt-2 rounded-lg bg-muted px-3 py-2 flex items-center gap-3">
+              <div className="h-10 w-10 shrink-0 rounded-lg bg-white overflow-hidden">
                 <img src={getImage(selectedPolicy)} alt={getProduct(selectedPolicy)} className="h-full w-full object-contain mix-blend-multiply" />
               </div>
               <p className="text-xs text-muted-foreground">
@@ -339,7 +339,7 @@ const NewClaim = () => {
                   const isImage = file.type.startsWith("image/");
                   const previewUrl = isImage ? URL.createObjectURL(file) : null;
                   return (
-                    <div key={i} className="relative group h-20 w-20 rounded-lg border border-border overflow-hidden bg-secondary/40 flex items-center justify-center shrink-0">
+                    <div key={i} className="relative group h-20 w-20 rounded-lg border border-border overflow-hidden bg-muted flex items-center justify-center shrink-0">
                       {previewUrl
                         ? <img src={previewUrl} alt={file.name} className="h-full w-full object-cover" />
                         : <FileText className="h-8 w-8 text-muted-foreground" />}

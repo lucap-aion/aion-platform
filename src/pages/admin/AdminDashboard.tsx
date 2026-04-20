@@ -68,12 +68,12 @@ const emptyStats = (): Statistics => ({
 const MetricCardSkeleton = ({ icon: Icon, label }: { icon: typeof BarChart3; label: string }) => (
   <div className="rounded-xl border border-border bg-card p-4 h-full flex flex-col justify-between">
     <div className="flex items-center justify-between">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
         <Icon className="h-4 w-4 text-muted-foreground" />
       </div>
     </div>
     <div className="mt-3">
-      <div className="h-7 w-20 rounded-md bg-secondary animate-pulse" />
+      <div className="h-7 w-20 rounded-md bg-muted animate-pulse" />
       <p className="text-xs text-muted-foreground mt-1">{label}</p>
     </div>
   </div>
@@ -82,7 +82,7 @@ const MetricCardSkeleton = ({ icon: Icon, label }: { icon: typeof BarChart3; lab
 const FinRowSkeleton = ({ label }: { label: string }) => (
   <div className="flex items-center justify-between py-3 border-b border-border last:border-0">
     <p className="text-sm font-medium text-foreground">{label}</p>
-    <div className="h-4 w-20 rounded bg-secondary animate-pulse" />
+    <div className="h-4 w-20 rounded bg-muted animate-pulse" />
   </div>
 );
 
@@ -93,7 +93,7 @@ const MetricCard = ({ icon: Icon, label, value, sub, href, accent = false }: {
     <div className={`rounded-xl border p-4 h-full flex flex-col justify-between transition-all group
       ${accent ? "border-primary/30 bg-primary/5 hover:border-primary/50" : "border-border bg-card hover:border-primary/30 hover:shadow-sm"}`}>
       <div className="flex items-center justify-between">
-        <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${accent ? "bg-primary/15" : "bg-secondary"}`}>
+        <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${accent ? "bg-primary/15" : "bg-muted"}`}>
           <Icon className={`h-4 w-4 ${accent ? "text-primary" : "text-muted-foreground"}`} />
         </div>
         {href && <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/30 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />}
@@ -123,7 +123,7 @@ const RevenueBar = ({ activationFee, premiumFee, total }: { activationFee: numbe
   const pPct = total > 0 ? (premiumFee / total) * 100 : 50;
   return (
     <div className="mt-3 space-y-2">
-      <div className="flex h-2 w-full overflow-hidden rounded-full bg-secondary">
+      <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
         <div className="bg-primary transition-all" style={{ width: `${aPct}%` }} />
         <div className="bg-primary/40 transition-all" style={{ width: `${pPct}%` }} />
       </div>
@@ -449,7 +449,7 @@ export default function AdminDashboard() {
           </div>
 
           {loading ? (
-            <div className="mt-3 h-2 w-full rounded-full bg-secondary animate-pulse" />
+            <div className="mt-3 h-2 w-full rounded-full bg-muted animate-pulse" />
           ) : (
             <RevenueBar activationFee={stats.aionActivationFee} premiumFee={stats.aionPremiumFee} total={stats.aionRevenue} />
           )}
@@ -458,7 +458,7 @@ export default function AdminDashboard() {
             <div className="rounded-lg border border-primary/15 bg-background/50 p-3">
               <p className="text-xs text-muted-foreground">Activation Fee</p>
               {loading
-                ? <div className="h-5 w-20 rounded bg-secondary animate-pulse mt-1" />
+                ? <div className="h-5 w-20 rounded bg-muted animate-pulse mt-1" />
                 : <p className="text-base font-bold text-foreground mt-0.5 tabular-nums">{fmt(stats.aionActivationFee)}</p>
               }
               <p className="text-xs text-muted-foreground/70 mt-0.5">{loading ? "" : `${fmtPct(stats.effectiveActivationFeePct)} of RRP`}</p>
@@ -466,7 +466,7 @@ export default function AdminDashboard() {
             <div className="rounded-lg border border-primary/15 bg-background/50 p-3">
               <p className="text-xs text-muted-foreground">Premium Fee</p>
               {loading
-                ? <div className="h-5 w-20 rounded bg-secondary animate-pulse mt-1" />
+                ? <div className="h-5 w-20 rounded bg-muted animate-pulse mt-1" />
                 : <p className="text-base font-bold text-foreground mt-0.5 tabular-nums">{fmt(stats.aionPremiumFee)}</p>
               }
               <p className="text-xs text-muted-foreground/70 mt-0.5">{loading ? "" : `${fmtPct(stats.effectiveAionPremiumFeePct)} of Net Premium`}</p>

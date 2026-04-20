@@ -212,15 +212,15 @@ const STATUS_COLORS: Record<string, string> = {
   open:     "bg-blue-100 text-blue-700 border-blue-200",
   pending:  "bg-yellow-100 text-yellow-700 border-yellow-200",
   under_review: "bg-yellow-100 text-yellow-700 border-yellow-200",
-  closed:   "bg-gray-100 text-gray-600 border-gray-200",
+  closed:   "bg-muted text-gray-600 border-gray-200",
   cancelled:"bg-red-100 text-red-700 border-red-200",
   rejected: "bg-red-100 text-red-700 border-red-200",
-  inactive: "bg-gray-100 text-gray-600 border-gray-200",
+  inactive: "bg-muted text-gray-600 border-gray-200",
   blocked:  "bg-red-100 text-red-700 border-red-200",
 };
 
 const StatusBadge = ({ status }: { status: string }) => {
-  const cls = STATUS_COLORS[status?.toLowerCase()] ?? "bg-gray-100 text-gray-600 border-gray-200";
+  const cls = STATUS_COLORS[status?.toLowerCase()] ?? "bg-muted text-gray-600 border-gray-200";
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${cls}`}>
       {toTitleCase(status)}
@@ -557,7 +557,7 @@ function AdminTable<T extends Record<string, unknown>>({
               onClick={handleExport}
               disabled={exporting}
               title="Export to CSV (opens in Excel)"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
             >
               {exporting
                 ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -612,7 +612,7 @@ function AdminTable<T extends Record<string, unknown>>({
         {hasActiveFilters && (
           <button
             onClick={() => { filters?.forEach((f) => onFilterChange?.(f.key, "")); onPageChange(0); }}
-            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             <X className="h-3 w-3" /> Clear
           </button>
@@ -626,7 +626,7 @@ function AdminTable<T extends Record<string, unknown>>({
               "inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
               pickerOpen
                 ? "border-primary text-primary bg-primary/5"
-                : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary",
+                : "border-border text-muted-foreground hover:text-foreground hover:bg-muted",
             ].join(" ")}
           >
             <SlidersHorizontal className="h-4 w-4" />
@@ -670,7 +670,7 @@ function AdminTable<T extends Record<string, unknown>>({
                       onDragEnd={() => { pickerDragSrc.current = null; setPickerDragOver(null); }}
                       className={[
                         "flex items-center gap-1.5 px-3 py-1.5 transition-colors",
-                        isDragOver ? "bg-primary/10" : "hover:bg-secondary/50",
+                        isDragOver ? "bg-primary/10" : "hover:bg-muted/50",
                       ].join(" ")}
                     >
                       <GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground/30 cursor-grab active:cursor-grabbing" />
@@ -748,7 +748,7 @@ function AdminTable<T extends Record<string, unknown>>({
             </colgroup>
 
             <thead>
-              <tr className="bg-secondary/50 border-b border-border">
+              <tr className="bg-muted/50 border-b border-border">
                 {visibleColumns.map((col) => {
                   const isFrozen = frozenVisible.includes(col.key);
                   return (
@@ -810,7 +810,7 @@ function AdminTable<T extends Record<string, unknown>>({
                   <tr key={i} className="border-b border-border last:border-0">
                     {visibleColumns.map((col) => (
                       <td key={col.key} className="px-4 py-3">
-                        <div className="h-4 w-3/4 bg-secondary animate-pulse rounded" />
+                        <div className="h-4 w-3/4 bg-muted animate-pulse rounded" />
                       </td>
                     ))}
                     {hasRowActions && <td className="px-4 py-3" />}
@@ -829,7 +829,7 @@ function AdminTable<T extends Record<string, unknown>>({
                 data.map((row, i) => (
                   <tr
                     key={i}
-                    className="border-b border-border last:border-0 hover:bg-secondary/30 transition-colors group"
+                    className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors group"
                   >
                     {visibleColumns.map((col) => {
                       const isFrozen = frozenVisible.includes(col.key);
@@ -852,7 +852,7 @@ function AdminTable<T extends Record<string, unknown>>({
                           {onView && (
                             <button
                               onClick={() => onView(row)}
-                              className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                               title="View"
                             >
                               <Eye className="h-3.5 w-3.5" />
@@ -861,7 +861,7 @@ function AdminTable<T extends Record<string, unknown>>({
                           {onEdit && (
                             <button
                               onClick={() => onEdit(row)}
-                              className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                               title="Edit"
                             >
                               <Pencil className="h-3.5 w-3.5" />
@@ -892,11 +892,11 @@ function AdminTable<T extends Record<string, unknown>>({
             {total === 0 ? "No records" : `${from}–${to} of ${total.toLocaleString()}`}
           </p>
           <div className="flex items-center gap-1">
-            <button onClick={() => onPageChange(0)} disabled={page === 0} className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors">«</button>
-            <button onClick={() => onPageChange(page - 1)} disabled={page === 0} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Previous</button>
+            <button onClick={() => onPageChange(0)} disabled={page === 0} className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">«</button>
+            <button onClick={() => onPageChange(page - 1)} disabled={page === 0} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Previous</button>
             <span className="px-3 py-1.5 text-xs text-muted-foreground">{page + 1} / {Math.max(1, pageCount)}</span>
-            <button onClick={() => onPageChange(page + 1)} disabled={page >= pageCount - 1} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next</button>
-            <button onClick={() => onPageChange(pageCount - 1)} disabled={page >= pageCount - 1} className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors">»</button>
+            <button onClick={() => onPageChange(page + 1)} disabled={page >= pageCount - 1} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next</button>
+            <button onClick={() => onPageChange(pageCount - 1)} disabled={page >= pageCount - 1} className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">»</button>
           </div>
         </div>
       </div>

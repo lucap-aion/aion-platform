@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 
 const statusConfig = {
-  open: { color: "bg-amber-50 text-amber-700 border-amber-200", icon: Clock, label: "Open" },
+  open: { color: "bg-orange-50 text-orange-700 border-orange-200", icon: Clock, label: "Open" },
   closed: { color: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2, label: "Closed" },
 } as const;
 
@@ -132,22 +132,22 @@ const CustomerClaimDetail = () => {
   if (isLoading) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
-        <div className="mb-8 h-8 w-32 rounded-lg bg-secondary/60 animate-pulse" />
+        <div className="mb-8 h-8 w-32 rounded-lg bg-muted animate-pulse" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             {[1, 2].map((i) => (
               <div key={i} className="glass-card p-6 space-y-3">
-                <div className="h-5 w-40 rounded bg-secondary/60 animate-pulse" />
-                <div className="h-4 w-full rounded bg-secondary/40 animate-pulse" />
-                <div className="h-4 w-3/4 rounded bg-secondary/40 animate-pulse" />
+                <div className="h-5 w-40 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-full rounded bg-muted animate-pulse" />
+                <div className="h-4 w-3/4 rounded bg-muted animate-pulse" />
               </div>
             ))}
           </div>
           <div className="space-y-6">
             {[1, 2].map((i) => (
               <div key={i} className="glass-card p-6 space-y-3">
-                <div className="h-5 w-28 rounded bg-secondary/60 animate-pulse" />
-                <div className="h-4 w-full rounded bg-secondary/40 animate-pulse" />
+                <div className="h-5 w-28 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-full rounded bg-muted animate-pulse" />
               </div>
             ))}
           </div>
@@ -185,8 +185,8 @@ const CustomerClaimDetail = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             {policy?.catalogues?.picture && (
-              <div className="h-16 w-16 shrink-0 rounded-xl bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-2">
-                <img src={policy.catalogues.picture} alt={productName} className="h-full w-full object-contain mix-blend-multiply" />
+              <div className="h-16 w-16 shrink-0 rounded-xl bg-white p-2">
+                <img src={policy.catalogues.picture} alt={productName} className="h-full w-full object-contain" />
               </div>
             )}
             <div>
@@ -205,7 +205,7 @@ const CustomerClaimDetail = () => {
             <div className="flex items-center gap-2 self-start shrink-0">
               <button
                 onClick={openEdit}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 <Pencil className="h-3.5 w-3.5" /> Edit
               </button>
@@ -249,7 +249,7 @@ const CustomerClaimDetail = () => {
                         key={i}
                         onClick={() => setLightboxIndex(i)}
                         title={`${name} — click to expand`}
-                        className="group relative rounded-xl border border-border bg-secondary/30 overflow-hidden transition-all hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        className="group relative rounded-xl border border-border bg-muted overflow-hidden transition-all hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40"
                       >
                         {isImage ? (
                           <img src={file} alt={name} className="w-full h-48 object-cover transition-transform group-hover:scale-[1.02]" />
@@ -451,7 +451,7 @@ const CustomerClaimDetail = () => {
             <DialogDescription>Are you sure you want to delete this claim? This action cannot be undone.</DialogDescription>
           </DialogHeader>
           <div className="flex gap-3 mt-4">
-            <button onClick={() => setConfirmDelete(false)} className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-secondary">Cancel</button>
+            <button onClick={() => setConfirmDelete(false)} className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleDelete} className="flex-1 rounded-lg bg-destructive py-2.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90">Delete</button>
           </div>
         </DialogContent>
@@ -468,19 +468,19 @@ const CustomerClaimDetail = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-medium text-foreground mb-1.5 block">Claim Type</label>
-                <select value={editForm.type} onChange={(e) => setEditForm({ ...editForm, type: e.target.value })} className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" required>
+                <select value={editForm.type} onChange={(e) => setEditForm({ ...editForm, type: e.target.value })} className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" required>
                   <option value="">Select type</option>
                   {CLAIM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
               <div>
                 <label className="text-xs font-medium text-foreground mb-1.5 block">Incident Date</label>
-                <input type="date" value={editForm.incidentDate} max={new Date().toISOString().split("T")[0]} onChange={(e) => setEditForm({ ...editForm, incidentDate: e.target.value })} className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" required />
+                <input type="date" value={editForm.incidentDate} max={new Date().toISOString().split("T")[0]} onChange={(e) => setEditForm({ ...editForm, incidentDate: e.target.value })} className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" required />
               </div>
             </div>
             <div>
               <label className="text-xs font-medium text-foreground mb-1.5 block">Incident City</label>
-              <input value={editForm.incidentCity} onChange={(e) => setEditForm({ ...editForm, incidentCity: e.target.value })} className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" required />
+              <input value={editForm.incidentCity} onChange={(e) => setEditForm({ ...editForm, incidentCity: e.target.value })} className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" required />
             </div>
             <div>
               <label className="text-xs font-medium text-foreground mb-1.5 block">Country</label>
@@ -493,10 +493,10 @@ const CustomerClaimDetail = () => {
             </div>
             <div>
               <label className="text-xs font-medium text-foreground mb-1.5 block">Description</label>
-              <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={3} className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" required />
+              <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={3} className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" required />
             </div>
             <div className="flex gap-3 pt-2">
-              <button type="button" onClick={() => setEditOpen(false)} className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-secondary">Cancel</button>
+              <button type="button" onClick={() => setEditOpen(false)} className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-muted">Cancel</button>
               <button type="submit" className="flex-1 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">Save Changes</button>
             </div>
           </form>

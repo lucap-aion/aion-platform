@@ -18,8 +18,8 @@ const PortalSelector = () => {
     return (
       <div className="h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <div className="h-12 w-32 rounded-lg bg-secondary/60 animate-pulse" />
-          <div className="h-4 w-48 rounded bg-secondary/40 animate-pulse" />
+          <div className="h-12 w-32 rounded-lg bg-muted/60 animate-pulse" />
+          <div className="h-4 w-48 rounded bg-muted/40 animate-pulse" />
         </div>
       </div>
     );
@@ -39,12 +39,12 @@ const PortalSelector = () => {
       {/* Left - Tenant branded image */}
       <div className="hidden lg:block lg:w-1/2 relative">
         <img src={tenant.authBackgroundUrl} alt={tenant.name} className="h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-gradient-to-r from-charcoal/60 to-charcoal/30" />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/60 to-black/30" />
         <div className="absolute top-10 left-10">
           <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-10 object-contain" />
         </div>
         <div className="absolute bottom-16 left-16">
-          <p className="text-cream-light/70 text-lg max-w-md">{tenant.tagline}</p>
+          <p className="text-white/70 text-lg max-w-md">{tenant.tagline}</p>
         </div>
       </div>
 

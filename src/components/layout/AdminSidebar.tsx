@@ -84,7 +84,7 @@ const AdminSidebar = () => {
                       <NavLink
                         to={link.path}
                         end
-                        className="gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:bg-secondary hover:text-foreground"
+                        className="gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
                         activeClassName="bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary"
                       >
                         <link.icon className="h-5 w-5 shrink-0" />
@@ -102,7 +102,7 @@ const AdminSidebar = () => {
       <SidebarFooter className={collapsed ? "p-1.5" : "p-3"}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className={`flex w-full items-center rounded-lg hover:bg-secondary transition-colors cursor-pointer ${collapsed ? "justify-center p-2" : "gap-3 px-3 py-2.5"}`}>
+            <button className={`flex w-full items-center rounded-lg hover:bg-muted transition-colors cursor-pointer ${collapsed ? "justify-center p-2" : "gap-3 px-3 py-2.5"}`}>
               <div className={`flex shrink-0 items-center justify-center rounded-full overflow-hidden ${collapsed ? "h-8 w-8" : "h-10 w-10"}`}>
                 {avatarUrl ? (
                   <img src={avatarUrl} alt={profileName} className="h-full w-full object-cover" />

@@ -40,7 +40,7 @@ type ClaimRow = {
 };
 
 const statusConfig = {
-  open: { label: "Open", icon: Clock, className: "bg-amber-50 text-amber-700 border-amber-200" },
+  open: { label: "Open", icon: Clock, className: "bg-orange-50 text-orange-700 border-orange-200" },
   closed: { label: "Closed", icon: CheckCircle2, className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
 } as const;
 
@@ -190,19 +190,19 @@ const CustomerClaims = () => {
     return (
       <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
         <div className="mb-6 md:mb-8">
-          <div className="h-8 w-32 bg-secondary rounded-lg animate-pulse mb-2" />
-          <div className="h-4 w-56 bg-secondary rounded animate-pulse" />
+          <div className="h-8 w-32 bg-muted rounded-lg animate-pulse mb-2" />
+          <div className="h-4 w-56 bg-muted rounded animate-pulse" />
         </div>
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
             <div key={i} className="glass-card p-5 md:p-6">
               <div className="flex gap-4 md:gap-6">
-                <div className="h-16 w-16 md:h-20 md:w-20 shrink-0 rounded-xl bg-secondary animate-pulse" />
+                <div className="h-16 w-16 md:h-20 md:w-20 shrink-0 rounded-xl bg-muted animate-pulse" />
                 <div className="flex-1 space-y-2">
-                  <div className="h-4 w-48 bg-secondary rounded animate-pulse" />
-                  <div className="h-3 w-32 bg-secondary rounded animate-pulse" />
-                  <div className="h-3 w-full max-w-sm bg-secondary rounded animate-pulse" />
-                  <div className="h-3 w-40 bg-secondary rounded animate-pulse" />
+                  <div className="h-4 w-48 bg-muted rounded animate-pulse" />
+                  <div className="h-3 w-32 bg-muted rounded animate-pulse" />
+                  <div className="h-3 w-full max-w-sm bg-muted rounded animate-pulse" />
+                  <div className="h-3 w-40 bg-muted rounded animate-pulse" />
                 </div>
               </div>
             </div>
@@ -273,8 +273,8 @@ const CustomerClaims = () => {
                   className="glass-card p-5 md:p-6 cursor-pointer transition-shadow hover:shadow-md"
                 >
                   <div className="flex gap-4 md:gap-6">
-                    <div className="h-16 w-16 md:h-20 md:w-20 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-2">
-                      <img src={getImage(claim)} alt={getProduct(claim)} className="h-full w-full object-contain mix-blend-multiply" />
+                    <div className="h-16 w-16 md:h-20 md:w-20 shrink-0 overflow-hidden rounded-xl bg-white p-2">
+                      <img src={getImage(claim)} alt={getProduct(claim)} className="h-full w-full object-contain" />
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -295,7 +295,7 @@ const CustomerClaims = () => {
                           <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.preventDefault()}>
                             <button
                               onClick={(e) => { e.preventDefault(); handleEditOpen(claim); }}
-                              className="rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                              className="rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                               title="Edit"
                             >
                               <Pencil className="h-3.5 w-3.5" />
@@ -332,7 +332,7 @@ const CustomerClaims = () => {
                             const isImage = ["jpg","jpeg","png","gif","webp","avif","svg"].includes(ext);
                             return (
                               <a key={idx} href={url} target="_blank" rel="noopener noreferrer"
-                                className="h-10 w-10 shrink-0 rounded-lg border border-border overflow-hidden bg-secondary/40 flex items-center justify-center hover:border-primary/40 transition-colors"
+                                className="h-10 w-10 shrink-0 rounded-lg border border-border overflow-hidden bg-muted flex items-center justify-center hover:border-primary/40 transition-colors"
                               >
                                 {isImage
                                   ? <img src={url} alt="" className="h-full w-full object-cover" />
@@ -365,8 +365,8 @@ const CustomerClaims = () => {
                   transition={{ delay: i * 0.08 }}
                   className="glass-card overflow-hidden flex flex-col cursor-pointer transition-shadow hover:shadow-md"
                 >
-                  <div className="flex items-center justify-center bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-6">
-                    <img src={getImage(claim)} alt={getProduct(claim)} className="h-28 w-28 object-contain mix-blend-multiply" />
+                  <div className="flex items-center justify-center bg-white p-6">
+                    <img src={getImage(claim)} alt={getProduct(claim)} className="h-28 w-28 object-contain" />
                   </div>
 
                   <div className="p-4 flex-1 flex flex-col">
@@ -404,7 +404,7 @@ const CustomerClaims = () => {
           <div className="flex gap-3 mt-4">
             <button
               onClick={() => setDeleteId(null)}
-              className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-secondary"
+              className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-muted"
             >
               Cancel
             </button>
@@ -439,7 +439,7 @@ const CustomerClaims = () => {
                 <select
                   value={editForm.type}
                   onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
-                  className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                   required
                 >
                   <option value="">Select type</option>
@@ -453,7 +453,7 @@ const CustomerClaims = () => {
                   value={editForm.incidentDate}
                   max={new Date().toISOString().split("T")[0]}
                   onChange={(e) => setEditForm({ ...editForm, incidentDate: e.target.value })}
-                  className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                   required
                 />
               </div>
@@ -463,7 +463,7 @@ const CustomerClaims = () => {
               <input
                 value={editForm.incidentCity}
                 onChange={(e) => setEditForm({ ...editForm, incidentCity: e.target.value })}
-                className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 required
               />
             </div>
@@ -483,7 +483,7 @@ const CustomerClaims = () => {
                 rows={4}
                 value={editForm.description}
                 onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
                 required
               />
             </div>
@@ -494,7 +494,7 @@ const CustomerClaims = () => {
                   const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
                   const isImage = ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"].includes(ext);
                   return (
-                    <div key={`existing-${i}`} className="relative group h-20 w-20 rounded-lg border border-border overflow-hidden bg-secondary/40 flex items-center justify-center shrink-0">
+                    <div key={`existing-${i}`} className="relative group h-20 w-20 rounded-lg border border-border overflow-hidden bg-muted flex items-center justify-center shrink-0">
                       {isImage
                         ? <img src={url} alt={`file-${i}`} className="h-full w-full object-cover" />
                         : <FileText className="h-8 w-8 text-muted-foreground" />}
@@ -554,7 +554,7 @@ const CustomerClaims = () => {
               <button
                 type="button"
                 onClick={() => setEditClaim(null)}
-                className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-secondary"
+                className="flex-1 rounded-lg border border-border py-2.5 text-sm font-medium text-foreground hover:bg-muted"
               >
                 Cancel
               </button>

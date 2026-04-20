@@ -431,7 +431,7 @@ const BrandCovers = () => {
                 className="glass-card flex items-center gap-4 p-4 transition-shadow hover:shadow-md cursor-pointer"
                 onClick={() => navigate(`${slugPrefix}/covers/${cover.id}`)}
               >
-                <div className="h-14 w-14 shrink-0 rounded-xl bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-1.5">
+                <div className="h-14 w-14 shrink-0 rounded-xl bg-white p-1.5">
                   <img
                     src={cover.catalogues?.picture || "/placeholder.svg"}
                     alt={cover.catalogues?.name || ""}
@@ -507,7 +507,7 @@ const BrandCovers = () => {
                   {canWrite && (
                     <button
                       onClick={() => openEdit(cover)}
-                      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                       title="Edit"
                     >
                       <Pencil className="h-4 w-4" />
@@ -538,7 +538,7 @@ const BrandCovers = () => {
               <button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -546,7 +546,7 @@ const BrandCovers = () => {
               <button
                 onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={page >= totalPages - 1}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -579,7 +579,7 @@ const BrandCovers = () => {
               </div>
               <button
                 onClick={() => setModalOpen(false)}
-                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -809,7 +809,7 @@ const BrandCovers = () => {
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-border/50">
               <button
                 onClick={() => setModalOpen(false)}
-                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 Cancel
               </button>
@@ -850,7 +850,7 @@ const BrandCovers = () => {
             <div className="flex justify-end gap-3 px-6 py-4">
               <button
                 onClick={() => setConfirmDeleteId(null)}
-                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 Cancel
               </button>

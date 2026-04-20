@@ -113,21 +113,21 @@ const CustomerCovers = () => {
     return (
       <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
         <div className="mb-6 md:mb-8">
-          <div className="h-8 w-36 bg-secondary rounded-lg animate-pulse mb-2" />
-          <div className="h-4 w-64 bg-secondary rounded animate-pulse" />
+          <div className="h-8 w-36 bg-muted rounded-lg animate-pulse mb-2" />
+          <div className="h-4 w-64 bg-muted rounded animate-pulse" />
         </div>
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
             <div key={i} className="glass-card p-4 md:p-5">
               <div className="flex items-center gap-4 md:gap-6">
-                <div className="h-16 w-16 md:h-20 md:w-20 shrink-0 rounded-xl bg-secondary animate-pulse" />
+                <div className="h-16 w-16 md:h-20 md:w-20 shrink-0 rounded-xl bg-muted animate-pulse" />
                 <div className="flex-1 space-y-2">
-                  <div className="h-4 w-40 bg-secondary rounded animate-pulse" />
-                  <div className="h-3 w-24 bg-secondary rounded animate-pulse" />
+                  <div className="h-4 w-40 bg-muted rounded animate-pulse" />
+                  <div className="h-3 w-24 bg-muted rounded animate-pulse" />
                 </div>
                 <div className="hidden md:flex gap-3">
-                  <div className="h-8 w-24 bg-secondary rounded-lg animate-pulse" />
-                  <div className="h-8 w-20 bg-secondary rounded-lg animate-pulse" />
+                  <div className="h-8 w-24 bg-muted rounded-lg animate-pulse" />
+                  <div className="h-8 w-20 bg-muted rounded-lg animate-pulse" />
                 </div>
               </div>
             </div>
@@ -188,8 +188,8 @@ const CustomerCovers = () => {
           {displayedPolicies.map((cover, i) => (
             <motion.div key={cover.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }} className="glass-card p-4 md:p-5 transition-shadow hover:shadow-md cursor-pointer" onClick={() => navigate(`${slugPrefix}/covers/${cover.id}/view`)}>
               <div className="flex items-center gap-4 md:gap-6">
-                <div className="h-16 w-16 md:h-20 md:w-20 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-2">
-                  <img src={getImage(cover)} alt={getProductName(cover)} className="h-full w-full object-contain mix-blend-multiply" />
+                <div className="h-16 w-16 md:h-20 md:w-20 shrink-0 overflow-hidden rounded-xl bg-white p-2">
+                  <img src={getImage(cover)} alt={getProductName(cover)} className="h-full w-full object-contain " />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-muted-foreground">#{cover.id || '-'}</p>
@@ -214,16 +214,16 @@ const CustomerCovers = () => {
                 </div>
                 <div className="hidden sm:flex items-center gap-2 md:gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
                   {getOpenClaim(cover) ? (
-                    <Link to={`${slugPrefix}/claims?edit=${getOpenClaim(cover)?.id}`} className="rounded-lg bg-amber-600 px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-white transition-colors hover:bg-amber-700">Manage Claim</Link>
+                    <Link to={`${slugPrefix}/claims?edit=${getOpenClaim(cover)?.id}`} className="rounded-lg bg-primary px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">Manage Claim</Link>
                   ) : (
                     <Link to={`${slugPrefix}/claims/new?cover=${cover.id}`} className="rounded-lg bg-primary px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">Open Claim</Link>
                   )}
-                  <button onClick={() => handleTransfer(cover.id)} disabled={hasClaim(cover)} className="rounded-lg border border-border px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed">Transfer</button>
+                  <button onClick={() => handleTransfer(cover.id)} disabled={hasClaim(cover)} className="rounded-lg border border-border px-3 md:px-5 py-2 md:py-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed">Transfer</button>
                 </div>
               </div>
               <div className="flex sm:hidden gap-2 mt-3 pt-3 border-t border-border" onClick={(e) => e.stopPropagation()}>
                 {getOpenClaim(cover) ? (
-                  <Link to={`${slugPrefix}/claims?edit=${getOpenClaim(cover)?.id}`} className="flex-1 text-center rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white">Manage Claim</Link>
+                  <Link to={`${slugPrefix}/claims?edit=${getOpenClaim(cover)?.id}`} className="flex-1 text-center rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground">Manage Claim</Link>
                 ) : (
                   <Link to={`${slugPrefix}/claims/new?cover=${cover.id}`} className="flex-1 text-center rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground">Open Claim</Link>
                 )}
@@ -236,8 +236,8 @@ const CustomerCovers = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {displayedPolicies.map((cover, i) => (
             <motion.div key={cover.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }} className="glass-card overflow-hidden transition-shadow hover:shadow-md flex flex-col cursor-pointer" onClick={() => navigate(`${slugPrefix}/covers/${cover.id}/view`)}>
-              <div className="flex items-center justify-center bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-6">
-                <img src={getImage(cover)} alt={getProductName(cover)} className="h-32 w-32 object-contain mix-blend-multiply" />
+              <div className="flex items-center justify-center bg-white p-6">
+                <img src={getImage(cover)} alt={getProductName(cover)} className="h-32 w-32 object-contain " />
               </div>
               <div className="p-4 flex-1 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
@@ -251,11 +251,11 @@ const CustomerCovers = () => {
                 </div>
                 <div className="flex gap-2 mt-auto" onClick={(e) => e.stopPropagation()}>
                   {getOpenClaim(cover) ? (
-                    <Link to={`${slugPrefix}/claims?edit=${getOpenClaim(cover)?.id}`} className="flex-1 text-center rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white hover:bg-amber-700">Manage Claim</Link>
+                    <Link to={`${slugPrefix}/claims?edit=${getOpenClaim(cover)?.id}`} className="flex-1 text-center rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">Manage Claim</Link>
                   ) : (
                     <Link to={`${slugPrefix}/claims/new?cover=${cover.id}`} className="flex-1 text-center rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">Open Claim</Link>
                   )}
-                  <button onClick={() => handleTransfer(cover.id)} disabled={hasClaim(cover)} className="flex-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed">Transfer</button>
+                  <button onClick={() => handleTransfer(cover.id)} disabled={hasClaim(cover)} className="flex-1 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed">Transfer</button>
                 </div>
               </div>
             </motion.div>
@@ -275,7 +275,7 @@ const CustomerCovers = () => {
           <form onSubmit={handleTransferSubmit} className="space-y-4 mt-2">
             <div>
               <label className="text-xs font-medium text-foreground mb-1.5 block">Recipient Email</label>
-              <input type="email" placeholder="recipient@email.com" value={transferEmail} onChange={(e) => setTransferEmail(e.target.value)} className="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" required />
+              <input type="email" placeholder="recipient@email.com" value={transferEmail} onChange={(e) => setTransferEmail(e.target.value)} className="w-full rounded-lg border border-border bg-muted px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" required />
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" onClick={() => setTransferOpen(false)} className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Cancel</button>

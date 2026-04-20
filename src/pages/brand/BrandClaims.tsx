@@ -18,7 +18,7 @@ const COUNTRIES = [
 ];
 
 const statusMap = {
-  open: { label: "Open", color: "bg-amber-50 text-amber-700" },
+  open: { label: "Open", color: "bg-orange-50 text-orange-700" },
   closed: { label: "Closed", color: "bg-emerald-50 text-emerald-700" },
 } as const;
 
@@ -314,8 +314,8 @@ const BrandClaims = () => {
       <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
         <div className="mb-8 flex items-center justify-between">
           <div className="space-y-2">
-            <div className="h-8 w-32 rounded-lg bg-secondary/60 animate-pulse" />
-            <div className="h-4 w-52 rounded bg-secondary/40 animate-pulse" />
+            <div className="h-8 w-32 rounded-lg bg-muted animate-pulse" />
+            <div className="h-4 w-52 rounded bg-muted animate-pulse" />
           </div>
         </div>
         <div className="glass-card overflow-hidden">
@@ -325,7 +325,7 @@ const BrandClaims = () => {
                 <tr className="border-b border-border">
                   {["ID", "Customer", "Product", "Type", "Date", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-6 py-4 text-left">
-                      <div className="h-3 w-16 rounded bg-secondary/60 animate-pulse" />
+                      <div className="h-3 w-16 rounded bg-muted animate-pulse" />
                     </th>
                   ))}
                 </tr>
@@ -333,19 +333,19 @@ const BrandClaims = () => {
               <tbody className="divide-y divide-border">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i}>
-                    <td className="px-6 py-4"><div className="h-3.5 w-8 rounded bg-secondary/40 animate-pulse" /></td>
+                    <td className="px-6 py-4"><div className="h-3.5 w-8 rounded bg-muted animate-pulse" /></td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2.5">
-                        <div className="h-9 w-9 rounded-full bg-secondary/60 animate-pulse shrink-0" />
+                        <div className="h-9 w-9 rounded-full bg-muted animate-pulse shrink-0" />
                         <div className="space-y-1.5">
-                          <div className="h-3.5 w-28 rounded bg-secondary/60 animate-pulse" />
-                          <div className="h-3 w-36 rounded bg-secondary/40 animate-pulse" />
+                          <div className="h-3.5 w-28 rounded bg-muted animate-pulse" />
+                          <div className="h-3 w-36 rounded bg-muted animate-pulse" />
                         </div>
                       </div>
                     </td>
                     {[1, 2, 3, 4, 5].map((j) => (
                       <td key={j} className="px-6 py-4">
-                        <div className="h-3.5 w-20 rounded bg-secondary/40 animate-pulse" />
+                        <div className="h-3.5 w-20 rounded bg-muted animate-pulse" />
                       </td>
                     ))}
                   </tr>
@@ -456,7 +456,7 @@ const BrandClaims = () => {
                   return (
                     <tr
                       key={claim.id}
-                      className="transition-colors hover:bg-secondary/30 cursor-pointer"
+                      className="transition-colors hover:bg-muted cursor-pointer"
                       onClick={() => navigate(`${slugPrefix}/claims/${claim.id}`)}
                     >
                       <td className="px-6 py-4 text-sm font-medium text-foreground">
@@ -486,8 +486,8 @@ const BrandClaims = () => {
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2.5">
                           {claim.policies?.catalogues?.picture
-                            ? <img src={claim.policies.catalogues.picture} alt={claim.policies?.catalogues?.name || ""} className="h-9 w-9 rounded-lg object-contain bg-secondary/50 shrink-0" />
-                            : <div className="h-9 w-9 rounded-lg bg-secondary/50 shrink-0" />}
+                            ? <img src={claim.policies.catalogues.picture} alt={claim.policies?.catalogues?.name || ""} className="h-9 w-9 rounded-lg object-contain bg-muted shrink-0" />
+                            : <div className="h-9 w-9 rounded-lg bg-muted shrink-0" />}
                           <span className="text-sm text-foreground whitespace-nowrap">{claim.policies?.catalogues?.name || "—"}</span>
                         </div>
                       </td>
@@ -507,7 +507,7 @@ const BrandClaims = () => {
                           {canWrite && (
                             <button
                               onClick={() => openEdit(claim)}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                               title="Edit claim"
                             >
                               <Pencil className="h-4 w-4" />
@@ -516,7 +516,7 @@ const BrandClaims = () => {
                           {canWrite && key === "open" && (
                             <button
                               onClick={() => handleClose(claim.id)}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                               title="Close claim"
                             >
                               <XCircle className="h-4 w-4" />
@@ -551,7 +551,7 @@ const BrandClaims = () => {
               <button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -561,7 +561,7 @@ const BrandClaims = () => {
               <button
                 onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={page >= totalPages - 1}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -593,7 +593,7 @@ const BrandClaims = () => {
               </div>
               <button
                 onClick={() => setModalOpen(false)}
-                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -714,7 +714,7 @@ const BrandClaims = () => {
                             href={url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="h-16 w-16 shrink-0 rounded-lg border border-border overflow-hidden bg-secondary/40 flex items-center justify-center hover:border-primary/40 transition-colors"
+                            className="h-16 w-16 shrink-0 rounded-lg border border-border overflow-hidden bg-muted flex items-center justify-center hover:border-primary/40 transition-colors"
                           >
                             {isImage
                               ? <img src={url} alt="" className="h-full w-full object-cover" />
@@ -813,7 +813,7 @@ const BrandClaims = () => {
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-border/50">
               <button
                 onClick={() => setModalOpen(false)}
-                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 Cancel
               </button>
@@ -854,7 +854,7 @@ const BrandClaims = () => {
             <div className="flex justify-end gap-3 px-6 py-4">
               <button
                 onClick={() => setConfirmDeleteId(null)}
-                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 Cancel
               </button>

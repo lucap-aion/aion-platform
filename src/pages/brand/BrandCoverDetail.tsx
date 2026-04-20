@@ -11,8 +11,8 @@ const statusColors: Record<string, string> = {
   live: "bg-emerald-50 text-emerald-700 border-emerald-200",
   active: "bg-emerald-50 text-emerald-700 border-emerald-200",
   cancelled: "bg-red-50 text-red-700 border-red-200",
-  expired: "bg-gray-100 text-gray-600 border-gray-200",
-  pending: "bg-amber-50 text-amber-700 border-amber-200",
+  expired: "bg-muted text-gray-600 border-gray-200",
+  pending: "bg-orange-50 text-orange-700 border-orange-200",
   blocked: "bg-red-50 text-red-700 border-red-200",
 };
 
@@ -62,22 +62,22 @@ const BrandCoverDetail = () => {
   if (isLoading) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
-        <div className="mb-8 h-8 w-32 rounded-lg bg-secondary/60 animate-pulse" />
+        <div className="mb-8 h-8 w-32 rounded-lg bg-muted animate-pulse" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             {[1, 2].map((i) => (
               <div key={i} className="glass-card p-6 space-y-3">
-                <div className="h-5 w-40 rounded bg-secondary/60 animate-pulse" />
-                <div className="h-4 w-full rounded bg-secondary/40 animate-pulse" />
-                <div className="h-4 w-3/4 rounded bg-secondary/40 animate-pulse" />
+                <div className="h-5 w-40 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-full rounded bg-muted animate-pulse" />
+                <div className="h-4 w-3/4 rounded bg-muted animate-pulse" />
               </div>
             ))}
           </div>
           <div className="space-y-6">
             {[1, 2].map((i) => (
               <div key={i} className="glass-card p-6 space-y-3">
-                <div className="h-5 w-28 rounded bg-secondary/60 animate-pulse" />
-                <div className="h-4 w-full rounded bg-secondary/40 animate-pulse" />
+                <div className="h-5 w-28 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-full rounded bg-muted animate-pulse" />
               </div>
             ))}
           </div>
@@ -107,7 +107,7 @@ const BrandCoverDetail = () => {
   const catalogue = (cover as any).catalogues;
   const shop = (cover as any).shops;
   const status = cover.status || "live";
-  const statusCls = statusColors[status] || "bg-gray-100 text-gray-600 border-gray-200";
+  const statusCls = statusColors[status] || "bg-muted text-gray-600 border-gray-200";
   const customerName = customer ? `${customer.first_name || ""} ${customer.last_name || ""}`.trim() || customer.email : "Unknown";
   const initials = customer
     ? `${(customer.first_name?.[0] || customer.email?.[0] || "?").toUpperCase()}${(customer.last_name?.[0] || "").toUpperCase()}`
@@ -122,8 +122,8 @@ const BrandCoverDetail = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             {catalogue?.picture && (
-              <div className="h-16 w-16 shrink-0 rounded-xl bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-2">
-                <img src={catalogue.picture} alt={catalogue.name || ""} className="h-full w-full object-contain mix-blend-multiply" />
+              <div className="h-16 w-16 shrink-0 rounded-xl bg-white p-2">
+                <img src={catalogue.picture} alt={catalogue.name || ""} className="h-full w-full object-contain" />
               </div>
             )}
             <div>
@@ -239,7 +239,7 @@ const BrandCoverDetail = () => {
                       <Link
                         key={claim.id}
                         to={`${slugPrefix}/claims/${claim.id}`}
-                        className="flex items-center justify-between px-6 py-3.5 transition-colors hover:bg-secondary/30"
+                        className="flex items-center justify-between px-6 py-3.5 transition-colors hover:bg-muted"
                       >
                         <div>
                           <p className="text-sm font-medium text-foreground">
@@ -247,7 +247,7 @@ const BrandCoverDetail = () => {
                           </p>
                           <p className="text-xs text-muted-foreground">{fmt(claim.created_at)}</p>
                         </div>
-                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${st === "open" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
+                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${st === "open" ? "bg-orange-50 text-orange-700" : "bg-emerald-50 text-emerald-700"}`}>
                           {st.charAt(0).toUpperCase() + st.slice(1)}
                         </span>
                       </Link>

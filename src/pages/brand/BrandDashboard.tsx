@@ -175,11 +175,11 @@ const BrandDashboard = () => {
               ) : (
                 recentClaims.map((claim: any) => {
                   const isOpen = claim.status !== "closed";
-                  const statusClass = isOpen ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600";
+                  const statusClass = isOpen ? "bg-blue-100 text-blue-700" : "bg-muted text-gray-600";
                   return (
                     <tr
                       key={claim.id}
-                      className="transition-colors hover:bg-secondary/30 cursor-pointer"
+                      className="transition-colors hover:bg-muted cursor-pointer"
                       onClick={() => navigate(`${slugPrefix}/claims/${claim.id}`)}
                     >
                       <td className="px-6 py-4 text-sm font-medium text-foreground">{claim.id}</td>

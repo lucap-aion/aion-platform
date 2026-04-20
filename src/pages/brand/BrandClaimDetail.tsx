@@ -14,7 +14,7 @@ import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { parseError } from "@/utils/parseError";
 
 const statusConfig = {
-  open: { color: "bg-amber-50 text-amber-700 border-amber-200", icon: Clock, label: "Open" },
+  open: { color: "bg-orange-50 text-orange-700 border-orange-200", icon: Clock, label: "Open" },
   closed: { color: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: CheckCircle2, label: "Closed" },
 } as const;
 
@@ -82,23 +82,23 @@ const BrandClaimDetail = () => {
   if (isLoading) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
-        <div className="mb-8 h-8 w-32 rounded-lg bg-secondary/60 animate-pulse" />
+        <div className="mb-8 h-8 w-32 rounded-lg bg-muted animate-pulse" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             {[1, 2].map((i) => (
               <div key={i} className="glass-card p-6 space-y-3">
-                <div className="h-5 w-40 rounded bg-secondary/60 animate-pulse" />
-                <div className="h-4 w-full rounded bg-secondary/40 animate-pulse" />
-                <div className="h-4 w-3/4 rounded bg-secondary/40 animate-pulse" />
+                <div className="h-5 w-40 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-full rounded bg-muted animate-pulse" />
+                <div className="h-4 w-3/4 rounded bg-muted animate-pulse" />
               </div>
             ))}
           </div>
           <div className="space-y-6">
             {[1, 2].map((i) => (
               <div key={i} className="glass-card p-6 space-y-3">
-                <div className="h-5 w-28 rounded bg-secondary/60 animate-pulse" />
-                <div className="h-4 w-full rounded bg-secondary/40 animate-pulse" />
-                <div className="h-4 w-2/3 rounded bg-secondary/40 animate-pulse" />
+                <div className="h-5 w-28 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-full rounded bg-muted animate-pulse" />
+                <div className="h-4 w-2/3 rounded bg-muted animate-pulse" />
               </div>
             ))}
           </div>
@@ -193,7 +193,7 @@ const BrandClaimDetail = () => {
                           key={i}
                           onClick={() => setLightboxIndex(i)}
                           title={`${name} — click to expand`}
-                          className="group relative rounded-xl border border-border bg-secondary/30 overflow-hidden transition-all hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40"
+                          className="group relative rounded-xl border border-border bg-muted overflow-hidden transition-all hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40"
                         >
                           {isImage ? (
                             <img src={file} alt={name} className="w-full h-48 object-cover transition-transform group-hover:scale-[1.02]" />
@@ -258,7 +258,7 @@ const BrandClaimDetail = () => {
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 {policy?.catalogues?.picture && (
-                  <div className="h-20 w-20 rounded-xl overflow-hidden bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-2 mb-1">
+                  <div className="h-20 w-20 rounded-xl overflow-hidden bg-white p-2 mb-1">
                     <img
                       src={policy.catalogues.picture}
                       alt={productName}
@@ -408,7 +408,7 @@ const BrandClaimDetail = () => {
             <div className="flex justify-end gap-3 px-6 py-4">
               <button
                 onClick={() => setConfirmClose(false)}
-                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 Cancel
               </button>

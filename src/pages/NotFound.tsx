@@ -65,7 +65,7 @@ const NotFound = () => {
         <div className="flex items-center justify-center gap-3 flex-wrap">
           <button
             onClick={() => navigate(homePath)}
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background/80 px-5 py-2.5 text-sm font-medium text-foreground backdrop-blur-sm transition-all hover:bg-secondary"
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background/80 px-5 py-2.5 text-sm font-medium text-foreground backdrop-blur-sm transition-all hover:bg-muted"
           >
             <ArrowLeft className="h-4 w-4" />
             Go back

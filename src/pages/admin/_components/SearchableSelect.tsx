@@ -90,7 +90,7 @@ export const SearchableSelect = ({
             {clearable && !required && (
               <button
                 type="button"
-                className="w-full px-3 py-2 text-left text-sm text-muted-foreground hover:bg-secondary transition-colors italic"
+                className="w-full px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted transition-colors italic"
                 onClick={() => { onChange(""); setOpen(false); setQuery(""); }}
               >
                 {placeholder}
@@ -103,7 +103,7 @@ export const SearchableSelect = ({
                 <button
                   key={o.value}
                   type="button"
-                  className={`w-full px-3 py-2 text-left text-sm transition-colors hover:bg-secondary ${
+                  className={`w-full px-3 py-2 text-left text-sm transition-colors hover:bg-muted ${
                     String(o.value) === String(value ?? "")
                       ? "bg-primary/10 text-primary font-medium"
                       : "text-foreground"

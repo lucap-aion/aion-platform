@@ -12,8 +12,8 @@ export default {
     },
     extend: {
       fontFamily: {
-        serif: ["Playfair Display", "Georgia", "serif"],
-        sans: ["DM Sans", "system-ui", "sans-serif"],
+        serif: ["var(--heading-font)"],
+        sans: ["var(--body-font)"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -48,19 +48,6 @@ export default {
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
-        },
-        gold: {
-          DEFAULT: "hsl(var(--gold))",
-          light: "hsl(var(--gold-light))",
-          dark: "hsl(var(--gold-dark))",
-        },
-        cream: {
-          DEFAULT: "hsl(var(--cream))",
-          light: "hsl(var(--cream-light))",
-        },
-        charcoal: {
-          DEFAULT: "hsl(var(--charcoal))",
-          light: "hsl(var(--charcoal-light))",
         },
         success: "hsl(var(--success))",
         warning: "hsl(var(--warning))",

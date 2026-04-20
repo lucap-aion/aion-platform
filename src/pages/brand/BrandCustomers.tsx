@@ -237,8 +237,8 @@ const BrandCustomers = () => {
       <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
         <div className="mb-8 flex items-center justify-between">
           <div className="space-y-2">
-            <div className="h-8 w-40 rounded-lg bg-secondary/60 animate-pulse" />
-            <div className="h-4 w-56 rounded bg-secondary/40 animate-pulse" />
+            <div className="h-8 w-40 rounded-lg bg-muted animate-pulse" />
+            <div className="h-4 w-56 rounded bg-muted animate-pulse" />
           </div>
         </div>
         <div className="glass-card overflow-hidden">
@@ -248,7 +248,7 @@ const BrandCustomers = () => {
                 <tr className="border-b border-border">
                   {["Customer", "Covers", "Claims", "Protected Value", "Joined"].map((h) => (
                     <th key={h} className="px-6 py-4 text-left">
-                      <div className="h-3 w-20 rounded bg-secondary/60 animate-pulse" />
+                      <div className="h-3 w-20 rounded bg-muted animate-pulse" />
                     </th>
                   ))}
                 </tr>
@@ -258,16 +258,16 @@ const BrandCustomers = () => {
                   <tr key={i}>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="h-9 w-9 rounded-full bg-secondary/60 animate-pulse shrink-0" />
+                        <div className="h-9 w-9 rounded-full bg-muted animate-pulse shrink-0" />
                         <div className="space-y-1.5">
-                          <div className="h-3.5 w-32 rounded bg-secondary/60 animate-pulse" />
-                          <div className="h-3 w-44 rounded bg-secondary/40 animate-pulse" />
+                          <div className="h-3.5 w-32 rounded bg-muted animate-pulse" />
+                          <div className="h-3 w-44 rounded bg-muted animate-pulse" />
                         </div>
                       </div>
                     </td>
                     {[1, 2, 3, 4].map((j) => (
                       <td key={j} className="px-6 py-4">
-                        <div className="h-3.5 w-12 rounded bg-secondary/40 animate-pulse" />
+                        <div className="h-3.5 w-12 rounded bg-muted animate-pulse" />
                       </td>
                     ))}
                   </tr>
@@ -373,7 +373,7 @@ const BrandCustomers = () => {
                 customers.map((c) => (
                   <tr
                     key={c.id}
-                    className="transition-colors hover:bg-secondary/30 cursor-pointer"
+                    className="transition-colors hover:bg-muted cursor-pointer"
                     onClick={() => navigate(`${slugPrefix}/customers/${c.id}`)}
                   >
                     <td className="px-6 py-4">
@@ -415,7 +415,7 @@ const BrandCustomers = () => {
                         {canWrite && (
                           <button
                             onClick={() => openEdit(c)}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                             title="Edit"
                           >
                             <Pencil className="h-4 w-4" />
@@ -449,7 +449,7 @@ const BrandCustomers = () => {
               <button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -459,7 +459,7 @@ const BrandCustomers = () => {
               <button
                 onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={page >= totalPages - 1}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -491,7 +491,7 @@ const BrandCustomers = () => {
               </div>
               <button
                 onClick={() => setModalOpen(false)}
-                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -598,7 +598,7 @@ const BrandCustomers = () => {
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-border/50">
               <button
                 onClick={() => setModalOpen(false)}
-                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 Cancel
               </button>
@@ -639,7 +639,7 @@ const BrandCustomers = () => {
             <div className="flex justify-end gap-3 px-6 py-4">
               <button
                 onClick={() => setConfirmDeleteId(null)}
-                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 Cancel
               </button>

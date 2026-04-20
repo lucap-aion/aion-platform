@@ -13,30 +13,71 @@ const supabaseAdmin = createClient(
 const AION_LOGO =
   "https://dvmhwsmunvfdxnvckdom.supabase.co/storage/v1/object/public/brand_logos/aion_logo_dark.png";
 
+// ─── HSL → Hex converter ─────────────────────────────────────────────────────
+function hslToHex(hsl: string): string {
+  const parts = hsl.match(/[\d.]+/g);
+  if (!parts || parts.length < 3) return "#7A5F28";
+  const h = parseFloat(parts[0]) / 360;
+  const s = parseFloat(parts[1]) / 100;
+  const l = parseFloat(parts[2]) / 100;
+  const hue2rgb = (p: number, q: number, t: number) => {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  let r: number, g: number, b: number;
+  if (s === 0) { r = g = b = l; } else {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+  const toHex = (v: number) => Math.round(v * 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+const AION_PRIMARY = "#7A5F28";
+
 // ─── Shared styles ────────────────────────────────────────────────────────────
-const S = {
-  body:    `margin:0;padding:0;background-color:#FAF8F4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif`,
-  wrap:    `max-width:600px;margin:0 auto;padding:48px 16px`,
-  card:    `background-color:#ffffff;border-radius:16px;padding:40px 40px 32px;border:1px solid #EDE5D8`,
-  title:   `margin:0 0 20px;font-family:Georgia,'Times New Roman',serif;font-size:24px;font-weight:700;color:#1C1208;line-height:1.3`,
-  text:    `margin:0 0 16px;font-size:15px;line-height:1.7;color:#4A3F35`,
-  btnWrap: `text-align:center;margin:32px 0`,
-  btn:     `display:inline-block;background-color:#7A5F28;color:#ffffff;padding:14px 36px;border-radius:8px;font-weight:600;font-size:15px;text-decoration:none;letter-spacing:0.2px`,
-  rule:    `border:none;border-top:1px solid #EDE5D8;margin:28px 0`,
-  footer:  `text-align:center;padding-top:28px;font-size:12px;color:#B0A090;line-height:1.6`,
-  small:   `margin:20px 0 0;font-size:12px;line-height:1.6;color:#B0A090`,
-};
+function makeStyles(primaryHex: string) {
+  return {
+    body:    `margin:0;padding:0;background-color:#f7f7f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif`,
+    wrap:    `max-width:600px;margin:0 auto;padding:48px 16px`,
+    card:    `background-color:#ffffff;border-radius:16px;padding:40px 40px 32px;border:1px solid #e5e5e5`,
+    title:   `margin:0 0 20px;font-family:Georgia,'Times New Roman',serif;font-size:24px;font-weight:700;color:#111111;line-height:1.3`,
+    text:    `margin:0 0 16px;font-size:15px;line-height:1.7;color:#333333`,
+    btnWrap: `text-align:center;margin:32px 0`,
+    btn:     `display:inline-block;background-color:${primaryHex};color:#ffffff;padding:14px 36px;border-radius:8px;font-weight:600;font-size:15px;text-decoration:none;letter-spacing:0.2px`,
+    rule:    `border:none;border-top:1px solid #e5e5e5;margin:28px 0`,
+    footer:  `text-align:center;padding-top:28px;font-size:12px;color:#999999;line-height:1.6`,
+    small:   `margin:20px 0 0;font-size:12px;line-height:1.6;color:#999999`,
+    link:    `color:${primaryHex};text-decoration:none`,
+  };
+}
+
+const S = makeStyles(AION_PRIMARY);
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
-async function fetchBrandLogo(brandName: string | null): Promise<string | null> {
+interface BrandInfo { logo: string | null; primaryHex: string }
+
+async function fetchBrandInfo(brandName: string | null): Promise<BrandInfo | null> {
   if (!brandName || brandName === "AION Cover") return null;
   const { data } = await supabaseAdmin
     .from("brands")
-    .select("logo_big, logo_small")
+    .select("logo_big, logo_small, theme_settings")
     .eq("name", brandName)
     .maybeSingle();
-  return (data as any)?.logo_big || (data as any)?.logo_small || null;
+  if (!data) return null;
+  const ts = (data as any).theme_settings;
+  const primaryHsl = (ts && typeof ts === "object" && typeof ts.primary_hsl === "string") ? ts.primary_hsl : null;
+  return {
+    logo: (data as any).logo_big || (data as any).logo_small || null,
+    primaryHex: primaryHsl ? hslToHex(primaryHsl) : AION_PRIMARY,
+  };
 }
 
 // ─── Logo helpers ─────────────────────────────────────────────────────────────
@@ -64,7 +105,7 @@ function dualLogo(brandName: string, brandLogoUrl: string): string {
     <tr><td align="center">
       <table cellpadding="0" cellspacing="0" style="border-collapse:collapse">
         <tr>
-          <td style="padding-right:20px;border-right:1px solid #EDE5D8;vertical-align:middle">
+          <td style="padding-right:20px;border-right:1px solid #e5e5e5;vertical-align:middle">
             <img src="${brandLogoUrl}" alt="${brandName}" height="44" border="0"
                  style="display:block;max-height:44px;max-width:180px;width:auto;height:auto" />
           </td>
@@ -85,12 +126,16 @@ function logoBlock(brandName: string, brandLogoUrl: string | null): string {
 }
 
 // ─── Shared fragments ─────────────────────────────────────────────────────────
-const autoNote = `<p style="${S.small}">This is an automated message — please do not reply. For help, contact <a href="mailto:team@aioncover.com" style="color:#7A5F28;text-decoration:none">team@aioncover.com</a>.</p>`;
-const copyright = `<p style="${S.footer}">© AION Cover · All rights reserved</p>`;
+function autoNote(s: ReturnType<typeof makeStyles>) {
+  return `<p style="${s.small}">This is an automated message — please do not reply. For help, contact <a href="mailto:team@aioncover.com" style="${s.link}">team@aioncover.com</a>.</p>`;
+}
+function copyright(s: ReturnType<typeof makeStyles>) {
+  return `<p style="${s.footer}">© AION Cover · All rights reserved</p>`;
+}
 
-function wrap(inner: string): string {
+function wrap(inner: string, s: ReturnType<typeof makeStyles> = S): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="${S.body}"><div style="${S.wrap}"><div style="${S.card}">${inner}</div>${copyright}</div></body></html>`;
+<body style="${s.body}"><div style="${s.wrap}"><div style="${s.card}">${inner}</div>${copyright(s)}</div></body></html>`;
 }
 
 function htmlToText(html: string): string {
@@ -123,7 +168,7 @@ function adminVerifyHtml(firstName: string | null, verifyUrl: string): string {
     <div style="${S.btnWrap}"><a href="${verifyUrl}" target="_blank" style="${S.btn}">Verify Email Address</a></div>
     <p style="${S.text}">This link expires in 24 hours. If you did not register, you can safely ignore this email.</p>
     <p style="${S.text}">Best regards,<br><strong>AION Cover Team</strong></p>
-    ${autoNote}`);
+    ${autoNote(S)}`);
 }
 
 function adminResetHtml(firstName: string | null, resetUrl: string): string {
@@ -136,7 +181,7 @@ function adminResetHtml(firstName: string | null, resetUrl: string): string {
     <div style="${S.btnWrap}"><a href="${resetUrl}" target="_blank" style="${S.btn}">Reset Password</a></div>
     <p style="${S.text}">This link expires in 1 hour. If you did not request a password reset, you can safely ignore this email.</p>
     <p style="${S.text}">Best regards,<br><strong>AION Cover Team</strong></p>
-    ${autoNote}`);
+    ${autoNote(S)}`);
 }
 
 function userVerifyHtml(
@@ -144,17 +189,18 @@ function userVerifyHtml(
   brandName: string,
   brandLogoUrl: string | null,
   verifyUrl: string,
+  s: ReturnType<typeof makeStyles>,
 ): string {
   const greeting = firstName ? `Dear ${firstName},` : "Hello,";
   return wrap(`
     ${logoBlock(brandName, brandLogoUrl)}
-    <h1 style="${S.title}">Verify your email address</h1>
-    <p style="${S.text}">${greeting}</p>
-    <p style="${S.text}">Thank you for registering with <strong>${brandName}</strong> on AION Cover. Click the button below to verify your email and activate your account.</p>
-    <div style="${S.btnWrap}"><a href="${verifyUrl}" target="_blank" style="${S.btn}">Verify Email Address</a></div>
-    <p style="${S.text}">This link expires in 24 hours. If you did not register, you can safely ignore this email.</p>
-    <p style="${S.text}">Best regards,<br><strong>AION Cover Team</strong></p>
-    ${autoNote}`);
+    <h1 style="${s.title}">Verify your email address</h1>
+    <p style="${s.text}">${greeting}</p>
+    <p style="${s.text}">Thank you for registering with <strong>${brandName}</strong> on AION Cover. Click the button below to verify your email and activate your account.</p>
+    <div style="${s.btnWrap}"><a href="${verifyUrl}" target="_blank" style="${s.btn}">Verify Email Address</a></div>
+    <p style="${s.text}">This link expires in 24 hours. If you did not register, you can safely ignore this email.</p>
+    <p style="${s.text}">Best regards,<br><strong>AION Cover Team</strong></p>
+    ${autoNote(s)}`, s);
 }
 
 function userResetHtml(
@@ -162,17 +208,18 @@ function userResetHtml(
   brandName: string,
   brandLogoUrl: string | null,
   resetUrl: string,
+  s: ReturnType<typeof makeStyles>,
 ): string {
   const greeting = firstName ? `Dear ${firstName},` : "Hello,";
   return wrap(`
     ${logoBlock(brandName, brandLogoUrl)}
-    <h1 style="${S.title}">Reset your password</h1>
-    <p style="${S.text}">${greeting}</p>
-    <p style="${S.text}">We received a request to reset the password for your <strong>${brandName}</strong> account. Click the button below to set a new password.</p>
-    <div style="${S.btnWrap}"><a href="${resetUrl}" target="_blank" style="${S.btn}">Reset Password</a></div>
-    <p style="${S.text}">This link expires in 1 hour. If you did not request this, you can safely ignore this email.</p>
-    <p style="${S.text}">Best regards,<br><strong>AION Cover Team</strong></p>
-    ${autoNote}`);
+    <h1 style="${s.title}">Reset your password</h1>
+    <p style="${s.text}">${greeting}</p>
+    <p style="${s.text}">We received a request to reset the password for your <strong>${brandName}</strong> account. Click the button below to set a new password.</p>
+    <div style="${s.btnWrap}"><a href="${resetUrl}" target="_blank" style="${s.btn}">Reset Password</a></div>
+    <p style="${s.text}">This link expires in 1 hour. If you did not request this, you can safely ignore this email.</p>
+    <p style="${s.text}">Best regards,<br><strong>AION Cover Team</strong></p>
+    ${autoNote(s)}`, s);
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -187,7 +234,9 @@ Deno.serve(async (req) => {
 
     const firstName: string | null = meta.first_name ?? null;
     const brandName: string = meta.brand_name ?? "AION Cover";
-    const brandLogoUrl: string | null = await fetchBrandLogo(brandName);
+    const brandInfo = await fetchBrandInfo(brandName);
+    const brandLogoUrl: string | null = brandInfo?.logo ?? null;
+    const bs = makeStyles(brandInfo?.primaryHex ?? AION_PRIMARY);
 
     const actionType: string = email_data?.email_action_type ?? "";
     const tokenHash: string = email_data?.token_hash ?? "";
@@ -213,7 +262,7 @@ Deno.serve(async (req) => {
         html = adminVerifyHtml(firstName, verifyUrl);
       } else {
         subject = `Verify your email — ${brandName}`;
-        html = userVerifyHtml(firstName, brandName, brandLogoUrl, verifyUrl);
+        html = userVerifyHtml(firstName, brandName, brandLogoUrl, verifyUrl, bs);
       }
     } else if (actionType === "recovery") {
       if (isAdmin) {
@@ -221,11 +270,11 @@ Deno.serve(async (req) => {
         html = adminResetHtml(firstName, verifyUrl);
       } else {
         subject = `Reset your password — ${brandName}`;
-        html = userResetHtml(firstName, brandName, brandLogoUrl, verifyUrl);
+        html = userResetHtml(firstName, brandName, brandLogoUrl, verifyUrl, bs);
       }
     } else if (actionType === "magiclink") {
       subject = `Your sign-in link — ${brandName}`;
-      html = userVerifyHtml(firstName, brandName, brandLogoUrl, verifyUrl);
+      html = userVerifyHtml(firstName, brandName, brandLogoUrl, verifyUrl, bs);
     } else {
       // Unknown type — return OK so Supabase does not retry
       return new Response(JSON.stringify({ ok: true }), {

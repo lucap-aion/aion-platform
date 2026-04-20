@@ -33,7 +33,7 @@ const HeaderControls = () => {
       {/* Language */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
+          <button className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
             <Globe className="h-4 w-4" />
             <span className="uppercase">{locale}</span>
           </button>
@@ -51,7 +51,7 @@ const HeaderControls = () => {
       {/* Theme */}
       <button
         onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         aria-label="Toggle theme"
       >
         {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -60,7 +60,7 @@ const HeaderControls = () => {
       {/* Fullscreen */}
       <button
         onClick={toggleFullscreen}
-        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         aria-label="Toggle fullscreen"
       >
         {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}

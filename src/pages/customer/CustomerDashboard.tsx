@@ -222,19 +222,19 @@ const CustomerDashboard = () => {
         className="relative rounded-xl overflow-hidden"
       >
         <img src={imgHero} alt="" className="w-full h-56 md:h-72 object-cover object-[50%_70%]" />
-        <div className="absolute inset-0 bg-charcoal/75" />
+        <div className="absolute inset-0 bg-black/75" />
         <div className="absolute inset-0 flex flex-col justify-center p-8 md:p-12">
-          <h2 className="font-serif text-2xl md:text-4xl font-bold text-cream-light mb-3">
+          <h2 className="font-serif text-2xl md:text-4xl font-bold text-white mb-3">
             {tenant.name} {locale === "en" ? "Prestige Service" : "Servizio Prestige"}
           </h2>
-          <p className="max-w-md text-sm text-cream-light/80 mb-6 leading-relaxed">
+          <p className="max-w-md text-sm text-white/80 mb-6 leading-relaxed">
             {locale === "en"
               ? `Inspired by its passion for customer excellence, ${tenant.name} is pleased to introduce an exclusive cover service.`
               : `Ispirato dalla passione per l'esperienza del cliente, ${tenant.name} è lieto di presentare un servizio di copertura esclusivo.`}
           </p>
           <Link
             to={`${slugPrefix}/covers`}
-            className="inline-flex w-fit items-center gap-2 rounded-lg border border-cream-light/40 px-5 py-2.5 text-sm font-medium text-cream-light transition-all hover:bg-cream-light/10"
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-white/40 px-5 py-2.5 text-sm font-medium text-white transition-all hover:bg-white/10"
           >
             {locale === "en" ? "See All Products" : "Vedi tutti i prodotti"}
           </Link>
@@ -406,7 +406,7 @@ const CustomerDashboard = () => {
           href={tenant.website ?? "#"}
           target={tenant.website ? "_blank" : undefined}
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 rounded-lg border border-border px-5 py-2.5 text-sm font-medium text-foreground transition-all hover:bg-secondary"
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-5 py-2.5 text-sm font-medium text-foreground transition-all hover:bg-muted"
         >
           {locale === "en" ? "Continue Shopping" : "Continua lo shopping"}
         </a>

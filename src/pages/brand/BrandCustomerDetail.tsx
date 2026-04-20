@@ -12,13 +12,13 @@ const statusColors: Record<string, string> = {
   live: "bg-emerald-50 text-emerald-700",
   active: "bg-emerald-50 text-emerald-700",
   cancelled: "bg-red-50 text-red-700",
-  expired: "bg-gray-100 text-gray-600",
-  pending: "bg-amber-50 text-amber-700",
+  expired: "bg-muted text-gray-600",
+  pending: "bg-orange-50 text-orange-700",
   blocked: "bg-red-50 text-red-700",
 };
 
 const claimStatusColors: Record<string, string> = {
-  open: "bg-amber-50 text-amber-700",
+  open: "bg-orange-50 text-orange-700",
   closed: "bg-emerald-50 text-emerald-700",
 };
 
@@ -88,20 +88,20 @@ const BrandCustomerDetail = () => {
   if (isLoading) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
-        <div className="mb-8 h-8 w-32 rounded-lg bg-secondary/60 animate-pulse" />
+        <div className="mb-8 h-8 w-32 rounded-lg bg-muted animate-pulse" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             {[1, 2].map((i) => (
               <div key={i} className="glass-card p-6 space-y-3">
-                <div className="h-5 w-40 rounded bg-secondary/60 animate-pulse" />
-                <div className="h-4 w-full rounded bg-secondary/40 animate-pulse" />
-                <div className="h-4 w-3/4 rounded bg-secondary/40 animate-pulse" />
+                <div className="h-5 w-40 rounded bg-muted animate-pulse" />
+                <div className="h-4 w-full rounded bg-muted animate-pulse" />
+                <div className="h-4 w-3/4 rounded bg-muted animate-pulse" />
               </div>
             ))}
           </div>
           <div className="glass-card p-6 space-y-3">
-            <div className="h-5 w-28 rounded bg-secondary/60 animate-pulse" />
-            <div className="h-4 w-full rounded bg-secondary/40 animate-pulse" />
+            <div className="h-5 w-28 rounded bg-muted animate-pulse" />
+            <div className="h-4 w-full rounded bg-muted animate-pulse" />
           </div>
         </div>
       </div>
@@ -170,9 +170,9 @@ const BrandCustomerDetail = () => {
                       <Link
                         key={cover.id}
                         to={`${slugPrefix}/covers/${cover.id}`}
-                        className="flex items-center gap-4 px-6 py-4 transition-colors hover:bg-secondary/30"
+                        className="flex items-center gap-4 px-6 py-4 transition-colors hover:bg-muted"
                       >
-                        <div className="h-10 w-10 shrink-0 rounded-lg bg-gradient-to-br from-[#f5f0e8] to-[#ede8df] p-1">
+                        <div className="h-10 w-10 shrink-0 rounded-lg bg-white p-1">
                           <img
                             src={(cover as any).catalogues?.picture || "/placeholder.svg"}
                             alt={(cover as any).catalogues?.name || ""}
@@ -187,7 +187,7 @@ const BrandCustomerDetail = () => {
                             {fmt(cover.start_date)} — {fmt(cover.expiration_date)}
                           </p>
                         </div>
-                        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColors[status] || "bg-gray-100 text-gray-600"}`}>
+                        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColors[status] || "bg-muted text-gray-600"}`}>
                           {status.charAt(0).toUpperCase() + status.slice(1)}
                         </span>
                       </Link>
@@ -202,7 +202,7 @@ const BrandCustomerDetail = () => {
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
             <div className="glass-card overflow-hidden">
               <div className="px-6 py-4 border-b border-border/50 flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                <AlertTriangle className="h-4 w-4 text-orange-500" />
                 <h2 className="text-base font-semibold text-foreground">Claims ({claims?.length || 0})</h2>
               </div>
               {!claims?.length ? (
@@ -215,7 +215,7 @@ const BrandCustomerDetail = () => {
                       <Link
                         key={claim.id}
                         to={`${slugPrefix}/claims/${claim.id}`}
-                        className="flex items-center gap-4 px-6 py-4 transition-colors hover:bg-secondary/30"
+                        className="flex items-center gap-4 px-6 py-4 transition-colors hover:bg-muted"
                       >
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-foreground">

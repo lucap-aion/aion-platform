@@ -253,13 +253,13 @@ const AdminClaims = () => {
                 <div className="flex items-center gap-2">
                   {r.brand_logo
                     ? <div className="h-6 w-6 rounded bg-white flex items-center justify-center shrink-0 border border-border/30"><img src={r.brand_logo} alt={r.brand_name} className="h-5 w-5 object-contain" /></div>
-                    : <div className="h-6 w-6 rounded bg-secondary shrink-0" />}
+                    : <div className="h-6 w-6 rounded bg-muted shrink-0" />}
                   <span className="text-sm text-foreground">{r.brand_name}</span>
                 </div>
               );
             },
           },
-          { key: "item_name", label: "Item", width: 200, render: (row) => { const r = row as any; return <div className="flex items-center gap-2.5">{r.item_picture ? <img src={r.item_picture} alt={r.item_name} className="h-9 w-9 rounded-lg object-contain bg-secondary/50 shrink-0" /> : <div className="h-9 w-9 rounded-lg bg-secondary/50 shrink-0" />}<span className="text-sm text-foreground">{r.item_name}</span></div>; } },
+          { key: "item_name", label: "Item", width: 200, render: (row) => { const r = row as any; return <div className="flex items-center gap-2.5">{r.item_picture ? <img src={r.item_picture} alt={r.item_name} className="h-9 w-9 rounded-lg object-contain bg-muted/50 shrink-0" /> : <div className="h-9 w-9 rounded-lg bg-muted/50 shrink-0" />}<span className="text-sm text-foreground">{r.item_name}</span></div>; } },
           { key: "customer_email", label: "Customer", width: 200, render: (row) => { const r = row as any; const initials = `${(r.customer_first?.[0] || r.customer_email?.[0] || "?").toUpperCase()}${(r.customer_last?.[0] || "").toUpperCase()}`; return <div className="flex items-center gap-2.5"><div className="h-9 w-9 shrink-0 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">{initials}</div><div><p className="text-sm text-foreground">{r.customer_name || r.customer_email}</p>{r.customer_name && <p className="text-xs text-muted-foreground">{r.customer_email}</p>}</div></div>; } },
           { key: "type", label: "Type", sortable: true, render: (row) => { const r = row as unknown as Claim; return r.type ? toTitleCase(r.type) : <span className="text-muted-foreground">—</span>; } },
           {
@@ -360,7 +360,7 @@ const AdminClaims = () => {
                       href={url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="h-16 w-16 shrink-0 rounded-lg border border-border overflow-hidden bg-secondary/40 flex items-center justify-center hover:border-primary/40 transition-colors"
+                      className="h-16 w-16 shrink-0 rounded-lg border border-border overflow-hidden bg-muted/40 flex items-center justify-center hover:border-primary/40 transition-colors"
                     >
                       {isImage
                         ? <img src={url} alt="" className="h-full w-full object-cover" />
@@ -390,7 +390,7 @@ const AdminClaims = () => {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-secondary/30 px-4 py-5 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors"
+                className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/30 px-4 py-5 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground transition-colors"
               >
                 <Upload className="h-4 w-4" />
                 Click to upload files
@@ -400,7 +400,7 @@ const AdminClaims = () => {
                   {pendingFiles.map((file, idx) => {
                     const isImage = file.type.startsWith("image/");
                     return (
-                      <div key={idx} className="relative h-16 w-16 shrink-0 rounded-lg border border-border bg-secondary/40 overflow-hidden flex items-center justify-center">
+                      <div key={idx} className="relative h-16 w-16 shrink-0 rounded-lg border border-border bg-muted/40 overflow-hidden flex items-center justify-center">
                         {isImage
                           ? <img src={URL.createObjectURL(file)} alt={file.name} className="h-full w-full object-cover" />
                           : <FileText className="h-6 w-6 text-muted-foreground" />}
@@ -421,7 +421,7 @@ const AdminClaims = () => {
 
           {ro ? (
             <div className="flex justify-between gap-2 pt-4 border-t border-border mt-4">
-              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors">Close</button>
+              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">Close</button>
               <button type="button" onClick={() => setMode("edit")} className="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">Edit</button>
             </div>
           ) : (

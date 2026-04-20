@@ -52,7 +52,7 @@ export const ImageUpload = ({
     <div className="flex items-center gap-4">
       {/* Preview */}
       <div className="relative shrink-0 h-16 w-16">
-        <div className={`h-16 w-16 border border-border ${shapeClass} overflow-hidden bg-secondary flex items-center justify-center`}>
+        <div className={`h-16 w-16 border border-border ${shapeClass} overflow-hidden bg-muted flex items-center justify-center`}>
           {value ? (
             <img src={value} alt="" className="h-full w-full object-cover" />
           ) : (
@@ -84,7 +84,7 @@ export const ImageUpload = ({
             type="button"
             disabled={uploading}
             onClick={() => inputRef.current?.click()}
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-60"
           >
             <Upload className="h-3.5 w-3.5" />
             {uploading ? "Uploading…" : value ? "Change" : "Upload image"}

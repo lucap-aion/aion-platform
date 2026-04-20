@@ -199,11 +199,11 @@ const BrandTeam = () => {
         <div className="mb-6 md:mb-8 space-y-4">
           <div className="flex items-start justify-between">
             <div className="space-y-2">
-              <div className="h-8 w-24 rounded-lg bg-secondary/60 animate-pulse" />
-              <div className="h-4 w-56 rounded bg-secondary/40 animate-pulse" />
+              <div className="h-8 w-24 rounded-lg bg-muted animate-pulse" />
+              <div className="h-4 w-56 rounded bg-muted animate-pulse" />
             </div>
           </div>
-          <div className="h-10 w-60 rounded-lg bg-secondary/40 animate-pulse" />
+          <div className="h-10 w-60 rounded-lg bg-muted animate-pulse" />
         </div>
         <div className="glass-card overflow-hidden">
           <div className="overflow-x-auto">
@@ -212,7 +212,7 @@ const BrandTeam = () => {
                 <tr className="border-b border-border">
                   {["Member", "Role", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-6 py-4 text-left">
-                      <div className="h-3 w-16 rounded bg-secondary/60 animate-pulse" />
+                      <div className="h-3 w-16 rounded bg-muted animate-pulse" />
                     </th>
                   ))}
                 </tr>
@@ -222,16 +222,16 @@ const BrandTeam = () => {
                   <tr key={i}>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="h-9 w-9 rounded-full bg-secondary/60 animate-pulse shrink-0" />
+                        <div className="h-9 w-9 rounded-full bg-muted animate-pulse shrink-0" />
                         <div className="space-y-1.5">
-                          <div className="h-3.5 w-28 rounded bg-secondary/60 animate-pulse" />
-                          <div className="h-3 w-40 rounded bg-secondary/40 animate-pulse" />
+                          <div className="h-3.5 w-28 rounded bg-muted animate-pulse" />
+                          <div className="h-3 w-40 rounded bg-muted animate-pulse" />
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4"><div className="h-3.5 w-16 rounded bg-secondary/40 animate-pulse" /></td>
-                    <td className="px-6 py-4"><div className="h-6 w-16 rounded-full bg-secondary/40 animate-pulse" /></td>
-                    <td className="px-6 py-4"><div className="h-7 w-14 rounded bg-secondary/40 animate-pulse" /></td>
+                    <td className="px-6 py-4"><div className="h-3.5 w-16 rounded bg-muted animate-pulse" /></td>
+                    <td className="px-6 py-4"><div className="h-6 w-16 rounded-full bg-muted animate-pulse" /></td>
+                    <td className="px-6 py-4"><div className="h-7 w-14 rounded bg-muted animate-pulse" /></td>
                   </tr>
                 ))}
               </tbody>
@@ -297,7 +297,7 @@ const BrandTeam = () => {
                 filtered.map((m) => {
                   const isPending = m.status === "pending" || !m.status;
                   return (
-                    <tr key={m.id} className="transition-colors hover:bg-secondary/30">
+                    <tr key={m.id} className="transition-colors hover:bg-muted">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0">
@@ -320,7 +320,7 @@ const BrandTeam = () => {
                             <Crown className="h-3 w-3" /> Master
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs font-medium text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
                             <UserCheck className="h-3 w-3" /> Staff
                           </span>
                         )}
@@ -344,7 +344,7 @@ const BrandTeam = () => {
                             <button
                               onClick={() => handleResendInvite(m)}
                               disabled={resendingId === m.id}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
                               title="Resend invite"
                             >
                               <Mail className="h-4 w-4" />
@@ -352,7 +352,7 @@ const BrandTeam = () => {
                           )}
                           <button
                             onClick={() => openEdit(m)}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                             title="Edit"
                           >
                             <Pencil className="h-4 w-4" />
@@ -401,7 +401,7 @@ const BrandTeam = () => {
               </div>
               <button
                 onClick={() => setModalOpen(false)}
-                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -453,7 +453,7 @@ const BrandTeam = () => {
                   Access Level
                 </p>
                 <div className="space-y-3">
-                  <label className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 px-4 py-3 cursor-pointer hover:bg-secondary/50 transition-colors">
+                  <label className="flex items-center justify-between rounded-lg border border-border bg-muted px-4 py-3 cursor-pointer hover:bg-muted transition-colors">
                     <div>
                       <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
                         <Crown className="h-4 w-4 text-primary" /> Master Access
@@ -490,7 +490,7 @@ const BrandTeam = () => {
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-border/50">
               <button
                 onClick={() => setModalOpen(false)}
-                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 Cancel
               </button>
@@ -529,7 +529,7 @@ const BrandTeam = () => {
             <div className="flex justify-end gap-3 px-6 py-4">
               <button
                 onClick={() => setConfirmDeleteId(null)}
-                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                className="rounded-lg border border-input px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
               >
                 Cancel
               </button>

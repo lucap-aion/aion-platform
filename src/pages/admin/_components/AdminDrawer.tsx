@@ -32,7 +32,7 @@ const AdminDrawer = ({ open, onClose, title, children }: Props) => {
           <h2 className="text-base font-semibold text-foreground">{title}</h2>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
             <X className="h-4 w-4" />
           </button>

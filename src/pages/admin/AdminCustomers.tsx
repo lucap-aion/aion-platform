@@ -236,7 +236,7 @@ const AdminCustomers = () => {
                 <div className="flex items-center gap-2">
                   {r.brand_logo
                     ? <div className="h-6 w-6 rounded bg-white flex items-center justify-center shrink-0 border border-border/30"><img src={r.brand_logo} alt={r.brand_name} className="h-5 w-5 object-contain" /></div>
-                    : <div className="h-6 w-6 rounded bg-secondary shrink-0" />}
+                    : <div className="h-6 w-6 rounded bg-muted shrink-0" />}
                   <span className="text-sm text-foreground">{r.brand_name}</span>
                 </div>
               );
@@ -314,7 +314,7 @@ const AdminCustomers = () => {
           )}
           {ro ? (
             <div className="flex justify-between gap-2 pt-4 border-t border-border mt-4">
-              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors">Close</button>
+              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">Close</button>
               <button type="button" onClick={() => setMode("edit")} className="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">Edit</button>
             </div>
           ) : (
