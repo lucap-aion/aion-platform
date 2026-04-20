@@ -81,7 +81,7 @@ const ResetPassword = () => {
         </div>
         <div className="flex-1 flex items-center justify-center p-8">
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
-          <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-12 object-contain mb-8 block mx-auto" />
+          <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-9 object-contain mb-8 block mx-auto" />
           {sessionError ? (
             <div className="text-center">
               <p className="text-destructive mb-4">

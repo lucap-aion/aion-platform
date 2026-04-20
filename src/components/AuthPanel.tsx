@@ -66,9 +66,6 @@ const AuthPanel = ({ logoUrl, bgUrl, name }: AuthPanelProps) => {
     <div className="hidden lg:block lg:w-1/2 relative">
       <img src={bgUrl} alt={name} className="h-full w-full object-cover" />
       <div className={`absolute inset-0 ${overlayClass} transition-colors duration-300`} />
-      <div className="absolute bottom-12 left-12">
-        <img src={logoUrl} alt={name} className="h-14 object-contain" />
-      </div>
     </div>
   );
 };

@@ -116,7 +116,7 @@ const Signup = () => {
             animate={{ opacity: 1, y: 0 }}
             className="w-full max-w-md"
           >
-            <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-12 object-contain mb-8 block mx-auto" />
+            <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-9 object-contain mb-8 block mx-auto" />
 
             {done ? (
               /* Confirmation screen — shown after successful signUp() */

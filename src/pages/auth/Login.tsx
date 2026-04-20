@@ -108,7 +108,7 @@ const Login = () => {
             animate={{ opacity: 1, y: 0 }}
             className="w-full max-w-md"
           >
-            <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-12 object-contain mb-8 block mx-auto" />
+            <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-9 object-contain mb-8 block mx-auto" />
             <h3 className="font-serif text-2xl font-semibold text-foreground mb-2">{t("auth.welcomeBack")}</h3>
             <p className="text-muted-foreground mb-8">
               {locale === "en" ? "Sign in to your account to continue." : "Accedi al tuo account per continuare."}
