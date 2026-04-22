@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 const AdminLogin = () => {
@@ -10,7 +11,17 @@ const AdminLogin = () => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingRedirect, setPendingRedirect] = useState(false);
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
+
+  // Navigate only after AuthContext confirms admin status
+  useEffect(() => {
+    if (pendingRedirect && isAdmin) {
+      setPendingRedirect(false);
+      navigate("/admin");
+    }
+  }, [pendingRedirect, isAdmin, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,15 +41,16 @@ const AdminLogin = () => {
     }
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setIsLoading(false);
 
     if (error) {
+      setIsLoading(false);
       toast.error(error.message);
       return;
     }
 
+    // Don't navigate yet — wait for AuthContext to hydrate admin status via useEffect above
     sessionStorage.removeItem("aion_tenant_slug");
-    navigate("/admin");
+    setPendingRedirect(true);
   };
 
   return (
