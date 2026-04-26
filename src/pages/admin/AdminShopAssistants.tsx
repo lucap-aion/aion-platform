@@ -112,7 +112,7 @@ const AdminShopAssistants = () => {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("brands").select("id, name").order("name"),
+      supabase.from("brands").select("id, name").eq("status", "verified").order("name"),
       supabase.from("shops").select("id, name, brand_id").order("name"),
     ]).then(([{ data: b }, { data: s }]) => {
       setBrands((b as BrandOption[]) ?? []);

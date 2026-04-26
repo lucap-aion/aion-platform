@@ -94,7 +94,7 @@ const AdminCatalogues = () => {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("brands").select("id, name").order("name"),
+      supabase.from("brands").select("id, name").eq("status", "verified").order("name"),
       supabase.from("manufacturing_costs").select("brand_id, category"),
     ]).then(([{ data: brandsData }, { data: costsData }]) => {
       setBrands((brandsData as BrandOption[]) ?? []);
