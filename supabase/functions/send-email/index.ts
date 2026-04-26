@@ -127,9 +127,9 @@ function dualLogo(brandName: string, brandLogoUrl: string | null): string {
             <img src="${bSrc}" alt="${brandName}" height="44" border="0"
                  style="display:block;max-height:44px;max-width:180px;width:auto;height:auto" />
           </td>
-          <td style="padding-left:20px;vertical-align:middle;background-color:#ffffff">
-            <img src="${AION_LOGO}" alt="AION Cover" height="28" border="0"
-                 style="display:block;max-height:28px;width:auto;height:28px;background-color:#ffffff" />
+          <td width="90" style="padding-left:20px;vertical-align:middle;background-color:#ffffff;width:90px">
+            <img src="${AION_LOGO}" alt="AION Cover" width="70" height="18" border="0"
+                 style="display:block;width:70px !important;max-width:70px !important;height:18px !important;max-height:18px !important;background-color:#ffffff" />
           </td>
         </tr>
       </table>

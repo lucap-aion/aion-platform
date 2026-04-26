@@ -10,7 +10,8 @@
       "Bash(supabase functions deploy auth-email-hook --use-api --no-verify-jwt)",
       "Bash(npx supabase functions list --project-ref tlmdlskiubfdhywmzgzb)",
       "Bash(supabase status)",
-      "Read(//dev/**)"
+      "Read(//dev/**)",
+      "Bash(git cherry-pick:*)"
     ],
     "additionalDirectories": [
       "/Users/lucapontone/Downloads/Aion/aion-platform"
