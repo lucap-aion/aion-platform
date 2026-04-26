@@ -166,7 +166,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             {/* Root */}
-            <Route path="/" element={<AuthLanding />} />
+            <Route path="/" element={<Navigate to="/rc" replace />} />
 
             {/* Admin login */}
             <Route path="/admin/login" element={<AuthRoute><AdminLogin /></AuthRoute>} />
