@@ -127,9 +127,9 @@ function dualLogo(brandName: string, brandLogoUrl: string | null): string {
             <img src="${bSrc}" alt="${brandName}" height="44" border="0"
                  style="display:block;max-height:44px;max-width:180px;width:auto;height:auto" />
           </td>
-          <td width="90" style="padding-left:20px;vertical-align:middle;background-color:#ffffff;width:90px">
-            <img src="${AION_LOGO}" alt="AION Cover" width="70" height="18" border="0"
-                 style="display:block;width:70px !important;max-width:70px !important;height:18px !important;max-height:18px !important;background-color:#ffffff" />
+          <td style="padding-left:20px;vertical-align:middle">
+            <img src="${AION_LOGO}" alt="AION Cover" width="80" height="20" border="0"
+                 style="display:block;max-height:20px;max-width:90px;width:auto;height:auto" />
           </td>
         </tr>
       </table>
@@ -149,13 +149,6 @@ function copyright(s: ReturnType<typeof makeStyles>) {
 function wrap(inner: string, s: ReturnType<typeof makeStyles> = S): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="${s.body}"><div style="${s.wrap}"><div style="${s.card}">${inner}</div>${copyright(s)}</div></body></html>`;
-}
-
-// ─── Name helpers ─────────────────────────────────────────────────────────────
-function fullName(first: unknown, last: unknown): string {
-  const f = typeof first === "string" ? first.trim() : "";
-  const l = typeof last === "string" ? last.trim() : "";
-  return [f, l].filter(Boolean).join(" ") || "—";
 }
 
 // ─── Plain-text fallback ───────────────────────────────────────────────────────
@@ -199,7 +192,7 @@ function customerTransferHtml(oldCustomer: any, newCustomer: any, policy: any, u
     ${soloLogo(AION_LOGO, "AION Cover")}
     <h1 style="${s.title}">Someone wants to transfer a cover to you</h1>
     <p style="${s.text}">${greeting}</p>
-    <p style="${s.text}"><strong>${fullName(oldCustomer.first_name, oldCustomer.last_name)}</strong> would like to transfer ownership of the following item to you:</p>
+    <p style="${s.text}"><strong>${oldCustomer.first_name} ${oldCustomer.last_name}</strong> would like to transfer ownership of the following item to you:</p>
     <hr style="${s.rule}">
     <p style="${s.label}">Item</p>
     <p style="${s.value}">${policy.item.name}</p>
@@ -236,11 +229,10 @@ function adminInviteHtml(url: string): string {
 }
 
 function claimConfirmationHtml(claim: any, s: ReturnType<typeof makeStyles>): string {
-  const greeting = claim.policy.customer.first_name ? `Dear ${claim.policy.customer.first_name},` : "Hello,";
   return wrap(`
     ${dualLogo(claim.policy.brand.name, claim.policy.brand.logo_big ?? null)}
     <h1 style="${s.title}">Claim received</h1>
-    <p style="${s.text}">${greeting}</p>
+    <p style="${s.text}">Dear ${claim.policy.customer.first_name},</p>
     <p style="${s.text}">We've received your claim for your <strong>${claim.policy.item.name}</strong> from <strong>${claim.policy.brand.name}</strong>. Our team is reviewing it and will be in touch shortly.</p>
     <hr style="${s.rule}">
     <p style="${s.label}">Cover</p><p style="${s.value}">${claim.policy.item.name} — ${claim.policy.brand.name}</p>
@@ -257,7 +249,7 @@ function claimInternalHtml(claim: any): string {
     ${soloLogo(AION_LOGO, "AION Cover")}
     <h1 style="${S.title}">New Claim Submission</h1>
     <hr style="${S.rule}">
-    <p style="${S.label}">Customer</p><p style="${S.value}">${fullName(claim.policy.customer.first_name, claim.policy.customer.last_name)} &lt;${claim.policy.customer.email}&gt;</p>
+    <p style="${S.label}">Customer</p><p style="${S.value}">${claim.policy.customer.first_name} ${claim.policy.customer.last_name} &lt;${claim.policy.customer.email}&gt;</p>
     <p style="${S.label}">Cover ID</p><p style="${S.value}">#${claim.policy.id}</p>
     <p style="${S.label}">Brand</p><p style="${S.value}">${claim.policy.brand.name}</p>
     <p style="${S.label}">Item</p><p style="${S.value}">${claim.policy.item.name}</p>
@@ -273,7 +265,7 @@ function supportInternalHtml(message: any): string {
     ${soloLogo(AION_LOGO, "AION Cover")}
     <h1 style="${S.title}">New Support Request</h1>
     <hr style="${S.rule}">
-    <p style="${S.label}">Customer</p><p style="${S.value}">${fullName(message.customer.first_name, message.customer.last_name)} &lt;${message.customer.email}&gt;</p>
+    <p style="${S.label}">Customer</p><p style="${S.value}">${message.customer.first_name} ${message.customer.last_name} &lt;${message.customer.email}&gt;</p>
     <p style="${S.label}">Brand</p><p style="${S.value}">${message.brand.name}</p>
     <hr style="${S.rule}">
     <p style="${S.label}">Message</p><p style="${S.value}">${message.message}</p>
@@ -297,7 +289,7 @@ function transferRequestHtml(customer: any, recipientEmail: string, cover: any):
     <h1 style="${S.title}">Transfer Request</h1>
     <hr style="${S.rule}">
     <p style="${S.label}">From Customer</p>
-    <p style="${S.value}">${fullName(customer.first_name, customer.last_name)} &lt;${customer.email}&gt;</p>
+    <p style="${S.value}">${customer.first_name} ${customer.last_name} &lt;${customer.email}&gt;</p>
     <p style="${S.label}">Transfer To</p>
     <p style="${S.value}">${recipientEmail}</p>
     <hr style="${S.rule}">
@@ -307,11 +299,10 @@ function transferRequestHtml(customer: any, recipientEmail: string, cover: any):
 }
 
 function claimUpdatedCustomerHtml(claim: any, s: ReturnType<typeof makeStyles>): string {
-  const greeting = claim.customerFirstName ? `Dear ${claim.customerFirstName},` : "Hello,";
   return wrap(`
     ${dualLogo(claim.brand, claim.brandLogoUrl ?? null)}
     <h1 style="${s.title}">Your claim has been updated</h1>
-    <p style="${s.text}">${greeting}</p>
+    <p style="${s.text}">Dear ${claim.customerFirstName},</p>
     <p style="${s.text}">Your claim for <strong>${claim.product}</strong> from <strong>${claim.brand}</strong> has been updated.</p>
     <hr style="${s.rule}">
     <p style="${s.label}">Claim type</p><p style="${s.value}">${(claim.type ?? "").replaceAll("_", " ")}</p>
@@ -327,7 +318,7 @@ function claimUpdatedInternalHtml(claim: any): string {
     ${soloLogo(AION_LOGO, "AION Cover")}
     <h1 style="${S.title}">Claim Updated by Customer</h1>
     <hr style="${S.rule}">
-    <p style="${S.label}">Customer</p><p style="${S.value}">${fullName(claim.customerFirstName, claim.customerLastName)} &lt;${claim.customerEmail}&gt;</p>
+    <p style="${S.label}">Customer</p><p style="${S.value}">${claim.customerFirstName} ${claim.customerLastName} &lt;${claim.customerEmail}&gt;</p>
     <p style="${S.label}">Claim #</p><p style="${S.value}">${claim.claimId}</p>
     <p style="${S.label}">Brand</p><p style="${S.value}">${claim.brand}</p>
     <p style="${S.label}">Item</p><p style="${S.value}">${claim.product}</p>
@@ -343,7 +334,7 @@ function feedbackHtml(feedback: any): string {
     ${soloLogo(AION_LOGO, "AION Cover")}
     <h1 style="${S.title}">New Feedback Submission</h1>
     <hr style="${S.rule}">
-    <p style="${S.label}">Customer</p><p style="${S.value}">${fullName(feedback.customer.first_name, feedback.customer.last_name)} &lt;${feedback.customer.email}&gt;</p>
+    <p style="${S.label}">Customer</p><p style="${S.value}">${feedback.customer.first_name} ${feedback.customer.last_name} &lt;${feedback.customer.email}&gt;</p>
     <hr style="${S.rule}">
     <p style="${S.label}">Satisfaction</p><p style="${S.value}">${feedback.satisfaction_rate ?? "—"} / 5</p>
     <p style="${S.label}">Recommendation</p><p style="${S.value}">${feedback.recommendation_rate ?? "—"} / 5</p>
