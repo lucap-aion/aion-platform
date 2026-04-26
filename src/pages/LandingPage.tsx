@@ -70,6 +70,7 @@ const LandingPage = () => {
           .select("id, slug, name, description, logo_big, logo_small")
           .not("slug", "is", null)
           .neq("slug", "")
+          .eq("status", "verified")
           .order("name");
         setBrands(data ?? []);
       } catch {
