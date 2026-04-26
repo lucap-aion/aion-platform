@@ -15,7 +15,7 @@ async function calculateCategoryCogs(category: any, recommendedRetailPrice: numb
   const { data: manufacturingCosts } = await supabaseClient
     .from('manufacturing_costs')
     .select('category, cost_pct')
-    .eq('organization_id', 2);
+    .eq('brand_id', 2);
 
   const costs = convertKeysToCamelCase(manufacturingCosts ?? []);
   const item = costs.find((c: any) => c.category.toUpperCase() === category.toUpperCase());
@@ -27,7 +27,7 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
   try {
     // RAW REQUEST
     const req = {
-      organization_id: 2,
+      brand_id: 2,
       sale_id: sale.id,
       row_id: sale.row_id,
       request: sale,
@@ -48,22 +48,13 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
         sale.customer.email = sale.customer.email ? sale.customer.email : `${sale.customer.first_name} ${sale.customer.last_name}`;
         sale.customer.role = 'customer';
         sale.customer.status = 'pending';
-        sale.customer.brand_ids = ['2'];
+        sale.customer.brand_id = 2;
 
         const { data: customer, error: customerError } = await supabaseClient.from('profiles').insert(sale.customer).select('id').single();
         if (customerError) return { status: 500, item: undefined, message: getErrorMessage(customerError) };
         customerId = customer.id;
       } else {
         customerId = existingCustomers[0].id;
-
-        let currentBrandsIds = existingCustomers[0].brand_ids || [];
-        if (!currentBrandsIds.includes('2') && !currentBrandsIds.includes(2)) {
-          currentBrandsIds.push(2);
-          await supabaseClient
-            .from('profiles')
-            .update({ brand_ids: currentBrandsIds, updated_at: new Date().toISOString() })
-            .eq('id', customerId);
-        }
       }
     }
 
@@ -74,7 +65,7 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
     if (!existingItems || existingItems.length === 0) {
       const { recommended_retail_price, selling_price, id, ...catalogueItem } = sale.item;
       catalogueItem.brand_item_id = id;
-      catalogueItem.organization_id = 2;
+      catalogueItem.brand_id = 2;
       catalogueItem.slug = catalogueItem.name.replaceAll(/[^a-zA-Z0-9]/g, '').toLowerCase();
       catalogueItem.category = catalogueItem.category.toUpperCase().replace(/([^S])$/, '$1S');
 
@@ -94,13 +85,13 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
     const { data: existingShops } = await supabaseClient
       .from('shops')
       .select('id')
-      .eq('organization_id', 2)
+      .eq('brand_id', 2)
       .eq('brand_shop_id', sale.shop.id);
 
     let shopId: string | undefined;
     if (!existingShops || existingShops.length === 0) {
       const shopItem = {
-        organization_id: 2,
+        brand_id: 2,
         brand_shop_id: sale.shop.id,
         name: sale.shop.name,
         status: 'verified'
@@ -138,7 +129,7 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
           customer_id: customerId,
           quantity: s.quantity,
           item_id: item.id,
-          organization_id: 2,
+          brand_id: 2,
           shop_id: shopId,
           start_date: sellDate,
           expiration_date: getYearsAfter(sellDate),
@@ -192,7 +183,7 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
 export async function parseReturnFromEplay(r: any): Promise<any> {
   try {
     const req = {
-      organization_id: 2,
+      brand_id: 2,
       return_id: r.id,
       sale_id: r.sale_id,
       row_id: r.row_id,
@@ -203,12 +194,12 @@ export async function parseReturnFromEplay(r: any): Promise<any> {
     if (requestError) return { status: 500, policyId: null, message: getErrorMessage(requestError) };
 
     // SHOP
-    const { data: existingShops } = await supabaseClient.from('shops').select('id').eq('organization_id', 2).eq('brand_shop_id', r.shop.id);
+    const { data: existingShops } = await supabaseClient.from('shops').select('id').eq('brand_id', 2).eq('brand_shop_id', r.shop.id);
 
     let shopId: string | undefined;
     if (!existingShops || existingShops.length === 0) {
       const shopItem = {
-        organization_id: 2,
+        brand_id: 2,
         brand_shop_id: r.shop.id,
         name: r.shop.name,
         status: 'verified'
@@ -275,7 +266,7 @@ export async function parseReturnFromEplay(r: any): Promise<any> {
 export async function parseCancellationFromEplay(r: any): Promise<any> {
   try {
     const req = {
-      organization_id: 2,
+      brand_id: 2,
       sale_id: r.sale_id,
       row_id: r.row_id,
       request: r,
