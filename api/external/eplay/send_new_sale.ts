@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { parseSaleFromEplay } from '../../lib/eplay';
-import { cleanAndParseJSON } from '../../lib/helpers';
+import { parseSaleFromEplay } from '../../lib/eplay.js';
+import { cleanAndParseJSON } from '../../lib/helpers.js';
 
 function verifyToken(token: string | null): boolean {
   return token === `Bearer ${process.env.EPLAY_TOKEN}`;

@@ -1,5 +1,5 @@
-import { supabaseClient } from './supabase';
-import { getErrorMessage, getYearsAfter, italyLocalToUtc, convertKeysToCamelCase } from './helpers';
+import { supabaseClient } from './supabase.js';
+import { getErrorMessage, getYearsAfter, italyLocalToUtc, convertKeysToCamelCase } from './helpers.js';
 
 function duplicateSales(sale: any): any[] {
   if (sale.quantity <= 1) return [sale];
