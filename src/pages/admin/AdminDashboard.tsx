@@ -174,7 +174,7 @@ export default function AdminDashboard() {
       // Phase 1: Fetch brands, counts, and eligible customers ALL in parallel
       const brandsPromise = allBrands.length > 0
         ? Promise.resolve(allBrands)
-        : supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee").order("name")
+        : supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee").eq("status", "verified").order("name")
             .then(({ data }) => {
               const b = (data as Brand[]) ?? [];
               setAllBrands(b);

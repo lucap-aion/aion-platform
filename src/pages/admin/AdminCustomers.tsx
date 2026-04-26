@@ -110,7 +110,7 @@ const AdminCustomers = () => {
   useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir]);
 
   useEffect(() => {
-    supabase.from("brands").select("id, name").order("name").then(({ data }) => setBrands((data as BrandOption[]) ?? []));
+    supabase.from("brands").select("id, name").eq("status", "verified").order("name").then(({ data }) => setBrands((data as BrandOption[]) ?? []));
   }, []);
 
   const openAdd = () => { setEditing(empty()); setMode("add"); setDrawerOpen(true); };

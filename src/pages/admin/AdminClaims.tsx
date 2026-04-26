@@ -119,7 +119,7 @@ const AdminClaims = () => {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("brands").select("id, name").order("name"),
+      supabase.from("brands").select("id, name").eq("status", "verified").order("name"),
       supabase.from("policies").select("id, brand_sale_id, brands(name), profiles(email)").order("brand_sale_id").limit(500),
     ]).then(([{ data: brandsData }, { data: policiesData }]) => {
       setBrands((brandsData as BrandOption[]) ?? []);

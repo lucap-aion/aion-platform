@@ -469,7 +469,7 @@ export default function AdminInsights() {
   const [lastUpdated, setLastUpdated] = useState("");
 
   useEffect(() => {
-    supabase.from("brands").select("id, name").order("name")
+    supabase.from("brands").select("id, name").eq("status", "verified").order("name")
       .then(({ data }) => setBrands((data as Brand[]) ?? []));
   }, []);
 
