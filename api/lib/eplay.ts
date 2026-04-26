@@ -2,12 +2,11 @@ import { supabaseClient } from './supabase.js';
 import { getErrorMessage, getYearsAfter, italyLocalToUtc, convertKeysToCamelCase } from './helpers.js';
 
 function duplicateSales(sale: any): any[] {
-  if (sale.quantity <= 1) return [sale];
+  if (sale.quantity === 1) return [sale];
   return Array.from({ length: sale.quantity }, (_, i) => ({
     ...sale,
     row_id: `${sale.row_id}-${i + 1}`,
-    subOrderRowCode: `${sale.subOrderRowCode}-${i + 1}`,
-    quantity: 1
+    subOrderRowCode: `${sale.subOrderRowCode}-${i + 1}`
   }));
 }
 
@@ -42,7 +41,7 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
       let key = sale.customer.email ? 'email' : 'last_name';
       let field = sale.customer.email ? sale.customer.email : sale.customer.last_name;
 
-      const { data: existingCustomers } = await supabaseClient.from('profiles').select('*').eq(key, field);
+      const { data: existingCustomers } = await supabaseClient.from('profiles').select('*').eq(key, field).eq('brand_id', 2);
 
       if (!existingCustomers || existingCustomers.length === 0) {
         sale.customer.email = sale.customer.email ? sale.customer.email : `${sale.customer.first_name} ${sale.customer.last_name}`;
@@ -82,11 +81,7 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
     }
 
     // SHOP
-    const { data: existingShops } = await supabaseClient
-      .from('shops')
-      .select('id')
-      .eq('brand_id', 2)
-      .eq('brand_shop_id', sale.shop.id);
+    const { data: existingShops } = await supabaseClient.from('shops').select('id').eq('brand_id', 2).eq('brand_shop_id', sale.shop.id);
 
     let shopId: string | undefined;
     if (!existingShops || existingShops.length === 0) {
@@ -119,7 +114,6 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
 
       const policyStatus = s.item.recommended_retail_price > 1000 ? 'live' : 'blocked';
       const { cogs } = await calculateCategoryCogs(item.category.toUpperCase(), s.item.recommended_retail_price);
-      const sellDate = s.sellDate ? italyLocalToUtc(s.sellDate) : new Date().toISOString();
 
       if (!existingPolicies || existingPolicies.length === 0) {
         const policyData = {
@@ -131,8 +125,8 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
           item_id: item.id,
           brand_id: 2,
           shop_id: shopId,
-          start_date: sellDate,
-          expiration_date: getYearsAfter(sellDate),
+          start_date: s.sellDate ? new Date(s.sellDate).toISOString() : new Date().toISOString(),
+          expiration_date: getYearsAfter(s.sellDate ? new Date(s.sellDate).toISOString() : new Date().toISOString()),
           notes: '',
           purchase_receipt: null,
           recommended_retail_price: s.item.recommended_retail_price,
@@ -155,7 +149,7 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
           console.error('Policy insert error:', policyError);
           results.push({ status: 500, message: `[COVER] ${getErrorMessage(policyError)}`, policyStatus: 'errored' });
         } else {
-          results.push({ status: 200, policyId: insertedPolicy.id, message: 'Cover created successfully.', policyStatus });
+          results.push({ status: 200, policyId: insertedPolicy.id, message: 'Cover created successfully.', policyStatus: policyStatus });
         }
       } else {
         results.push({
@@ -191,7 +185,7 @@ export async function parseReturnFromEplay(r: any): Promise<any> {
       source: 'eplay_api'
     };
     const { data: externalRequest, error: requestError } = await supabaseClient.from('external_requests').insert(req).select('id').single();
-    if (requestError) return { status: 500, policyId: null, message: getErrorMessage(requestError) };
+    if (requestError) return { status: 500, policyId: null, message: `[EXTERNAL REQUEST] ${getErrorMessage(requestError)}` };
 
     // SHOP
     const { data: existingShops } = await supabaseClient.from('shops').select('id').eq('brand_id', 2).eq('brand_shop_id', r.shop.id);
@@ -218,7 +212,7 @@ export async function parseReturnFromEplay(r: any): Promise<any> {
       .eq('brand_sale_id', r.sale_id)
       .eq('brand_row_id', r.row_id)
       .maybeSingle();
-    if (policyError) return { status: 500, policyId: null, message: getErrorMessage(policyError) };
+    if (policyError) return { status: 500, policyId: null, message: `[COVER] ${getErrorMessage(policyError)}` };
 
     if (existingPolicy) {
       if (existingPolicy.status == 'cancelled' || existingPolicy.return_id == r.id) {
@@ -237,8 +231,7 @@ export async function parseReturnFromEplay(r: any): Promise<any> {
         status: 'cancelled',
         return_id: rItem.id,
         external_request_id: externalRequest.id,
-        updated_at: 'now()',
-        cancelled_at: 'now()'
+        updated_at: 'now()'
       };
 
       const { data: updatedPolicy, error: policyUpdateError } = await supabaseClient
