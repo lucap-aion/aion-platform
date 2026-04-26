@@ -130,18 +130,26 @@ const AdminCustomers = () => {
       });
       setSaving(false);
       if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-      toast({ title: "Customer created" });
-      // Send invite email — fire-and-forget
+      // Send invite email
       if (editing.brand_id) {
         const { data: brandData } = await supabase.from("brands").select("name, slug, logo_small, logo_big").eq("id", editing.brand_id).single();
         if (brandData) {
           const url = `${siteUrl()}/${brandData.slug}/signup`;
-          sendEmail("customer_invite", {
+          const emailErr = await sendEmail("customer_invite", {
             customer: { email: editing.email, first_name: editing.first_name ?? null },
             brand: { name: brandData.name, id: editing.brand_id },
             url,
           });
+          if (emailErr) {
+            toast({ title: "Customer created but invite email failed", description: emailErr, variant: "destructive" });
+          } else {
+            toast({ title: "Customer created", description: `Invite sent to ${editing.email}` });
+          }
+        } else {
+          toast({ title: "Customer created", description: "Could not load brand data — invite email not sent", variant: "destructive" });
         }
+      } else {
+        toast({ title: "Customer created", description: "No brand selected — no invite email sent" });
       }
     } else {
       const { error } = await supabase.from("profiles").update({
