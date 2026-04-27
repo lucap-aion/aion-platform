@@ -22,6 +22,15 @@ const BL = C1, GR = C2, GY = C6, PU = C3, AM = C4;
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const fmtEur = (n: number) => new Intl.NumberFormat("en-EU", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
 
+// Collapse singular/plural to the same bucket and display in plural.
+// "BRACELET"/"BRACELETS" -> "BRACELETS"; non-English / single-letter / "—" pass through.
+function normalizeCategory(raw: string | null | undefined): string {
+  const v = (raw ?? "").trim().toUpperCase();
+  if (!v || v === "—" || v.length < 3) return v || "—";
+  const base = v.endsWith("S") ? v.slice(0, -1) : v;
+  return `${base}S`;
+}
+
 function getWeek(ds: string) {
   const dt = new Date(ds), d = dt.getDay() || 7;
   dt.setDate(dt.getDate() + 4 - d);
@@ -547,7 +556,7 @@ export default function AdminInsights() {
         shop: p.shops?.name || `#${p.shop_id}`,
         customerId: p.customer_id,
         regDate: profileRegMap.get(p.customer_id) || null,
-        category: (p.catalogues?.category || p.catalogues?.collection || "—").toUpperCase(),
+        category: normalizeCategory(p.catalogues?.category || p.catalogues?.collection || "—"),
       }));
 
       setRawPolicies(processed);
