@@ -153,6 +153,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
 
   const computeStats = useCallback(async () => {
+    if (allBrands.length === 0) return;
     setLoading(true);
     try {
       const result = emptyStats();
@@ -171,25 +172,19 @@ export default function AdminDashboard() {
         toDate = range.to;
       }
 
-      // Phase 1: brands metadata first so we know verified IDs for downstream filters
-      const fetchedBrands: Brand[] = allBrands.length > 0
-        ? allBrands
-        : await supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee").eq("status", "verified").order("name")
-            .then(({ data }) => {
-              const b = (data as Brand[]) ?? [];
-              setAllBrands(b);
-              return b;
-            });
-
+      // Phase 1: use brands loaded once on mount (separate effect) for the rates map.
+      const fetchedBrands: Brand[] = allBrands;
       const verifiedBrandIds = fetchedBrands.map((b) => b.id);
-      const safeBrandIds = verifiedBrandIds.length > 0 ? verifiedBrandIds : [-1];
+      const brandIds = selectedBrandId === "all" ? verifiedBrandIds : [selectedBrandId];
 
+      // Customer-type filter (new/returning) requires a separate query because
+      // the resulting ID list is also fed into the aggregate RPC for policy filtering.
       const eligibleCustomerIdsPromise: Promise<string[] | null> =
         customerType !== "all" && fromDate
           ? (async () => {
               let q = supabase.from("profiles").select("id").eq("role", "customer");
               if (selectedBrandId !== "all") q = q.in("brand_id", [selectedBrandId]);
-              else q = q.in("brand_id", safeBrandIds);
+              else if (verifiedBrandIds.length > 0) q = q.in("brand_id", verifiedBrandIds);
               if (customerType === "new") {
                 q = q.gte("created_at", fromDate!);
                 if (toDate) q = q.lte("created_at", toDate);
@@ -201,48 +196,41 @@ export default function AdminDashboard() {
             })()
           : Promise.resolve<string[] | null>(null);
 
-      // Phase 2: counts + eligible IDs in parallel — verified-brand filter via .in() on brand_id
-      const [
-        eligibleIds,
-        { count: brandsCount },
-        { count: shopsCount },
-        { count: customersCount },
-        { data: claimsRows },
-      ] = await Promise.all([
-        eligibleCustomerIdsPromise,
-        supabase.from("brands").select("id", { count: "exact", head: true }).eq("status", "verified"),
-        supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds),
-        supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds),
-        supabase.from("claims").select("status, policies!claims_policy_id_fkey!inner(brand_id)").in("policies.brand_id", safeBrandIds),
-      ]);
+      const eligibleIds = await eligibleCustomerIdsPromise;
 
-      const claimsArr = (claimsRows ?? []) as Array<{ status: string | null }>;
-      const claimsCount = claimsArr.length;
-      const openClaimsCount = claimsArr.filter((c) => c.status === "open").length;
-      const closedClaimsCount = claimsArr.filter((c) => c.status === "closed").length;
-
-      const brandIds = selectedBrandId === "all" ? verifiedBrandIds : [selectedBrandId];
       const brandRates = new Map<number, { activation_fee: number; insurance_premium: number; aion_premium_fee: number }>();
       for (const b of fetchedBrands) {
         if (brandIds.includes(b.id)) brandRates.set(b.id, { activation_fee: toPct(b.activation_fee), insurance_premium: toPct(b.insurance_premium), aion_premium_fee: toPct(b.aion_premium_fee) });
       }
 
-      if (eligibleIds !== null && eligibleIds.length === 0) {
-        result.brands = brandsCount ?? 0;
-        result.shops = shopsCount ?? 0;
-        result.customers = 0;
-        setStats(result);
-        return;
-      }
+      // Phase 2: ONE round trip — every count + per-brand policy stats in one SECURITY DEFINER RPC.
+      const aggParams: Record<string, unknown> = {};
+      if (selectedBrandId !== "all") aggParams.p_brand_ids = [selectedBrandId];
+      if (fromDate) aggParams.p_from_date = fromDate;
+      if (toDate) aggParams.p_to_date = toDate;
+      if (eligibleIds !== null) aggParams.p_customer_ids = eligibleIds;
 
-      // Phase 3: Aggregated policy stats via RPC
-      const rpcParams: Record<string, unknown> = {};
-      if (brandIds.length > 0) rpcParams.p_brand_ids = brandIds;
-      if (fromDate) rpcParams.p_from_date = fromDate;
-      if (toDate) rpcParams.p_to_date = toDate;
-      if (eligibleIds !== null) rpcParams.p_customer_ids = eligibleIds;
+      const { data: aggData, error: aggErr } = await supabase.rpc("admin_dashboard_aggregates", aggParams);
+      if (aggErr) console.error("admin_dashboard_aggregates failed", aggErr);
 
-      const { data: policyStats = [] } = await supabase.rpc("dashboard_policy_stats", rpcParams);
+      const aggs = (aggData ?? {}) as {
+        brands_count?: number | string;
+        shops_count?: number | string;
+        customers_count?: number | string;
+        claims_total?: number | string;
+        claims_open?: number | string;
+        claims_closed?: number | string;
+        policy_stats?: Array<{
+          brand_id: number;
+          covers: number | string;
+          total_cogs: number | string;
+          total_rrp: number | string;
+          total_selling_price: number | string;
+          latest_start_date: string | null;
+        }>;
+      };
+
+      const policyStats = aggs.policy_stats ?? [];
 
       // Aggregate per-brand rows into totals, applying brand-specific rates
       for (const row of policyStats as any[]) {
@@ -275,18 +263,24 @@ export default function AdminDashboard() {
       result.effectiveActivationFeePct = result.rrpTotal > 0 ? result.aionActivationFee / result.rrpTotal : null;
       result.effectiveAionPremiumFeePct = result.netPremium > 0 ? result.aionPremiumFee / result.netPremium : null;
 
-      result.claims = claimsCount ?? 0;
-      result.openClaims = openClaimsCount ?? 0;
-      result.closedClaims = closedClaimsCount ?? 0;
+      result.claims = Number(aggs.claims_total ?? 0);
+      result.openClaims = Number(aggs.claims_open ?? 0);
+      result.closedClaims = Number(aggs.claims_closed ?? 0);
 
-      result.brands = brandsCount ?? 0;
-      result.customers = eligibleIds !== null ? eligibleIds.length : (customersCount ?? 0);
-      result.shops = shopsCount ?? 0;
+      result.brands = Number(aggs.brands_count ?? 0);
+      result.customers = eligibleIds !== null ? eligibleIds.length : Number(aggs.customers_count ?? 0);
+      result.shops = Number(aggs.shops_count ?? 0);
       result.claimRate = result.covers > 0 ? result.claims / result.covers : null;
 
       setStats(result);
     } finally { setLoading(false); }
   }, [allBrands, selectedBrandId, period, selectedYear, selectedMonth, selectedWeek, customerType]);
+
+  useEffect(() => {
+    if (allBrands.length > 0) return;
+    supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee").eq("status", "verified").order("name")
+      .then(({ data }) => setAllBrands((data as Brand[]) ?? []));
+  }, []);
 
   useEffect(() => { void computeStats(); }, [computeStats]);
 
