@@ -29,6 +29,7 @@ const COVERS_SCHEMA: ExportColumn[] = [
   { key: "item_id",                    label: "Item ID" },
 ];
 import { flattenSupabaseRow } from "./_utils/flattenRow";
+import { resolveSortOrder } from "./_utils/resolveSortOrder";
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, SaveBar } from "./_components/FormField";
@@ -75,6 +76,8 @@ type Mode = "view" | "edit" | "add";
 
 const PAGE_SIZE = 25;
 
+const SORT_RELATIONS = ["brands", "catalogues", "profiles"] as const;
+
 const addTwoYears = (dateStr: string): string => {
   const d = new Date(dateStr);
   d.setFullYear(d.getFullYear() + 2);
@@ -120,12 +123,13 @@ const AdminCovers = () => {
     abortRef.current = new AbortController();
     setLoading(true);
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
+    const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("policies")
       .select("id, brand_sale_id, brand_row_id, brand_sub_order_row_code, status, start_date, expiration_date, selling_price, cogs, recommended_retail_price, quantity, brand_id, customer_id, item_id, created_at, brands(name, logo_small), catalogues(name, sku, picture), profiles(email, first_name, last_name, avatar, created_at, registered_at, email_confirmed_at)", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .in("brand_id", brandFilterIds)
-      .order(sortKey, { ascending: sortDir === "asc" })
+      .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`brand_sale_id.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
@@ -223,11 +227,12 @@ const AdminCovers = () => {
 
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
+    const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let q = supabase
       .from("policies")
       .select("id, brand_sale_id, status, start_date, expiration_date, selling_price, cogs, recommended_retail_price, quantity, brand_id, customer_id, item_id, created_at, brands(name), catalogues(name, sku), profiles(email, first_name, last_name, created_at, registered_at, email_confirmed_at)")
       .in("brand_id", brandFilterIds)
-      .order(sortKey, { ascending: sortDir === "asc" })
+      .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
     if (search) q = q.or(`brand_sale_id.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
@@ -326,9 +331,9 @@ const AdminCovers = () => {
               );
             },
           },
-          { key: "profiles_created_at", label: "Customer Created", sortable: false, render: (row) => fmtDate((row as unknown as Cover).profiles_created_at) },
-          { key: "profiles_registered_at", label: "Customer Registered", sortable: false, render: (row) => fmtDate((row as unknown as Cover).profiles_registered_at) },
-          { key: "profiles_email_confirmed_at", label: "Email Confirmed", sortable: false, render: (row) => fmtDate((row as unknown as Cover).profiles_email_confirmed_at) },
+          { key: "profiles_created_at", label: "Customer Created", sortable: true, render: (row) => fmtDate((row as unknown as Cover).profiles_created_at) },
+          { key: "profiles_registered_at", label: "Customer Registered", sortable: true, render: (row) => fmtDate((row as unknown as Cover).profiles_registered_at) },
+          { key: "profiles_email_confirmed_at", label: "Email Confirmed", sortable: true, render: (row) => fmtDate((row as unknown as Cover).profiles_email_confirmed_at) },
           {
             key: "recommended_retail_price", label: "RRP", sortable: true,
             render: (row) => { const r = row as unknown as Cover; return r.recommended_retail_price != null ? `€${r.recommended_retail_price.toLocaleString("en-EU", { minimumFractionDigits: 0 })}` : "—"; },

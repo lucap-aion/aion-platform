@@ -3,6 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge, type FilterDef } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
+import { resolveSortOrder } from "./_utils/resolveSortOrder";
+
+const SORT_RELATIONS = ["brands"] as const;
 
 const CUSTOMERS_SCHEMA: ExportColumn[] = [
   { key: "id",                  label: "ID" },
@@ -87,12 +90,13 @@ const AdminCustomers = () => {
     abortRef.current = new AbortController();
     setLoading(true);
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
+    const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("profiles")
       .select("id, first_name, last_name, email, city, country, phone_number, address, postcode, status, created_at, registered_at, email_confirmed_at, brand_id, role, avatar, brands(name, logo_small)", { count: "exact" })
       .eq("role", "customer")
       .in("brand_id", brandFilterIds)
-      .order(sortKey, { ascending: sortDir === "asc" })
+      .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
@@ -181,12 +185,13 @@ const AdminCustomers = () => {
 
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
+    const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let q = supabase
       .from("profiles")
       .select("id, first_name, last_name, email, city, country, phone_number, address, postcode, status, created_at, registered_at, email_confirmed_at, brand_id, brands(name)")
       .eq("role", "customer")
       .in("brand_id", brandFilterIds)
-      .order(sortKey, { ascending: sortDir === "asc" })
+      .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
     if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);

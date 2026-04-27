@@ -97,6 +97,10 @@ function collectLeafCols<T>(
       result.push({
         key: flatKey,
         label: friendlyLabel(flatKey),
+        // Top-level scalars map 1:1 to a column on the primary table, so they
+        // are safe to sort server-side. Joined-table flat keys (path.length>0)
+        // need foreignTable handling and are left to the parent to opt into.
+        sortable: path.length === 0,
         render: (row: T) => {
           let val: unknown;
           if (path.length > 0) {

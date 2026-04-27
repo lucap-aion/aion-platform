@@ -3,6 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
+import { resolveSortOrder } from "./_utils/resolveSortOrder";
+
+const SORT_RELATIONS = ["brands"] as const;
 
 const SHOPS_SCHEMA: ExportColumn[] = [
   { key: "id",          label: "ID" },
@@ -68,12 +71,13 @@ const AdminShops = () => {
     abortRef.current = new AbortController();
     setLoading(true);
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
+    const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("shops")
       .select("id, name, address, city, country, contact, status, brand_id, brands(name, logo_small)", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .in("brand_id", brandFilterIds)
-      .order(sortKey, { ascending: sortDir === "asc" })
+      .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`name.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%`);
     query.then(({ data, count, error }) => {
@@ -124,11 +128,12 @@ const AdminShops = () => {
 
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
+    const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let q = supabase
       .from("shops")
       .select("id, name, address, city, country, contact, status, brand_id, brands(name)")
       .in("brand_id", brandFilterIds)
-      .order(sortKey, { ascending: sortDir === "asc" })
+      .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
     if (search) q = q.or(`name.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%`);
     const { data } = await q;
