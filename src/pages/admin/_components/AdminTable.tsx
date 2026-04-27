@@ -197,22 +197,28 @@ function defaultSettings<T>(primaryCols: Column<T>[], allCols: Column<T>[]): Col
   };
 }
 
-/** Merge saved settings with current column set (handles added/removed columns) */
+/** Merge saved settings with current column set (handles added/removed columns).
+ *
+ * Important: do NOT filter saved.{hidden,frozen,order} by the current allCols.
+ * On initial mount, allCols only contains the declared columns (data hasn't
+ * loaded yet). Filtering would strip every extra/togglable key the user had
+ * customised, and the new-keys-detection effect would then re-hide them as if
+ * fresh, wiping their toggles. Stale keys for removed columns are harmless —
+ * they simply never get rendered. */
 function mergeSettings<T>(
   saved: ColSettings,
   allCols: Column<T>[],
   primaryCols: Column<T>[],
 ): ColSettings {
-  const allKeys = allCols.map((c) => c.key);
   const primaryKeys = new Set(primaryCols.map((c) => c.key));
-  const newKeys = allKeys.filter((k) => !saved.order.includes(k));
+  const newKeys = allCols.map((c) => c.key).filter((k) => !saved.order.includes(k));
   return {
     hidden: [
-      ...saved.hidden.filter((k) => allKeys.includes(k)),
+      ...saved.hidden,
       ...newKeys.filter((k) => !primaryKeys.has(k)),
     ],
-    frozen: saved.frozen.filter((k) => allKeys.includes(k)),
-    order: [...saved.order.filter((k) => allKeys.includes(k)), ...newKeys],
+    frozen: saved.frozen,
+    order: [...saved.order, ...newKeys],
     widths: {
       ...Object.fromEntries(allCols.map((c) => [c.key, c.width ?? defaultColWidth(c.key)])),
       ...saved.widths,
