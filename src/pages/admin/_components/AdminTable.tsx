@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Search, Plus, Pencil, Trash2, Eye, EyeOff,
-  ChevronDown, X, ChevronsUpDown, Download, SlidersHorizontal, Pin, GripVertical,
+  ChevronDown, X, ChevronsUpDown, Download, SlidersHorizontal, Pin, GripVertical, Filter,
 } from "lucide-react";
 import { exportToCsv, type ExportColumn } from "../_utils/exportCsv";
 import { fmtDate } from "./fmtDate";
@@ -159,6 +159,10 @@ interface AdminTableProps<T extends Record<string, unknown>> {
   filters?: FilterDef[];
   filterValues?: Record<string, string>;
   onFilterChange?: (key: string, value: string) => void;
+  /** Per-column filter values, keyed by `col.sortKey ?? col.key`. */
+  columnFilters?: Record<string, string>;
+  /** Setter for per-column filters. Called with empty string to clear. */
+  onColumnFilterChange?: (key: string, value: string) => void;
   extraRowAction?: (row: T) => React.ReactNode;
   onExport?: () => Promise<Record<string, unknown>[]>;
   exportFilename?: string;
@@ -309,6 +313,8 @@ function AdminTable<T extends Record<string, unknown>>({
   filters,
   filterValues = {},
   onFilterChange,
+  columnFilters = {},
+  onColumnFilterChange,
   extraRowAction,
   onExport,
   exportFilename = title,
@@ -514,6 +520,30 @@ function AdminTable<T extends Record<string, unknown>>({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [pickerOpen]);
+
+  // ── Per-column filter popover ───────────────────────────────────────
+  const [colFilterOpen, setColFilterOpen] = useState<string | null>(null);
+  const [colFilterDraft, setColFilterDraft] = useState("");
+  const colFilterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!colFilterOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (colFilterRef.current && !colFilterRef.current.contains(e.target as Node))
+        setColFilterOpen(null);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [colFilterOpen]);
+
+  const openColFilter = (key: string) => {
+    setColFilterDraft(columnFilters[key] ?? "");
+    setColFilterOpen(colFilterOpen === key ? null : key);
+  };
+  const applyColFilter = (key: string, value: string) => {
+    onColumnFilterChange?.(key, value);
+    setColFilterOpen(null);
+  };
 
   const hiddenCount = settings.hidden.length;
   const visibleCount = visibleColumns.length;
@@ -798,11 +828,11 @@ function AdminTable<T extends Record<string, unknown>>({
                       ].join(" ")}
                       style={isFrozen ? frozenThStyle(col.key) : normalThStyle}
                     >
-                      <span className="inline-flex items-center gap-1 truncate">
+                      <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
                         {isFrozen && (
                           <Pin className="h-3 w-3 text-primary/50 shrink-0" />
                         )}
-                        {friendlyLabel(col.label)}
+                        <span className="truncate">{friendlyLabel(col.label)}</span>
                         {col.sortable !== false && onSort && (
                           <ChevronsUpDown
                             className={`h-3.5 w-3.5 ml-0.5 shrink-0 ${
@@ -810,7 +840,58 @@ function AdminTable<T extends Record<string, unknown>>({
                             }`}
                           />
                         )}
+                        {onColumnFilterChange && (() => {
+                          const fk = col.sortKey ?? col.key;
+                          const active = !!columnFilters[fk];
+                          return (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openColFilter(fk); }}
+                              title={active ? `Filter: ${columnFilters[fk]}` : "Filter column"}
+                              className={`shrink-0 ml-0.5 rounded p-0.5 transition-colors ${
+                                active ? "text-primary" : "text-muted-foreground/30 hover:text-muted-foreground"
+                              }`}
+                            >
+                              <Filter className="h-3 w-3" />
+                            </button>
+                          );
+                        })()}
                       </span>
+                      {onColumnFilterChange && colFilterOpen === (col.sortKey ?? col.key) && (
+                        <div
+                          ref={colFilterRef}
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute top-full left-2 mt-1 z-30 w-56 rounded-xl border border-border bg-background shadow-xl p-2"
+                        >
+                          <input
+                            autoFocus
+                            type="text"
+                            placeholder={`Filter ${friendlyLabel(col.label)}…`}
+                            value={colFilterDraft}
+                            onChange={(e) => setColFilterDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") applyColFilter(col.sortKey ?? col.key, colFilterDraft);
+                              else if (e.key === "Escape") setColFilterOpen(null);
+                            }}
+                            className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          <div className="mt-2 flex items-center justify-between gap-2">
+                            {columnFilters[col.sortKey ?? col.key] ? (
+                              <button
+                                onClick={() => applyColFilter(col.sortKey ?? col.key, "")}
+                                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                Clear
+                              </button>
+                            ) : <span />}
+                            <button
+                              onClick={() => applyColFilter(col.sortKey ?? col.key, colFilterDraft)}
+                              className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                            >
+                              Apply
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       {/* Resize handle — always-visible grip */}
                       <div
                         className="absolute right-0 top-0 h-full w-[9px] cursor-col-resize z-10 flex items-center justify-center gap-px group/resize"
