@@ -109,25 +109,29 @@ const BrandCustomers = () => {
       if (error) throw error;
 
       const customerIds = (data || []).map((c) => c.id);
-      const [policiesRes, claimsRes] = customerIds.length
-        ? await Promise.all([
-            supabase.from("policies").select("id, customer_id, selling_price").in("customer_id", customerIds),
-            supabase.from("claims").select("id, policy_id").in(
-              "policy_id",
-              (await supabase.from("policies").select("id").in("customer_id", customerIds)).data?.map((p) => p.id) || []
-            ),
-          ])
-        : [{ data: [] }, { data: [] }];
+      const aggMap = new Map<string, { covers: number; claims: number; value: number }>();
 
-      const allPolicies = policiesRes.data || [];
-      const allClaims = claimsRes.data || [];
+      if (customerIds.length) {
+        const { data: aggData, error: aggErr } = await supabase
+          .rpc("brand_customer_aggregates", { p_customer_ids: customerIds });
+        if (aggErr) throw aggErr;
+        for (const row of (aggData ?? []) as Array<{
+          customer_id: string;
+          covers: number | string | null;
+          claims: number | string | null;
+          total_value: number | string | null;
+        }>) {
+          aggMap.set(row.customer_id, {
+            covers: Number(row.covers) || 0,
+            claims: Number(row.claims) || 0,
+            value: Number(row.total_value) || 0,
+          });
+        }
+      }
 
       const enriched = (data || []).map((c) => {
-        const cPolicies = allPolicies.filter((p) => p.customer_id === c.id);
-        const cPolicyIds = new Set(cPolicies.map((p) => p.id));
-        const cClaims = allClaims.filter((cl) => cPolicyIds.has(cl.policy_id));
-        const totalValue = cPolicies.reduce((sum, p) => sum + (p.selling_price || 0), 0);
-        return { ...c, covers: cPolicies.length, claims: cClaims.length, value: totalValue };
+        const a = aggMap.get(c.id) ?? { covers: 0, claims: 0, value: 0 };
+        return { ...c, ...a };
       });
 
       return { customers: enriched, total: count ?? 0 };
