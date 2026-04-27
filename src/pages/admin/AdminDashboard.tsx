@@ -45,6 +45,7 @@ const getWeekRange = (year: number, week: number) => {
 };
 
 interface Brand { id: number; name: string; slug: string | null; activation_fee: unknown; insurance_premium: unknown; aion_premium_fee: unknown; }
+interface Shop { id: number; name: string | null; brand_id: number | null; }
 
 interface Statistics {
   brands: number; customers: number; covers: number; claims: number; openClaims: number;
@@ -143,7 +144,9 @@ export default function AdminDashboard() {
   const { adminRecord } = useAuth();
 
   const [allBrands, setAllBrands] = useState<Brand[]>([]);
+  const [allShops, setAllShops] = useState<Shop[]>([]);
   const [selectedBrandId, setSelectedBrandId] = useState<number | "all">("all");
+  const [selectedShopId, setSelectedShopId] = useState<number | "all">("all");
   const [period, setPeriod] = useState<"all" | "week" | "month" | "year">("all");
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
@@ -206,11 +209,12 @@ export default function AdminDashboard() {
       }
 
       // Phase 2 — fast path: ONE SECURITY DEFINER RPC with everything.
-      const aggParams: { p_brand_ids?: number[]; p_from_date?: string; p_to_date?: string; p_customer_ids?: string[] } = {};
+      const aggParams: { p_brand_ids?: number[]; p_from_date?: string; p_to_date?: string; p_customer_ids?: string[]; p_shop_ids?: number[] } = {};
       if (selectedBrandId !== "all") aggParams.p_brand_ids = [selectedBrandId];
       if (fromDate) aggParams.p_from_date = fromDate;
       if (toDate) aggParams.p_to_date = toDate;
       if (eligibleIds !== null) aggParams.p_customer_ids = eligibleIds;
+      if (selectedShopId !== "all") aggParams.p_shop_ids = [selectedShopId];
 
       const aggRes = await supabase.rpc("admin_dashboard_aggregates", aggParams);
 
@@ -248,6 +252,7 @@ export default function AdminDashboard() {
       } else {
         // Fallback: original multi-query path (slower but proven). Logs the agg failure for diagnosis.
         console.warn("admin_dashboard_aggregates returned unexpected shape, falling back", { error: aggRes.error, rawAgg });
+        const shopFilterIds = selectedShopId !== "all" ? [selectedShopId] : null;
         const [
           { count: bC },
           { count: sC },
@@ -257,15 +262,20 @@ export default function AdminDashboard() {
           { data: psData = [] },
         ] = await Promise.all([
           supabase.from("brands").select("id", { count: "exact", head: true }).eq("status", "verified"),
-          supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds),
+          shopFilterIds
+            ? supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds).in("id", shopFilterIds)
+            : supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds),
           supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds),
           supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds).not("registered_at", "is", null),
-          supabase.from("claims").select("status, policies!claims_policy_id_fkey!inner(brand_id)").in("policies.brand_id", safeBrandIds),
+          shopFilterIds
+            ? supabase.from("claims").select("status, policies!claims_policy_id_fkey!inner(brand_id, shop_id)").in("policies.brand_id", safeBrandIds).in("policies.shop_id", shopFilterIds)
+            : supabase.from("claims").select("status, policies!claims_policy_id_fkey!inner(brand_id)").in("policies.brand_id", safeBrandIds),
           supabase.rpc("dashboard_policy_stats", {
             ...(brandIds.length > 0 ? { p_brand_ids: brandIds } : {}),
             ...(fromDate ? { p_from_date: fromDate } : {}),
             ...(toDate ? { p_to_date: toDate } : {}),
             ...(eligibleIds !== null ? { p_customer_ids: eligibleIds } : {}),
+            ...(shopFilterIds ? { p_shop_ids: shopFilterIds } : {}),
           }),
         ]);
         const cArr = (claimsRows ?? []) as Array<{ status: string | null }>;
@@ -315,20 +325,36 @@ export default function AdminDashboard() {
       result.closedClaims = closedClaimsCount;
 
       result.brands = brandsCount;
-      result.customers = eligibleIds !== null ? eligibleIds.length : customersCount;
+      result.customers = customersCount;
       result.shops = shopsCount;
       result.claimRate = result.covers > 0 ? result.claims / result.covers : null;
       result.registrationRate = customersCount > 0 ? registeredCount / customersCount : null;
 
       setStats(result);
     } finally { setLoading(false); }
-  }, [allBrands, selectedBrandId, period, selectedYear, selectedMonth, selectedWeek, customerType]);
+  }, [allBrands, selectedBrandId, selectedShopId, period, selectedYear, selectedMonth, selectedWeek, customerType]);
 
   useEffect(() => {
     if (allBrands.length > 0) return;
     supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee").eq("status", "verified").order("name")
       .then(({ data }) => setAllBrands((data as Brand[]) ?? []));
   }, []);
+
+  useEffect(() => {
+    if (allShops.length > 0) return;
+    supabase.from("shops").select("id, name, brand_id").order("name")
+      .then(({ data }) => setAllShops((data as Shop[]) ?? []));
+  }, []);
+
+  // Reset Store filter when the selected brand no longer contains it.
+  useEffect(() => {
+    if (selectedShopId === "all") return;
+    const shop = allShops.find((s) => s.id === selectedShopId);
+    if (!shop) return;
+    if (selectedBrandId !== "all" && shop.brand_id !== selectedBrandId) {
+      setSelectedShopId("all");
+    }
+  }, [selectedBrandId, selectedShopId, allShops]);
 
   useEffect(() => { void computeStats(); }, [computeStats]);
 
@@ -357,6 +383,17 @@ export default function AdminDashboard() {
             <select className={selectCls} value={selectedBrandId} onChange={(e) => setSelectedBrandId(e.target.value === "all" ? "all" : Number(e.target.value))}>
               <option value="all">All Brands</option>
               {allBrands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          </div>
+
+          {/* Store filter */}
+          <div className="relative">
+            <select className={selectCls} value={selectedShopId} onChange={(e) => setSelectedShopId(e.target.value === "all" ? "all" : Number(e.target.value))}>
+              <option value="all">All Stores</option>
+              {(selectedBrandId === "all" ? allShops : allShops.filter((s) => s.brand_id === selectedBrandId)).map((s) => (
+                <option key={s.id} value={s.id}>{s.name ?? `Store #${s.id}`}</option>
+              ))}
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           </div>

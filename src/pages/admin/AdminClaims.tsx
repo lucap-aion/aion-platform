@@ -4,6 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge, toTitleCase } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
+import { resolveSortOrder } from "./_utils/resolveSortOrder";
+
+// Longest-match wins, so nested relations come first.
+const SORT_RELATIONS = ["policies.brands", "policies.catalogues", "policies.profiles", "policies"] as const;
 
 const CLAIMS_SCHEMA: ExportColumn[] = [
   { key: "id",                            label: "ID" },
@@ -89,12 +93,13 @@ const AdminClaims = () => {
     abortRef.current = new AbortController();
     setLoading(true);
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
+    const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("claims")
       .select("id, policy_id, type, status, incident_date, incident_city, incident_country, created_at, description, media, policies!claims_policy_id_fkey!inner(brand_id, brands(name, logo_small), catalogues(name, picture), profiles(email, first_name, last_name))", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .in("policies.brand_id", brandFilterIds)
-      .order(sortKey, { ascending: sortDir === "asc" })
+      .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`type.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
@@ -204,11 +209,12 @@ const AdminClaims = () => {
 
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
+    const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let q = supabase
       .from("claims")
       .select("id, policy_id, type, status, incident_date, incident_city, incident_country, created_at, description, policies!claims_policy_id_fkey!inner(brand_id, brands(name), catalogues(name, sku), profiles(email, first_name, last_name))")
       .in("policies.brand_id", brandFilterIds)
-      .order(sortKey, { ascending: sortDir === "asc" })
+      .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
     if (search) q = q.or(`type.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);

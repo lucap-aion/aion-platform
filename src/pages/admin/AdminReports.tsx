@@ -6,6 +6,9 @@ import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
+import { resolveSortOrder } from "./_utils/resolveSortOrder";
+
+const SORT_RELATIONS = ["brands"] as const;
 
 interface Report {
   id: number;
@@ -41,11 +44,12 @@ const AdminReports = () => {
 
   const fetchData = () => {
     setLoading(true);
+    const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("reports")
       .select("id, name, type, source, direction, start_date, end_date, url, brand_id, created_at, created_by, uploaded_to_chubb, uploaded_to_chubb_at, brands!inner(name, status)", { count: "exact" })
       .eq("brands.status", "verified")
-      .order(sortKey, { ascending: sortDir === "asc" })
+      .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`name.ilike.%${search}%,type.ilike.%${search}%,source.ilike.%${search}%`);
     query.then(({ data, count }) => {
