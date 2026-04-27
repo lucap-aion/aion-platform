@@ -22,6 +22,17 @@ const BL = C1, GR = C2, GY = C6, PU = C3, AM = C4;
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const fmtEur = (n: number) => new Intl.NumberFormat("en-EU", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
 
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Convert "2026-01" -> "Jan 2026" and "2026-W01" -> "Wk 1 2026"; pass anything else through.
+function fmtPeriodLabel(key: string | null | undefined): string {
+  if (!key) return "";
+  const wk = /^(\d{4})-W(\d{1,2})$/.exec(key);
+  if (wk) return `Wk ${parseInt(wk[2], 10)} ${wk[1]}`;
+  const mo = /^(\d{4})-(\d{2})$/.exec(key);
+  if (mo) return `${SHORT_MONTHS[parseInt(mo[2], 10) - 1] ?? mo[2]} ${mo[1]}`;
+  return key;
+}
+
 // Collapse singular/plural to the same bucket and display in plural.
 // "BRACELET"/"BRACELETS" -> "BRACELETS"; non-English / single-letter / "—" pass through.
 function normalizeCategory(raw: string | null | undefined): string {
@@ -111,9 +122,10 @@ const StackLabel = ({ x, y, width, height, value }: any) => {
 
 const CTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
+  const prettyLabel = typeof label === "string" ? fmtPeriodLabel(label) : label;
   return (
     <div className="rounded-lg border border-border/50 bg-background px-3 py-2.5 text-xs shadow-lg backdrop-blur-sm">
-      <p className="font-semibold text-foreground mb-1.5">{label}</p>
+      <p className="font-semibold text-foreground mb-1.5">{prettyLabel}</p>
       {payload.map((p: any, i: number) => (
         <p key={i} className="flex items-center gap-1.5 text-muted-foreground">
           <span className="w-2 h-2 rounded-full inline-block" style={{ background: p.color || p.fill }} />
@@ -741,7 +753,7 @@ function WeeklyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData>
       <ChartCard title={t("insights.chart.weeklyCov")}>
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={wkVol}>
-            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} />
+            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} tickFormatter={fmtPeriodLabel} />
             <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
             <Bar dataKey="v" fill={PU} radius={[6, 6, 0, 0]} name={t("insights.label.covers")}><LabelList dataKey="v" content={SimpleBarLabel} /></Bar>
           </BarChart>
@@ -751,7 +763,7 @@ function WeeklyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData>
       <ChartCard title={t("insights.chart.weeklyRRP")}>
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={wkRRP}>
-            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} />
+            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} tickFormatter={fmtPeriodLabel} />
             <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} /><Tooltip content={<CTooltip />} />
             <Bar dataKey="v" fill={GR} radius={[6, 6, 0, 0]} name="RRP €k">
               <LabelList dataKey="v" content={({ x, y, width, height, value }: any) => {
@@ -769,7 +781,7 @@ function WeeklyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData>
             <ColorLegend items={d.shops.map((s, i) => ({ color: SHOP_COLORS[i] || SLATE, label: s }))} />
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={wkShopVol}>
-                <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} />
+                <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} tickFormatter={fmtPeriodLabel} />
                 <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
                 {d.shops.map((s, i) => (
                   <Bar key={s} dataKey={s} stackId="s" fill={SHOP_COLORS[i] || SLATE} radius={i === d.shops.length - 1 ? [2, 2, 0, 0] : undefined} name={s}>
@@ -784,7 +796,7 @@ function WeeklyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData>
             <ColorLegend items={d.shops.map((s, i) => ({ color: SHOP_COLORS[i] || SLATE, label: s }))} />
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={wkShopRRP}>
-                <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} />
+                <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} tickFormatter={fmtPeriodLabel} />
                 <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} /><Tooltip content={<CTooltip />} />
                 {d.shops.map((s, i) => (
                   <Bar key={s} dataKey={s} stackId="s" fill={SHOP_COLORS[i] || SLATE} name={s}>
@@ -804,7 +816,7 @@ function WeeklyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData>
         <ColorLegend items={[{ color: GR, label: t("insights.label.registered") }, { color: GY, label: t("insights.label.notRegistered") }]} />
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={d.rrpAvgWeekly}>
-            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} />
+            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} tickFormatter={fmtPeriodLabel} />
             <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} /><Tooltip content={<CTooltip />} />
             <Bar dataKey="reg" fill={GR} radius={[6, 6, 0, 0]} name={t("insights.label.registered")}>
               <LabelList dataKey="reg" content={({ x, y, width, height, value }: any) => {
@@ -835,7 +847,7 @@ function WeeklyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData>
       <ChartCard title={t("insights.chart.regPctWeekly")}>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={d.regPctWeekly}>
-            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} />
+            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} tickFormatter={fmtPeriodLabel} />
             <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} /><Tooltip content={<CTooltip />} />
             <Bar dataKey="pct" fill={AM} radius={[6, 6, 0, 0]} name="%">
               <LabelList dataKey="pct" content={({ x, y, width, height, value }: any) => {
@@ -873,7 +885,7 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
       <ChartCard title={t("insights.chart.monthlyCov")}>
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={moVol}>
-            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
+            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
             <Bar dataKey="v" fill={PU} radius={[6, 6, 0, 0]} name={t("insights.label.covers")}><LabelList dataKey="v" content={SimpleBarLabel} /></Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -882,7 +894,7 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
       <ChartCard title={t("insights.chart.monthlyRRP")}>
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={moRRP}>
-            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} /><Tooltip content={<CTooltip />} />
+            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} /><Tooltip content={<CTooltip />} />
             <Bar dataKey="v" fill={GR} radius={[6, 6, 0, 0]} name="RRP €k">
               <LabelList dataKey="v" content={({ x, y, width, height, value }: any) => {
                 if (!value) return null; const inside = height > 20;
@@ -899,7 +911,7 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
             <ColorLegend items={d.shops.map((s, i) => ({ color: SHOP_COLORS[i] || SLATE, label: s }))} />
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={moShopVol}>
-                <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
+                <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
                 {d.shops.map((s, i) => (
                   <Bar key={s} dataKey={s} stackId="s" fill={SHOP_COLORS[i] || SLATE} name={s}><LabelList dataKey={s} content={StackLabel} /></Bar>
                 ))}
@@ -911,7 +923,7 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
             <ColorLegend items={d.shops.map((s, i) => ({ color: SHOP_COLORS[i] || SLATE, label: s }))} />
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={moShopRRP}>
-                <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} /><Tooltip content={<CTooltip />} />
+                <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} /><Tooltip content={<CTooltip />} />
                 {d.shops.map((s, i) => (
                   <Bar key={s} dataKey={s} stackId="s" fill={SHOP_COLORS[i] || SLATE} name={s}>
                     <LabelList dataKey={s} content={({ x, y, width, height, value }: any) => {
@@ -930,7 +942,7 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
         <ColorLegend items={[{ color: GR, label: t("insights.label.registered") }, { color: GY, label: t("insights.label.notRegistered") }]} />
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={d.rrpAvgMonthly}>
-            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} /><Tooltip content={<CTooltip />} />
+            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} /><Tooltip content={<CTooltip />} />
             <Bar dataKey="reg" fill={GR} radius={[6, 6, 0, 0]} name={t("insights.label.registered")}>
               <LabelList dataKey="reg" content={({ x, y, width, height, value }: any) => {
                 if (value === null) return null; const inside = height > 18;
@@ -960,7 +972,7 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
       <ChartCard title={t("insights.chart.regPctMonthly")}>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={d.regPctMonthly}>
-            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} /><Tooltip content={<CTooltip />} />
+            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} /><YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} /><Tooltip content={<CTooltip />} />
             <Bar dataKey="pct" fill={AM} radius={[6, 6, 0, 0]} name="%">
               <LabelList dataKey="pct" content={({ x, y, width, height, value }: any) => {
                 if (!value) return null; const inside = height > 20;
@@ -983,7 +995,7 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
               <ChartCard key={s} title={`${t("insights.chart.regPctMonthShop")}${s}${t("insights.chart.regPctMonthShopSuffix")}`}>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={data}>
-                    <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} /><Tooltip content={<CTooltip />} />
+                    <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} /><YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} /><Tooltip content={<CTooltip />} />
                     <Bar dataKey="pct" fill={COLORS[si] || SLATE} radius={[6, 6, 0, 0]} name={`% ${s}`}>
                       <LabelList dataKey="pct" content={({ x, y, width, height, value }: any) => {
                         if (!value) return null; const inside = height > 20;
@@ -1010,7 +1022,7 @@ function ReturnChart({ title, data, rotateX, height = 240, t }: {
       <ColorLegend items={[{ color: GR, label: t("insights.label.new") }, { color: AM, label: t("insights.label.returning") }]} />
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={data}>
-          <XAxis dataKey="key" tick={{ fontSize: rotateX ? 9 : 11 }} angle={rotateX ? -45 : 0} textAnchor={rotateX ? "end" : "middle"} height={rotateX ? 60 : 30} />
+          <XAxis dataKey="key" tick={{ fontSize: rotateX ? 9 : 11 }} angle={rotateX ? -45 : 0} textAnchor={rotateX ? "end" : "middle"} height={rotateX ? 60 : 30} tickFormatter={fmtPeriodLabel} />
           <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
           <Bar dataKey="nuovi" stackId="s" fill={GR} name={t("insights.label.new")}><LabelList dataKey="nuovi" content={StackLabel} /></Bar>
           <Bar dataKey="tornano" stackId="s" fill={AM} radius={[6, 6, 0, 0]} name={t("insights.label.returning")}><LabelList dataKey="tornano" content={StackLabel} /></Bar>
@@ -1237,7 +1249,7 @@ function RegTimeTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
       <ChartCard title={t("insights.chart.avgDaysByMonth")}>
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={rt.byMonthData}>
-            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
+            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
             <Bar dataKey="avg" fill={PU} radius={[6, 6, 0, 0]} name={t("insights.label.days")}>
               <LabelList dataKey="avg" content={({ x, y, width, height, value }: any) => {
                 if (!value) return null; const inside = height > 20;
@@ -1251,7 +1263,7 @@ function RegTimeTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
       <ChartCard title={t("insights.chart.avgDaysByWeek")}>
         <ResponsiveContainer width="100%" height={280}>
           <BarChart data={rt.byWeekData}>
-            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
+            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} tickFormatter={fmtPeriodLabel} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
             <Bar dataKey="avg" fill={BL} radius={[6, 6, 0, 0]} name={t("insights.label.days")}>
               <LabelList dataKey="avg" content={({ x, y, width, height, value }: any) => {
                 if (!value) return null; const inside = height > 20;
