@@ -171,7 +171,7 @@ export default function AdminDashboard() {
         toDate = range.to;
       }
 
-      // Phase 1: brands metadata first so we know verified IDs for the customer-type filter
+      // Phase 1: brands metadata first so we know verified IDs for downstream filters
       const fetchedBrands: Brand[] = allBrands.length > 0
         ? allBrands
         : await supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee").eq("status", "verified").order("name")
@@ -182,13 +182,14 @@ export default function AdminDashboard() {
             });
 
       const verifiedBrandIds = fetchedBrands.map((b) => b.id);
+      const safeBrandIds = verifiedBrandIds.length > 0 ? verifiedBrandIds : [-1];
 
       const eligibleCustomerIdsPromise: Promise<string[] | null> =
         customerType !== "all" && fromDate
           ? (async () => {
               let q = supabase.from("profiles").select("id").eq("role", "customer");
               if (selectedBrandId !== "all") q = q.in("brand_id", [selectedBrandId]);
-              else if (verifiedBrandIds.length > 0) q = q.in("brand_id", verifiedBrandIds);
+              else q = q.in("brand_id", safeBrandIds);
               if (customerType === "new") {
                 q = q.gte("created_at", fromDate!);
                 if (toDate) q = q.lte("created_at", toDate);
@@ -200,22 +201,24 @@ export default function AdminDashboard() {
             })()
           : Promise.resolve<string[] | null>(null);
 
-      // Phase 2: counts RPC + eligible customer IDs in parallel
-      const [eligibleIds, countsRes] = await Promise.all([
+      // Phase 2: counts + eligible IDs in parallel — verified-brand filter via .in() / FK join
+      const [
+        eligibleIds,
+        { count: brandsCount },
+        { count: shopsCount },
+        { count: customersCount },
+        { count: claimsCount },
+        { count: openClaimsCount },
+        { count: closedClaimsCount },
+      ] = await Promise.all([
         eligibleCustomerIdsPromise,
-        supabase.rpc("admin_dashboard_counts"),
+        supabase.from("brands").select("id", { count: "exact", head: true }).eq("status", "verified"),
+        supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds),
+        supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds),
+        supabase.from("claims").select("id, policies!claims_policy_id_fkey!inner(brand_id)", { count: "exact", head: true }).in("policies.brand_id", safeBrandIds),
+        supabase.from("claims").select("id, policies!claims_policy_id_fkey!inner(brand_id)", { count: "exact", head: true }).eq("status", "open").in("policies.brand_id", safeBrandIds),
+        supabase.from("claims").select("id, policies!claims_policy_id_fkey!inner(brand_id)", { count: "exact", head: true }).eq("status", "closed").in("policies.brand_id", safeBrandIds),
       ]);
-
-      if (countsRes.error) console.error("admin_dashboard_counts RPC failed", countsRes.error);
-
-      const counts = (Array.isArray(countsRes.data) ? countsRes.data[0] : countsRes.data) as {
-        brands: number | string | null;
-        shops: number | string | null;
-        customers: number | string | null;
-        claims: number | string | null;
-        open_claims: number | string | null;
-        closed_claims: number | string | null;
-      } | null | undefined;
 
       const brandIds = selectedBrandId === "all" ? verifiedBrandIds : [selectedBrandId];
       const brandRates = new Map<number, { activation_fee: number; insurance_premium: number; aion_premium_fee: number }>();
@@ -224,8 +227,8 @@ export default function AdminDashboard() {
       }
 
       if (eligibleIds !== null && eligibleIds.length === 0) {
-        result.brands = Number(counts?.brands ?? 0);
-        result.shops = Number(counts?.shops ?? 0);
+        result.brands = brandsCount ?? 0;
+        result.shops = shopsCount ?? 0;
         result.customers = 0;
         setStats(result);
         return;
@@ -271,13 +274,13 @@ export default function AdminDashboard() {
       result.effectiveActivationFeePct = result.rrpTotal > 0 ? result.aionActivationFee / result.rrpTotal : null;
       result.effectiveAionPremiumFeePct = result.netPremium > 0 ? result.aionPremiumFee / result.netPremium : null;
 
-      result.claims = Number(counts?.claims ?? 0);
-      result.openClaims = Number(counts?.open_claims ?? 0);
-      result.closedClaims = Number(counts?.closed_claims ?? 0);
+      result.claims = claimsCount ?? 0;
+      result.openClaims = openClaimsCount ?? 0;
+      result.closedClaims = closedClaimsCount ?? 0;
 
-      result.brands = Number(counts?.brands ?? 0);
-      result.customers = eligibleIds !== null ? eligibleIds.length : Number(counts?.customers ?? 0);
-      result.shops = Number(counts?.shops ?? 0);
+      result.brands = brandsCount ?? 0;
+      result.customers = eligibleIds !== null ? eligibleIds.length : (customersCount ?? 0);
+      result.shops = shopsCount ?? 0;
       result.claimRate = result.covers > 0 ? result.claims / result.covers : null;
 
       setStats(result);
