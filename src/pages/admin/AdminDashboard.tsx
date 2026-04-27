@@ -178,42 +178,21 @@ export default function AdminDashboard() {
       const safeBrandIds = verifiedBrandIds.length > 0 ? verifiedBrandIds : [-1];
       const brandIds = selectedBrandId === "all" ? verifiedBrandIds : [selectedBrandId];
 
-      const eligibleCustomerIdsPromise: Promise<string[] | null> =
-        customerType !== "all" && fromDate
-          ? (async () => {
-              let q = supabase.from("profiles").select("id").eq("role", "customer");
-              if (selectedBrandId !== "all") q = q.in("brand_id", [selectedBrandId]);
-              else q = q.in("brand_id", safeBrandIds);
-              if (customerType === "new") {
-                q = q.gte("created_at", fromDate!);
-                if (toDate) q = q.lte("created_at", toDate);
-              } else {
-                q = q.lt("created_at", fromDate!);
-              }
-              const { data } = await q;
-              return (data ?? []).map((c: any) => c.id as string);
-            })()
-          : Promise.resolve<string[] | null>(null);
-
-      // Phase 2: counts + claims rows + eligible IDs all in parallel.
-      const [
-        eligibleIds,
-        { count: brandsCount },
-        { count: shopsCount },
-        { count: customersCount },
-        { data: claimsRows },
-      ] = await Promise.all([
-        eligibleCustomerIdsPromise,
-        supabase.from("brands").select("id", { count: "exact", head: true }).eq("status", "verified"),
-        supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds),
-        supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds),
-        supabase.from("claims").select("status, policies!claims_policy_id_fkey!inner(brand_id)").in("policies.brand_id", safeBrandIds),
-      ]);
-
-      const claimsArr = (claimsRows ?? []) as Array<{ status: string | null }>;
-      const claimsCount = claimsArr.length;
-      const openClaimsCount = claimsArr.filter((c) => c.status === "open").length;
-      const closedClaimsCount = claimsArr.filter((c) => c.status === "closed").length;
+      const eligibleIds: string[] | null = customerType !== "all" && fromDate
+        ? await (async () => {
+            let q = supabase.from("profiles").select("id").eq("role", "customer");
+            if (selectedBrandId !== "all") q = q.in("brand_id", [selectedBrandId]);
+            else q = q.in("brand_id", safeBrandIds);
+            if (customerType === "new") {
+              q = q.gte("created_at", fromDate!);
+              if (toDate) q = q.lte("created_at", toDate);
+            } else {
+              q = q.lt("created_at", fromDate!);
+            }
+            const { data } = await q;
+            return (data ?? []).map((c: any) => c.id as string);
+          })()
+        : null;
 
       const brandRates = new Map<number, { activation_fee: number; insurance_premium: number; aion_premium_fee: number }>();
       for (const b of fetchedBrands) {
@@ -221,21 +200,80 @@ export default function AdminDashboard() {
       }
 
       if (eligibleIds !== null && eligibleIds.length === 0) {
-        result.brands = brandsCount ?? 0;
-        result.shops = shopsCount ?? 0;
-        result.customers = 0;
+        result.brands = fetchedBrands.length;
         setStats(result);
         return;
       }
 
-      // Phase 3: per-brand policy aggregates via the working RPC.
-      const rpcParams: Record<string, unknown> = {};
-      if (brandIds.length > 0) rpcParams.p_brand_ids = brandIds;
-      if (fromDate) rpcParams.p_from_date = fromDate;
-      if (toDate) rpcParams.p_to_date = toDate;
-      if (eligibleIds !== null) rpcParams.p_customer_ids = eligibleIds;
+      // Phase 2 — fast path: ONE SECURITY DEFINER RPC with everything.
+      const aggParams: { p_brand_ids?: number[]; p_from_date?: string; p_to_date?: string; p_customer_ids?: string[] } = {};
+      if (selectedBrandId !== "all") aggParams.p_brand_ids = [selectedBrandId];
+      if (fromDate) aggParams.p_from_date = fromDate;
+      if (toDate) aggParams.p_to_date = toDate;
+      if (eligibleIds !== null) aggParams.p_customer_ids = eligibleIds;
 
-      const { data: policyStats = [] } = await supabase.rpc("dashboard_policy_stats", rpcParams);
+      const aggRes = await supabase.rpc("admin_dashboard_aggregates", aggParams);
+
+      type AggShape = {
+        brands_count: number; shops_count: number; customers_count: number;
+        claims_total: number; claims_open: number; claims_closed: number;
+        policy_stats: Array<{ brand_id: number; covers: number; total_cogs: number; total_rrp: number; total_selling_price: number; latest_start_date: string | null }>;
+      };
+      // PostgREST may return the json scalar directly OR wrapped as [{col: value}]; handle both, plus string fallback.
+      const rawAgg: unknown = aggRes.data;
+      let aggs: AggShape | null = null;
+      if (rawAgg && typeof rawAgg === "object" && !Array.isArray(rawAgg) && "brands_count" in (rawAgg as object)) {
+        aggs = rawAgg as AggShape;
+      } else if (Array.isArray(rawAgg) && rawAgg.length > 0) {
+        const first = rawAgg[0];
+        if (first && typeof first === "object" && "brands_count" in first) aggs = first as AggShape;
+        else if (first && typeof first === "object" && "admin_dashboard_aggregates" in first) aggs = (first as Record<string, unknown>).admin_dashboard_aggregates as AggShape;
+      } else if (typeof rawAgg === "string") {
+        try { aggs = JSON.parse(rawAgg) as AggShape; } catch { /* fall through */ }
+      }
+
+      let policyStats: AggShape["policy_stats"] = [];
+      let brandsCount: number, shopsCount: number, customersCount: number;
+      let claimsCount: number, openClaimsCount: number, closedClaimsCount: number;
+
+      if (aggs) {
+        brandsCount = Number(aggs.brands_count) || 0;
+        shopsCount = Number(aggs.shops_count) || 0;
+        customersCount = Number(aggs.customers_count) || 0;
+        claimsCount = Number(aggs.claims_total) || 0;
+        openClaimsCount = Number(aggs.claims_open) || 0;
+        closedClaimsCount = Number(aggs.claims_closed) || 0;
+        policyStats = aggs.policy_stats ?? [];
+      } else {
+        // Fallback: original multi-query path (slower but proven). Logs the agg failure for diagnosis.
+        console.warn("admin_dashboard_aggregates returned unexpected shape, falling back", { error: aggRes.error, rawAgg });
+        const [
+          { count: bC },
+          { count: sC },
+          { count: cC },
+          { data: claimsRows },
+          { data: psData = [] },
+        ] = await Promise.all([
+          supabase.from("brands").select("id", { count: "exact", head: true }).eq("status", "verified"),
+          supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds),
+          supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds),
+          supabase.from("claims").select("status, policies!claims_policy_id_fkey!inner(brand_id)").in("policies.brand_id", safeBrandIds),
+          supabase.rpc("dashboard_policy_stats", {
+            ...(brandIds.length > 0 ? { p_brand_ids: brandIds } : {}),
+            ...(fromDate ? { p_from_date: fromDate } : {}),
+            ...(toDate ? { p_to_date: toDate } : {}),
+            ...(eligibleIds !== null ? { p_customer_ids: eligibleIds } : {}),
+          }),
+        ]);
+        const cArr = (claimsRows ?? []) as Array<{ status: string | null }>;
+        brandsCount = bC ?? 0;
+        shopsCount = sC ?? 0;
+        customersCount = cC ?? 0;
+        claimsCount = cArr.length;
+        openClaimsCount = cArr.filter((c) => c.status === "open").length;
+        closedClaimsCount = cArr.filter((c) => c.status === "closed").length;
+        policyStats = psData as AggShape["policy_stats"];
+      }
 
       // Aggregate per-brand rows into totals, applying brand-specific rates
       for (const row of policyStats as any[]) {
@@ -272,9 +310,9 @@ export default function AdminDashboard() {
       result.openClaims = openClaimsCount;
       result.closedClaims = closedClaimsCount;
 
-      result.brands = brandsCount ?? 0;
-      result.customers = eligibleIds !== null ? eligibleIds.length : (customersCount ?? 0);
-      result.shops = shopsCount ?? 0;
+      result.brands = brandsCount;
+      result.customers = eligibleIds !== null ? eligibleIds.length : customersCount;
+      result.shops = shopsCount;
       result.claimRate = result.covers > 0 ? result.claims / result.covers : null;
 
       setStats(result);
