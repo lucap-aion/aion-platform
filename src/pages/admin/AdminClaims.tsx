@@ -101,7 +101,7 @@ const AdminClaims = () => {
       .in("policies.brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (search) query = query.or(`type.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%`);
+    if (search) query = query.or(`type.ilike.%${search}%,status.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%,description.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
     if (filterValues.type) query = query.eq("type", filterValues.type);
     query.then(({ data, count, error }) => {
@@ -216,7 +216,7 @@ const AdminClaims = () => {
       .in("policies.brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
-    if (search) q = q.or(`type.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%`);
+    if (search) q = q.or(`type.ilike.%${search}%,status.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%,description.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
     if (filterValues.type) q = q.eq("type", filterValues.type);
     const { data } = await q;
@@ -255,7 +255,7 @@ const AdminClaims = () => {
         columns={[
           { key: "id", label: "#", width: 64, render: (row) => <span className="text-muted-foreground text-xs">#{(row as unknown as Claim).id}</span> },
           {
-            key: "brand_name", label: "Brand", width: 164,
+            key: "brand_name", sortKey: "policies_brands_name", label: "Brand", width: 164,
             render: (row) => {
               const r = row as unknown as Claim;
               return (
@@ -268,8 +268,8 @@ const AdminClaims = () => {
               );
             },
           },
-          { key: "item_name", label: "Item", width: 200, render: (row) => { const r = row as any; return <div className="flex items-center gap-2.5">{r.item_picture ? <img src={r.item_picture} alt={r.item_name} className="h-9 w-9 rounded-lg object-contain bg-muted/50 shrink-0" /> : <div className="h-9 w-9 rounded-lg bg-muted/50 shrink-0" />}<span className="text-sm text-foreground">{r.item_name}</span></div>; } },
-          { key: "customer_email", label: "Customer", width: 200, render: (row) => { const r = row as any; const initials = `${(r.customer_first?.[0] || r.customer_email?.[0] || "?").toUpperCase()}${(r.customer_last?.[0] || "").toUpperCase()}`; return <div className="flex items-center gap-2.5"><div className="h-9 w-9 shrink-0 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">{initials}</div><div><p className="text-sm text-foreground">{r.customer_name || r.customer_email}</p>{r.customer_name && <p className="text-xs text-muted-foreground">{r.customer_email}</p>}</div></div>; } },
+          { key: "item_name", sortKey: "policies_catalogues_name", label: "Item", width: 200, render: (row) => { const r = row as any; return <div className="flex items-center gap-2.5">{r.item_picture ? <img src={r.item_picture} alt={r.item_name} className="h-9 w-9 rounded-lg object-contain bg-muted/50 shrink-0" /> : <div className="h-9 w-9 rounded-lg bg-muted/50 shrink-0" />}<span className="text-sm text-foreground">{r.item_name}</span></div>; } },
+          { key: "customer_email", sortKey: "policies_profiles_email", label: "Customer", width: 200, render: (row) => { const r = row as any; const initials = `${(r.customer_first?.[0] || r.customer_email?.[0] || "?").toUpperCase()}${(r.customer_last?.[0] || "").toUpperCase()}`; return <div className="flex items-center gap-2.5"><div className="h-9 w-9 shrink-0 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">{initials}</div><div><p className="text-sm text-foreground">{r.customer_name || r.customer_email}</p>{r.customer_name && <p className="text-xs text-muted-foreground">{r.customer_email}</p>}</div></div>; } },
           { key: "type", label: "Type", sortable: true, render: (row) => { const r = row as unknown as Claim; return r.type ? toTitleCase(r.type) : <span className="text-muted-foreground">—</span>; } },
           {
             key: "incident_date", label: "Incident Date", sortable: true,

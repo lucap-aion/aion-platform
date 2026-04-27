@@ -75,7 +75,7 @@ const AdminAdmins = () => {
       .abortSignal(abortRef.current.signal)
       .order(sortKey, { ascending: sortDir === "asc" })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%`);
+    if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,phone_number.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,role.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
@@ -132,7 +132,7 @@ const AdminAdmins = () => {
       .select("id, first_name, last_name, email, role, status, phone_number, city, country, registered_at")
       .order(sortKey, { ascending: sortDir === "asc" })
       .limit(10000);
-    if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%`);
+    if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,phone_number.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,role.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];

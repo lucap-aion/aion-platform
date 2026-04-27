@@ -79,7 +79,7 @@ const AdminShops = () => {
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (search) query = query.or(`name.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%`);
+    if (search) query = query.or(`name.ilike.%${search}%,address.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%,status.ilike.%${search}%`);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
       setShops((data ?? []).map((s: any) => ({ ...s, brand_name: s.brands?.name ?? "—", brand_logo: s.brands?.logo_small ?? null })));
@@ -135,7 +135,7 @@ const AdminShops = () => {
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
-    if (search) q = q.or(`name.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%`);
+    if (search) q = q.or(`name.ilike.%${search}%,address.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%,status.ilike.%${search}%`);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
   };
@@ -176,7 +176,7 @@ const AdminShops = () => {
             },
           },
           {
-            key: "brand_name", label: "Brand",
+            key: "brand_name", sortKey: "brands_name", label: "Brand",
             render: (row) => {
               const r = row as unknown as Shop;
               return (

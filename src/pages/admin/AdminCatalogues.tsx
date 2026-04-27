@@ -87,7 +87,7 @@ const AdminCatalogues = () => {
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (search) query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%,category.ilike.%${search}%,collection.ilike.%${search}%,brand_item_id.ilike.%${search}%`);
+    if (search) query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%,slug.ilike.%${search}%,category.ilike.%${search}%,collection.ilike.%${search}%,composition.ilike.%${search}%,description.ilike.%${search}%,brand_item_id.ilike.%${search}%`);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
       setCatalogues((data ?? []).map((c: any) => ({ ...c, brand_name: c.brands?.name ?? "—", brand_logo: c.brands?.logo_small ?? null })));
@@ -151,7 +151,7 @@ const AdminCatalogues = () => {
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
-    if (search) q = q.or(`name.ilike.%${search}%,sku.ilike.%${search}%,category.ilike.%${search}%,collection.ilike.%${search}%,brand_item_id.ilike.%${search}%`);
+    if (search) q = q.or(`name.ilike.%${search}%,sku.ilike.%${search}%,slug.ilike.%${search}%,category.ilike.%${search}%,collection.ilike.%${search}%,composition.ilike.%${search}%,description.ilike.%${search}%,brand_item_id.ilike.%${search}%`);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
   };
@@ -209,7 +209,7 @@ const AdminCatalogues = () => {
             },
           },
           {
-            key: "brand_name", label: "Brand",
+            key: "brand_name", sortKey: "brands_name", label: "Brand",
             render: (row) => {
               const r = row as unknown as Catalogue;
               return (

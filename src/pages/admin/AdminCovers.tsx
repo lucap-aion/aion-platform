@@ -131,7 +131,7 @@ const AdminCovers = () => {
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (search) query = query.or(`brand_sale_id.ilike.%${search}%`);
+    if (search) query = query.or(`brand_sale_id.ilike.%${search}%,brand_row_id.ilike.%${search}%,brand_sub_order_row_code.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
@@ -234,7 +234,7 @@ const AdminCovers = () => {
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
-    if (search) q = q.or(`brand_sale_id.ilike.%${search}%`);
+    if (search) q = q.or(`brand_sale_id.ilike.%${search}%,brand_row_id.ilike.%${search}%,brand_sub_order_row_code.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];

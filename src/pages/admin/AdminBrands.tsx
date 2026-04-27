@@ -164,7 +164,7 @@ const AdminBrands = () => {
       .abortSignal(abortRef.current.signal)
       .order(sortKey, { ascending: sortDir === "asc" })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,slug.ilike.%${search}%,hq_country.ilike.%${search}%`);
+    if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,slug.ilike.%${search}%,hq_country.ilike.%${search}%,website.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
@@ -278,7 +278,7 @@ const AdminBrands = () => {
       .select("id, name, slug, email, website, hq_country, status, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee")
       .order(sortKey, { ascending: sortDir === "asc" })
       .limit(10000);
-    if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%,slug.ilike.%${search}%,hq_country.ilike.%${search}%`);
+    if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%,slug.ilike.%${search}%,hq_country.ilike.%${search}%,website.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
