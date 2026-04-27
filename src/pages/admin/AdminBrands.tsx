@@ -4,6 +4,9 @@ import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
 import type { ThemeColors, ThemeFonts } from "@/contexts/TenantContext";
+import { applyColumnFilters } from "./_utils/resolveSortOrder";
+
+const SORT_RELATIONS: readonly string[] = [];
 
 // ── Hex ↔ HSL helpers ──────────────────────────────────────────────
 function hexToHsl(hex: string): string {
@@ -139,6 +142,7 @@ const AdminBrands = () => {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [sortKey, setSortKey] = useState("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [loading, setLoading] = useState(true);
@@ -166,6 +170,7 @@ const AdminBrands = () => {
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,slug.ilike.%${search}%,hq_country.ilike.%${search}%,website.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
+    query = applyColumnFilters(query, columnFilters, SORT_RELATIONS);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
       setBrands((data as Brand[]) ?? []);
@@ -174,7 +179,7 @@ const AdminBrands = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir]);
+  useEffect(() => { fetchData(); }, [page, search, filterValues, columnFilters, sortKey, sortDir]);
 
   // Fetch all columns for a single brand — used when opening view/edit drawer
   const fetchFull = async (id: number): Promise<Partial<Brand> | null> => {
@@ -280,6 +285,7 @@ const AdminBrands = () => {
       .limit(10000);
     if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%,slug.ilike.%${search}%,hq_country.ilike.%${search}%,website.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
+    q = applyColumnFilters(q, columnFilters, SORT_RELATIONS);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
   };
@@ -312,6 +318,8 @@ const AdminBrands = () => {
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        columnFilters={columnFilters}
+        onColumnFilterChange={(k, v) => { setColumnFilters((p) => { if (!v) { const { [k]: _, ...rest } = p; return rest; } return { ...p, [k]: v }; }); setPage(0); }}
         columns={[
           {
             key: "name", label: "Brand", sortable: true, width: 220,

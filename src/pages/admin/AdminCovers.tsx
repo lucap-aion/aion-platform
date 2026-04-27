@@ -29,7 +29,7 @@ const COVERS_SCHEMA: ExportColumn[] = [
   { key: "item_id",                    label: "Item ID" },
 ];
 import { flattenSupabaseRow } from "./_utils/flattenRow";
-import { resolveSortOrder } from "./_utils/resolveSortOrder";
+import { resolveSortOrder, applyColumnFilters } from "./_utils/resolveSortOrder";
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, SaveBar } from "./_components/FormField";
@@ -106,6 +106,7 @@ const AdminCovers = () => {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [sortKey, setSortKey] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
@@ -133,6 +134,7 @@ const AdminCovers = () => {
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`brand_sale_id.ilike.%${search}%,brand_row_id.ilike.%${search}%,brand_sub_order_row_code.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
+    query = applyColumnFilters(query, columnFilters, SORT_RELATIONS);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
       setCovers((data ?? []).map((p: any) => flattenSupabaseRow(p) as unknown as Cover));
@@ -141,7 +143,7 @@ const AdminCovers = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir, brands]);
+  useEffect(() => { fetchData(); }, [page, search, filterValues, columnFilters, sortKey, sortDir, brands]);
 
   useEffect(() => {
     Promise.all([
@@ -236,6 +238,7 @@ const AdminCovers = () => {
       .limit(10000);
     if (search) q = q.or(`brand_sale_id.ilike.%${search}%,brand_row_id.ilike.%${search}%,brand_sub_order_row_code.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
+    q = applyColumnFilters(q, columnFilters, SORT_RELATIONS);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
   };
@@ -274,6 +277,8 @@ const AdminCovers = () => {
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        columnFilters={columnFilters}
+        onColumnFilterChange={(k, v) => { setColumnFilters((p) => { if (!v) { const { [k]: _, ...rest } = p; return rest; } return { ...p, [k]: v }; }); setPage(0); }}
         columns={[
           { key: "id", label: "ID", sortable: true, width: 64, render: (row) => <span className="text-muted-foreground text-xs">#{(row as unknown as Cover).id}</span> },
           { key: "brand_sale_id", label: "Sale ID", sortable: true },

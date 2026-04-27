@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge, type FilterDef } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
-import { resolveSortOrder } from "./_utils/resolveSortOrder";
+import { resolveSortOrder, applyColumnFilters } from "./_utils/resolveSortOrder";
 
 const SORT_RELATIONS = ["brands"] as const;
 
@@ -73,6 +73,7 @@ const AdminCustomers = () => {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [sortKey, setSortKey] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
@@ -98,6 +99,7 @@ const AdminCustomers = () => {
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    query = applyColumnFilters(query, columnFilters, SORT_RELATIONS);
     if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,phone_number.ilike.%${search}%,address.ilike.%${search}%,postcode.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
     query.then(({ data, count, error }) => {
@@ -113,7 +115,7 @@ const AdminCustomers = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir, brands]);
+  useEffect(() => { fetchData(); }, [page, search, filterValues, columnFilters, sortKey, sortDir, brands]);
 
   useEffect(() => {
     supabase.from("brands").select("id, name").eq("status", "verified").order("name").then(({ data }) => setBrands((data as BrandOption[]) ?? []));
@@ -193,6 +195,7 @@ const AdminCustomers = () => {
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
+    q = applyColumnFilters(q, columnFilters, SORT_RELATIONS);
     if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,phone_number.ilike.%${search}%,address.ilike.%${search}%,postcode.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
     const { data } = await q;
@@ -227,6 +230,8 @@ const AdminCustomers = () => {
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        columnFilters={columnFilters}
+        onColumnFilterChange={(k, v) => { setColumnFilters((p) => { if (!v) { const { [k]: _, ...rest } = p; return rest; } return { ...p, [k]: v }; }); setPage(0); }}
         columns={[
           {
             key: "first_name", label: "Name", sortable: true, width: 220,
