@@ -52,7 +52,7 @@ interface Statistics {
   cogsTotal: number; grossPremium: number; netPremium: number; aionActivationFee: number;
   aionPremiumFee: number; aionRevenue: number; effectivePremiumPct: number | null;
   effectiveActivationFeePct: number | null; effectiveAionPremiumFeePct: number | null;
-  latestActivation: string; claimRate: number | null;
+  latestActivation: string; claimRate: number | null; registrationRate: number | null;
 }
 
 const emptyStats = (): Statistics => ({
@@ -60,7 +60,7 @@ const emptyStats = (): Statistics => ({
   rrpTotal: 0, sellingPriceTotal: 0, cogsTotal: 0, grossPremium: 0, netPremium: 0,
   aionActivationFee: 0, aionPremiumFee: 0, aionRevenue: 0,
   effectivePremiumPct: null, effectiveActivationFeePct: null, effectiveAionPremiumFeePct: null,
-  latestActivation: "", claimRate: null,
+  latestActivation: "", claimRate: null, registrationRate: null,
 });
 
 // ─── Sub-components ────────────────────────────────────────────────────────
@@ -215,7 +215,7 @@ export default function AdminDashboard() {
       const aggRes = await supabase.rpc("admin_dashboard_aggregates", aggParams);
 
       type AggShape = {
-        brands_count: number; shops_count: number; customers_count: number;
+        brands_count: number; shops_count: number; customers_count: number; customers_registered: number;
         claims_total: number; claims_open: number; claims_closed: number;
         policy_stats: Array<{ brand_id: number; covers: number; total_cogs: number; total_rrp: number; total_selling_price: number; latest_start_date: string | null }>;
       };
@@ -233,13 +233,14 @@ export default function AdminDashboard() {
       }
 
       let policyStats: AggShape["policy_stats"] = [];
-      let brandsCount: number, shopsCount: number, customersCount: number;
+      let brandsCount: number, shopsCount: number, customersCount: number, registeredCount: number;
       let claimsCount: number, openClaimsCount: number, closedClaimsCount: number;
 
       if (aggs) {
         brandsCount = Number(aggs.brands_count) || 0;
         shopsCount = Number(aggs.shops_count) || 0;
         customersCount = Number(aggs.customers_count) || 0;
+        registeredCount = Number(aggs.customers_registered) || 0;
         claimsCount = Number(aggs.claims_total) || 0;
         openClaimsCount = Number(aggs.claims_open) || 0;
         closedClaimsCount = Number(aggs.claims_closed) || 0;
@@ -251,12 +252,14 @@ export default function AdminDashboard() {
           { count: bC },
           { count: sC },
           { count: cC },
+          { count: rC },
           { data: claimsRows },
           { data: psData = [] },
         ] = await Promise.all([
           supabase.from("brands").select("id", { count: "exact", head: true }).eq("status", "verified"),
           supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds),
           supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds),
+          supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds).not("registered_at", "is", null),
           supabase.from("claims").select("status, policies!claims_policy_id_fkey!inner(brand_id)").in("policies.brand_id", safeBrandIds),
           supabase.rpc("dashboard_policy_stats", {
             ...(brandIds.length > 0 ? { p_brand_ids: brandIds } : {}),
@@ -269,6 +272,7 @@ export default function AdminDashboard() {
         brandsCount = bC ?? 0;
         shopsCount = sC ?? 0;
         customersCount = cC ?? 0;
+        registeredCount = rC ?? 0;
         claimsCount = cArr.length;
         openClaimsCount = cArr.filter((c) => c.status === "open").length;
         closedClaimsCount = cArr.filter((c) => c.status === "closed").length;
@@ -314,6 +318,7 @@ export default function AdminDashboard() {
       result.customers = eligibleIds !== null ? eligibleIds.length : customersCount;
       result.shops = shopsCount;
       result.claimRate = result.covers > 0 ? result.claims / result.covers : null;
+      result.registrationRate = customersCount > 0 ? registeredCount / customersCount : null;
 
       setStats(result);
     } finally { setLoading(false); }
@@ -437,14 +442,14 @@ export default function AdminDashboard() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {loading ? (
             <>
-              <MetricCardSkeleton icon={FileText} label="Total Claims" />
+              <MetricCardSkeleton icon={UserCheck} label="Registration Rate" />
               <MetricCardSkeleton icon={Activity} label="Open Claims" />
               <MetricCardSkeleton icon={FileText} label="Closed Claims" />
               <MetricCardSkeleton icon={Percent} label="Claim Rate" />
             </>
           ) : (
             <>
-              <MetricCard icon={FileText} label="Total Claims" value={fmtN(stats.claims)} href="/admin/claims" />
+              <MetricCard icon={UserCheck} label="Registration Rate" value={stats.registrationRate != null ? fmtPct(stats.registrationRate) : "—"} sub="Registered / Customers" />
               <MetricCard icon={Activity} label="Open Claims" value={fmtN(stats.openClaims)} sub="Pending action" href="/admin/claims" accent={stats.openClaims > 0} />
               <MetricCard icon={FileText} label="Closed Claims" value={fmtN(stats.closedClaims)} href="/admin/claims" />
               <MetricCard icon={Percent} label="Claim Rate" value={stats.claimRate != null ? fmtPct(stats.claimRate) : "—"} sub="Claims / Covers" />
