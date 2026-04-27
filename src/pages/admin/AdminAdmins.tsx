@@ -5,9 +5,6 @@ import { siteUrl } from "@/utils/siteUrl";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
-import { applyColumnFilters } from "./_utils/resolveSortOrder";
-
-const SORT_RELATIONS: readonly string[] = [];
 
 const ADMINS_SCHEMA: ExportColumn[] = [
   { key: "id",            label: "ID" },
@@ -57,7 +54,6 @@ const AdminAdmins = () => {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [sortKey, setSortKey] = useState("registered_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
@@ -81,7 +77,6 @@ const AdminAdmins = () => {
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,phone_number.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,role.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
-    query = applyColumnFilters(query, columnFilters, SORT_RELATIONS);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
       setAdmins((data as Admin[]) ?? []);
@@ -90,7 +85,7 @@ const AdminAdmins = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, filterValues, columnFilters, sortKey, sortDir]);
+  useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir]);
 
   const openAdd = () => { setEditing(empty()); setMode("add"); setDrawerOpen(true); };
   const openView = (row: Record<string, unknown>) => { setEditing({ ...row } as Partial<Admin>); setMode("view"); setDrawerOpen(true); };
@@ -139,7 +134,6 @@ const AdminAdmins = () => {
       .limit(10000);
     if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,phone_number.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,role.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
-    q = applyColumnFilters(q, columnFilters, SORT_RELATIONS);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
   };
@@ -172,8 +166,6 @@ const AdminAdmins = () => {
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
-        columnFilters={columnFilters}
-        onColumnFilterChange={(k, v) => { setColumnFilters((p) => { if (!v) { const { [k]: _, ...rest } = p; return rest; } return { ...p, [k]: v }; }); setPage(0); }}
         columns={[
           {
             key: "first_name", label: "Name", sortable: true, width: 220,

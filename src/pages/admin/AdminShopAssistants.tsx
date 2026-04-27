@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge, toTitleCase } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
-import { resolveSortOrder, applyColumnFilters } from "./_utils/resolveSortOrder";
+import { resolveSortOrder } from "./_utils/resolveSortOrder";
 
 const SORT_RELATIONS = ["brands", "shops"] as const;
 
@@ -73,7 +73,6 @@ const AdminShopAssistants = () => {
   const [sortKey, setSortKey] = useState("email");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("view");
@@ -101,7 +100,6 @@ const AdminShopAssistants = () => {
     if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,status.ilike.%${search}%,role.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
     if (filterValues.is_master !== undefined && filterValues.is_master !== "") query = query.eq("is_master", filterValues.is_master === "true");
-    query = applyColumnFilters(query, columnFilters, SORT_RELATIONS);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
       setAssistants((data ?? []).map((p: any) => ({
@@ -116,7 +114,7 @@ const AdminShopAssistants = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, sortKey, sortDir, filterValues, columnFilters, brands]);
+  useEffect(() => { fetchData(); }, [page, search, sortKey, sortDir, filterValues, brands]);
 
   useEffect(() => {
     Promise.all([
@@ -211,7 +209,6 @@ const AdminShopAssistants = () => {
     if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,status.ilike.%${search}%,role.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
     if (filterValues.is_master !== undefined && filterValues.is_master !== "") q = q.eq("is_master", filterValues.is_master === "true");
-    q = applyColumnFilters(q, columnFilters, SORT_RELATIONS);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
   };
@@ -248,8 +245,6 @@ const AdminShopAssistants = () => {
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
-        columnFilters={columnFilters}
-        onColumnFilterChange={(k, v) => { setColumnFilters((p) => { if (!v) { const { [k]: _, ...rest } = p; return rest; } return { ...p, [k]: v }; }); setPage(0); }}
         extraRowAction={(row) => (
           <button
             onClick={() => handleResendInvite(row)}
