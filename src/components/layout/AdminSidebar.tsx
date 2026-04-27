@@ -56,12 +56,12 @@ const AdminSidebar = () => {
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border bg-card">
-      <SidebarHeader className={collapsed ? "p-2" : "p-4"}>
-        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-start px-1"}`}>
+      <SidebarHeader className={collapsed ? "p-2" : "py-4 px-2"}>
+        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-start"}`}>
           {collapsed ? (
-            <img src="/aion_dark_icon.png" alt="AION" className="h-7 w-7 object-contain dark:brightness-0 dark:invert" />
+            <img src="/aion_dark_icon.png" alt="AION" className="h-7 w-7 object-contain object-left dark:brightness-0 dark:invert" />
           ) : (
-            <img src="/aion_dark_logo.png" alt="AION" className="h-8 max-w-[140px] object-contain object-left dark:brightness-0 dark:invert" />
+            <img src="/aion_dark_logo.png" alt="AION" className="block h-8 max-w-[140px] object-contain object-left dark:brightness-0 dark:invert" />
           )}
         </div>
       </SidebarHeader>
