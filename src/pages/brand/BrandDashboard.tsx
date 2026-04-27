@@ -29,28 +29,21 @@ const BrandDashboard = () => {
     queryKey: ["brand-metrics", profile?.brand_id],
     queryFn: async () => {
       const brandId = profile?.brand_id || -1;
-      const [customers, covers, claims, policies] = await Promise.all([
-        supabase.from("profiles").select("id", { count: "exact", head: true }).eq("brand_id", brandId).or("role.eq.customer,role.is.null"),
-        supabase.from("policies").select("id", { count: "exact", head: true }).eq("brand_id", brandId),
-        supabase.from("claims").select("id, policies!claims_policy_id_fkey!inner(brand_id)", { count: "exact", head: true }).eq("status", "open").eq("policies.brand_id", brandId),
-        supabase.from("policies").select("selling_price").eq("brand_id", brandId),
-      ]);
-
-      if (customers.error) throw customers.error;
-      if (covers.error) throw covers.error;
-      if (claims.error) throw claims.error;
-      if (policies.error) throw policies.error;
-
-      const protectedValue = (policies.data || []).reduce(
-        (sum: number, p: { selling_price: number | null }) => sum + Number(p.selling_price || 0),
-        0
-      );
-
+      const { data, error } = await supabase
+        .rpc("brand_dashboard_metrics", { p_brand_id: brandId })
+        .single();
+      if (error) throw error;
+      const row = data as {
+        customers: number | string | null;
+        covers: number | string | null;
+        open_claims: number | string | null;
+        protected_value: number | string | null;
+      } | null;
       return {
-        customers: customers.count || 0,
-        covers: covers.count || 0,
-        openClaims: claims.count || 0,
-        protectedValue,
+        customers: Number(row?.customers ?? 0),
+        covers: Number(row?.covers ?? 0),
+        openClaims: Number(row?.open_claims ?? 0),
+        protectedValue: Number(row?.protected_value ?? 0),
       };
     },
     enabled: !!profile?.brand_id,
