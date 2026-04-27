@@ -798,11 +798,11 @@ function AdminTable<T extends Record<string, unknown>>({
                       ].join(" ")}
                       style={isFrozen ? frozenThStyle(col.key) : normalThStyle}
                     >
-                      <span className="inline-flex items-center gap-1 truncate">
+                      <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
                         {isFrozen && (
                           <Pin className="h-3 w-3 text-primary/50 shrink-0" />
                         )}
-                        {friendlyLabel(col.label)}
+                        <span className="truncate">{friendlyLabel(col.label)}</span>
                         {col.sortable !== false && onSort && (
                           <ChevronsUpDown
                             className={`h-3.5 w-3.5 ml-0.5 shrink-0 ${
