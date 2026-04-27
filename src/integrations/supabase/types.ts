@@ -887,6 +887,60 @@ export type Database = {
       get_my_profile_id: { Args: never; Returns: string }
       get_my_role: { Args: never; Returns: string }
       mark_policies_expired: { Args: never; Returns: undefined }
+      admin_dashboard_aggregates: {
+        Args: {
+          p_brand_ids?: number[] | null
+          p_from_date?: string | null
+          p_to_date?: string | null
+          p_customer_ids?: string[] | null
+        }
+        Returns: Json
+      }
+      admin_dashboard_counts: {
+        Args: never
+        Returns: {
+          brands: number
+          shops: number
+          customers: number
+          claims: number
+          open_claims: number
+          closed_claims: number
+        }[]
+      }
+      brand_dashboard_metrics: {
+        Args: { p_brand_id: number }
+        Returns: {
+          customers: number
+          covers: number
+          open_claims: number
+          protected_value: number
+        }[]
+      }
+      brand_customer_aggregates: {
+        Args: { p_customer_ids: string[] }
+        Returns: {
+          customer_id: string
+          covers: number
+          claims: number
+          total_value: number
+        }[]
+      }
+      dashboard_policy_stats: {
+        Args: {
+          p_brand_ids?: number[] | null
+          p_from_date?: string | null
+          p_to_date?: string | null
+          p_customer_ids?: string[] | null
+        }
+        Returns: {
+          brand_id: number
+          covers: number
+          total_cogs: number
+          total_rrp: number
+          total_selling_price: number
+          latest_start_date: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
