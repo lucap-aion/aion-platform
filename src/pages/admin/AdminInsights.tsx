@@ -474,9 +474,11 @@ export default function AdminInsights() {
   }, []);
 
   const loadData = useCallback(async () => {
+    if (brands.length === 0) return;
     setLoading(true);
     try {
-      const brandFilter = selectedBrandId !== "all" ? selectedBrandId : null;
+      const verifiedBrandIds = brands.map((b) => b.id);
+      const brandFilterIds = selectedBrandId !== "all" ? [selectedBrandId as number] : verifiedBrandIds;
 
       // Fetch policies with shop name and category — paginate to avoid 1000-row limit
       async function fetchAllPolicies() {
@@ -484,12 +486,12 @@ export default function AdminInsights() {
         const PAGE = 1000;
         let from = 0;
         while (true) {
-          let q = supabase
+          const q = supabase
             .from("policies")
             .select("id, start_date, recommended_retail_price, selling_price, customer_id, shop_id, shops(name), catalogues(category, collection)")
             .eq("status", "live")
+            .in("brand_id", brandFilterIds)
             .range(from, from + PAGE - 1);
-          if (brandFilter) q = q.eq("brand_id", brandFilter);
           const { data, error } = await q;
           if (error) { console.error("policies error:", error); break; }
           if (!data || data.length === 0) break;
@@ -506,12 +508,12 @@ export default function AdminInsights() {
         const PAGE = 1000;
         let from = 0;
         while (true) {
-          let q = supabase
+          const q = supabase
             .from("profiles")
             .select("id, registered_at, first_name, last_name, date_of_birth, country, city, postcode, address, province, nationality, phone_number, created_at")
             .eq("role", "customer")
+            .in("brand_id", brandFilterIds)
             .range(from, from + PAGE - 1);
-          if (brandFilter) q = q.eq("brand_id", brandFilter);
           const { data, error } = await q;
           if (error) { console.error("profiles error:", error); break; }
           if (!data || data.length === 0) break;
@@ -523,8 +525,7 @@ export default function AdminInsights() {
       }
 
       // Fetch feedback (typically small, but paginate anyway)
-      let fbQ = supabase.from("feedback").select("user_id, satisfaction_rate, peace_of_mind_rate, recommendation_rate");
-      if (brandFilter) fbQ = fbQ.eq("brand_id", brandFilter);
+      const fbQ = supabase.from("feedback").select("user_id, satisfaction_rate, peace_of_mind_rate, recommendation_rate").in("brand_id", brandFilterIds);
 
       const [polData, profData, { data: fbData, error: fbErr }] = await Promise.all([
         fetchAllPolicies(), fetchAllProfiles(), fbQ,
@@ -550,7 +551,7 @@ export default function AdminInsights() {
       setRawPolicies(processed);
       setRawProfiles(profData as ProfileRow[]);
       setRawFeedback((fbData as FeedbackRow[]) ?? []);
-      setBrandName(brandFilter ? brands.find(b => b.id === brandFilter)?.name || "" : "");
+      setBrandName(selectedBrandId !== "all" ? brands.find(b => b.id === selectedBrandId)?.name || "" : "");
       setLastUpdated(new Date().toLocaleDateString(locale === "it" ? "it-IT" : "en-GB", { day: "numeric", month: "long", year: "numeric" }));
     } finally {
       setLoading(false);

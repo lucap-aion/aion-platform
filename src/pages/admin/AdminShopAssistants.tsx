@@ -80,18 +80,20 @@ const AdminShopAssistants = () => {
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = () => {
+    if (brands.length === 0) return;
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     setLoading(true);
+    const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     let query = supabase
       .from("profiles")
       .select("id, first_name, last_name, email, role, is_master, status, brand_id, shop_id, avatar, created_at, registered_at, email_confirmed_at, brands(name, logo_small), shops(name)", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .eq("role", "brand")
+      .in("brand_id", brandFilterIds)
       .order(sortKey, { ascending: sortDir === "asc" })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`);
-    if (filterValues.brand_id) query = query.eq("brand_id", Number(filterValues.brand_id));
     if (filterValues.status) query = query.eq("status", filterValues.status);
     if (filterValues.is_master !== undefined && filterValues.is_master !== "") query = query.eq("is_master", filterValues.is_master === "true");
     query.then(({ data, count, error }) => {
@@ -108,7 +110,7 @@ const AdminShopAssistants = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, sortKey, sortDir, filterValues]);
+  useEffect(() => { fetchData(); }, [page, search, sortKey, sortDir, filterValues, brands]);
 
   useEffect(() => {
     Promise.all([
@@ -191,14 +193,15 @@ const AdminShopAssistants = () => {
   };
 
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     let q = supabase
       .from("profiles")
       .select("id, first_name, last_name, email, role, is_master, status, brand_id, shop_id, created_at, registered_at, email_confirmed_at, brands(name), shops(name)")
       .eq("role", "brand")
+      .in("brand_id", brandFilterIds)
       .order(sortKey, { ascending: sortDir === "asc" })
       .limit(10000);
     if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`);
-    if (filterValues.brand_id) q = q.eq("brand_id", Number(filterValues.brand_id));
     if (filterValues.status) q = q.eq("status", filterValues.status);
     if (filterValues.is_master !== undefined && filterValues.is_master !== "") q = q.eq("is_master", filterValues.is_master === "true");
     const { data } = await q;

@@ -84,19 +84,21 @@ const AdminClaims = () => {
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = () => {
+    if (brands.length === 0) return;
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     setLoading(true);
+    const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     let query = supabase
       .from("claims")
-      .select("id, policy_id, type, status, incident_date, incident_city, incident_country, created_at, description, media, policies(brands(name, logo_small), catalogues(name, picture), profiles(email, first_name, last_name))", { count: "exact" })
+      .select("id, policy_id, type, status, incident_date, incident_city, incident_country, created_at, description, media, policies!claims_policy_id_fkey!inner(brand_id, brands(name, logo_small), catalogues(name, picture), profiles(email, first_name, last_name))", { count: "exact" })
       .abortSignal(abortRef.current.signal)
+      .in("policies.brand_id", brandFilterIds)
       .order(sortKey, { ascending: sortDir === "asc" })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`type.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
     if (filterValues.type) query = query.eq("type", filterValues.type);
-    if (filterValues.brand_id) query = query.eq("policies.brand_id", Number(filterValues.brand_id));
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
       setClaims((data ?? []).map((c: any) => ({
@@ -115,7 +117,7 @@ const AdminClaims = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir]);
+  useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir, brands]);
 
   useEffect(() => {
     Promise.all([
@@ -201,15 +203,16 @@ const AdminClaims = () => {
   };
 
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     let q = supabase
       .from("claims")
-      .select("id, policy_id, type, status, incident_date, incident_city, incident_country, created_at, description, policies(brands(name), catalogues(name, sku), profiles(email, first_name, last_name))")
+      .select("id, policy_id, type, status, incident_date, incident_city, incident_country, created_at, description, policies!claims_policy_id_fkey!inner(brand_id, brands(name), catalogues(name, sku), profiles(email, first_name, last_name))")
+      .in("policies.brand_id", brandFilterIds)
       .order(sortKey, { ascending: sortDir === "asc" })
       .limit(10000);
     if (search) q = q.or(`type.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
     if (filterValues.type) q = q.eq("type", filterValues.type);
-    if (filterValues.brand_id) q = q.eq("policies.brand_id", Number(filterValues.brand_id));
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
   };
