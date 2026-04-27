@@ -6,7 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
-import { resolveSortOrder, applyColumnFilters } from "./_utils/resolveSortOrder";
+import { resolveSortOrder } from "./_utils/resolveSortOrder";
 
 const SORT_RELATIONS = ["brands"] as const;
 
@@ -37,7 +37,6 @@ const AdminReports = () => {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [viewing, setViewing] = useState<Report | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Report | null>(null);
@@ -53,7 +52,6 @@ const AdminReports = () => {
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`name.ilike.%${search}%,type.ilike.%${search}%,source.ilike.%${search}%,direction.ilike.%${search}%,created_by.ilike.%${search}%`);
-    query = applyColumnFilters(query, columnFilters, SORT_RELATIONS);
     query.then(({ data, count }) => {
       setReports((data ?? []).map((r: any) => ({ ...r, brand_name: r.brands?.name ?? "—" })));
       setTotal(count ?? 0);
@@ -61,7 +59,7 @@ const AdminReports = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, columnFilters, sortKey, sortDir]);
+  useEffect(() => { fetchData(); }, [page, search, sortKey, sortDir]);
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -94,8 +92,6 @@ const AdminReports = () => {
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
-        columnFilters={columnFilters}
-        onColumnFilterChange={(k, v) => { setColumnFilters((p) => { if (!v) { const { [k]: _, ...rest } = p; return rest; } return { ...p, [k]: v }; }); setPage(0); }}
         onView={(row) => setViewing(row as unknown as Report)}
         onDelete={(row) => setDeleteTarget(row as unknown as Report)}
         columns={[

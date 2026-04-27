@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge, toTitleCase } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
-import { resolveSortOrder, applyColumnFilters } from "./_utils/resolveSortOrder";
+import { resolveSortOrder } from "./_utils/resolveSortOrder";
 
 // Longest-match wins, so nested relations come first.
 const SORT_RELATIONS = ["policies.brands", "policies.catalogues", "policies.profiles", "policies"] as const;
@@ -74,7 +74,6 @@ const AdminClaims = () => {
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [sortKey, setSortKey] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
@@ -105,7 +104,6 @@ const AdminClaims = () => {
     if (search) query = query.or(`type.ilike.%${search}%,status.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%,description.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
     if (filterValues.type) query = query.eq("type", filterValues.type);
-    query = applyColumnFilters(query, columnFilters, SORT_RELATIONS);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
       setClaims((data ?? []).map((c: any) => ({
@@ -124,7 +122,7 @@ const AdminClaims = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, filterValues, columnFilters, sortKey, sortDir, brands]);
+  useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir, brands]);
 
   useEffect(() => {
     Promise.all([
@@ -221,7 +219,6 @@ const AdminClaims = () => {
     if (search) q = q.or(`type.ilike.%${search}%,status.ilike.%${search}%,incident_city.ilike.%${search}%,incident_country.ilike.%${search}%,description.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
     if (filterValues.type) q = q.eq("type", filterValues.type);
-    q = applyColumnFilters(q, columnFilters, SORT_RELATIONS);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
   };
@@ -255,8 +252,6 @@ const AdminClaims = () => {
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
-        columnFilters={columnFilters}
-        onColumnFilterChange={(k, v) => { setColumnFilters((p) => { if (!v) { const { [k]: _, ...rest } = p; return rest; } return { ...p, [k]: v }; }); setPage(0); }}
         columns={[
           { key: "id", label: "#", width: 64, render: (row) => <span className="text-muted-foreground text-xs">#{(row as unknown as Claim).id}</span> },
           {

@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
-import { resolveSortOrder, applyColumnFilters } from "./_utils/resolveSortOrder";
+import { resolveSortOrder } from "./_utils/resolveSortOrder";
 
 const SORT_RELATIONS = ["brands"] as const;
 
@@ -56,7 +56,6 @@ const AdminShops = () => {
   const [sortKey, setSortKey] = useState("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("add");
@@ -81,7 +80,6 @@ const AdminShops = () => {
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`name.ilike.%${search}%,address.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%,status.ilike.%${search}%`);
-    query = applyColumnFilters(query, columnFilters, SORT_RELATIONS);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
       setShops((data ?? []).map((s: any) => ({ ...s, brand_name: s.brands?.name ?? "—", brand_logo: s.brands?.logo_small ?? null })));
@@ -90,7 +88,7 @@ const AdminShops = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, sortKey, sortDir, filterValues, columnFilters, brands]);
+  useEffect(() => { fetchData(); }, [page, search, sortKey, sortDir, filterValues, brands]);
 
   useEffect(() => {
     supabase.from("brands").select("id, name").eq("status", "verified").order("name").then(({ data }) => setBrands((data as BrandOption[]) ?? []));
@@ -138,7 +136,6 @@ const AdminShops = () => {
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
     if (search) q = q.or(`name.ilike.%${search}%,address.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%,status.ilike.%${search}%`);
-    q = applyColumnFilters(q, columnFilters, SORT_RELATIONS);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
   };
@@ -170,8 +167,6 @@ const AdminShops = () => {
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
-        columnFilters={columnFilters}
-        onColumnFilterChange={(k, v) => { setColumnFilters((p) => { if (!v) { const { [k]: _, ...rest } = p; return rest; } return { ...p, [k]: v }; }); setPage(0); }}
         columns={[
           {
             key: "name", label: "Shop", sortable: true, width: 200,
