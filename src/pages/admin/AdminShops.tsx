@@ -63,17 +63,19 @@ const AdminShops = () => {
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = () => {
+    if (brands.length === 0) return;
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     setLoading(true);
+    const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     let query = supabase
       .from("shops")
       .select("id, name, address, city, country, contact, status, brand_id, brands(name, logo_small)", { count: "exact" })
       .abortSignal(abortRef.current.signal)
+      .in("brand_id", brandFilterIds)
       .order(sortKey, { ascending: sortDir === "asc" })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`name.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%`);
-    if (filterValues.brand_id) query = query.eq("brand_id", Number(filterValues.brand_id));
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
       setShops((data ?? []).map((s: any) => ({ ...s, brand_name: s.brands?.name ?? "—", brand_logo: s.brands?.logo_small ?? null })));
@@ -82,7 +84,7 @@ const AdminShops = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, sortKey, sortDir, filterValues]);
+  useEffect(() => { fetchData(); }, [page, search, sortKey, sortDir, filterValues, brands]);
 
   useEffect(() => {
     supabase.from("brands").select("id, name").eq("status", "verified").order("name").then(({ data }) => setBrands((data as BrandOption[]) ?? []));
@@ -121,13 +123,14 @@ const AdminShops = () => {
   };
 
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     let q = supabase
       .from("shops")
       .select("id, name, address, city, country, contact, status, brand_id, brands(name)")
+      .in("brand_id", brandFilterIds)
       .order(sortKey, { ascending: sortDir === "asc" })
       .limit(10000);
     if (search) q = q.or(`name.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,contact.ilike.%${search}%`);
-    if (filterValues.brand_id) q = q.eq("brand_id", Number(filterValues.brand_id));
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];
   };

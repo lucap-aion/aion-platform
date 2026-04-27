@@ -115,17 +115,19 @@ const AdminCovers = () => {
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = () => {
+    if (brands.length === 0) return;
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     setLoading(true);
+    const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     let query = supabase
       .from("policies")
       .select("id, brand_sale_id, brand_row_id, brand_sub_order_row_code, status, start_date, expiration_date, selling_price, cogs, recommended_retail_price, quantity, brand_id, customer_id, item_id, created_at, brands(name, logo_small), catalogues(name, sku, picture), profiles(email, first_name, last_name, avatar, created_at, registered_at, email_confirmed_at)", { count: "exact" })
       .abortSignal(abortRef.current.signal)
+      .in("brand_id", brandFilterIds)
       .order(sortKey, { ascending: sortDir === "asc" })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`brand_sale_id.ilike.%${search}%`);
-    if (filterValues.brand_id) query = query.eq("brand_id", Number(filterValues.brand_id));
     if (filterValues.status) query = query.eq("status", filterValues.status);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
@@ -135,7 +137,7 @@ const AdminCovers = () => {
     });
   };
 
-  useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir]);
+  useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir, brands]);
 
   useEffect(() => {
     Promise.all([
@@ -220,13 +222,14 @@ const AdminCovers = () => {
   const ro = mode === "view";
 
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
+    const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     let q = supabase
       .from("policies")
       .select("id, brand_sale_id, status, start_date, expiration_date, selling_price, cogs, recommended_retail_price, quantity, brand_id, customer_id, item_id, created_at, brands(name), catalogues(name, sku), profiles(email, first_name, last_name, created_at, registered_at, email_confirmed_at)")
+      .in("brand_id", brandFilterIds)
       .order(sortKey, { ascending: sortDir === "asc" })
       .limit(10000);
     if (search) q = q.or(`brand_sale_id.ilike.%${search}%`);
-    if (filterValues.brand_id) q = q.eq("brand_id", Number(filterValues.brand_id));
     if (filterValues.status) q = q.eq("status", filterValues.status);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];

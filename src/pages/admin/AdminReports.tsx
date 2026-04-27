@@ -43,7 +43,8 @@ const AdminReports = () => {
     setLoading(true);
     let query = supabase
       .from("reports")
-      .select("id, name, type, source, direction, start_date, end_date, url, brand_id, created_at, created_by, uploaded_to_chubb, uploaded_to_chubb_at, brands(name)", { count: "exact" })
+      .select("id, name, type, source, direction, start_date, end_date, url, brand_id, created_at, created_by, uploaded_to_chubb, uploaded_to_chubb_at, brands!inner(name, status)", { count: "exact" })
+      .eq("brands.status", "verified")
       .order(sortKey, { ascending: sortDir === "asc" })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`name.ilike.%${search}%,type.ilike.%${search}%,source.ilike.%${search}%`);
