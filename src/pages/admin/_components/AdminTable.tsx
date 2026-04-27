@@ -4,6 +4,17 @@ import {
   ChevronDown, X, ChevronsUpDown, Download, SlidersHorizontal, Pin, GripVertical,
 } from "lucide-react";
 import { exportToCsv, type ExportColumn } from "../_utils/exportCsv";
+import { fmtDate } from "./fmtDate";
+
+/** Heuristic: key name suggests a date column. */
+const DATE_KEY_RE = /(^|_)(date|at|created|updated|expires|expired|registered|confirmed|opened|closed|deleted|started|ended|birth|incident|sent|sold)$/i;
+/** Value looks like an ISO timestamp. */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?/;
+const isDateLikeValue = (v: unknown, key: string): boolean => {
+  if (typeof v !== "string" || !v) return false;
+  if (!DATE_KEY_RE.test(key) && !ISO_DATE_RE.test(v)) return false;
+  return ISO_DATE_RE.test(v);
+};
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -86,13 +97,19 @@ function collectLeafCols<T>(
       result.push({
         key: flatKey,
         label: friendlyLabel(flatKey),
-        render: path.length > 0
-          ? (row: T) => {
-              let val: unknown = row;
-              for (const p of capPath) val = (val as Record<string, unknown>)?.[p];
-              return <span className="block truncate">{String(val ?? "—")}</span>;
-            }
-          : undefined,
+        render: (row: T) => {
+          let val: unknown;
+          if (path.length > 0) {
+            val = row;
+            for (const p of capPath) val = (val as Record<string, unknown>)?.[p];
+          } else {
+            val = (row as Record<string, unknown>)[flatKey];
+          }
+          if (isDateLikeValue(val, flatKey)) {
+            return <span className="block truncate">{fmtDate(val as string)}</span>;
+          }
+          return <span className="block truncate">{val == null || val === "" ? "—" : String(val)}</span>;
+        },
       });
     }
   }
@@ -841,7 +858,13 @@ function AdminTable<T extends Record<string, unknown>>({
                         >
                           {col.render
                             ? col.render(row)
-                            : <span className="block truncate">{String(row[col.key] ?? "—")}</span>}
+                            : (() => {
+                                const v = row[col.key];
+                                if (isDateLikeValue(v, col.key)) {
+                                  return <span className="block truncate">{fmtDate(v as string)}</span>;
+                                }
+                                return <span className="block truncate">{v == null || v === "" ? "—" : String(v)}</span>;
+                              })()}
                         </td>
                       );
                     })}
