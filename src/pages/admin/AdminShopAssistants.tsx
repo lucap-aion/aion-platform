@@ -97,7 +97,7 @@ const AdminShopAssistants = () => {
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`);
+    if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,status.ilike.%${search}%,role.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
     if (filterValues.is_master !== undefined && filterValues.is_master !== "") query = query.eq("is_master", filterValues.is_master === "true");
     query.then(({ data, count, error }) => {
@@ -206,7 +206,7 @@ const AdminShopAssistants = () => {
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
-    if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`);
+    if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,status.ilike.%${search}%,role.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
     if (filterValues.is_master !== undefined && filterValues.is_master !== "") q = q.eq("is_master", filterValues.is_master === "true");
     const { data } = await q;
@@ -272,7 +272,7 @@ const AdminShopAssistants = () => {
             },
           },
           {
-            key: "brand_name", label: "Brand",
+            key: "brand_name", sortKey: "brands_name", label: "Brand",
             render: (row) => {
               const r = row as unknown as Assistant;
               return (
@@ -285,7 +285,7 @@ const AdminShopAssistants = () => {
               );
             },
           },
-          { key: "shop_name", label: "Shop" },
+          { key: "shop_name", sortKey: "shops_name", label: "Shop" },
           {
             key: "is_master", label: "Access", sortable: true,
             render: (row) => {

@@ -369,7 +369,7 @@ export default function AdminDashboard() {
     <div className="p-6 md:p-8 space-y-6">
 
       {/* ── Header ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="space-y-4">
         <div>
           <h1 className="font-serif text-2xl font-bold text-foreground">Welcome back, {name}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
@@ -377,7 +377,7 @@ export default function AdminDashboard() {
           </p>
         </div>
         {/* Filters */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {/* Brand filter */}
           <div className="relative">
             <select className={selectCls} value={selectedBrandId} onChange={(e) => setSelectedBrandId(e.target.value === "all" ? "all" : Number(e.target.value))}>

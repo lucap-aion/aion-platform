@@ -51,7 +51,7 @@ const AdminReports = () => {
       .eq("brands.status", "verified")
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (search) query = query.or(`name.ilike.%${search}%,type.ilike.%${search}%,source.ilike.%${search}%`);
+    if (search) query = query.or(`name.ilike.%${search}%,type.ilike.%${search}%,source.ilike.%${search}%,direction.ilike.%${search}%,created_by.ilike.%${search}%`);
     query.then(({ data, count }) => {
       setReports((data ?? []).map((r: any) => ({ ...r, brand_name: r.brands?.name ?? "—" })));
       setTotal(count ?? 0);
@@ -102,7 +102,7 @@ const AdminReports = () => {
               return <p className="font-medium text-foreground">{r.name}</p>;
             },
           },
-          { key: "brand_name", label: "Brand" },
+          { key: "brand_name", sortKey: "brands_name", label: "Brand" },
           { key: "type", label: "Type", sortable: true },
           { key: "source", label: "Source" },
           {

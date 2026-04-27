@@ -97,10 +97,7 @@ function collectLeafCols<T>(
       result.push({
         key: flatKey,
         label: friendlyLabel(flatKey),
-        // Top-level scalars map 1:1 to a column on the primary table, so they
-        // are safe to sort server-side. Joined-table flat keys (path.length>0)
-        // need foreignTable handling and are left to the parent to opt into.
-        sortable: path.length === 0,
+        sortable: true,
         render: (row: T) => {
           let val: unknown;
           if (path.length > 0) {
@@ -125,7 +122,11 @@ function collectLeafCols<T>(
 export interface Column<T> {
   key: string;
   label: string;
+  /** Defaults to true. Set to false to opt out (e.g. composite render fields with no server column). */
   sortable?: boolean;
+  /** Override the key passed to onSort when it differs from the cell key
+   *  (e.g. cell reads `brand_name` from a client-mapped row, but server orders on `brands_name`). */
+  sortKey?: string;
   width?: number;
   render?: (row: T) => React.ReactNode;
 }
@@ -787,12 +788,12 @@ function AdminTable<T extends Record<string, unknown>>({
                       onDragLeave={() => setDragOverKey(null)}
                       onDrop={() => handleDrop(col.key)}
                       onDragEnd={() => { dragSrcKey.current = null; setDragOverKey(null); }}
-                      onClick={col.sortable && onSort ? () => handleSort(col.key) : undefined}
+                      onClick={col.sortable !== false && onSort ? () => handleSort(col.sortKey ?? col.key) : undefined}
                       className={[
                         "relative px-4 py-3 text-left text-xs font-semibold text-muted-foreground tracking-wide select-none",
                         "border-r border-border/40",
                         !isFrozen ? "cursor-grab active:cursor-grabbing" : "cursor-default",
-                        col.sortable && onSort ? "hover:text-foreground" : "",
+                        col.sortable !== false && onSort ? "hover:text-foreground" : "",
                         dragOverKey === col.key ? "bg-primary/10" : "",
                       ].join(" ")}
                       style={isFrozen ? frozenThStyle(col.key) : normalThStyle}
@@ -802,10 +803,10 @@ function AdminTable<T extends Record<string, unknown>>({
                           <Pin className="h-3 w-3 text-primary/50 shrink-0" />
                         )}
                         {friendlyLabel(col.label)}
-                        {col.sortable && onSort && (
+                        {col.sortable !== false && onSort && (
                           <ChevronsUpDown
                             className={`h-3.5 w-3.5 ml-0.5 shrink-0 ${
-                              sortKey === col.key ? "text-primary" : "text-muted-foreground/40"
+                              sortKey === (col.sortKey ?? col.key) ? "text-primary" : "text-muted-foreground/40"
                             }`}
                           />
                         )}
