@@ -20,6 +20,8 @@ const GOLD = C1, TEAL = C2, SLATE = C6, WARM = "#8C7A5E", ROSE = C4;
 const BL = C1, GR = C2, GY = C6, PU = C3, AM = C4;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+const fmtEur = (n: number) => new Intl.NumberFormat("en-EU", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
+
 function getWeek(ds: string) {
   const dt = new Date(ds), d = dt.getDay() || 7;
   dt.setDate(dt.getDate() + 4 - d);
@@ -624,8 +626,8 @@ function OverviewTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
         <KpiCard label={t("insights.kpi.liveCovers")} value={d.totalCovers} />
         <KpiCard label={t("insights.kpi.uniqueClients")} value={d.uniqueCustomers} />
-        <KpiCard label={t("insights.kpi.totalRRP")} value={`€${Math.round(d.totalRRP / 1000)}k`} />
-        <KpiCard label={t("insights.kpi.sellingPrice")} value={`€${Math.round(d.totalSP / 1000)}k`} />
+        <KpiCard label={t("insights.kpi.totalRRP")} value={fmtEur(d.totalRRP)} />
+        <KpiCard label={t("insights.kpi.sellingPrice")} value={fmtEur(d.totalSP)} />
         <KpiCard label={t("insights.kpi.feedback")} value={d.satisfactionAvg ?? "—"} sub={`${d.feedbackCount} ${t("insights.kpi.reviews")}`} />
         <KpiCard label={t("insights.kpi.regRate")} value={`${d.regRate}%`} sub={`${d.regCustIds.length} ${t("insights.kpi.ofTotal")} ${d.uniqueCustomers}`} />
       </div>
