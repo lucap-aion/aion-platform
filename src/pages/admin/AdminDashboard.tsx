@@ -201,19 +201,21 @@ export default function AdminDashboard() {
           : Promise.resolve<string[] | null>(null);
 
       // Phase 2: counts RPC + eligible customer IDs in parallel
-      const [eligibleIds, { data: countsRaw }] = await Promise.all([
+      const [eligibleIds, countsRes] = await Promise.all([
         eligibleCustomerIdsPromise,
-        supabase.rpc("admin_dashboard_counts").single(),
+        supabase.rpc("admin_dashboard_counts"),
       ]);
 
-      const counts = countsRaw as {
+      if (countsRes.error) console.error("admin_dashboard_counts RPC failed", countsRes.error);
+
+      const counts = (Array.isArray(countsRes.data) ? countsRes.data[0] : countsRes.data) as {
         brands: number | string | null;
         shops: number | string | null;
         customers: number | string | null;
         claims: number | string | null;
         open_claims: number | string | null;
         closed_claims: number | string | null;
-      } | null;
+      } | null | undefined;
 
       const brandIds = selectedBrandId === "all" ? verifiedBrandIds : [selectedBrandId];
       const brandRates = new Map<number, { activation_fee: number; insurance_premium: number; aion_premium_fee: number }>();
