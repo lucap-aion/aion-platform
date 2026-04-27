@@ -201,24 +201,25 @@ export default function AdminDashboard() {
             })()
           : Promise.resolve<string[] | null>(null);
 
-      // Phase 2: counts + eligible IDs in parallel — verified-brand filter via .in() / FK join
+      // Phase 2: counts + eligible IDs in parallel — verified-brand filter via .in() on brand_id
       const [
         eligibleIds,
         { count: brandsCount },
         { count: shopsCount },
         { count: customersCount },
-        { count: claimsCount },
-        { count: openClaimsCount },
-        { count: closedClaimsCount },
+        { data: claimsRows },
       ] = await Promise.all([
         eligibleCustomerIdsPromise,
         supabase.from("brands").select("id", { count: "exact", head: true }).eq("status", "verified"),
         supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds),
         supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds),
-        supabase.from("claims").select("id, policies!claims_policy_id_fkey!inner(brand_id)", { count: "exact", head: true }).in("policies.brand_id", safeBrandIds),
-        supabase.from("claims").select("id, policies!claims_policy_id_fkey!inner(brand_id)", { count: "exact", head: true }).eq("status", "open").in("policies.brand_id", safeBrandIds),
-        supabase.from("claims").select("id, policies!claims_policy_id_fkey!inner(brand_id)", { count: "exact", head: true }).eq("status", "closed").in("policies.brand_id", safeBrandIds),
+        supabase.from("claims").select("status, policies!claims_policy_id_fkey!inner(brand_id)").in("policies.brand_id", safeBrandIds),
       ]);
+
+      const claimsArr = (claimsRows ?? []) as Array<{ status: string | null }>;
+      const claimsCount = claimsArr.length;
+      const openClaimsCount = claimsArr.filter((c) => c.status === "open").length;
+      const closedClaimsCount = claimsArr.filter((c) => c.status === "closed").length;
 
       const brandIds = selectedBrandId === "all" ? verifiedBrandIds : [selectedBrandId];
       const brandRates = new Map<number, { activation_fee: number; insurance_premium: number; aion_premium_fee: number }>();
