@@ -3,7 +3,7 @@ import { ChevronDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useLanguage } from "@/contexts/LanguageContext";
 import {
-  BarChart, Bar, PieChart, Pie, Cell, ComposedChart, Line,
+  BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, LabelList, Legend,
 } from "recharts";
 
@@ -136,6 +136,29 @@ const CTooltip = ({ active, payload, label }: any) => {
   );
 };
 
+// Pie slice label — % always shown; placed inside when the slice is large enough, outside otherwise.
+const PieValueLabel = (props: any) => {
+  const { cx, cy, midAngle, innerRadius, outerRadius, value } = props;
+  if (value === null || value === undefined || value === 0) return null;
+  const RADIAN = Math.PI / 180;
+  const inside = value >= 10;
+  const radius = inside
+    ? (Number(innerRadius) + Number(outerRadius)) / 2
+    : Number(outerRadius) + 14;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  return (
+    <text x={x} y={y}
+      fill={inside ? "#fff" : "hsl(0 0% 30%)"}
+      textAnchor={inside ? "middle" : (x > cx ? "start" : "end")}
+      dominantBaseline="central"
+      fontSize={inside ? 13 : 11}
+      fontWeight={inside ? 700 : 600}>
+      {value}%
+    </text>
+  );
+};
+
 const ChartSkeleton = () => <div className="h-56 w-full rounded-xl border border-border bg-card animate-pulse" />;
 const KpiSkeleton = () => (
   <div className="rounded-xl border border-border bg-card p-4">
@@ -232,16 +255,19 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       const p = profileMap.get(id);
       return p && p.date_of_birth && p.country && p.city && p.postcode && p.address && p.province && p.nationality && p.phone_number;
     });
-    const feedbackUserIds = new Set(feedback.map(f => f.user_id));
+    // Restrict feedback to customers present in the (filtered) policy set so KPIs respond to date/shop filters
+    const policyCustIds = new Set(Object.keys(custMap));
+    const scopedFeedback = feedback.filter(f => policyCustIds.has(f.user_id));
+    const feedbackUserIds = new Set(scopedFeedback.map(f => f.user_id));
     const custsWithFeedback = regCustIds.filter(id => feedbackUserIds.has(id));
 
     const avgRate = (arr: (number | null)[]) => {
       const valid = arr.filter((v): v is number => v !== null && v > 0);
       return valid.length ? +(valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(1) : null;
     };
-    const satisfactionAvg = avgRate(feedback.map(f => f.satisfaction_rate));
-    const recommendationAvg = avgRate(feedback.map(f => f.recommendation_rate));
-    const peaceOfMindAvg = avgRate(feedback.map(f => f.peace_of_mind_rate));
+    const satisfactionAvg = avgRate(scopedFeedback.map(f => f.satisfaction_rate));
+    const recommendationAvg = avgRate(scopedFeedback.map(f => f.recommendation_rate));
+    const peaceOfMindAvg = avgRate(scopedFeedback.map(f => f.peace_of_mind_rate));
 
     // Totals
     const totalRRP = policies.reduce((s, p) => s + p.rrp, 0);
@@ -352,22 +378,24 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       return periods.map(k => ({ key: k, reg: avg(regByK[k]), nonReg: avg(nonByK[k]) }));
     }
 
-    // Registration % by period
-    const RBW: Record<string, Set<string>> = {};
-    const RBM: Record<string, Set<string>> = {};
-    policies.filter(p => p.regDate).forEach(p => {
-      const w = getWeek(p.regDate!), m = getMonth(p.regDate!);
-      if (!RBW[w]) RBW[w] = new Set(); RBW[w].add(p.customerId);
-      if (!RBM[m]) RBM[m] = new Set(); RBM[m].add(p.customerId);
-    });
-
-    function regPctByPeriod(periods: string[], aggMap: Record<string, PeriodAgg>, regMap: Record<string, Set<string>>) {
-      const allKeys = [...new Set([...periods, ...Object.keys(regMap)])].sort();
-      return allKeys.map(k => {
-        const nc = aggMap[k]?.nc.size || 0;
-        const nr = (regMap[k] || new Set()).size;
-        return { key: k, pct: nc > 0 ? Math.round(nr / nc * 100) : 0 };
+    // Cohort-based registration %: each customer belongs to the period of their FIRST policy;
+    // numerator = those who ever registered. Mirrors the per-shop chart so totals reconcile.
+    function regPctByPeriod(periods: string[], getKey: (d: string) => string) {
+      const firstSeenPer: Record<string, string> = {};
+      const sorted = [...policies].sort((a, b) => a.date < b.date ? -1 : 1);
+      sorted.forEach(p => {
+        if (!firstSeenPer[p.customerId]) firstSeenPer[p.customerId] = getKey(p.date);
       });
+      const regCids = new Set(policies.filter(p => p.regDate).map(p => p.customerId));
+      const tot: Record<string, number> = {};
+      const reg: Record<string, number> = {};
+      periods.forEach(k => { tot[k] = 0; reg[k] = 0; });
+      Object.entries(firstSeenPer).forEach(([cid, k]) => {
+        if (!(k in tot)) { tot[k] = 0; reg[k] = 0; }
+        tot[k]++;
+        if (regCids.has(cid)) reg[k]++;
+      });
+      return periods.map(k => ({ key: k, pct: tot[k] > 0 ? Math.round(reg[k] / tot[k] * 100) : 0 }));
     }
 
     // Registration % per month per shop
@@ -420,7 +448,15 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       function bkt(d: number) { if (d <= 3) return d; if (d <= 7) return 4; if (d <= 14) return 5; if (d <= 30) return 6; return 7; }
       const dist = Array(8).fill(0);
       ds.forEach(d => dist[bkt(d)]++);
-      return { avgDays, medDays, min: ds[0], max: ds[ds.length - 1], byMonthData, byWeekData, distData: buckets.map((name, i) => ({ name, count: dist[i] })) };
+      const totalRegs = ds.length;
+      return {
+        avgDays, medDays, min: ds[0], max: ds[ds.length - 1], byMonthData, byWeekData,
+        distData: buckets.map((name, i) => ({
+          name,
+          count: dist[i],
+          pct: totalRegs > 0 ? Math.round(dist[i] / totalRegs * 100) : 0,
+        })),
+      };
     }
 
     // Geo & generation (from profiled customers)
@@ -451,14 +487,14 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       retW, retM,
       rrpAvgWeekly: rrpAvgByPeriod(wks, getWeek),
       rrpAvgMonthly: rrpAvgByPeriod(mos, getMonth),
-      regPctWeekly: regPctByPeriod(wks, WM, RBW),
-      regPctMonthly: regPctByPeriod(mos, MM, RBM),
+      regPctWeekly: regPctByPeriod(wks, getWeek),
+      regPctMonthly: regPctByPeriod(mos, getMonth),
       regPctMoShop,
       ticketsAll: ticketBands(custs),
       ticketsByShop: Object.fromEntries(shops.map(s => [s, ticketBands(shopCusts[s])])),
       regTime: regTimeData(),
       regRate,
-      feedbackCount: feedback.length,
+      feedbackCount: scopedFeedback.length,
       geoData, genData,
     };
   }, [policies, profiles, feedback]);
@@ -477,6 +513,8 @@ const TAB_KEYS: { id: TabId; key: string }[] = [
 type T = (key: string) => string;
 
 // ─── Main Component ──────────────────────────────────────────────────────────
+type DateRange = "all" | "30d" | "90d" | "ytd" | "12m";
+
 export default function AdminInsights() {
   const { t, locale } = useLanguage();
   const [tab, setTab] = useState<TabId>("ov");
@@ -484,12 +522,42 @@ export default function AdminInsights() {
   const [selectedBrandId, setSelectedBrandId] = useState<number | "all">("all");
   const [loading, setLoading] = useState(true);
 
+  // Filters
+  const [dateRange, setDateRange] = useState<DateRange>("all");
+  const [shopFilter, setShopFilter] = useState<string>("all");
+
   // Raw data
   const [rawPolicies, setRawPolicies] = useState<ProcessedPolicy[]>([]);
   const [rawProfiles, setRawProfiles] = useState<ProfileRow[]>([]);
   const [rawFeedback, setRawFeedback] = useState<FeedbackRow[]>([]);
   const [brandName, setBrandName] = useState("");
   const [lastUpdated, setLastUpdated] = useState("");
+
+  // Available shops in the unfiltered dataset (for the shop dropdown)
+  const availableShops = useMemo(
+    () => Array.from(new Set(rawPolicies.map(p => p.shop))).sort(),
+    [rawPolicies]
+  );
+
+  // Apply date + shop filters before computing insights
+  const filteredPolicies = useMemo(() => {
+    if (!rawPolicies.length) return rawPolicies;
+    let cutoff: number | null = null;
+    const now = new Date();
+    if (dateRange === "30d") cutoff = now.getTime() - 30 * 86400000;
+    else if (dateRange === "90d") cutoff = now.getTime() - 90 * 86400000;
+    else if (dateRange === "ytd") cutoff = new Date(now.getFullYear(), 0, 1).getTime();
+    else if (dateRange === "12m") {
+      const c = new Date(now);
+      c.setFullYear(c.getFullYear() - 1);
+      cutoff = c.getTime();
+    }
+    return rawPolicies.filter(p => {
+      if (cutoff !== null && new Date(p.date).getTime() < cutoff) return false;
+      if (shopFilter !== "all" && p.shop !== shopFilter) return false;
+      return true;
+    });
+  }, [rawPolicies, dateRange, shopFilter]);
 
   useEffect(() => {
     supabase.from("brands").select("id, name").eq("status", "verified").order("name")
@@ -585,7 +653,10 @@ export default function AdminInsights() {
     if (brands.length > 0 || selectedBrandId === "all") void loadData();
   }, [loadData, brands]);
 
-  const d = useInsightsData(rawPolicies, rawProfiles, rawFeedback);
+  // Reset shop filter when brand changes — the prior shop may not exist in the new dataset
+  useEffect(() => { setShopFilter("all"); }, [selectedBrandId]);
+
+  const d = useInsightsData(filteredPolicies, rawProfiles, rawFeedback);
 
   return (
     <div className="p-6 md:p-8 space-y-6">
@@ -599,12 +670,33 @@ export default function AdminInsights() {
             {lastUpdated && <> · {t("insights.updatedOn")} {lastUpdated}</>}
           </p>
         </div>
-        <div className="relative">
-          <select className={selectCls} value={selectedBrandId} onChange={e => setSelectedBrandId(e.target.value === "all" ? "all" : Number(e.target.value))}>
-            <option value="all">{t("insights.allBrands")}</option>
-            {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <select className={selectCls} value={dateRange} onChange={e => setDateRange(e.target.value as DateRange)}>
+              <option value="all">{t("insights.filter.allTime")}</option>
+              <option value="30d">{t("insights.filter.last30")}</option>
+              <option value="90d">{t("insights.filter.last90")}</option>
+              <option value="ytd">{t("insights.filter.thisYear")}</option>
+              <option value="12m">{t("insights.filter.last12m")}</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          </div>
+          {availableShops.length > 1 && (
+            <div className="relative">
+              <select className={selectCls} value={shopFilter} onChange={e => setShopFilter(e.target.value)}>
+                <option value="all">{t("insights.filter.allShops")}</option>
+                {availableShops.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            </div>
+          )}
+          <div className="relative">
+            <select className={selectCls} value={selectedBrandId} onChange={e => setSelectedBrandId(e.target.value === "all" ? "all" : Number(e.target.value))}>
+              <option value="all">{t("insights.allBrands")}</option>
+              {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          </div>
         </div>
       </div>
 
@@ -657,15 +749,12 @@ function OverviewTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <ChartCard title={t("insights.chart.volumeByShop")}>
             <ColorLegend items={d.shops.map(s => ({ color: COLORS[d.shops.indexOf(s)] || SLATE, label: `${s} ${d.shopVolume[s]} (${Math.round((d.shopVolume[s] || 0) / d.totalCovers * 100)}%)` }))} />
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie data={d.shops.map(s => ({ name: s, value: Math.round((d.shopVolume[s] || 0) / d.totalCovers * 100) }))}
-                  cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}>
+                  cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}
+                  label={PieValueLabel} labelLine={false}>
                   {d.shops.map((_, i) => <Cell key={i} fill={COLORS[i] || SLATE} />)}
-                  <LabelList dataKey="value" content={({ x, y, value }: any) => {
-                    if (!value || value < 10) return null;
-                    return <text x={x} y={y} textAnchor="middle" dominantBaseline="middle" fill="#fff" fontWeight="bold" fontSize={13}>{value}%</text>;
-                  }} />
                 </Pie>
                 <Tooltip content={<CTooltip />} />
               </PieChart>
@@ -673,15 +762,12 @@ function OverviewTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
           </ChartCard>
           <ChartCard title={t("insights.chart.rrpByShop")}>
             <ColorLegend items={d.shops.map(s => ({ color: COLORS[d.shops.indexOf(s)] || SLATE, label: `${s} €${Math.round((d.shopRRP[s] || 0) / 1000)}k (${Math.round((d.shopRRP[s] || 0) / d.totalRRP * 100)}%)` }))} />
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie data={d.shops.map(s => ({ name: s, value: Math.round((d.shopRRP[s] || 0) / d.totalRRP * 100) }))}
-                  cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}>
+                  cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}
+                  label={PieValueLabel} labelLine={false}>
                   {d.shops.map((_, i) => <Cell key={i} fill={COLORS[i] || SLATE} />)}
-                  <LabelList dataKey="value" content={({ x, y, value }: any) => {
-                    if (!value || value < 10) return null;
-                    return <text x={x} y={y} textAnchor="middle" dominantBaseline="middle" fill="#fff" fontWeight="bold" fontSize={13}>{value}%</text>;
-                  }} />
                 </Pie>
                 <Tooltip content={<CTooltip />} />
               </PieChart>
@@ -700,31 +786,40 @@ function OverviewTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
 
 function CategoryChart({ title, data, t }: { title: string; data: { cat: string; vol: number; rrpk: number; volPct: number; rrpPct: number }[]; t: T }) {
   if (!data.length) return null;
+  // Re-sort by RRP descending so the largest RRP share leads — keeps the visual hierarchy meaningful
+  // when RRP and volume distributions diverge.
+  const sorted = [...data].sort((a, b) => b.rrpPct - a.rrpPct);
+  const yMax = Math.min(100, Math.max(20, Math.ceil(Math.max(...sorted.map(r => Math.max(r.volPct, r.rrpPct))) / 10) * 10 + 10));
+  const renderPctLabel = ({ x, y, width, height, value, fill }: any) => {
+    if (value === null || value === undefined) return null;
+    const inside = height > 22;
+    return (
+      <text x={x + width / 2} y={inside ? y + height / 2 : y - 6}
+        textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"}
+        fill={inside ? "#fff" : (fill || "hsl(0 0% 30%)")}
+        fontSize={11} fontWeight={600}>
+        {value}%
+      </text>
+    );
+  };
   return (
     <ChartCard title={title}>
       <ColorLegend items={[
+        { color: C2, label: `RRP (%)` },
         { color: C1, label: `${t("insights.label.volume")} (%)` },
-        { color: C2, label: "RRP €k (%)" },
       ]} />
       <ResponsiveContainer width="100%" height={280}>
-        <ComposedChart data={data} margin={{ top: 32, right: 10, left: 0, bottom: 0 }}>
+        <BarChart data={sorted} margin={{ top: 28, right: 10, left: 0, bottom: 0 }} barCategoryGap="20%">
           <XAxis dataKey="cat" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
-          <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
-          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `€${v}k`} />
+          <YAxis domain={[0, yMax]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} />
           <Tooltip content={<CTooltip />} />
-          <Bar yAxisId="left" dataKey="vol" fill={C1} radius={[6, 6, 0, 0]} name={t("insights.label.volume")}>
-            <LabelList dataKey="volPct" content={({ x, y, width, height, value }: any) => {
-              if (!value || value < 5) return null; const inside = height > 24;
-              return <text x={x + width / 2} y={inside ? y + height / 2 : y - 10} textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"} fill={inside ? "#fff" : "hsl(0 0% 35%)"} fontSize={12} fontWeight={600}>{value}%</text>;
-            }} />
+          <Bar dataKey="rrpPct" fill={C2} radius={[6, 6, 0, 0]} name="RRP">
+            <LabelList dataKey="rrpPct" content={(p: any) => renderPctLabel({ ...p, fill: C2 })} />
           </Bar>
-          <Line yAxisId="right" type="monotone" dataKey="rrpk" stroke={C2} strokeWidth={2.5} dot={{ fill: C2, r: 4, strokeWidth: 2, stroke: "#fff" }} name="RRP €k">
-            <LabelList dataKey="rrpPct" content={({ x, y, value }: any) => {
-              if (value === undefined || value === null || value < 5) return null;
-              return <text x={x} y={y - 16} textAnchor="middle" fill={C2} fontSize={11} fontWeight={600}>{value}%</text>;
-            }} />
-          </Line>
-        </ComposedChart>
+          <Bar dataKey="volPct" fill={C1} radius={[6, 6, 0, 0]} name={t("insights.label.volume")}>
+            <LabelList dataKey="volPct" content={(p: any) => renderPctLabel({ ...p, fill: C1 })} />
+          </Bar>
+        </BarChart>
       </ResponsiveContainer>
     </ChartCard>
   );
@@ -1156,14 +1251,11 @@ function DeepDiveTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {d.geoData.length > 0 && (
             <ChartCard title={t("insights.chart.geoDistribution")}>
-              <ResponsiveContainer width="100%" height={240}>
+              <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
-                  <Pie data={d.geoData.map(g => ({ ...g, name: t(g.name) }))} cx="50%" cy="50%" innerRadius={50} outerRadius={85} dataKey="value" paddingAngle={3}>
+                  <Pie data={d.geoData.map(g => ({ ...g, name: t(g.name) }))} cx="50%" cy="50%" innerRadius={50} outerRadius={85} dataKey="value" paddingAngle={3}
+                    label={PieValueLabel} labelLine={false}>
                     {d.geoData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                    <LabelList dataKey="value" content={({ x, y, value }: any) => {
-                    if (!value || value < 10) return null;
-                    return <text x={x} y={y} textAnchor="middle" dominantBaseline="middle" fill="#fff" fontWeight="bold" fontSize={13}>{value}%</text>;
-                  }} />
                   </Pie>
                   <Tooltip content={<CTooltip />} /><Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
                 </PieChart>
@@ -1172,14 +1264,11 @@ function DeepDiveTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
           )}
           {d.genData.length > 0 && (
             <ChartCard title={t("insights.chart.genDistribution")}>
-              <ResponsiveContainer width="100%" height={240}>
+              <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
-                  <Pie data={d.genData.map(g => ({ ...g, name: t(g.name) }))} cx="50%" cy="50%" innerRadius={50} outerRadius={85} dataKey="value" paddingAngle={3}>
+                  <Pie data={d.genData.map(g => ({ ...g, name: t(g.name) }))} cx="50%" cy="50%" innerRadius={50} outerRadius={85} dataKey="value" paddingAngle={3}
+                    label={PieValueLabel} labelLine={false}>
                     {d.genData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                    <LabelList dataKey="value" content={({ x, y, value }: any) => {
-                    if (!value || value < 10) return null;
-                    return <text x={x} y={y} textAnchor="middle" dominantBaseline="middle" fill="#fff" fontWeight="bold" fontSize={13}>{value}%</text>;
-                  }} />
                   </Pie>
                   <Tooltip content={<CTooltip />} /><Legend iconSize={10} wrapperStyle={{ fontSize: 10 }} />
                 </PieChart>
@@ -1277,8 +1366,15 @@ function RegTimeTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
       <ChartCard title={t("insights.chart.regDaysDist")}>
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={rt.distData}>
-            <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
-            <Bar dataKey="count" fill={GR} radius={[6, 6, 0, 0]} name={t("insights.label.clients")}><LabelList dataKey="count" content={SimpleBarLabel} /></Bar>
+            <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
+            <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} />
+            <Tooltip formatter={(v: number, _: any, entry: any) => [`${entry.payload.count} (${v}%)`, t("insights.label.pctRegistered")]} />
+            <Bar dataKey="pct" fill={GR} radius={[6, 6, 0, 0]} name="%">
+              <LabelList dataKey="pct" content={({ x, y, width, height, value }: any) => {
+                if (!value) return null; const inside = height > 20;
+                return <text x={x + width / 2} y={inside ? y + height / 2 : y - 6} textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"} fill={inside ? "#fff" : "#333"} fontSize={11} fontWeight={600}>{value}%</text>;
+              }} />
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
