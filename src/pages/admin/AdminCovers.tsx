@@ -126,7 +126,7 @@ const AdminCovers = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("policies")
-      .select("*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns(*)", { count: "exact" })
+      .select("*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns!policies_return_id_fkey(*)", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
@@ -230,7 +230,7 @@ const AdminCovers = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let q = supabase
       .from("policies")
-      .select("*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns(*)")
+      .select("*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns!policies_return_id_fkey(*)")
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);

@@ -96,7 +96,7 @@ const AdminClaims = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("claims")
-      .select("*, policies!claims_policy_id_fkey!inner(*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns(*))", { count: "exact" })
+      .select("*, policies!claims_policy_id_fkey!inner(*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns!policies_return_id_fkey(*))", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .in("policies.brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
@@ -212,7 +212,7 @@ const AdminClaims = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let q = supabase
       .from("claims")
-      .select("*, policies!claims_policy_id_fkey!inner(*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns(*))")
+      .select("*, policies!claims_policy_id_fkey!inner(*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns!policies_return_id_fkey(*))")
       .in("policies.brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
