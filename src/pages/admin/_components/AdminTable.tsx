@@ -52,18 +52,21 @@ function friendlyLabel(key: string): string {
 }
 
 /** Keys that should never appear as auto-generated columns (at any nesting depth) */
-/** Suffix-based skip list — matches both bare keys and prefixed variants like `brands_logo_small` */
+/** Matches bare keys (`logo_small`), prefixed variants (`brands_logo_small`), and
+ *  mid-path segments (`brands_theme_settings_primary`) so JSONB blobs don't flood
+ *  the picker once we recurse through nested FK joins. */
 const SKIP_SUFFIXES = new Set([
   "logo_small", "logo_big", "logo", "avatar", "picture",
   "auth_background_image", "top_banner_image", "theft_image",
   "damage_image", "faq_image", "feedback_image",
   "faq_en", "faq_it", "media",
+  "theme_settings", "request", "purchase_receipt",
 ]);
 
 function isSkippedKey(k: string): boolean {
   if (SKIP_SUFFIXES.has(k)) return true;
   for (const s of SKIP_SUFFIXES) {
-    if (k.endsWith(`_${s}`)) return true;
+    if (k.endsWith(`_${s}`) || k.includes(`_${s}_`)) return true;
   }
   return false;
 }

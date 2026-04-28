@@ -93,7 +93,7 @@ const AdminCustomers = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("profiles")
-      .select("id, first_name, last_name, email, city, country, phone_number, address, postcode, status, created_at, registered_at, email_confirmed_at, brand_id, role, avatar, brands(name, logo_small)", { count: "exact" })
+      .select("*, brands(*), shops(*)", { count: "exact" })
       .eq("role", "customer")
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
@@ -188,7 +188,7 @@ const AdminCustomers = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let q = supabase
       .from("profiles")
-      .select("id, first_name, last_name, email, city, country, phone_number, address, postcode, status, created_at, registered_at, email_confirmed_at, brand_id, brands(name)")
+      .select("*, brands(*), shops(*)")
       .eq("role", "customer")
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })

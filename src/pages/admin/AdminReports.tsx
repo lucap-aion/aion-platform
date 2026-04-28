@@ -47,7 +47,7 @@ const AdminReports = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("reports")
-      .select("id, name, type, source, direction, start_date, end_date, url, brand_id, created_at, created_by, uploaded_to_chubb, uploaded_to_chubb_at, brands!inner(name, status)", { count: "exact" })
+      .select("*, brands!inner(*), created_by_profile:profiles!reports_created_by_fkey(*), uploaded_by_profile:profiles!reports_uploaded_to_chubb_by_fkey(*)", { count: "exact" })
       .eq("brands.status", "verified")
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);

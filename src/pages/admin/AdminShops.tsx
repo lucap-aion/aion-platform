@@ -74,7 +74,7 @@ const AdminShops = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("shops")
-      .select("id, name, address, city, country, contact, status, brand_id, brands(name, logo_small)", { count: "exact" })
+      .select("*, brands(*)", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
@@ -131,7 +131,7 @@ const AdminShops = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let q = supabase
       .from("shops")
-      .select("id, name, address, city, country, contact, status, brand_id, brands(name)")
+      .select("*, brands(*)")
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
