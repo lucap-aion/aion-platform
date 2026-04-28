@@ -506,10 +506,11 @@ function AdminTable<T extends Record<string, unknown>>({
 
   // ── Column picker panel ─────────────────────────────────────────────
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState("");
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!pickerOpen) return;
+    if (!pickerOpen) { setPickerSearch(""); return; }
     const handler = (e: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node))
         setPickerOpen(false);
@@ -517,6 +518,12 @@ function AdminTable<T extends Record<string, unknown>>({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [pickerOpen]);
+
+  const pickerFilteredColumns = pickerSearch.trim()
+    ? allColumns.filter((c) =>
+        friendlyLabel(c.label).toLowerCase().includes(pickerSearch.trim().toLowerCase()),
+      )
+    : allColumns;
 
   const hiddenCount = settings.hidden.length;
   const visibleCount = visibleColumns.length;
@@ -684,9 +691,36 @@ function AdminTable<T extends Record<string, unknown>>({
                 </button>
               </div>
 
+              {/* Search */}
+              <div className="relative px-2 pt-2 pb-1">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Search columns…"
+                  value={pickerSearch}
+                  onChange={(e) => setPickerSearch(e.target.value)}
+                  className="w-full rounded-lg border border-input bg-background pl-7 pr-7 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                {pickerSearch && (
+                  <button
+                    onClick={() => setPickerSearch("")}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                    title="Clear search"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
               {/* Column rows */}
               <div className="max-h-80 overflow-y-auto py-1">
-                {allColumns.map((col) => {
+                {pickerFilteredColumns.length === 0 && (
+                  <p className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    No columns match "{pickerSearch}"
+                  </p>
+                )}
+                {pickerFilteredColumns.map((col) => {
                   const isHidden = settings.hidden.includes(col.key);
                   const isFrozen = settings.frozen.includes(col.key);
                   const isDragOver = pickerDragOver === col.key;
