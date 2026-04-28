@@ -375,6 +375,7 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
     }
 
     setStatus({ loading: true, notFound: false });
+    let cancelled = false;
 
     const fetchBrand = async () => {
       const { data: brand, error } = await supabase
@@ -382,6 +383,9 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
         .select(BRAND_SELECT)
         .eq("slug", slug)
         .maybeSingle();
+
+      // Slug changed mid-fetch (e.g. redirect to /admin) — drop the result
+      if (cancelled) return;
 
       if (!error && brand) {
         setTenant(mergeWithBrandData(brand));
@@ -395,6 +399,8 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
     };
 
     void fetchBrand();
+
+    return () => { cancelled = true; };
   }, [slug]);
 
   return (
