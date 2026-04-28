@@ -83,7 +83,7 @@ const AdminCatalogues = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("catalogues")
-      .select("id, name, brand_id, brand_item_id, sku, slug, category, collection, composition, description, picture, brands(name, logo_small)", { count: "exact" })
+      .select("*, brands(*)", { count: "exact" })
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
@@ -147,7 +147,7 @@ const AdminCatalogues = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let q = supabase
       .from("catalogues")
-      .select("id, name, brand_id, brand_item_id, sku, slug, category, collection, composition, description, brands(name)")
+      .select("*, brands(*)")
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);

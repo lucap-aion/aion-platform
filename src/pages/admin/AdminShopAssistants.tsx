@@ -91,7 +91,7 @@ const AdminShopAssistants = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("profiles")
-      .select("id, first_name, last_name, email, role, is_master, status, brand_id, shop_id, avatar, created_at, registered_at, email_confirmed_at, brands(name, logo_small), shops(name)", { count: "exact" })
+      .select("*, brands(*), shops(*)", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .eq("role", "brand")
       .in("brand_id", brandFilterIds)
@@ -201,7 +201,7 @@ const AdminShopAssistants = () => {
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let q = supabase
       .from("profiles")
-      .select("id, first_name, last_name, email, role, is_master, status, brand_id, shop_id, created_at, registered_at, email_confirmed_at, brands(name), shops(name)")
+      .select("*, brands(*), shops(*)")
       .eq("role", "brand")
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
