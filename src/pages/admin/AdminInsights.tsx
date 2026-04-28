@@ -707,7 +707,7 @@ function CategoryChart({ title, data, t }: { title: string; data: { cat: string;
         { color: C2, label: "RRP €k (%)" },
       ]} />
       <ResponsiveContainer width="100%" height={280}>
-        <ComposedChart data={data} margin={{ top: 20, right: 10, left: 0, bottom: 0 }}>
+        <ComposedChart data={data} margin={{ top: 32, right: 10, left: 0, bottom: 0 }}>
           <XAxis dataKey="cat" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
           <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `€${v}k`} />

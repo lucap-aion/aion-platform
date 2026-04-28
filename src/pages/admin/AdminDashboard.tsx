@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   Shield, Users, FileText, Store, DollarSign, BarChart3,
@@ -358,6 +358,15 @@ export default function AdminDashboard() {
 
   useEffect(() => { void computeStats(); }, [computeStats]);
 
+  const visibleShops = useMemo(() => {
+    const verifiedBrandIds = new Set(allBrands.map((b) => b.id));
+    return allShops.filter((s) =>
+      s.brand_id != null
+      && verifiedBrandIds.has(s.brand_id)
+      && (selectedBrandId === "all" || s.brand_id === selectedBrandId)
+    );
+  }, [allShops, allBrands, selectedBrandId]);
+
   const name = adminRecord?.first_name || "Admin";
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
   const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -391,7 +400,7 @@ export default function AdminDashboard() {
           <div className="relative">
             <select className={selectCls} value={selectedShopId} onChange={(e) => setSelectedShopId(e.target.value === "all" ? "all" : Number(e.target.value))}>
               <option value="all">All Stores</option>
-              {(selectedBrandId === "all" ? allShops : allShops.filter((s) => s.brand_id === selectedBrandId)).map((s) => (
+              {visibleShops.map((s) => (
                 <option key={s.id} value={s.id}>{s.name ?? `Store #${s.id}`}</option>
               ))}
             </select>
