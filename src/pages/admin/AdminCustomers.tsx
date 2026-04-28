@@ -31,6 +31,8 @@ import { SearchableSelect } from "./_components/SearchableSelect";
 import { fmtDate } from "./_components/fmtDate";
 import { sendEmail } from "@/utils/sendEmail";
 import { siteUrl } from "@/utils/siteUrl";
+import { Mail, MailCheck, Loader2 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Customer {
   id: string;
@@ -82,6 +84,7 @@ const AdminCustomers = () => {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = () => {
@@ -136,26 +139,29 @@ const AdminCustomers = () => {
       });
       setSaving(false);
       if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-      // Send invite email
-      if (editing.brand_id) {
-        const { data: brandData } = await supabase.from("brands").select("name, slug, logo_small, logo_big").eq("id", editing.brand_id).single();
-        if (brandData) {
-          const url = `${siteUrl()}/${brandData.slug}/signup`;
-          const emailErr = await sendEmail("customer_invite", {
-            customer: { email: editing.email, first_name: editing.first_name ?? null },
-            brand: { name: brandData.name, id: editing.brand_id },
-            url,
-          });
-          if (emailErr) {
-            toast({ title: "Customer created but invite email failed", description: emailErr, variant: "destructive" });
-          } else {
-            toast({ title: "Customer created", description: `Invite sent to ${editing.email}` });
-          }
-        } else {
-          toast({ title: "Customer created", description: "Could not load brand data — invite email not sent", variant: "destructive" });
-        }
-      } else {
+      const brandId = editing.brand_id;
+      const inviteEmail = editing.email!;
+      const inviteFirstName = editing.first_name ?? null;
+      setDrawerOpen(false);
+      fetchData();
+      if (!brandId) {
         toast({ title: "Customer created", description: "No brand selected — no invite email sent" });
+      } else {
+        toast({ title: "Customer created" });
+        (async () => {
+          const { data: brandData } = await supabase.from("brands").select("name, slug, logo_small, logo_big").eq("id", brandId).single();
+          if (!brandData) {
+            toast({ title: "Invite email not sent", description: "Could not load brand data", variant: "destructive" });
+            return;
+          }
+          const emailErr = await sendEmail("customer_invite", {
+            customer: { email: inviteEmail, first_name: inviteFirstName },
+            brand: { name: brandData.name, id: brandId },
+            url: `${siteUrl()}/${brandData.slug}/signup`,
+          });
+          if (emailErr) toast({ title: "Invite email failed", description: emailErr, variant: "destructive" });
+          else toast({ title: "Invite email sent", description: inviteEmail });
+        })();
       }
     } else {
       const { error } = await supabase.from("profiles").update({
@@ -167,10 +173,10 @@ const AdminCustomers = () => {
       }).eq("id", editing.id!);
       setSaving(false);
       if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+      setDrawerOpen(false);
+      fetchData();
       toast({ title: "Customer updated" });
     }
-    setDrawerOpen(false);
-    fetchData();
   };
 
   const handleDelete = async () => {
@@ -181,6 +187,39 @@ const AdminCustomers = () => {
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
     toast({ title: "Customer deleted" });
     fetchData();
+  };
+
+  const handleResendInvite = async (row: Record<string, unknown>) => {
+    const r = row as unknown as Customer;
+    if (!r.brand_id) { toast({ title: "No brand assigned", variant: "destructive" }); return; }
+    setPendingAction(`${r.id}:invite`);
+    const { data: brandData } = await supabase.from("brands").select("name, slug").eq("id", r.brand_id).single();
+    if (!brandData) { setPendingAction(null); toast({ title: "Brand not found", variant: "destructive" }); return; }
+    const emailError = await sendEmail("customer_invite", {
+      customer: { email: r.email, first_name: r.first_name ?? null },
+      brand: { name: brandData.name, id: r.brand_id },
+      url: `${siteUrl()}/${brandData.slug}/signup`,
+    });
+    setPendingAction(null);
+    if (emailError) toast({ title: "Invite email failed", description: emailError, variant: "destructive" });
+    else toast({ title: "Invite email sent", description: r.email });
+  };
+
+  const handleResendConfirmation = async (row: Record<string, unknown>) => {
+    const r = row as unknown as Customer;
+    setPendingAction(`${r.id}:confirm`);
+    const { data: brandData } = r.brand_id
+      ? await supabase.from("brands").select("slug").eq("id", r.brand_id).single()
+      : { data: null as { slug: string } | null };
+    const redirect = brandData?.slug ? `${siteUrl()}/${brandData.slug}` : siteUrl();
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: r.email,
+      options: { emailRedirectTo: redirect },
+    });
+    setPendingAction(null);
+    if (error) toast({ title: "Confirmation email failed", description: error.message, variant: "destructive" });
+    else toast({ title: "Confirmation email sent", description: r.email });
   };
 
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
@@ -227,6 +266,40 @@ const AdminCustomers = () => {
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        extraRowAction={(row) => {
+          const r = row as unknown as Customer;
+          if (r.status !== "pending") return null;
+          const invitePending = pendingAction === `${r.id}:invite`;
+          const confirmPending = pendingAction === `${r.id}:confirm`;
+          const hasRegistered = !!r.registered_at;
+          return hasRegistered ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => handleResendConfirmation(row)}
+                  disabled={confirmPending}
+                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {confirmPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MailCheck className="h-3.5 w-3.5" />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Resend email confirmation</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => handleResendInvite(row)}
+                  disabled={invitePending}
+                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {invitePending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Resend invite email</TooltipContent>
+            </Tooltip>
+          );
+        }}
         columns={[
           {
             key: "first_name", label: "Name", sortable: true, width: 220,

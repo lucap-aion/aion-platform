@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { exportToCsv, type ExportColumn } from "../_utils/exportCsv";
 import { fmtDate } from "./fmtDate";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /** Heuristic: key name suggests a date column. */
 const DATE_KEY_RE = /(^|_)(date|at|created|updated|expires|expired|registered|confirmed|opened|closed|deleted|started|ended|birth|incident|sent|sold)$/i;
@@ -921,31 +922,43 @@ function AdminTable<T extends Record<string, unknown>>({
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           {extraRowAction && extraRowAction(row)}
                           {onView && (
-                            <button
-                              onClick={() => onView(row)}
-                              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                              title="View"
-                            >
-                              <Eye className="h-3.5 w-3.5" />
-                            </button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onClick={() => onView(row)}
+                                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>View</TooltipContent>
+                            </Tooltip>
                           )}
                           {onEdit && (
-                            <button
-                              onClick={() => onEdit(row)}
-                              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                              title="Edit"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onClick={() => onEdit(row)}
+                                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>Edit</TooltipContent>
+                            </Tooltip>
                           )}
                           {onDelete && (
-                            <button
-                              onClick={() => onDelete(row)}
-                              className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-                              title="Delete"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onClick={() => onDelete(row)}
+                                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>Delete</TooltipContent>
+                            </Tooltip>
                           )}
                         </div>
                       </td>

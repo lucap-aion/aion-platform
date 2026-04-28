@@ -159,7 +159,7 @@ const AdminProtectedLayout = () => (
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
+    <TooltipProvider delayDuration={150} skipDelayDuration={100}>
       <Toaster />
       <Sonner />
       <BrowserRouter>

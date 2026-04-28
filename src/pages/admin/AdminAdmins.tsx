@@ -23,6 +23,8 @@ import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, SaveBar } from "./_components/FormField";
 import { ImageUpload } from "./_components/ImageUpload";
 import { fmtDate } from "./_components/fmtDate";
+import { Mail, MailCheck, Loader2 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Admin {
   id: string;
@@ -36,6 +38,7 @@ interface Admin {
   country: string | null;
   avatar: string | null;
   registered_at: string | null;
+  email_confirmed_at: string | null;
 }
 
 type Mode = "view" | "edit" | "add";
@@ -63,6 +66,7 @@ const AdminAdmins = () => {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Admin | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = () => {
@@ -71,7 +75,7 @@ const AdminAdmins = () => {
     setLoading(true);
     let query = supabase
       .from("admins")
-      .select("id, first_name, last_name, email, role, status, phone_number, city, country, avatar, registered_at", { count: "exact" })
+      .select("id, first_name, last_name, email, role, status, phone_number, city, country, avatar, registered_at, email_confirmed_at", { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .order(sortKey, { ascending: sortDir === "asc" })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
@@ -105,6 +109,8 @@ const AdminAdmins = () => {
       : await supabase.from("admins").update(payload).eq("id", editing.id!);
     setSaving(false);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    setDrawerOpen(false);
+    fetchData();
     toast({ title: mode === "add" ? "Admin created" : "Admin updated" });
     if (mode === "add") {
       sendEmail("admin_invite", {
@@ -112,8 +118,6 @@ const AdminAdmins = () => {
         url: `${siteUrl()}/admin/register?email=${encodeURIComponent(editing.email!)}`,
       });
     }
-    setDrawerOpen(false);
-    fetchData();
   };
 
   const handleDelete = async () => {
@@ -124,6 +128,33 @@ const AdminAdmins = () => {
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
     toast({ title: "Admin deleted" });
     fetchData();
+  };
+
+  const handleResendInvite = async (row: Record<string, unknown>) => {
+    const r = row as unknown as Admin;
+    const key = `${r.id}:invite`;
+    setPendingAction(key);
+    const emailError = await sendEmail("admin_invite", {
+      admin: { email: r.email },
+      url: `${siteUrl()}/admin/register?email=${encodeURIComponent(r.email)}`,
+    });
+    setPendingAction(null);
+    if (emailError) toast({ title: "Invite email failed", description: emailError, variant: "destructive" });
+    else toast({ title: "Invite email sent", description: r.email });
+  };
+
+  const handleResendConfirmation = async (row: Record<string, unknown>) => {
+    const r = row as unknown as Admin;
+    const key = `${r.id}:confirm`;
+    setPendingAction(key);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: r.email,
+      options: { emailRedirectTo: `${siteUrl()}/admin` },
+    });
+    setPendingAction(null);
+    if (error) toast({ title: "Confirmation email failed", description: error.message, variant: "destructive" });
+    else toast({ title: "Confirmation email sent", description: r.email });
   };
 
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
@@ -166,6 +197,40 @@ const AdminAdmins = () => {
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        extraRowAction={(row) => {
+          const r = row as unknown as Admin;
+          if (r.status !== "pending") return null;
+          const invitePending = pendingAction === `${r.id}:invite`;
+          const confirmPending = pendingAction === `${r.id}:confirm`;
+          const hasRegistered = !!r.registered_at;
+          return hasRegistered ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => handleResendConfirmation(row)}
+                  disabled={confirmPending}
+                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {confirmPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MailCheck className="h-3.5 w-3.5" />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Resend email confirmation</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => handleResendInvite(row)}
+                  disabled={invitePending}
+                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {invitePending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Resend invite email</TooltipContent>
+            </Tooltip>
+          );
+        }}
         columns={[
           {
             key: "first_name", label: "Name", sortable: true, width: 220,
