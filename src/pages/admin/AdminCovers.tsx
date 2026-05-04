@@ -124,14 +124,19 @@ const AdminCovers = () => {
     setLoading(true);
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
+    // When searching, swap profiles to !inner so the embedded-OR on
+    // profiles.{first_name,last_name,email} actually narrows parent rows.
+    const profileJoin = search ? "profiles!inner(*)" : "profiles(*)";
     let query = supabase
       .from("policies")
-      .select("*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns!policies_return_id_fkey(*)", { count: "exact" })
+      .select(`*, brands(*), catalogues(*), ${profileJoin}, shops(*), external_requests(*), returns!policies_return_id_fkey(*)`, { count: "exact" })
       .abortSignal(abortRef.current.signal)
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (search) query = query.or(`brand_sale_id.ilike.%${search}%,brand_row_id.ilike.%${search}%,brand_sub_order_row_code.ilike.%${search}%,status.ilike.%${search}%`);
+    if (search) {
+      query = query.or(`brand_sale_id.ilike.%${search}%,brand_row_id.ilike.%${search}%,brand_sub_order_row_code.ilike.%${search}%,status.ilike.%${search}%,profiles.first_name.ilike.%${search}%,profiles.last_name.ilike.%${search}%,profiles.email.ilike.%${search}%`);
+    }
     if (filterValues.status) query = query.eq("status", filterValues.status);
     query.then(({ data, count, error }) => {
       if (error?.name === "AbortError") return;
@@ -228,13 +233,16 @@ const AdminCovers = () => {
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
+    const profileJoin = search ? "profiles!inner(*)" : "profiles(*)";
     let q = supabase
       .from("policies")
-      .select("*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns!policies_return_id_fkey(*)")
+      .select(`*, brands(*), catalogues(*), ${profileJoin}, shops(*), external_requests(*), returns!policies_return_id_fkey(*)`)
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
-    if (search) q = q.or(`brand_sale_id.ilike.%${search}%,brand_row_id.ilike.%${search}%,brand_sub_order_row_code.ilike.%${search}%,status.ilike.%${search}%`);
+    if (search) {
+      q = q.or(`brand_sale_id.ilike.%${search}%,brand_row_id.ilike.%${search}%,brand_sub_order_row_code.ilike.%${search}%,status.ilike.%${search}%,profiles.first_name.ilike.%${search}%,profiles.last_name.ilike.%${search}%,profiles.email.ilike.%${search}%`);
+    }
     if (filterValues.status) q = q.eq("status", filterValues.status);
     const { data } = await q;
     return (data ?? []) as Record<string, unknown>[];

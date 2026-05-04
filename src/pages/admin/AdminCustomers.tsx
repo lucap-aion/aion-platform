@@ -5,7 +5,7 @@ import AdminTable, { StatusBadge, type FilterDef } from "./_components/AdminTabl
 import type { ExportColumn } from "./_utils/exportCsv";
 import { resolveSortOrder } from "./_utils/resolveSortOrder";
 
-const SORT_RELATIONS = ["brands"] as const;
+const SORT_RELATIONS = ["brands", "shops"] as const;
 
 const CUSTOMERS_SCHEMA: ExportColumn[] = [
   { key: "id",                  label: "ID" },

@@ -73,52 +73,51 @@ function isSkippedKey(k: string): boolean {
 }
 
 /**
- * Scans a pre-flattened row (produced by `flattenSupabaseRow`) and yields
- * auto-generated Column definitions for every scalar key not already declared
+ * Scans every row in `rows` (recursing into nested FK join objects) and yields
+ * auto-generated Column definitions for every scalar leaf key not already declared
  * in the primary `columns` prop and not in the skip list.
- * Also handles legacy un-flattened rows by recursing into nested objects.
+ *
+ * Walking ALL rows (not just data[0]) ensures FK-derived columns surface even
+ * when the FK is null in the first row — e.g. profiles where some have a shop
+ * and some don't will still expose `shops_name` in the picker.
  */
 function collectLeafCols<T>(
-  obj: Record<string, unknown>,
+  rows: Record<string, unknown>[],
   definedKeys: Set<string>,
   primaryValues: Set<unknown>,
-  prefix = "",
-  path: string[] = [],
 ): Column<T>[] {
-  const result: Column<T>[] = [];
-  for (const [k, v] of Object.entries(obj)) {
-    const flatKey = prefix ? `${prefix}_${k}` : k;
-    if (isSkippedKey(flatKey)) continue;
-    const currentPath = [...path, k];
-    if (v !== null && v !== undefined && typeof v === "object" && !Array.isArray(v)) {
-      result.push(...collectLeafCols<T>(
-        v as Record<string, unknown>, definedKeys, primaryValues, flatKey, currentPath,
-      ));
-    } else {
-      if (definedKeys.has(flatKey)) continue;
-      if (path.length > 0 && v != null && v !== "" && v !== "—" && primaryValues.has(v)) continue;
-      const capPath = currentPath;
-      result.push({
-        key: flatKey,
-        label: friendlyLabel(flatKey),
-        sortable: true,
-        render: (row: T) => {
-          let val: unknown;
-          if (path.length > 0) {
-            val = row;
-            for (const p of capPath) val = (val as Record<string, unknown>)?.[p];
-          } else {
-            val = (row as Record<string, unknown>)[flatKey];
-          }
-          if (isDateLikeValue(val, flatKey)) {
-            return <span className="block truncate">{fmtDate(val as string)}</span>;
-          }
-          return <span className="block truncate">{val == null || val === "" ? "—" : String(val)}</span>;
-        },
-      });
+  const leafMap = new Map<string, { path: string[] }>();
+
+  function visit(obj: Record<string, unknown>, prefix: string, path: string[]) {
+    for (const [k, v] of Object.entries(obj)) {
+      const flatKey = prefix ? `${prefix}_${k}` : k;
+      if (isSkippedKey(flatKey)) continue;
+      const currentPath = [...path, k];
+      if (v !== null && v !== undefined && typeof v === "object" && !Array.isArray(v)) {
+        visit(v as Record<string, unknown>, flatKey, currentPath);
+      } else {
+        if (definedKeys.has(flatKey)) continue;
+        if (path.length > 0 && v != null && v !== "" && v !== "—" && primaryValues.has(v)) continue;
+        if (!leafMap.has(flatKey)) leafMap.set(flatKey, { path: currentPath });
+      }
     }
   }
-  return result;
+
+  for (const row of rows) visit(row, "", []);
+
+  return Array.from(leafMap.entries()).map<Column<T>>(([flatKey, { path }]) => ({
+    key: flatKey,
+    label: friendlyLabel(flatKey),
+    sortable: true,
+    render: (row: T) => {
+      let val: unknown = row;
+      for (const p of path) val = (val as Record<string, unknown>)?.[p];
+      if (isDateLikeValue(val, flatKey)) {
+        return <span className="block truncate">{fmtDate(val as string)}</span>;
+      }
+      return <span className="block truncate">{val == null || val === "" ? "—" : String(val)}</span>;
+    },
+  }));
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -320,7 +319,11 @@ function AdminTable<T extends Record<string, unknown>>({
 }: AdminTableProps<T>) {
 
   // ── Auto-detect extra columns from data ─────────────────────────────
-  const firstRowKeySig = data[0] ? Object.keys(data[0]).join(",") : "";
+  // Signature of all rows' top-level shape — re-derive auto-columns when any
+  // row gains/loses a leaf (e.g. a row with a populated FK appears).
+  const dataKeySig = data
+    .map((r) => r ? Object.keys(r).sort().join(",") : "")
+    .join("|");
   const allColumns = useMemo<Column<T>[]>(() => {
     const definedKeys = new Set(columns.map((c) => c.key));
     if (!data[0]) return [...columns];
@@ -332,10 +335,10 @@ function AdminTable<T extends Record<string, unknown>>({
       if (v != null && v !== "" && v !== "—" && typeof v !== "object" && !Array.isArray(v))
         primaryValues.add(v);
     }
-    const extras = collectLeafCols<T>(row0, definedKeys, primaryValues);
+    const extras = collectLeafCols<T>(data as Record<string, unknown>[], definedKeys, primaryValues);
     return [...columns, ...extras];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columns, firstRowKeySig]);
+  }, [columns, dataKeySig]);
 
   const allColMap = useMemo(() => new Map(allColumns.map((c) => [c.key, c])), [allColumns]);
 
