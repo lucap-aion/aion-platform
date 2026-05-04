@@ -29,10 +29,15 @@ const ABBREV: Record<string, string> = {
   rrp: "RRP", cogs: "COGS", hq: "HQ", api: "API",
 };
 
-/** Singularise common Supabase join table-name prefixes so labels read naturally */
+/** Singularise common Supabase join table-name prefixes so labels read naturally.
+ *  Membership here ALSO marks a key as an FK relation root, so a top-level value
+ *  that is null in every row never gets auto-generated as a useless scalar
+ *  column (e.g. an empty "Shop" column when no row in the page has a shop). */
 const SINGULAR: Record<string, string> = {
   brands: "brand", profiles: "profile", catalogues: "catalogue",
   shops: "shop", policies: "policy", admins: "admin",
+  claims: "claim", feedback: "feedback", returns: "return",
+  external_requests: "external request", manufacturing_costs: "manufacturing cost",
 };
 
 /**
@@ -96,9 +101,15 @@ function collectLeafCols<T>(
       const flatKey = prefix ? `${prefix}_${k}` : k;
       if (isSkippedKey(flatKey)) continue;
       const currentPath = [...path, k];
+      // Top-level keys that are FK relation names (e.g. brands, shops, profiles)
+      // should never become scalar leaf columns even if the join is null in
+      // every row of the current page — only their nested fields matter.
+      const isRootRelation = path.length === 0 && (k in SINGULAR);
       if (v !== null && v !== undefined && typeof v === "object" && !Array.isArray(v)) {
         containerKeys.add(flatKey);
         visit(v as Record<string, unknown>, flatKey, currentPath);
+      } else if (isRootRelation) {
+        containerKeys.add(flatKey);
       } else {
         if (definedKeys.has(flatKey)) continue;
         if (path.length > 0 && v != null && v !== "" && v !== "—" && primaryValues.has(v)) continue;
