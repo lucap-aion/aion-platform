@@ -13,6 +13,7 @@ const CUSTOMERS_SCHEMA: ExportColumn[] = [
   { key: "last_name",           label: "Last Name" },
   { key: "email",               label: "Email" },
   { key: "brands_name",         label: "Brand" },
+  { key: "shop_name",           label: "Shop" },
   { key: "status",              label: "Status" },
   { key: "phone_number",        label: "Phone" },
   { key: "city",                label: "City" },
@@ -23,6 +24,7 @@ const CUSTOMERS_SCHEMA: ExportColumn[] = [
   { key: "registered_at",       label: "Registered At" },
   { key: "email_confirmed_at",  label: "Email Confirmed At" },
   { key: "brand_id",            label: "Brand ID" },
+  { key: "shop_id",             label: "Shop ID" },
 ];
 import AdminDrawer from "./_components/AdminDrawer";
 import ConfirmDialog from "./_components/ConfirmDialog";
@@ -49,9 +51,11 @@ interface Customer {
   registered_at: string | null;
   email_confirmed_at: string | null;
   brand_id: number | null;
+  shop_id: number | null;
   role: string | null;
   brand_name?: string;
   brand_logo?: string | null;
+  shop_name?: string | null;
   avatar?: string | null;
 }
 
@@ -109,6 +113,7 @@ const AdminCustomers = () => {
         ...p,
         brand_name: p.brands?.name ?? "—",
         brand_logo: p.brands?.logo_small ?? null,
+        shop_name: p.shops?.name ?? null,
         avatar: p.avatar ?? null,
       })));
       setTotal(count ?? 0);
@@ -329,6 +334,13 @@ const AdminCustomers = () => {
                   <span className="text-sm text-foreground">{r.brand_name}</span>
                 </div>
               );
+            },
+          },
+          {
+            key: "shop_name", sortKey: "shops_name", label: "Shop",
+            render: (row) => {
+              const r = row as unknown as Customer;
+              return r.shop_name ? <span className="text-sm text-foreground">{r.shop_name}</span> : <span className="text-muted-foreground">—</span>;
             },
           },
           {

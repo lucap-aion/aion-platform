@@ -87,6 +87,9 @@ function collectLeafCols<T>(
   primaryValues: Set<unknown>,
 ): Column<T>[] {
   const leafMap = new Map<string, { path: string[] }>();
+  // Keys seen as a container (object) in any row — used to drop the scalar
+  // leaf entry that gets emitted when the FK is null in another row.
+  const containerKeys = new Set<string>();
 
   function visit(obj: Record<string, unknown>, prefix: string, path: string[]) {
     for (const [k, v] of Object.entries(obj)) {
@@ -94,6 +97,7 @@ function collectLeafCols<T>(
       if (isSkippedKey(flatKey)) continue;
       const currentPath = [...path, k];
       if (v !== null && v !== undefined && typeof v === "object" && !Array.isArray(v)) {
+        containerKeys.add(flatKey);
         visit(v as Record<string, unknown>, flatKey, currentPath);
       } else {
         if (definedKeys.has(flatKey)) continue;
@@ -104,6 +108,7 @@ function collectLeafCols<T>(
   }
 
   for (const row of rows) visit(row, "", []);
+  for (const k of containerKeys) leafMap.delete(k);
 
   return Array.from(leafMap.entries()).map<Column<T>>(([flatKey, { path }]) => ({
     key: flatKey,

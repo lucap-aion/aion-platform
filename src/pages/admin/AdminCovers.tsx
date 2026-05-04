@@ -117,33 +117,55 @@ const AdminCovers = () => {
   const [deleting, setDeleting] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
-  const fetchData = () => {
+  const fetchData = async () => {
     if (brands.length === 0) return;
     abortRef.current?.abort();
     abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
     setLoading(true);
+
+    // PostgREST OR cannot reference embedded resources, so resolve customer
+    // matches via a pre-query and pass their IDs as one of the OR branches.
+    let matchedCustomerIds: string[] | null = null;
+    if (search) {
+      const { data: matched } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("role", "customer")
+        .or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`)
+        .abortSignal(signal)
+        .limit(500);
+      if (signal.aborted) return;
+      matchedCustomerIds = (matched ?? []).map((r: any) => r.id as string);
+    }
+
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
-    // When searching, swap profiles to !inner so the embedded-OR on
-    // profiles.{first_name,last_name,email} actually narrows parent rows.
-    const profileJoin = search ? "profiles!inner(*)" : "profiles(*)";
     let query = supabase
       .from("policies")
-      .select(`*, brands(*), catalogues(*), ${profileJoin}, shops(*), external_requests(*), returns!policies_return_id_fkey(*)`, { count: "exact" })
-      .abortSignal(abortRef.current.signal)
+      .select("*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns!policies_return_id_fkey(*)", { count: "exact" })
+      .abortSignal(signal)
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) {
-      query = query.or(`brand_sale_id.ilike.%${search}%,brand_row_id.ilike.%${search}%,brand_sub_order_row_code.ilike.%${search}%,status.ilike.%${search}%,profiles.first_name.ilike.%${search}%,profiles.last_name.ilike.%${search}%,profiles.email.ilike.%${search}%`);
+      const orParts = [
+        `brand_sale_id.ilike.%${search}%`,
+        `brand_row_id.ilike.%${search}%`,
+        `brand_sub_order_row_code.ilike.%${search}%`,
+        `status.ilike.%${search}%`,
+      ];
+      if (matchedCustomerIds && matchedCustomerIds.length) {
+        orParts.push(`customer_id.in.(${matchedCustomerIds.join(",")})`);
+      }
+      query = query.or(orParts.join(","));
     }
     if (filterValues.status) query = query.eq("status", filterValues.status);
-    query.then(({ data, count, error }) => {
-      if (error?.name === "AbortError") return;
-      setCovers((data ?? []).map((p: any) => flattenSupabaseRow(p) as unknown as Cover));
-      setTotal(count ?? 0);
-      setLoading(false);
-    });
+    const { data, count, error } = await query;
+    if (error?.name === "AbortError" || signal.aborted) return;
+    setCovers((data ?? []).map((p: any) => flattenSupabaseRow(p) as unknown as Cover));
+    setTotal(count ?? 0);
+    setLoading(false);
   };
 
   useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir, brands]);
@@ -233,15 +255,33 @@ const AdminCovers = () => {
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
-    const profileJoin = search ? "profiles!inner(*)" : "profiles(*)";
+    let matchedCustomerIds: string[] | null = null;
+    if (search) {
+      const { data: matched } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("role", "customer")
+        .or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`)
+        .limit(2000);
+      matchedCustomerIds = (matched ?? []).map((r: any) => r.id as string);
+    }
     let q = supabase
       .from("policies")
-      .select(`*, brands(*), catalogues(*), ${profileJoin}, shops(*), external_requests(*), returns!policies_return_id_fkey(*)`)
+      .select("*, brands(*), catalogues(*), profiles(*), shops(*), external_requests(*), returns!policies_return_id_fkey(*)")
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .limit(10000);
     if (search) {
-      q = q.or(`brand_sale_id.ilike.%${search}%,brand_row_id.ilike.%${search}%,brand_sub_order_row_code.ilike.%${search}%,status.ilike.%${search}%,profiles.first_name.ilike.%${search}%,profiles.last_name.ilike.%${search}%,profiles.email.ilike.%${search}%`);
+      const orParts = [
+        `brand_sale_id.ilike.%${search}%`,
+        `brand_row_id.ilike.%${search}%`,
+        `brand_sub_order_row_code.ilike.%${search}%`,
+        `status.ilike.%${search}%`,
+      ];
+      if (matchedCustomerIds && matchedCustomerIds.length) {
+        orParts.push(`customer_id.in.(${matchedCustomerIds.join(",")})`);
+      }
+      q = q.or(orParts.join(","));
     }
     if (filterValues.status) q = q.eq("status", filterValues.status);
     const { data } = await q;
