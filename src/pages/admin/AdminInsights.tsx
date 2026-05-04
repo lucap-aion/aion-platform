@@ -1254,44 +1254,65 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
 
       <MonthlyPctChart title={t("insights.chart.newProfiledMonthly")} data={d.cohortMonth.profPctMonthly} color={GR} />
       {d.shops.length >= 2 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {d.shops.map((s, si) => {
-            const data = d.mos.map(m => ({
-              key: m,
-              pct: (d.cohortMonth.novByShopMo[s]?.[m] || 0) > 0
-                ? Math.round((d.cohortMonth.profByShopMo[s]?.[m] || 0) / d.cohortMonth.novByShopMo[s][m] * 100) : 0,
-            }));
-            return (
-              <MonthlyPctChart key={s}
-                title={`${t("insights.chart.newProfiledMonthly")} — ${s} (%)`}
-                data={data}
-                color={COLORS[si] || SLATE}
-              />
-            );
-          })}
-        </div>
+        <MonthlyPctByShopChart
+          title={t("insights.chart.newProfiledMonthlyByShop")}
+          mos={d.mos}
+          shops={d.shops}
+          novByShop={d.cohortMonth.novByShopMo}
+          numByShop={d.cohortMonth.profByShopMo}
+        />
       )}
 
       <MonthlyPctChart title={t("insights.chart.newFeedbackMonthly")} data={d.cohortMonth.fbPctMonthly} color={AM} />
       {d.shops.length >= 2 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {d.shops.map((s, si) => {
-            const data = d.mos.map(m => ({
-              key: m,
-              pct: (d.cohortMonth.novByShopMo[s]?.[m] || 0) > 0
-                ? Math.round((d.cohortMonth.fbByShopMo[s]?.[m] || 0) / d.cohortMonth.novByShopMo[s][m] * 100) : 0,
-            }));
-            return (
-              <MonthlyPctChart key={s}
-                title={`${t("insights.chart.newFeedbackMonthly")} — ${s} (%)`}
-                data={data}
-                color={COLORS[si] || SLATE}
-              />
-            );
-          })}
-        </div>
+        <MonthlyPctByShopChart
+          title={t("insights.chart.newFeedbackMonthlyByShop")}
+          mos={d.mos}
+          shops={d.shops}
+          novByShop={d.cohortMonth.novByShopMo}
+          numByShop={d.cohortMonth.fbByShopMo}
+        />
       )}
     </div>
+  );
+}
+
+function MonthlyPctByShopChart({ title, mos, shops, novByShop, numByShop }: {
+  title: string;
+  mos: string[];
+  shops: string[];
+  novByShop: Record<string, Record<string, number>>;
+  numByShop: Record<string, Record<string, number>>;
+}) {
+  const data = mos.map(m => {
+    const row: any = { key: m };
+    shops.forEach(s => {
+      const denom = novByShop[s]?.[m] || 0;
+      const num = numByShop[s]?.[m] || 0;
+      row[s] = denom > 0 ? Math.round(num / denom * 100) : 0;
+    });
+    return row;
+  });
+  return (
+    <ChartCard title={title}>
+      <ColorLegend items={shops.map((s, i) => ({ color: COLORS[i] || SLATE, label: s }))} />
+      <ResponsiveContainer width="100%" height={240}>
+        <BarChart data={data}>
+          <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} />
+          <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} />
+          <Tooltip content={<CTooltip />} />
+          {shops.map((s, i) => (
+            <Bar key={s} dataKey={s} fill={COLORS[i] || SLATE} radius={[6, 6, 0, 0]} name={s}>
+              <LabelList dataKey={s} content={({ x, y, width, height, value }: any) => {
+                if (!value) return null;
+                const inside = height > 20;
+                return <text x={x + width / 2} y={inside ? y + height / 2 : y - 6} textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"} fill={inside ? "#fff" : "#333"} fontSize={10} fontWeight={600}>{value}%</text>;
+              }} />
+            </Bar>
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartCard>
   );
 }
 
