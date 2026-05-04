@@ -349,14 +349,18 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       }));
     }
 
-    const matchCity = (city: string | null | undefined, target: "roma" | "venice"): boolean => {
-      if (!city) return false;
-      const c = city.trim().toLowerCase();
-      if (target === "roma") return c === "roma" || c === "rome";
-      return c === "venice" || c === "venezia";
+    // Match against the shop's city AND the shop name (some shops only encode the city in the name,
+    // e.g. "Buccellati Roma"). Strip accents and use word-boundary regex so "Roma Centro" /
+    // "Venezia Mestre" / trailing whitespace all match, while "Romania"/"Romeo" do not.
+    const norm = (s: string | null | undefined) =>
+      (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    const cityRe = { roma: /\broma\b|\brome\b/, venice: /\bvenezia\b|\bvenice\b/ } as const;
+    const matchCity = (p: ProcessedPolicy, target: "roma" | "venice"): boolean => {
+      const hay = `${norm(p.city)} ${norm(p.shop)}`;
+      return cityRe[target].test(hay);
     };
-    const polsRoma = policies.filter(p => matchCity(p.city, "roma"));
-    const polsVenice = policies.filter(p => matchCity(p.city, "venice"));
+    const polsRoma = policies.filter(p => matchCity(p, "roma"));
+    const polsVenice = policies.filter(p => matchCity(p, "venice"));
 
     // New vs returning
     function calcReturning(periods: string[], getKey: (d: string) => string) {
