@@ -211,6 +211,7 @@ interface ProcessedPolicy {
   rrp: number;
   sellingPrice: number;
   shop: string;
+  city: string | null;
   customerId: string;
   regDate: string | null;
   category: string;
@@ -302,15 +303,56 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
     // Category data
     function catData(pols: ProcessedPolicy[]) {
       const ct: Record<string, number> = {}, cr: Record<string, number> = {};
-      pols.forEach(p => { const c = p.category; ct[c] = (ct[c] || 0) + 1; cr[c] = (cr[c] || 0) + p.rrp; });
+      const cc: Record<string, Set<string>> = {};
+      pols.forEach(p => {
+        const c = p.category;
+        ct[c] = (ct[c] || 0) + 1;
+        cr[c] = (cr[c] || 0) + p.rrp;
+        if (!cc[c]) cc[c] = new Set();
+        cc[c].add(p.customerId);
+      });
       const sorted = Object.entries(ct).sort((a, b) => b[1] - a[1]);
       const totV = pols.length, totR = pols.reduce((s, p) => s + p.rrp, 0) / 1000;
+      const totC = new Set(pols.map(p => p.customerId)).size;
       return sorted.map(([cat, vol]) => ({
         cat, vol, rrpk: Math.round(cr[cat] / 1000),
+        cust: cc[cat]?.size ?? 0,
         volPct: totV > 0 ? Math.round(vol / totV * 100) : 0,
         rrpPct: totR > 0 ? Math.round(cr[cat] / 1000 / totR * 100) : 0,
+        custPct: totC > 0 ? Math.round((cc[cat]?.size ?? 0) / totC * 100) : 0,
       }));
     }
+
+    // Covers / RRP / unique customers per RRP price band (per-policy bands).
+    // Customers are counted per band uniquely, so totals across bands can exceed
+    // the unique customer count when a buyer transacts in multiple bands.
+    function priceBandData(pols: ProcessedPolicy[]) {
+      const bands = ["<2k", "2-5k", "5-10k", "10-15k", "15-20k", "20k+"];
+      const bkt = (rrp: number) => rrp < 2000 ? 0 : rrp < 5000 ? 1 : rrp < 10000 ? 2 : rrp < 15000 ? 3 : rrp < 20000 ? 4 : 5;
+      const cv = Array(6).fill(0), rk = Array(6).fill(0);
+      const cs: Set<string>[] = Array.from({ length: 6 }, () => new Set());
+      pols.forEach(p => {
+        const i = bkt(p.rrp);
+        cv[i]++;
+        rk[i] += p.rrp;
+        cs[i].add(p.customerId);
+      });
+      return bands.map((name, i) => ({
+        name,
+        covers: cv[i],
+        rrpk: Math.round(rk[i] / 1000),
+        customers: cs[i].size,
+      }));
+    }
+
+    const matchCity = (city: string | null | undefined, target: "roma" | "venice"): boolean => {
+      if (!city) return false;
+      const c = city.trim().toLowerCase();
+      if (target === "roma") return c === "roma" || c === "rome";
+      return c === "venice" || c === "venezia";
+    };
+    const polsRoma = policies.filter(p => matchCity(p.city, "roma"));
+    const polsVenice = policies.filter(p => matchCity(p.city, "venice"));
 
     // New vs returning
     function calcReturning(periods: string[], getKey: (d: string) => string) {
@@ -476,6 +518,31 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
 
     const regPctMoShop = regPctByMonthShop();
 
+    // Monthly cohort tallies: each customer is assigned to the month/shop of their first policy,
+    // then we count cohort members who later became profiled / left feedback.
+    function monthlyCohort(predicate: (cid: string) => boolean) {
+      const firstSeenByMo: Record<string, { m: string; sh: string }> = {};
+      const sorted = [...policies].sort((a, b) => a.date < b.date ? -1 : 1);
+      sorted.forEach(p => {
+        if (!firstSeenByMo[p.customerId]) firstSeenByMo[p.customerId] = { m: getMonth(p.date), sh: p.shop };
+      });
+      const totalsByMo: Record<string, number> = {};
+      const byShopMo: Record<string, Record<string, number>> = {};
+      shops.forEach(s => byShopMo[s] = {});
+      mos.forEach(m => { totalsByMo[m] = 0; shops.forEach(s => { byShopMo[s][m] = 0; }); });
+      Object.entries(firstSeenByMo).forEach(([cid, { m, sh }]) => {
+        if (!(m in totalsByMo)) return;
+        if (!predicate(cid)) return;
+        totalsByMo[m]++;
+        if (byShopMo[sh]) byShopMo[sh][m] = (byShopMo[sh][m] || 0) + 1;
+      });
+      return { totalsByMo, byShopMo };
+    }
+    const profiledSet = new Set(profiledCustIds);
+    const feedbackInPolicySet = new Set(scopedFeedback.map(f => f.user_id).filter(id => policyCustIds.has(id)));
+    const newProfiledByMo = monthlyCohort(cid => profiledSet.has(cid));
+    const newFeedbackByMo = monthlyCohort(cid => feedbackInPolicySet.has(cid));
+
     return {
       custs, regC, nonRegC, uniqueCustomers, regCustIds, profiledCustIds, custsWithFeedback,
       satisfactionAvg, recommendationAvg, peaceOfMindAvg,
@@ -496,6 +563,12 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       regRate,
       feedbackCount: scopedFeedback.length,
       geoData, genData,
+      priceBandsAll: priceBandData(policies),
+      priceBandsRoma: priceBandData(polsRoma),
+      priceBandsVenice: priceBandData(polsVenice),
+      hasRoma: polsRoma.length > 0,
+      hasVenice: polsVenice.length > 0,
+      newProfiledByMo, newFeedbackByMo,
     };
   }, [policies, profiles, feedback]);
 }
@@ -579,7 +652,7 @@ export default function AdminInsights() {
         while (true) {
           const q = supabase
             .from("policies")
-            .select("id, start_date, recommended_retail_price, selling_price, customer_id, shop_id, shops(name), catalogues(category, collection)")
+            .select("id, start_date, recommended_retail_price, selling_price, customer_id, shop_id, shops(name, city), catalogues(category, collection)")
             .eq("status", "live")
             .in("brand_id", brandFilterIds)
             .range(from, from + PAGE - 1);
@@ -634,6 +707,7 @@ export default function AdminInsights() {
         rrp: Number(p.recommended_retail_price) || 0,
         sellingPrice: Number(p.selling_price) || 0,
         shop: p.shops?.name || `#${p.shop_id}`,
+        city: p.shops?.city ?? null,
         customerId: p.customer_id,
         regDate: profileRegMap.get(p.customer_id) || null,
         category: normalizeCategory(p.catalogues?.category || p.catalogues?.collection || "—"),
@@ -780,16 +854,74 @@ function OverviewTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
       {d.shops.map(s => (
         <CategoryChart key={s} title={`${t("insights.chart.catByShop")} ${s}`} data={d.catByShop[s] || []} t={t} />
       ))}
+
+      <PriceBandChart title={t("insights.chart.priceRangeAll")} data={d.priceBandsAll} t={t} />
+      {d.hasRoma && (
+        <PriceBandChart title={t("insights.chart.priceRangeRoma")} data={d.priceBandsRoma} t={t} />
+      )}
+      {d.hasVenice && (
+        <PriceBandChart title={t("insights.chart.priceRangeVenice")} data={d.priceBandsVenice} t={t} />
+      )}
     </div>
   );
 }
 
-function CategoryChart({ title, data, t }: { title: string; data: { cat: string; vol: number; rrpk: number; volPct: number; rrpPct: number }[]; t: T }) {
+function PriceBandChart({ title, data, t }: { title: string; data: { name: string; covers: number; rrpk: number; customers: number }[]; t: T }) {
+  if (!data.length || data.every(b => b.covers === 0 && b.rrpk === 0 && b.customers === 0)) return null;
+  const renderCount = ({ x, y, width, height, value, fill }: any) => {
+    if (!value) return null;
+    const inside = height > 22;
+    return (
+      <text x={x + width / 2} y={inside ? y + height / 2 : y - 6}
+        textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"}
+        fill={inside ? "#fff" : (fill || "hsl(0 0% 30%)")}
+        fontSize={11} fontWeight={600}>{value}</text>
+    );
+  };
+  const renderRrpk = ({ x, y, width, height, value, fill }: any) => {
+    if (!value) return null;
+    const inside = height > 22;
+    return (
+      <text x={x + width / 2} y={inside ? y + height / 2 : y - 6}
+        textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"}
+        fill={inside ? "#fff" : (fill || "hsl(0 0% 30%)")}
+        fontSize={11} fontWeight={600}>{value}k</text>
+    );
+  };
+  return (
+    <ChartCard title={title}>
+      <ColorLegend items={[
+        { color: C2, label: "RRP €k" },
+        { color: C1, label: t("insights.label.covers") },
+        { color: C3, label: t("insights.label.customers") },
+      ]} />
+      <ResponsiveContainer width="100%" height={280}>
+        <BarChart data={data} margin={{ top: 28, right: 10, left: 0, bottom: 0 }} barCategoryGap="20%">
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
+          <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
+          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} />
+          <Tooltip content={<CTooltip />} />
+          <Bar yAxisId="right" dataKey="rrpk" fill={C2} radius={[6, 6, 0, 0]} name="RRP €k">
+            <LabelList dataKey="rrpk" content={(p: any) => renderRrpk({ ...p, fill: C2 })} />
+          </Bar>
+          <Bar yAxisId="left" dataKey="covers" fill={C1} radius={[6, 6, 0, 0]} name={t("insights.label.covers")}>
+            <LabelList dataKey="covers" content={(p: any) => renderCount({ ...p, fill: C1 })} />
+          </Bar>
+          <Bar yAxisId="left" dataKey="customers" fill={C3} radius={[6, 6, 0, 0]} name={t("insights.label.customers")}>
+            <LabelList dataKey="customers" content={(p: any) => renderCount({ ...p, fill: C3 })} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartCard>
+  );
+}
+
+function CategoryChart({ title, data, t }: { title: string; data: { cat: string; vol: number; rrpk: number; cust: number; volPct: number; rrpPct: number; custPct: number }[]; t: T }) {
   if (!data.length) return null;
   // Re-sort by RRP descending so the largest RRP share leads — keeps the visual hierarchy meaningful
   // when RRP and volume distributions diverge.
   const sorted = [...data].sort((a, b) => b.rrpPct - a.rrpPct);
-  const yMax = Math.min(100, Math.max(20, Math.ceil(Math.max(...sorted.map(r => Math.max(r.volPct, r.rrpPct))) / 10) * 10 + 10));
+  const yMax = Math.min(100, Math.max(20, Math.ceil(Math.max(...sorted.map(r => Math.max(r.volPct, r.rrpPct, r.custPct))) / 10) * 10 + 10));
   const renderPctLabel = ({ x, y, width, height, value, fill }: any) => {
     if (value === null || value === undefined) return null;
     const inside = height > 22;
@@ -807,6 +939,7 @@ function CategoryChart({ title, data, t }: { title: string; data: { cat: string;
       <ColorLegend items={[
         { color: C2, label: `RRP (%)` },
         { color: C1, label: `${t("insights.label.volume")} (%)` },
+        { color: C3, label: `${t("insights.label.customers")} (%)` },
       ]} />
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={sorted} margin={{ top: 28, right: 10, left: 0, bottom: 0 }} barCategoryGap="20%">
@@ -818,6 +951,9 @@ function CategoryChart({ title, data, t }: { title: string; data: { cat: string;
           </Bar>
           <Bar dataKey="volPct" fill={C1} radius={[6, 6, 0, 0]} name={t("insights.label.volume")}>
             <LabelList dataKey="volPct" content={(p: any) => renderPctLabel({ ...p, fill: C1 })} />
+          </Bar>
+          <Bar dataKey="custPct" fill={C3} radius={[6, 6, 0, 0]} name={t("insights.label.customers")}>
+            <LabelList dataKey="custPct" content={(p: any) => renderPctLabel({ ...p, fill: C3 })} />
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -1104,7 +1240,62 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
           })}
         </div>
       )}
+
+      <CohortMonthlyChart title={t("insights.chart.newProfiledMonthly")} mos={d.mos} totals={d.newProfiledByMo.totalsByMo} barColor={GR} t={t} />
+      {d.shops.length >= 2 && (
+        <CohortMonthlyByShopChart title={t("insights.chart.newProfiledMonthlyByShop")} mos={d.mos} shops={d.shops} byShop={d.newProfiledByMo.byShopMo} t={t} />
+      )}
+
+      <CohortMonthlyChart title={t("insights.chart.newFeedbackMonthly")} mos={d.mos} totals={d.newFeedbackByMo.totalsByMo} barColor={AM} t={t} />
+      {d.shops.length >= 2 && (
+        <CohortMonthlyByShopChart title={t("insights.chart.newFeedbackMonthlyByShop")} mos={d.mos} shops={d.shops} byShop={d.newFeedbackByMo.byShopMo} t={t} />
+      )}
     </div>
+  );
+}
+
+function CohortMonthlyChart({ title, mos, totals, barColor, t: _t }: { title: string; mos: string[]; totals: Record<string, number>; barColor: string; t: T }) {
+  const data = mos.map(m => ({ key: m, v: totals[m] || 0 }));
+  if (data.every(r => r.v === 0)) return null;
+  return (
+    <ChartCard title={title}>
+      <ResponsiveContainer width="100%" height={240}>
+        <BarChart data={data}>
+          <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} />
+          <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
+          <Tooltip content={<CTooltip />} />
+          <Bar dataKey="v" fill={barColor} radius={[6, 6, 0, 0]} name={title}>
+            <LabelList dataKey="v" content={SimpleBarLabel} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartCard>
+  );
+}
+
+function CohortMonthlyByShopChart({ title, mos, shops, byShop, t: _t }: { title: string; mos: string[]; shops: string[]; byShop: Record<string, Record<string, number>>; t: T }) {
+  const data = mos.map(m => {
+    const row: any = { key: m };
+    shops.forEach(s => row[s] = byShop[s]?.[m] || 0);
+    return row;
+  });
+  if (data.every(r => shops.every(s => !r[s]))) return null;
+  return (
+    <ChartCard title={title}>
+      <ColorLegend items={shops.map((s, i) => ({ color: COLORS[i] || SLATE, label: s }))} />
+      <ResponsiveContainer width="100%" height={260}>
+        <BarChart data={data}>
+          <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} />
+          <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
+          <Tooltip content={<CTooltip />} />
+          {shops.map((s, i) => (
+            <Bar key={s} dataKey={s} stackId="s" fill={COLORS[i] || SLATE} name={s}>
+              <LabelList dataKey={s} content={StackLabel} />
+            </Bar>
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartCard>
   );
 }
 

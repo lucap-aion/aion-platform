@@ -4,6 +4,7 @@ import {
   Shield, Users, FileText, Store, DollarSign, BarChart3,
   Activity, Package, UserCheck, ChevronDown, TrendingUp,
   TrendingDown, Minus, ArrowRight, Percent, Wallet,
+  BadgeCheck, Star,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -54,6 +55,7 @@ interface Statistics {
   aionPremiumFee: number; aionRevenue: number; effectivePremiumPct: number | null;
   effectiveActivationFeePct: number | null; effectiveAionPremiumFeePct: number | null;
   latestActivation: string; claimRate: number | null; registrationRate: number | null;
+  profilationRate: number | null; feedbackRate: number | null;
 }
 
 const emptyStats = (): Statistics => ({
@@ -62,6 +64,7 @@ const emptyStats = (): Statistics => ({
   aionActivationFee: 0, aionPremiumFee: 0, aionRevenue: 0,
   effectivePremiumPct: null, effectiveActivationFeePct: null, effectiveAionPremiumFeePct: null,
   latestActivation: "", claimRate: null, registrationRate: null,
+  profilationRate: null, feedbackRate: null,
 });
 
 // ─── Sub-components ────────────────────────────────────────────────────────
@@ -216,7 +219,33 @@ export default function AdminDashboard() {
       if (eligibleIds !== null) aggParams.p_customer_ids = eligibleIds;
       if (selectedShopId !== "all") aggParams.p_shop_ids = [selectedShopId];
 
-      const aggRes = await supabase.rpc("admin_dashboard_aggregates", aggParams);
+      // Build profiled-customer and feedback-distinct-user queries to run in parallel with the RPC.
+      // A profiled customer = registered AND all profile fields non-null.
+      const buildProfiledQuery = () => {
+        let q = supabase.from("profiles").select("id", { count: "exact", head: true })
+          .eq("role", "customer").in("brand_id", safeBrandIds)
+          .not("registered_at", "is", null)
+          .not("date_of_birth", "is", null).not("country", "is", null)
+          .not("city", "is", null).not("postcode", "is", null)
+          .not("address", "is", null).not("province", "is", null)
+          .not("nationality", "is", null).not("phone_number", "is", null);
+        if (eligibleIds !== null) q = q.in("id", eligibleIds.length ? eligibleIds : ["__none__"]);
+        return q;
+      };
+      const buildFeedbackQuery = () => {
+        let q = supabase.from("feedback").select("user_id").in("brand_id", safeBrandIds);
+        if (eligibleIds !== null) q = q.in("user_id", eligibleIds.length ? eligibleIds : ["__none__"]);
+        return q;
+      };
+
+      const [aggRes, profRes, fbRes] = await Promise.all([
+        supabase.rpc("admin_dashboard_aggregates", aggParams),
+        buildProfiledQuery(),
+        buildFeedbackQuery(),
+      ]);
+      const profiledCount = profRes.count ?? 0;
+      const feedbackUserCount = new Set(((fbRes.data ?? []) as Array<{ user_id: string | null }>)
+        .map(r => r.user_id).filter((v): v is string => !!v)).size;
 
       type AggShape = {
         brands_count: number; shops_count: number; customers_count: number; customers_registered: number;
@@ -329,6 +358,8 @@ export default function AdminDashboard() {
       result.shops = shopsCount;
       result.claimRate = result.covers > 0 ? result.claims / result.covers : null;
       result.registrationRate = customersCount > 0 ? registeredCount / customersCount : null;
+      result.profilationRate = customersCount > 0 ? profiledCount / customersCount : null;
+      result.feedbackRate = customersCount > 0 ? feedbackUserCount / customersCount : null;
 
       setStats(result);
     } finally { setLoading(false); }
@@ -482,22 +513,22 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* ── Row 2: Claims & Activity ── */}
+      {/* ── Row 2: Engagement Rates ── */}
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Claims & Activity</p>
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Engagement</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {loading ? (
             <>
               <MetricCardSkeleton icon={UserCheck} label="Registration Rate" />
-              <MetricCardSkeleton icon={Activity} label="Open Claims" />
-              <MetricCardSkeleton icon={FileText} label="Closed Claims" />
+              <MetricCardSkeleton icon={BadgeCheck} label="Profilation Rate" />
+              <MetricCardSkeleton icon={Star} label="Feedback Rate" />
               <MetricCardSkeleton icon={Percent} label="Claim Rate" />
             </>
           ) : (
             <>
               <MetricCard icon={UserCheck} label="Registration Rate" value={stats.registrationRate != null ? fmtPct(stats.registrationRate) : "—"} sub="Registered / Customers" />
-              <MetricCard icon={Activity} label="Open Claims" value={fmtN(stats.openClaims)} sub="Pending action" href="/admin/claims" accent={stats.openClaims > 0} />
-              <MetricCard icon={FileText} label="Closed Claims" value={fmtN(stats.closedClaims)} href="/admin/claims" />
+              <MetricCard icon={BadgeCheck} label="Profilation Rate" value={stats.profilationRate != null ? fmtPct(stats.profilationRate) : "—"} sub="Profiled / Customers" />
+              <MetricCard icon={Star} label="Feedback Rate" value={stats.feedbackRate != null ? fmtPct(stats.feedbackRate) : "—"} sub="With feedback / Customers" />
               <MetricCard icon={Percent} label="Claim Rate" value={stats.claimRate != null ? fmtPct(stats.claimRate) : "—"} sub="Claims / Covers" />
             </>
           )}
