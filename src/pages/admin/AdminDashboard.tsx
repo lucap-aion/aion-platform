@@ -224,6 +224,7 @@ export default function AdminDashboard() {
       type AggShape = {
         brands_count: number; shops_count: number; customers_count: number; customers_registered: number;
         customers_profiled: number; customers_with_feedback: number;
+        pool_total?: number; pool_registered?: number; pool_profiled?: number; pool_with_feedback?: number;
         claims_total: number; claims_open: number; claims_closed: number;
         policy_stats: Array<{ brand_id: number; covers: number; total_cogs: number; total_rrp: number; total_selling_price: number; latest_start_date: string | null }>;
       };
@@ -241,32 +242,33 @@ export default function AdminDashboard() {
       }
 
       let policyStats: AggShape["policy_stats"] = [];
-      let brandsCount: number, shopsCount: number, customersCount: number, registeredCount: number;
-      let profiledCount: number | null = null, feedbackUserCount: number | null = null;
+      let brandsCount: number, shopsCount: number, customersCount: number;
+      let poolTotal: number | null = null, poolRegistered: number | null = null;
+      let poolProfiled: number | null = null, poolWithFeedback: number | null = null;
       let claimsCount: number, openClaimsCount: number, closedClaimsCount: number;
 
       if (aggs) {
         brandsCount = Number(aggs.brands_count) || 0;
         shopsCount = Number(aggs.shops_count) || 0;
         customersCount = Number(aggs.customers_count) || 0;
-        registeredCount = Number(aggs.customers_registered) || 0;
-        profiledCount = Number(aggs.customers_profiled) || 0;
-        feedbackUserCount = Number(aggs.customers_with_feedback) || 0;
+        poolTotal = aggs.pool_total != null ? Number(aggs.pool_total) || 0 : null;
+        poolRegistered = aggs.pool_registered != null ? Number(aggs.pool_registered) || 0 : null;
+        poolProfiled = aggs.pool_profiled != null ? Number(aggs.pool_profiled) || 0 : null;
+        poolWithFeedback = aggs.pool_with_feedback != null ? Number(aggs.pool_with_feedback) || 0 : null;
         claimsCount = Number(aggs.claims_total) || 0;
         openClaimsCount = Number(aggs.claims_open) || 0;
         closedClaimsCount = Number(aggs.claims_closed) || 0;
         policyStats = aggs.policy_stats ?? [];
       } else {
-        // Fallback: degraded multi-query path. Engagement-rate numerators (profiled,
-        // feedback) are only computed correctly inside the RPC — leave them at 0 here
-        // so the cards render "—" rather than misleading values.
+        // Fallback: degraded multi-query path. Engagement-rate pool counts
+        // (registered/profiled/feedback) come only from the RPC — leave them
+        // at null here so the cards render "—" rather than misleading values.
         console.warn("admin_dashboard_aggregates returned unexpected shape, falling back", { error: aggRes.error, rawAgg });
         const shopFilterIds = selectedShopId !== "all" ? [selectedShopId] : null;
         const [
           { count: bC },
           { count: sC },
           { count: cC },
-          { count: rC },
           { data: claimsRows },
           { data: psData = [] },
         ] = await Promise.all([
@@ -275,7 +277,6 @@ export default function AdminDashboard() {
             ? supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds).in("id", shopFilterIds)
             : supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds),
           supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds),
-          supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "customer").in("brand_id", safeBrandIds).not("registered_at", "is", null),
           shopFilterIds
             ? supabase.from("claims").select("status, policies!claims_policy_id_fkey!inner(brand_id, shop_id)").in("policies.brand_id", safeBrandIds).in("policies.shop_id", shopFilterIds)
             : supabase.from("claims").select("status, policies!claims_policy_id_fkey!inner(brand_id)").in("policies.brand_id", safeBrandIds),
@@ -291,7 +292,6 @@ export default function AdminDashboard() {
         brandsCount = bC ?? 0;
         shopsCount = sC ?? 0;
         customersCount = cC ?? 0;
-        registeredCount = rC ?? 0;
         claimsCount = cArr.length;
         openClaimsCount = cArr.filter((c) => c.status === "open").length;
         closedClaimsCount = cArr.filter((c) => c.status === "closed").length;
@@ -337,9 +337,9 @@ export default function AdminDashboard() {
       result.customers = customersCount;
       result.shops = shopsCount;
       result.claimRate = result.covers > 0 ? result.claims / result.covers : null;
-      result.registrationRate = customersCount > 0 ? registeredCount / customersCount : null;
-      result.profilationRate = customersCount > 0 && profiledCount !== null ? profiledCount / customersCount : null;
-      result.feedbackRate = customersCount > 0 && feedbackUserCount !== null ? feedbackUserCount / customersCount : null;
+      result.registrationRate = poolTotal && poolTotal > 0 && poolRegistered !== null ? poolRegistered / poolTotal : null;
+      result.profilationRate = poolTotal && poolTotal > 0 && poolProfiled !== null ? poolProfiled / poolTotal : null;
+      result.feedbackRate = poolTotal && poolTotal > 0 && poolWithFeedback !== null ? poolWithFeedback / poolTotal : null;
 
       setStats(result);
     } finally { setLoading(false); }
