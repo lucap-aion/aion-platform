@@ -116,7 +116,7 @@ const PAGE_SIZE = 25;
 const empty = (): Partial<Brand> => ({
   name: "", slug: "", description: "", email: "", website: "",
   hq_country: "", hq_address: "", hq_city: "", hq_postcode: "",
-  status: "active",
+  status: "pending",
   logo_small: "", logo_big: "",
   auth_background_image: null, top_banner_image: null,
   theft_image: null, damage_image: null, faq_image: null, feedback_image: null,
@@ -308,7 +308,7 @@ const AdminBrands = () => {
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Brand)}
         filters={[
-          { key: "status", label: "Status", options: [{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }] },
+          { key: "status", label: "Status", options: [{ value: "pending", label: "Pending" }, { value: "verified", label: "Verified" }, { value: "blocked", label: "Blocked" }] },
         ]}
         filterValues={filterValues}
         onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
@@ -361,8 +361,9 @@ const AdminBrands = () => {
             <FormField label="Status">
               {ro ? <Input disabled value={editing.status ?? ""} /> : (
                 <Select value={editing.status ?? ""} onChange={(e) => set("status", e.target.value)}>
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
+                  <option value="pending">Pending</option>
+                  <option value="verified">Verified</option>
+                  <option value="blocked">Blocked</option>
                 </Select>
               )}
             </FormField>
