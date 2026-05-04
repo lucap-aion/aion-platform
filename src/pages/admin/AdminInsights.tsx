@@ -323,9 +323,9 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       }));
     }
 
-    // Covers / RRP / unique customers per RRP price band (per-policy bands).
-    // Customers are counted per band uniquely, so totals across bands can exceed
-    // the unique customer count when a buyer transacts in multiple bands.
+    // Covers / RRP / unique customers per RRP price band (per-policy bands), as %.
+    // Customers are counted per band uniquely; the customer % uses the band-sum as
+    // denominator (same convention as covers/RRP) so all three series sum to 100%.
     function priceBandData(pols: ProcessedPolicy[]) {
       const bands = ["<2k", "2-5k", "5-10k", "10-15k", "15-20k", "20k+"];
       const bkt = (rrp: number) => rrp < 2000 ? 0 : rrp < 5000 ? 1 : rrp < 10000 ? 2 : rrp < 15000 ? 3 : rrp < 20000 ? 4 : 5;
@@ -337,11 +337,15 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
         rk[i] += p.rrp;
         cs[i].add(p.customerId);
       });
+      const totV = cv.reduce((a, b) => a + b, 0);
+      const totR = rk.reduce((a, b) => a + b, 0);
+      const custCounts = cs.map(s => s.size);
+      const totC = custCounts.reduce((a, b) => a + b, 0);
       return bands.map((name, i) => ({
         name,
-        covers: cv[i],
-        rrpk: Math.round(rk[i] / 1000),
-        customers: cs[i].size,
+        coversPct: totV > 0 ? Math.round(cv[i] / totV * 100) : 0,
+        rrpPct: totR > 0 ? Math.round(rk[i] / totR * 100) : 0,
+        custPct: totC > 0 ? Math.round(custCounts[i] / totC * 100) : 0,
       }));
     }
 
@@ -518,30 +522,47 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
 
     const regPctMoShop = regPctByMonthShop();
 
-    // Monthly cohort tallies: each customer is assigned to the month/shop of their first policy,
-    // then we count cohort members who later became profiled / left feedback.
-    function monthlyCohort(predicate: (cid: string) => boolean) {
+    // Monthly cohort tallies: each customer is assigned to the month/shop of their first policy.
+    // For each cohort we track how many later became profiled / left feedback. Numerators and
+    // denominators (cohort size) live side-by-side so % can be derived at render time without
+    // re-sorting policies again.
+    const profiledSet = new Set(profiledCustIds);
+    const feedbackInPolicySet = new Set(scopedFeedback.map(f => f.user_id).filter(id => policyCustIds.has(id)));
+    const cohortMonth = (() => {
       const firstSeenByMo: Record<string, { m: string; sh: string }> = {};
       const sorted = [...policies].sort((a, b) => a.date < b.date ? -1 : 1);
       sorted.forEach(p => {
         if (!firstSeenByMo[p.customerId]) firstSeenByMo[p.customerId] = { m: getMonth(p.date), sh: p.shop };
       });
-      const totalsByMo: Record<string, number> = {};
-      const byShopMo: Record<string, Record<string, number>> = {};
-      shops.forEach(s => byShopMo[s] = {});
-      mos.forEach(m => { totalsByMo[m] = 0; shops.forEach(s => { byShopMo[s][m] = 0; }); });
-      Object.entries(firstSeenByMo).forEach(([cid, { m, sh }]) => {
-        if (!(m in totalsByMo)) return;
-        if (!predicate(cid)) return;
-        totalsByMo[m]++;
-        if (byShopMo[sh]) byShopMo[sh][m] = (byShopMo[sh][m] || 0) + 1;
+      const novByMo: Record<string, number> = {};
+      const novByShopMo: Record<string, Record<string, number>> = {};
+      const profByMo: Record<string, number> = {};
+      const profByShopMo: Record<string, Record<string, number>> = {};
+      const fbByMo: Record<string, number> = {};
+      const fbByShopMo: Record<string, Record<string, number>> = {};
+      shops.forEach(s => { novByShopMo[s] = {}; profByShopMo[s] = {}; fbByShopMo[s] = {}; });
+      mos.forEach(m => {
+        novByMo[m] = 0; profByMo[m] = 0; fbByMo[m] = 0;
+        shops.forEach(s => { novByShopMo[s][m] = 0; profByShopMo[s][m] = 0; fbByShopMo[s][m] = 0; });
       });
-      return { totalsByMo, byShopMo };
-    }
-    const profiledSet = new Set(profiledCustIds);
-    const feedbackInPolicySet = new Set(scopedFeedback.map(f => f.user_id).filter(id => policyCustIds.has(id)));
-    const newProfiledByMo = monthlyCohort(cid => profiledSet.has(cid));
-    const newFeedbackByMo = monthlyCohort(cid => feedbackInPolicySet.has(cid));
+      Object.entries(firstSeenByMo).forEach(([cid, { m, sh }]) => {
+        if (!(m in novByMo)) return;
+        novByMo[m]++;
+        if (novByShopMo[sh]) novByShopMo[sh][m]++;
+        if (profiledSet.has(cid)) {
+          profByMo[m]++;
+          if (profByShopMo[sh]) profByShopMo[sh][m]++;
+        }
+        if (feedbackInPolicySet.has(cid)) {
+          fbByMo[m]++;
+          if (fbByShopMo[sh]) fbByShopMo[sh][m]++;
+        }
+      });
+      const pct = (n: number, d: number) => d > 0 ? Math.round(n / d * 100) : 0;
+      const profPctMonthly = mos.map(m => ({ key: m, pct: pct(profByMo[m], novByMo[m]) }));
+      const fbPctMonthly = mos.map(m => ({ key: m, pct: pct(fbByMo[m], novByMo[m]) }));
+      return { novByMo, novByShopMo, profByShopMo, fbByShopMo, profPctMonthly, fbPctMonthly };
+    })();
 
     return {
       custs, regC, nonRegC, uniqueCustomers, regCustIds, profiledCustIds, custsWithFeedback,
@@ -568,7 +589,7 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       priceBandsVenice: priceBandData(polsVenice),
       hasRoma: polsRoma.length > 0,
       hasVenice: polsVenice.length > 0,
-      newProfiledByMo, newFeedbackByMo,
+      cohortMonth,
     };
   }, [policies, profiles, feedback]);
 }
@@ -866,49 +887,39 @@ function OverviewTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
   );
 }
 
-function PriceBandChart({ title, data, t }: { title: string; data: { name: string; covers: number; rrpk: number; customers: number }[]; t: T }) {
-  if (!data.length || data.every(b => b.covers === 0 && b.rrpk === 0 && b.customers === 0)) return null;
-  const renderCount = ({ x, y, width, height, value, fill }: any) => {
-    if (!value) return null;
+function PriceBandChart({ title, data, t }: { title: string; data: { name: string; coversPct: number; rrpPct: number; custPct: number }[]; t: T }) {
+  if (!data.length || data.every(b => b.coversPct === 0 && b.rrpPct === 0 && b.custPct === 0)) return null;
+  const yMax = Math.min(100, Math.max(20, Math.ceil(Math.max(...data.map(r => Math.max(r.coversPct, r.rrpPct, r.custPct))) / 10) * 10 + 10));
+  const renderPctLabel = ({ x, y, width, height, value, fill }: any) => {
+    if (value === null || value === undefined) return null;
     const inside = height > 22;
     return (
       <text x={x + width / 2} y={inside ? y + height / 2 : y - 6}
         textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"}
         fill={inside ? "#fff" : (fill || "hsl(0 0% 30%)")}
-        fontSize={11} fontWeight={600}>{value}</text>
-    );
-  };
-  const renderRrpk = ({ x, y, width, height, value, fill }: any) => {
-    if (!value) return null;
-    const inside = height > 22;
-    return (
-      <text x={x + width / 2} y={inside ? y + height / 2 : y - 6}
-        textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"}
-        fill={inside ? "#fff" : (fill || "hsl(0 0% 30%)")}
-        fontSize={11} fontWeight={600}>{value}k</text>
+        fontSize={11} fontWeight={600}>{value}%</text>
     );
   };
   return (
     <ChartCard title={title}>
       <ColorLegend items={[
-        { color: C2, label: "RRP €k" },
-        { color: C1, label: t("insights.label.covers") },
-        { color: C3, label: t("insights.label.customers") },
+        { color: C2, label: `RRP (%)` },
+        { color: C1, label: `${t("insights.label.covers")} (%)` },
+        { color: C3, label: `${t("insights.label.customers")} (%)` },
       ]} />
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={data} margin={{ top: 28, right: 10, left: 0, bottom: 0 }} barCategoryGap="20%">
           <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
-          <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
-          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}k`} />
+          <YAxis domain={[0, yMax]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} />
           <Tooltip content={<CTooltip />} />
-          <Bar yAxisId="right" dataKey="rrpk" fill={C2} radius={[6, 6, 0, 0]} name="RRP €k">
-            <LabelList dataKey="rrpk" content={(p: any) => renderRrpk({ ...p, fill: C2 })} />
+          <Bar dataKey="rrpPct" fill={C2} radius={[6, 6, 0, 0]} name="RRP">
+            <LabelList dataKey="rrpPct" content={(p: any) => renderPctLabel({ ...p, fill: C2 })} />
           </Bar>
-          <Bar yAxisId="left" dataKey="covers" fill={C1} radius={[6, 6, 0, 0]} name={t("insights.label.covers")}>
-            <LabelList dataKey="covers" content={(p: any) => renderCount({ ...p, fill: C1 })} />
+          <Bar dataKey="coversPct" fill={C1} radius={[6, 6, 0, 0]} name={t("insights.label.covers")}>
+            <LabelList dataKey="coversPct" content={(p: any) => renderPctLabel({ ...p, fill: C1 })} />
           </Bar>
-          <Bar yAxisId="left" dataKey="customers" fill={C3} radius={[6, 6, 0, 0]} name={t("insights.label.customers")}>
-            <LabelList dataKey="customers" content={(p: any) => renderCount({ ...p, fill: C3 })} />
+          <Bar dataKey="custPct" fill={C3} radius={[6, 6, 0, 0]} name={t("insights.label.customers")}>
+            <LabelList dataKey="custPct" content={(p: any) => renderPctLabel({ ...p, fill: C3 })} />
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -1241,58 +1252,64 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
         </div>
       )}
 
-      <CohortMonthlyChart title={t("insights.chart.newProfiledMonthly")} mos={d.mos} totals={d.newProfiledByMo.totalsByMo} barColor={GR} t={t} />
+      <MonthlyPctChart title={t("insights.chart.newProfiledMonthly")} data={d.cohortMonth.profPctMonthly} color={GR} />
       {d.shops.length >= 2 && (
-        <CohortMonthlyByShopChart title={t("insights.chart.newProfiledMonthlyByShop")} mos={d.mos} shops={d.shops} byShop={d.newProfiledByMo.byShopMo} t={t} />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {d.shops.map((s, si) => {
+            const data = d.mos.map(m => ({
+              key: m,
+              pct: (d.cohortMonth.novByShopMo[s]?.[m] || 0) > 0
+                ? Math.round((d.cohortMonth.profByShopMo[s]?.[m] || 0) / d.cohortMonth.novByShopMo[s][m] * 100) : 0,
+            }));
+            return (
+              <MonthlyPctChart key={s}
+                title={`${t("insights.chart.newProfiledMonthly")} — ${s} (%)`}
+                data={data}
+                color={COLORS[si] || SLATE}
+              />
+            );
+          })}
+        </div>
       )}
 
-      <CohortMonthlyChart title={t("insights.chart.newFeedbackMonthly")} mos={d.mos} totals={d.newFeedbackByMo.totalsByMo} barColor={AM} t={t} />
+      <MonthlyPctChart title={t("insights.chart.newFeedbackMonthly")} data={d.cohortMonth.fbPctMonthly} color={AM} />
       {d.shops.length >= 2 && (
-        <CohortMonthlyByShopChart title={t("insights.chart.newFeedbackMonthlyByShop")} mos={d.mos} shops={d.shops} byShop={d.newFeedbackByMo.byShopMo} t={t} />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {d.shops.map((s, si) => {
+            const data = d.mos.map(m => ({
+              key: m,
+              pct: (d.cohortMonth.novByShopMo[s]?.[m] || 0) > 0
+                ? Math.round((d.cohortMonth.fbByShopMo[s]?.[m] || 0) / d.cohortMonth.novByShopMo[s][m] * 100) : 0,
+            }));
+            return (
+              <MonthlyPctChart key={s}
+                title={`${t("insights.chart.newFeedbackMonthly")} — ${s} (%)`}
+                data={data}
+                color={COLORS[si] || SLATE}
+              />
+            );
+          })}
+        </div>
       )}
     </div>
   );
 }
 
-function CohortMonthlyChart({ title, mos, totals, barColor, t: _t }: { title: string; mos: string[]; totals: Record<string, number>; barColor: string; t: T }) {
-  const data = mos.map(m => ({ key: m, v: totals[m] || 0 }));
-  if (data.every(r => r.v === 0)) return null;
+function MonthlyPctChart({ title, data, color }: { title: string; data: { key: string; pct: number }[]; color: string }) {
   return (
     <ChartCard title={title}>
-      <ResponsiveContainer width="100%" height={240}>
+      <ResponsiveContainer width="100%" height={200}>
         <BarChart data={data}>
           <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} />
-          <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
+          <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} />
           <Tooltip content={<CTooltip />} />
-          <Bar dataKey="v" fill={barColor} radius={[6, 6, 0, 0]} name={title}>
-            <LabelList dataKey="v" content={SimpleBarLabel} />
+          <Bar dataKey="pct" fill={color} radius={[6, 6, 0, 0]} name="%">
+            <LabelList dataKey="pct" content={({ x, y, width, height, value }: any) => {
+              if (!value) return null;
+              const inside = height > 20;
+              return <text x={x + width / 2} y={inside ? y + height / 2 : y - 6} textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"} fill={inside ? "#fff" : "#333"} fontSize={11} fontWeight={600}>{value}%</text>;
+            }} />
           </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </ChartCard>
-  );
-}
-
-function CohortMonthlyByShopChart({ title, mos, shops, byShop, t: _t }: { title: string; mos: string[]; shops: string[]; byShop: Record<string, Record<string, number>>; t: T }) {
-  const data = mos.map(m => {
-    const row: any = { key: m };
-    shops.forEach(s => row[s] = byShop[s]?.[m] || 0);
-    return row;
-  });
-  if (data.every(r => shops.every(s => !r[s]))) return null;
-  return (
-    <ChartCard title={title}>
-      <ColorLegend items={shops.map((s, i) => ({ color: COLORS[i] || SLATE, label: s }))} />
-      <ResponsiveContainer width="100%" height={260}>
-        <BarChart data={data}>
-          <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} />
-          <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
-          <Tooltip content={<CTooltip />} />
-          {shops.map((s, i) => (
-            <Bar key={s} dataKey={s} stackId="s" fill={COLORS[i] || SLATE} name={s}>
-              <LabelList dataKey={s} content={StackLabel} />
-            </Bar>
-          ))}
         </BarChart>
       </ResponsiveContainer>
     </ChartCard>
