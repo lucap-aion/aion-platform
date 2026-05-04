@@ -267,7 +267,7 @@ const AdminShopAssistants = () => {
         action={undefined}
         filters={[
           { key: "brand_id", label: "Brand", options: brands.map((b) => ({ value: String(b.id), label: b.name ?? "" })) },
-          { key: "status", label: "Status", options: [{ value: "active", label: "Active" }, { value: "inactive", label: "Inactive" }, { value: "pending", label: "Pending" }] },
+          { key: "status", label: "Status", options: [{ value: "pending", label: "Pending" }, { value: "verified", label: "Verified" }, { value: "blocked", label: "Blocked" }] },
           { key: "is_master", label: "Access", options: [{ value: "true", label: "Master" }, { value: "false", label: "Read Only" }] },
         ]}
         filterValues={filterValues}
@@ -381,9 +381,9 @@ const AdminShopAssistants = () => {
               <FormField label="Status">
                 {ro ? <Input disabled value={editing.status ? toTitleCase(editing.status) : ""} /> : (
                   <Select value={editing.status ?? ""} onChange={(e) => set("status", e.target.value)}>
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
                     <option value="pending">Pending</option>
+                    <option value="verified">Verified</option>
+                    <option value="blocked">Blocked</option>
                   </Select>
                 )}
               </FormField>
