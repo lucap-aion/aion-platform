@@ -219,36 +219,11 @@ export default function AdminDashboard() {
       if (eligibleIds !== null) aggParams.p_customer_ids = eligibleIds;
       if (selectedShopId !== "all") aggParams.p_shop_ids = [selectedShopId];
 
-      // Build profiled-customer and feedback-distinct-user queries to run in parallel with the RPC.
-      // A profiled customer = registered AND all profile fields non-null.
-      const buildProfiledQuery = () => {
-        let q = supabase.from("profiles").select("id", { count: "exact", head: true })
-          .eq("role", "customer").in("brand_id", safeBrandIds)
-          .not("registered_at", "is", null)
-          .not("date_of_birth", "is", null).not("country", "is", null)
-          .not("city", "is", null).not("postcode", "is", null)
-          .not("address", "is", null).not("province", "is", null)
-          .not("nationality", "is", null).not("phone_number", "is", null);
-        if (eligibleIds !== null) q = q.in("id", eligibleIds.length ? eligibleIds : ["__none__"]);
-        return q;
-      };
-      const buildFeedbackQuery = () => {
-        let q = supabase.from("feedback").select("user_id").in("brand_id", safeBrandIds);
-        if (eligibleIds !== null) q = q.in("user_id", eligibleIds.length ? eligibleIds : ["__none__"]);
-        return q;
-      };
-
-      const [aggRes, profRes, fbRes] = await Promise.all([
-        supabase.rpc("admin_dashboard_aggregates", aggParams),
-        buildProfiledQuery(),
-        buildFeedbackQuery(),
-      ]);
-      const profiledCount = profRes.count ?? 0;
-      const feedbackUserCount = new Set(((fbRes.data ?? []) as Array<{ user_id: string | null }>)
-        .map(r => r.user_id).filter((v): v is string => !!v)).size;
+      const aggRes = await supabase.rpc("admin_dashboard_aggregates", aggParams);
 
       type AggShape = {
         brands_count: number; shops_count: number; customers_count: number; customers_registered: number;
+        customers_profiled: number; customers_with_feedback: number;
         claims_total: number; claims_open: number; claims_closed: number;
         policy_stats: Array<{ brand_id: number; covers: number; total_cogs: number; total_rrp: number; total_selling_price: number; latest_start_date: string | null }>;
       };
@@ -267,6 +242,7 @@ export default function AdminDashboard() {
 
       let policyStats: AggShape["policy_stats"] = [];
       let brandsCount: number, shopsCount: number, customersCount: number, registeredCount: number;
+      let profiledCount: number | null = null, feedbackUserCount: number | null = null;
       let claimsCount: number, openClaimsCount: number, closedClaimsCount: number;
 
       if (aggs) {
@@ -274,12 +250,16 @@ export default function AdminDashboard() {
         shopsCount = Number(aggs.shops_count) || 0;
         customersCount = Number(aggs.customers_count) || 0;
         registeredCount = Number(aggs.customers_registered) || 0;
+        profiledCount = Number(aggs.customers_profiled) || 0;
+        feedbackUserCount = Number(aggs.customers_with_feedback) || 0;
         claimsCount = Number(aggs.claims_total) || 0;
         openClaimsCount = Number(aggs.claims_open) || 0;
         closedClaimsCount = Number(aggs.claims_closed) || 0;
         policyStats = aggs.policy_stats ?? [];
       } else {
-        // Fallback: original multi-query path (slower but proven). Logs the agg failure for diagnosis.
+        // Fallback: degraded multi-query path. Engagement-rate numerators (profiled,
+        // feedback) are only computed correctly inside the RPC — leave them at 0 here
+        // so the cards render "—" rather than misleading values.
         console.warn("admin_dashboard_aggregates returned unexpected shape, falling back", { error: aggRes.error, rawAgg });
         const shopFilterIds = selectedShopId !== "all" ? [selectedShopId] : null;
         const [
@@ -358,8 +338,8 @@ export default function AdminDashboard() {
       result.shops = shopsCount;
       result.claimRate = result.covers > 0 ? result.claims / result.covers : null;
       result.registrationRate = customersCount > 0 ? registeredCount / customersCount : null;
-      result.profilationRate = customersCount > 0 ? profiledCount / customersCount : null;
-      result.feedbackRate = customersCount > 0 ? feedbackUserCount / customersCount : null;
+      result.profilationRate = customersCount > 0 && profiledCount !== null ? profiledCount / customersCount : null;
+      result.feedbackRate = customersCount > 0 && feedbackUserCount !== null ? feedbackUserCount / customersCount : null;
 
       setStats(result);
     } finally { setLoading(false); }
