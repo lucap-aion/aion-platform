@@ -5,7 +5,7 @@ import AdminTable, { StatusBadge, type FilterDef } from "./_components/AdminTabl
 import type { ExportColumn } from "./_utils/exportCsv";
 import { resolveSortOrder } from "./_utils/resolveSortOrder";
 
-const SORT_RELATIONS = ["brands", "shops"] as const;
+const SORT_RELATIONS = ["brands"] as const;
 
 const CUSTOMERS_SCHEMA: ExportColumn[] = [
   { key: "id",                  label: "ID" },
@@ -91,34 +91,60 @@ const AdminCustomers = () => {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const fetchData = () => {
+  const fetchData = async () => {
     if (brands.length === 0) return;
     abortRef.current?.abort();
     abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
     setLoading(true);
     const brandFilterIds = filterValues.brand_id ? [Number(filterValues.brand_id)] : brands.map((b) => b.id);
     const order = resolveSortOrder(sortKey, SORT_RELATIONS);
     let query = supabase
       .from("profiles")
       .select("*, brands(*), shops(*)", { count: "exact" })
+      .abortSignal(signal)
       .eq("role", "customer")
       .in("brand_id", brandFilterIds)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,phone_number.ilike.%${search}%,address.ilike.%${search}%,postcode.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) query = query.eq("status", filterValues.status);
-    query.then(({ data, count, error }) => {
-      if (error?.name === "AbortError") return;
-      setCustomers((data ?? []).map((p: any) => ({
-        ...p,
-        brand_name: p.brands?.name ?? "—",
-        brand_logo: p.brands?.logo_small ?? null,
-        shop_name: p.shops?.name ?? null,
-        avatar: p.avatar ?? null,
-      })));
-      setTotal(count ?? 0);
-      setLoading(false);
-    });
+    const { data, count, error } = await query;
+    if (error?.name === "AbortError" || signal.aborted) return;
+
+    const rows = (data ?? []).map((p: any) => ({
+      ...p,
+      brand_name: p.brands?.name ?? "—",
+      brand_logo: p.brands?.logo_small ?? null,
+      avatar: p.avatar ?? null,
+      shop_name: null as string | null,
+    }));
+
+    // The "Shop" column is sourced from the customer's most recent policy
+    // (policies.shop_id → shops.name), not from profiles.shop_id directly,
+    // since customers are usually associated with a shop only via purchases.
+    const customerIds = rows.map((r) => r.id).filter(Boolean);
+    if (customerIds.length > 0) {
+      const { data: pols } = await supabase
+        .from("policies")
+        .select("customer_id, shop_id, start_date, shops(name)")
+        .in("customer_id", customerIds)
+        .not("shop_id", "is", null)
+        .order("start_date", { ascending: false })
+        .abortSignal(signal);
+      if (signal.aborted) return;
+      const latestByCustomer = new Map<string, string | null>();
+      for (const pol of (pols ?? []) as any[]) {
+        if (pol.customer_id && !latestByCustomer.has(pol.customer_id)) {
+          latestByCustomer.set(pol.customer_id, pol.shops?.name ?? null);
+        }
+      }
+      for (const r of rows) r.shop_name = latestByCustomer.get(r.id) ?? null;
+    }
+
+    setCustomers(rows);
+    setTotal(count ?? 0);
+    setLoading(false);
   };
 
   useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir, brands]);
@@ -240,7 +266,28 @@ const AdminCustomers = () => {
     if (search) q = q.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,phone_number.ilike.%${search}%,address.ilike.%${search}%,postcode.ilike.%${search}%,status.ilike.%${search}%`);
     if (filterValues.status) q = q.eq("status", filterValues.status);
     const { data } = await q;
-    return (data ?? []) as Record<string, unknown>[];
+    const rows = (data ?? []).map((p: any) => ({
+      ...p,
+      brand_name: p.brands?.name ?? null,
+      shop_name: null as string | null,
+    }));
+    const customerIds = rows.map((r) => r.id).filter(Boolean);
+    if (customerIds.length > 0) {
+      const { data: pols } = await supabase
+        .from("policies")
+        .select("customer_id, shop_id, start_date, shops(name)")
+        .in("customer_id", customerIds)
+        .not("shop_id", "is", null)
+        .order("start_date", { ascending: false });
+      const latestByCustomer = new Map<string, string | null>();
+      for (const pol of (pols ?? []) as any[]) {
+        if (pol.customer_id && !latestByCustomer.has(pol.customer_id)) {
+          latestByCustomer.set(pol.customer_id, pol.shops?.name ?? null);
+        }
+      }
+      for (const r of rows) r.shop_name = latestByCustomer.get(r.id) ?? null;
+    }
+    return rows as Record<string, unknown>[];
   };
 
   const set = (k: keyof Customer, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
@@ -337,7 +384,7 @@ const AdminCustomers = () => {
             },
           },
           {
-            key: "shop_name", sortKey: "shops_name", label: "Shop",
+            key: "shop_name", label: "Shop", sortable: false,
             render: (row) => {
               const r = row as unknown as Customer;
               return r.shop_name ? <span className="text-sm text-foreground">{r.shop_name}</span> : <span className="text-muted-foreground">—</span>;
