@@ -48,6 +48,7 @@ import AdminAdmins from "./pages/admin/AdminAdmins";
 import AdminCatalogues from "./pages/admin/AdminCatalogues";
 import AdminReports from "./pages/admin/AdminReports";
 import AdminInsights from "./pages/admin/AdminInsights";
+import AdminFeedback from "./pages/admin/AdminFeedback";
 import NotFound from "./pages/NotFound";
 
 const TENANT_SLUG_KEY = "aion_tenant_slug";
@@ -189,6 +190,7 @@ const App = () => (
               <Route path="/admin/catalogues" element={<AdminCatalogues />} />
               <Route path="/admin/reports" element={<AdminReports />} />
               <Route path="/admin/insights" element={<AdminInsights />} />
+              <Route path="/admin/feedback" element={<AdminFeedback />} />
             </Route>
 
             {/* Slug entry point: /:slug → redirect to login or home */}
