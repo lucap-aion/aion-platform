@@ -171,6 +171,9 @@ const App = () => (
             {/* Root */}
             <Route path="/" element={<Navigate to="/rc" replace />} />
 
+            {/* Landing page bypass — view brand selector without auto-redirect to /rc */}
+            <Route path="/all" element={<LandingPage />} />
+
             {/* Admin login */}
             <Route path="/admin/login" element={<AuthRoute><AdminLogin /></AuthRoute>} />
             <Route path="/admin/forgot-password" element={<AdminForgotPassword />} />
