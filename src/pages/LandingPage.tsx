@@ -95,9 +95,9 @@ const LandingPage = () => {
         >
           <SmartLogo src="/aion_dark_logo.png" alt="AION Cover" className="h-9 object-contain" />
           <div className="w-8 h-px bg-primary/40 mt-1" />
-          <p className="text-muted-foreground text-base max-w-sm mx-auto leading-relaxed">
-            Global protection for luxury products.{" "}
-            <span className="text-foreground/60">Select your brand to continue.</span>
+          <p className="text-muted-foreground text-base max-w-lg mx-auto leading-relaxed">
+            To activate AION protection, purchase a new product from one of our partner brands and register on the platform.{" "}
+            <span className="text-foreground/60">Select your brand below to get started.</span>
           </p>
         </motion.div>
       </div>
