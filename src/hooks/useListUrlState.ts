@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 
 type SortDir = "asc" | "desc";
@@ -45,12 +45,22 @@ export function useListUrlState(opts: Options) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, filterKeysSig]);
 
+  // react-router's setSearchParams functional updater receives the LAST
+  // COMMITTED params (via a ref), not the queued state from prior calls in
+  // the same tick. So two back-to-back updaters both branch from the same
+  // base and the second wipes the first. We compose them ourselves via a
+  // pending ref that's cleared once react-router commits.
+  const pendingRef = useRef<URLSearchParams | null>(null);
+  useEffect(() => { pendingRef.current = null; }, [searchParams]);
+
   const update = useCallback(
     (mutate: (sp: URLSearchParams) => void) => {
       setSearchParams(
         (prev) => {
-          const next = new URLSearchParams(prev);
+          const base = pendingRef.current ?? prev;
+          const next = new URLSearchParams(base);
           mutate(next);
+          pendingRef.current = next;
           return next;
         },
         { replace: true }
@@ -133,14 +143,21 @@ export function useUrlParam<T>(
       ? parse(raw)
       : (raw as unknown as T);
 
+  // See note in useListUrlState — compose synchronous updaters so back-to-back
+  // setValue calls (e.g. changing period + shop in the same tick) don't race.
+  const pendingRef = useRef<URLSearchParams | null>(null);
+  useEffect(() => { pendingRef.current = null; }, [searchParams]);
+
   const setValue = useCallback(
     (next: T) => {
       const isDefault = next === defaultValue;
       setSearchParams(
         (prev) => {
-          const sp = new URLSearchParams(prev);
+          const base = pendingRef.current ?? prev;
+          const sp = new URLSearchParams(base);
           if (isDefault) sp.delete(key);
           else sp.set(key, serialize ? serialize(next) : String(next));
+          pendingRef.current = sp;
           return sp;
         },
         { replace: true }

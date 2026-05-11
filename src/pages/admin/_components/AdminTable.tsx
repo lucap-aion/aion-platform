@@ -486,16 +486,19 @@ function AdminTable<T extends Record<string, unknown>>({
   };
 
   // ── Sort ────────────────────────────────────────────────────────────
+  // NB: onSort / onSearch / onFilterChange are expected to reset page
+  // themselves. Firing onPageChange(0) here too would race with the
+  // first setSearchParams call and wipe the new value (react-router's
+  // useSearchParams reads from a ref of the last committed value).
   const handleSort = (key: string) => {
     if (!onSort) return;
     onSort(key, sortKey === key && sortDir === "asc" ? "desc" : "asc");
-    onPageChange(0);
   };
 
   // ── Search debounce ─────────────────────────────────────────────────
   const [inputValue, setInputValue] = useState("");
   useEffect(() => {
-    const t = setTimeout(() => { onSearch(inputValue); onPageChange(0); }, 350);
+    const t = setTimeout(() => { onSearch(inputValue); }, 350);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputValue]);
@@ -654,7 +657,7 @@ function AdminTable<T extends Record<string, unknown>>({
           <div key={f.key} className="relative">
             <select
               value={filterValues[f.key] ?? ""}
-              onChange={(e) => { onFilterChange?.(f.key, e.target.value); onPageChange(0); }}
+              onChange={(e) => onFilterChange?.(f.key, e.target.value)}
               className="appearance-none rounded-lg border border-input bg-background pl-3 pr-8 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             >
               <option value="">All {f.label}</option>
