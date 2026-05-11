@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useListUrlState } from "@/hooks/useListUrlState";
 import AdminTable from "./_components/AdminTable";
 import AdminDrawer from "./_components/AdminDrawer";
 import { FormField, Input } from "./_components/FormField";
@@ -59,11 +60,8 @@ const AdminFeedback = () => {
   const [rows, setRows] = useState<Feedback[]>([]);
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [sortKey, setSortKey] = useState("created_at");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const { page, search, sortKey, sortDir, filterValues, setPage, setSearch, setSort, setFilter } =
+    useListUrlState({ defaultSortKey: "created_at", defaultSortDir: "desc", filterKeys: ["brand_id"] });
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [viewing, setViewing] = useState<Feedback | null>(null);
@@ -135,17 +133,17 @@ const AdminFeedback = () => {
         page={page}
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
-        onSearch={(q) => { setSearch(q); setPage(0); }}
+        onSearch={setSearch}
         sortKey={sortKey}
         sortDir={sortDir}
-        onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onSort={setSort}
         onExport={handleExport} exportFilename="feedback" exportSchema={FEEDBACK_SCHEMA}
         onView={openView}
         filters={[
           { key: "brand_id", label: "Brand", options: brands.map((b) => ({ value: String(b.id), label: b.name ?? "" })) },
         ]}
         filterValues={filterValues}
-        onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        onFilterChange={setFilter}
         columns={[
           {
             key: "customer_email", sortKey: "profiles_email", label: "Customer", width: 240,

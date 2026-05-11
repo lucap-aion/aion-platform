@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useListUrlState } from "@/hooks/useListUrlState";
 import { sendEmail } from "@/utils/sendEmail";
 import { siteUrl } from "@/utils/siteUrl";
 import { useToast } from "@/hooks/use-toast";
@@ -54,11 +55,8 @@ const AdminAdmins = () => {
   const { toast } = useToast();
   const [admins, setAdmins] = useState<Admin[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [sortKey, setSortKey] = useState("registered_at");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const { page, search, sortKey, sortDir, filterValues, setPage, setSearch, setSort, setFilter } =
+    useListUrlState({ defaultSortKey: "registered_at", defaultSortDir: "desc", filterKeys: ["status"] });
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("view");
@@ -184,10 +182,10 @@ const AdminAdmins = () => {
         page={page}
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
-        onSearch={(q) => { setSearch(q); setPage(0); }}
+        onSearch={setSearch}
         sortKey={sortKey}
         sortDir={sortDir}
-        onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onSort={setSort}
         onExport={handleExport} exportFilename="admins" exportSchema={ADMINS_SCHEMA}
         onAdd={openAdd} addLabel="New Admin"
         onView={openView} onEdit={openEdit}
@@ -196,7 +194,7 @@ const AdminAdmins = () => {
           { key: "status", label: "Status", options: [{ value: "pending", label: "Pending" }, { value: "verified", label: "Verified" }, { value: "blocked", label: "Blocked" }] },
         ]}
         filterValues={filterValues}
-        onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        onFilterChange={setFilter}
         extraRowAction={(row) => {
           const r = row as unknown as Admin;
           if (r.status !== "pending") return null;

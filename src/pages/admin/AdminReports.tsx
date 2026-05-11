@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
+import { useListUrlState } from "@/hooks/useListUrlState";
 import { fmtDate } from "./_components/fmtDate";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -33,10 +34,8 @@ const AdminReports = () => {
   const { toast } = useToast();
   const [reports, setReports] = useState<Report[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState("created_at");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const { page, search, sortKey, sortDir, setPage, setSearch, setSort } =
+    useListUrlState({ defaultSortKey: "created_at", defaultSortDir: "desc" });
   const [loading, setLoading] = useState(true);
   const [viewing, setViewing] = useState<Report | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Report | null>(null);
@@ -88,10 +87,10 @@ const AdminReports = () => {
         page={page}
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
-        onSearch={(q) => { setSearch(q); setPage(0); }}
+        onSearch={setSearch}
         sortKey={sortKey}
         sortDir={sortDir}
-        onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onSort={setSort}
         onView={(row) => setViewing(row as unknown as Report)}
         onDelete={(row) => setDeleteTarget(row as unknown as Report)}
         columns={[

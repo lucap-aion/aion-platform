@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { ChevronDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useUrlParam } from "@/hooks/useListUrlState";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, LabelList, Legend,
@@ -615,14 +616,17 @@ type DateRange = "all" | "30d" | "90d" | "ytd" | "12m";
 
 export default function AdminInsights() {
   const { t, locale } = useLanguage();
-  const [tab, setTab] = useState<TabId>("ov");
+  const [tab, setTab] = useUrlParam<TabId>("tab", "ov");
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [selectedBrandId, setSelectedBrandId] = useState<number | "all">("all");
+  const [selectedBrandId, setSelectedBrandId] = useUrlParam<number | "all">("brand", "all", {
+    parse: (raw) => (raw === "all" ? "all" : Number.isFinite(Number(raw)) ? Number(raw) : "all"),
+    serialize: (v) => String(v),
+  });
   const [loading, setLoading] = useState(true);
 
   // Filters
-  const [dateRange, setDateRange] = useState<DateRange>("all");
-  const [shopFilter, setShopFilter] = useState<string>("all");
+  const [dateRange, setDateRange] = useUrlParam<DateRange>("range", "all");
+  const [shopFilter, setShopFilter] = useUrlParam<string>("shop", "all");
 
   // Raw data
   const [rawPolicies, setRawPolicies] = useState<ProcessedPolicy[]>([]);

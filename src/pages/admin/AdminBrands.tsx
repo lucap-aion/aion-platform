@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useListUrlState } from "@/hooks/useListUrlState";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
 import type { ThemeColors, ThemeFonts } from "@/contexts/TenantContext";
@@ -136,11 +137,8 @@ const AdminBrands = () => {
   const { toast } = useToast();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [sortKey, setSortKey] = useState("name");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const { page, search, sortKey, sortDir, filterValues, setPage, setSearch, setSort, setFilter } =
+    useListUrlState({ defaultSortKey: "name", defaultSortDir: "asc", filterKeys: ["status"] });
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("add");
@@ -299,10 +297,10 @@ const AdminBrands = () => {
         page={page}
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
-        onSearch={(q) => { setSearch(q); setPage(0); }}
+        onSearch={setSearch}
         sortKey={sortKey}
         sortDir={sortDir}
-        onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onSort={setSort}
         onExport={handleExport} exportFilename="brands" exportSchema={BRANDS_SCHEMA}
         onAdd={openAdd} addLabel="New Brand"
         onView={openView} onEdit={openEdit}
@@ -311,7 +309,7 @@ const AdminBrands = () => {
           { key: "status", label: "Status", options: [{ value: "pending", label: "Pending" }, { value: "verified", label: "Verified" }, { value: "blocked", label: "Blocked" }] },
         ]}
         filterValues={filterValues}
-        onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        onFilterChange={setFilter}
         columns={[
           {
             key: "name", label: "Brand", sortable: true, width: 220,

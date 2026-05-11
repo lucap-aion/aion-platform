@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useListUrlState } from "@/hooks/useListUrlState";
 import { Upload, X, FileText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -71,11 +72,8 @@ const AdminClaims = () => {
   const [policies, setPolicies] = useState<PolicyOption[]>([]);
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [sortKey, setSortKey] = useState("created_at");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const { page, search, sortKey, sortDir, filterValues, setPage, setSearch, setSort, setFilter } =
+    useListUrlState({ defaultSortKey: "created_at", defaultSortDir: "desc", filterKeys: ["brand_id", "status", "type"] });
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("view");
@@ -237,10 +235,10 @@ const AdminClaims = () => {
         page={page}
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
-        onSearch={(q) => { setSearch(q); setPage(0); }}
+        onSearch={setSearch}
         sortKey={sortKey}
         sortDir={sortDir}
-        onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onSort={setSort}
         onExport={handleExport} exportFilename="claims" exportSchema={CLAIMS_SCHEMA}
         onAdd={openAdd} addLabel="New Claim"
         onView={openView} onEdit={openEdit}
@@ -251,7 +249,7 @@ const AdminClaims = () => {
           { key: "type", label: "Type", options: [{ value: "accidental_damage", label: "Accidental Damage" }, { value: "robbery", label: "Robbery" }, { value: "theft", label: "Theft" }] },
         ]}
         filterValues={filterValues}
-        onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        onFilterChange={setFilter}
         columns={[
           { key: "id", label: "#", width: 64, render: (row) => <span className="text-muted-foreground text-xs">#{(row as unknown as Claim).id}</span> },
           {

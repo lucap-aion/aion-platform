@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useListUrlState } from "@/hooks/useListUrlState";
 import { useToast } from "@/hooks/use-toast";
 import AdminTable, { StatusBadge, toTitleCase } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
@@ -69,11 +70,8 @@ const AdminShopAssistants = () => {
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [shops, setShops] = useState<ShopOption[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState("email");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
+  const { page, search, sortKey, sortDir, filterValues, setPage, setSearch, setSort, setFilter } =
+    useListUrlState({ defaultSortKey: "email", defaultSortDir: "asc", filterKeys: ["brand_id", "status", "is_master"] });
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("view");
@@ -256,10 +254,10 @@ const AdminShopAssistants = () => {
         page={page}
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
-        onSearch={(q) => { setSearch(q); setPage(0); }}
+        onSearch={setSearch}
         sortKey={sortKey}
         sortDir={sortDir}
-        onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onSort={setSort}
         onExport={handleExport} exportFilename="shop-assistants" exportSchema={ASSISTANTS_SCHEMA}
         onAdd={openAdd} addLabel="New Assistant"
         onView={openView} onEdit={openEdit}
@@ -271,7 +269,7 @@ const AdminShopAssistants = () => {
           { key: "is_master", label: "Access", options: [{ value: "true", label: "Master" }, { value: "false", label: "Read Only" }] },
         ]}
         filterValues={filterValues}
-        onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        onFilterChange={setFilter}
         extraRowAction={(row) => {
           const r = row as unknown as Assistant;
           if (r.status !== "pending") return null;

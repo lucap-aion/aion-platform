@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUrlParam } from "@/hooks/useListUrlState";
 
 const GVT_FEE = 0.2225;
 
@@ -148,13 +149,32 @@ export default function AdminDashboard() {
 
   const [allBrands, setAllBrands] = useState<Brand[]>([]);
   const [allShops, setAllShops] = useState<Shop[]>([]);
-  const [selectedBrandId, setSelectedBrandId] = useState<number | "all">("all");
-  const [selectedShopId, setSelectedShopId] = useState<number | "all">("all");
-  const [period, setPeriod] = useState<"all" | "week" | "month" | "year">("all");
-  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
-  const [selectedWeek, setSelectedWeek] = useState<number>(1);
-  const [customerType, setCustomerType] = useState<"all" | "new" | "returning">("all");
+  const parseBrandOrShop = (raw: string): number | "all" =>
+    raw === "all" ? "all" : Number.isFinite(Number(raw)) ? Number(raw) : "all";
+  const [selectedBrandId, setSelectedBrandId] = useUrlParam<number | "all">("brand", "all", {
+    parse: parseBrandOrShop,
+    serialize: (v) => String(v),
+  });
+  const [selectedShopId, setSelectedShopId] = useUrlParam<number | "all">("shop", "all", {
+    parse: parseBrandOrShop,
+    serialize: (v) => String(v),
+  });
+  const [period, setPeriod] = useUrlParam<"all" | "week" | "month" | "year">("period", "all");
+  const todayYear = new Date().getFullYear();
+  const todayMonth = new Date().getMonth() + 1;
+  const [selectedYear, setSelectedYear] = useUrlParam<number>("year", todayYear, {
+    parse: (raw) => Number(raw) || todayYear,
+    serialize: String,
+  });
+  const [selectedMonth, setSelectedMonth] = useUrlParam<number>("month", todayMonth, {
+    parse: (raw) => Number(raw) || todayMonth,
+    serialize: String,
+  });
+  const [selectedWeek, setSelectedWeek] = useUrlParam<number>("week", 1, {
+    parse: (raw) => Number(raw) || 1,
+    serialize: String,
+  });
+  const [customerType, setCustomerType] = useUrlParam<"all" | "new" | "returning">("ctype", "all");
   const [stats, setStats] = useState<Statistics>(emptyStats());
   const [loading, setLoading] = useState(true);
 

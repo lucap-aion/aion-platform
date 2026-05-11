@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useListUrlState } from "@/hooks/useListUrlState";
 import AdminTable, { StatusBadge, type FilterDef } from "./_components/AdminTable";
 import type { ExportColumn } from "./_utils/exportCsv";
 import { resolveSortOrder } from "./_utils/resolveSortOrder";
@@ -76,11 +77,8 @@ const AdminCustomers = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState("");
-  const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [sortKey, setSortKey] = useState("created_at");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const { page, search, sortKey, sortDir, filterValues, setPage, setSearch, setSort, setFilter } =
+    useListUrlState({ defaultSortKey: "created_at", defaultSortDir: "desc", filterKeys: ["brand_id", "status"] });
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("view");
@@ -304,10 +302,10 @@ const AdminCustomers = () => {
         page={page}
         pageSize={PAGE_SIZE}
         onPageChange={setPage}
-        onSearch={(q) => { setSearch(q); setPage(0); }}
+        onSearch={setSearch}
         sortKey={sortKey}
         sortDir={sortDir}
-        onSort={(k, d) => { setSortKey(k); setSortDir(d); setPage(0); }}
+        onSort={setSort}
         onExport={handleExport} exportFilename="customers" exportSchema={CUSTOMERS_SCHEMA}
         onAdd={openAdd} addLabel="New Customer"
         onView={openView} onEdit={openEdit}
@@ -317,7 +315,7 @@ const AdminCustomers = () => {
           { key: "status", label: "Status", options: [{ value: "pending", label: "Pending" }, { value: "verified", label: "Verified" }, { value: "blocked", label: "Blocked" }] },
         ]}
         filterValues={filterValues}
-        onFilterChange={(k, v) => { setFilterValues((p) => ({ ...p, [k]: v })); setPage(0); }}
+        onFilterChange={setFilter}
         extraRowAction={(row) => {
           const r = row as unknown as Customer;
           if (r.status !== "pending") return null;
