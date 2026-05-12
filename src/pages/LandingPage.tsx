@@ -36,7 +36,7 @@ const BrandCard = ({ brand, index }: { brand: Brand; index: number }) => {
       >
         <div className="relative w-full flex-1 overflow-hidden bg-muted/30">
           {image ? (
-            <SmartLogo
+            <img
               src={image}
               alt={brand.name}
               className="absolute inset-0 h-full w-full object-cover transform-gpu transition-transform duration-700 ease-out group-hover:scale-[1.04]"
