@@ -32,38 +32,34 @@ const BrandCard = ({ brand, index }: { brand: Brand; index: number }) => {
     >
       <Link
         to={`/${brand.slug}`}
-        className="group flex flex-col items-center gap-4 rounded-2xl border border-border bg-card p-5 text-center transition-all duration-300 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 w-64 h-72 overflow-hidden"
+        className="group relative flex flex-col rounded-2xl border border-border bg-card transition-all duration-300 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 w-64 h-80 overflow-hidden"
       >
-        <div className="flex items-center justify-center h-10 w-full">
-          {logo ? (
-            <SmartLogo
-              src={logo}
-              alt={brand.name}
-              className="max-h-8 max-w-[140px] w-auto object-contain"
-            />
-          ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10">
-              <span className="text-base font-serif font-bold text-primary">{initial}</span>
-            </div>
-          )}
-        </div>
-
-        <div className="relative flex-1 w-full overflow-hidden rounded-xl bg-muted/30">
+        <div className="relative w-full flex-1 overflow-hidden bg-muted/30">
           {image ? (
             <SmartLogo
               src={image}
               alt={brand.name}
-              className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+              className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-4xl font-serif font-bold text-primary/20">{initial}</span>
+              <span className="text-5xl font-serif font-bold text-primary/20">{initial}</span>
             </div>
           )}
+          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-card to-transparent" />
         </div>
 
-        <div className="flex w-full items-center justify-end">
-          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/30 transition-all duration-300 group-hover:text-primary group-hover:translate-x-0.5" />
+        <div className="relative flex items-center justify-between px-5 py-4 border-t border-border/60">
+          {logo ? (
+            <SmartLogo
+              src={logo}
+              alt={brand.name}
+              className="max-h-7 max-w-[140px] w-auto object-contain object-left"
+            />
+          ) : (
+            <span className="text-sm font-serif font-medium text-foreground/80">{brand.name}</span>
+          )}
+          <ArrowRight className="h-4 w-4 text-muted-foreground/40 transition-all duration-300 group-hover:text-primary group-hover:translate-x-0.5" />
         </div>
       </Link>
     </motion.div>
@@ -75,20 +71,18 @@ const ComingSoonCard = ({ index, label }: { index: number; label: string }) => (
     initial={{ opacity: 0, y: 20 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ delay: index * 0.08 }}
-    className="relative w-64 h-72 rounded-2xl border border-border bg-card p-5 overflow-hidden cursor-not-allowed select-none"
+    className="relative w-64 h-80 rounded-2xl border border-border bg-card overflow-hidden cursor-not-allowed select-none"
     aria-disabled="true"
   >
-    <div className="flex flex-col items-center gap-4 h-full filter blur-[3px] opacity-60 pointer-events-none">
-      <div className="flex items-center justify-center h-10 w-full">
-        <div className="h-6 w-28 rounded bg-muted-foreground/20" />
-      </div>
-      <div className="relative flex-1 w-full overflow-hidden rounded-xl bg-muted/40" />
-      <div className="flex w-full items-center justify-end">
-        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/30" />
+    <div className="flex flex-col h-full filter blur-[3px] opacity-50 pointer-events-none">
+      <div className="relative flex-1 w-full overflow-hidden bg-muted/40" />
+      <div className="flex items-center justify-between px-5 py-4 border-t border-border/60">
+        <div className="h-5 w-24 rounded bg-muted-foreground/20" />
+        <ArrowRight className="h-4 w-4 text-muted-foreground/30" />
       </div>
     </div>
     <div className="absolute inset-0 flex items-center justify-center">
-      <span className="px-4 py-1.5 rounded-full bg-background/80 backdrop-blur-sm text-xs tracking-widest uppercase text-foreground/70 border border-border">
+      <span className="px-4 py-1.5 rounded-full bg-background/85 backdrop-blur-sm text-xs tracking-widest uppercase text-foreground/70 border border-border">
         {label}
       </span>
     </div>
@@ -96,7 +90,7 @@ const ComingSoonCard = ({ index, label }: { index: number; label: string }) => (
 );
 
 const SkeletonCard = () => (
-  <div className="rounded-2xl border border-border bg-card w-64 h-72 animate-pulse" />
+  <div className="rounded-2xl border border-border bg-card w-64 h-80 animate-pulse" />
 );
 
 const LandingPage = () => {
