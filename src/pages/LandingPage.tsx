@@ -39,14 +39,13 @@ const BrandCard = ({ brand, index }: { brand: Brand; index: number }) => {
             <SmartLogo
               src={image}
               alt={brand.name}
-              className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.06]"
+              className="absolute inset-0 h-full w-full object-cover transform-gpu transition-transform duration-700 ease-out group-hover:scale-[1.04]"
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-muted/30 to-muted/50">
               <span className="text-5xl font-serif font-bold text-primary/20">{initial}</span>
             </div>
           )}
-          <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-card via-card/70 to-transparent" />
         </div>
 
         <div className="relative flex items-center justify-center px-5 py-3.5">
