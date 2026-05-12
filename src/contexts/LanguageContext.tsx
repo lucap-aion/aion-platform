@@ -206,12 +206,14 @@ const translations: Translations = {
 
   // Landing (brand selector)
   "landing.intro": {
-    en: "To activate AION protection, purchase a new product from one of our partner brands and register on the platform.",
-    it: "Per attivare la protezione AION, acquista un nuovo prodotto da uno dei nostri brand partner e registrati sulla piattaforma.",
+    en: "To activate AION service, purchase a new product from one of our partner brands and register on the platform.",
+    it: "Per attivare il servizio AION, acquista un nuovo prodotto da uno dei nostri brand partner e registrati sulla piattaforma.",
   },
   "landing.selectBrand": { en: "Select your brand below to get started.", it: "Seleziona il tuo brand qui sotto per iniziare." },
   "landing.noBrands": { en: "No brands available.", it: "Nessun brand disponibile." },
   "landing.poweredBy": { en: "Powered by AION Cover", it: "Powered by AION Cover" },
+  "landing.back": { en: "Back", it: "Indietro" },
+  "landing.comingSoon": { en: "Coming soon", it: "Prossimamente" },
 
   // Support
   "support.title": { en: "Contact Support", it: "Contatta il Supporto" },

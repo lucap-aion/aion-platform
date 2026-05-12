@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
-import { ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import SmartLogo from "@/components/SmartLogo";
 import HeaderControls from "@/components/layout/HeaderControls";
@@ -14,10 +14,12 @@ interface Brand {
   description: string | null;
   logo_big: string | null;
   logo_small: string | null;
+  top_banner_image: string | null;
 }
 
 const BrandCard = ({ brand, index }: { brand: Brand; index: number }) => {
-  const logo = brand.logo_big || brand.logo_small;
+  const logo = brand.logo_small || brand.logo_big;
+  const image = brand.top_banner_image;
   const initial = brand.name?.[0]?.toUpperCase() ?? "?";
 
   return (
@@ -30,24 +32,37 @@ const BrandCard = ({ brand, index }: { brand: Brand; index: number }) => {
     >
       <Link
         to={`/${brand.slug}`}
-        className="group flex flex-col items-center justify-between gap-6 rounded-2xl border border-border bg-card px-8 pt-10 pb-6 text-center transition-all duration-300 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 w-64 h-52"
+        className="group flex flex-col items-center gap-4 rounded-2xl border border-border bg-card p-5 text-center transition-all duration-300 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 w-64 h-72 overflow-hidden"
       >
-        <div className="flex flex-1 items-center justify-center w-full">
+        <div className="flex items-center justify-center h-10 w-full">
           {logo ? (
             <SmartLogo
               src={logo}
               alt={brand.name}
-              className="max-h-14 max-w-[180px] w-auto object-contain"
+              className="max-h-8 max-w-[140px] w-auto object-contain"
             />
           ) : (
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-              <span className="text-2xl font-serif font-bold text-primary">{initial}</span>
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10">
+              <span className="text-base font-serif font-bold text-primary">{initial}</span>
             </div>
           )}
         </div>
 
-        <div className="flex w-full items-center justify-between">
-          <span className="text-xs text-muted-foreground font-medium tracking-wide">{brand.name}</span>
+        <div className="relative flex-1 w-full overflow-hidden rounded-xl bg-muted/30">
+          {image ? (
+            <SmartLogo
+              src={image}
+              alt={brand.name}
+              className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-4xl font-serif font-bold text-primary/20">{initial}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex w-full items-center justify-end">
           <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/30 transition-all duration-300 group-hover:text-primary group-hover:translate-x-0.5" />
         </div>
       </Link>
@@ -55,8 +70,33 @@ const BrandCard = ({ brand, index }: { brand: Brand; index: number }) => {
   );
 };
 
+const ComingSoonCard = ({ index, label }: { index: number; label: string }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay: index * 0.08 }}
+    className="relative w-64 h-72 rounded-2xl border border-border bg-card p-5 overflow-hidden cursor-not-allowed select-none"
+    aria-disabled="true"
+  >
+    <div className="flex flex-col items-center gap-4 h-full filter blur-[3px] opacity-60 pointer-events-none">
+      <div className="flex items-center justify-center h-10 w-full">
+        <div className="h-6 w-28 rounded bg-muted-foreground/20" />
+      </div>
+      <div className="relative flex-1 w-full overflow-hidden rounded-xl bg-muted/40" />
+      <div className="flex w-full items-center justify-end">
+        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/30" />
+      </div>
+    </div>
+    <div className="absolute inset-0 flex items-center justify-center">
+      <span className="px-4 py-1.5 rounded-full bg-background/80 backdrop-blur-sm text-xs tracking-widest uppercase text-foreground/70 border border-border">
+        {label}
+      </span>
+    </div>
+  </motion.div>
+);
+
 const SkeletonCard = () => (
-  <div className="rounded-2xl border border-border bg-card w-64 h-52 animate-pulse" />
+  <div className="rounded-2xl border border-border bg-card w-64 h-72 animate-pulse" />
 );
 
 const LandingPage = () => {
@@ -69,7 +109,7 @@ const LandingPage = () => {
       try {
         const { data } = await supabase
           .from("brands")
-          .select("id, slug, name, description, logo_big, logo_small")
+          .select("id, slug, name, description, logo_big, logo_small, top_banner_image")
           .not("slug", "is", null)
           .neq("slug", "")
           .eq("status", "verified")
@@ -85,7 +125,14 @@ const LandingPage = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <div className="flex justify-end px-4 pt-4">
+      <div className="flex items-center justify-between px-4 pt-4">
+        <a
+          href="https://aioncover.com"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {t("landing.back")}
+        </a>
         <HeaderControls />
       </div>
       {/* Hero */}
@@ -119,6 +166,7 @@ const LandingPage = () => {
             {brands.map((brand, i) => (
               <BrandCard key={brand.id} brand={brand} index={i} />
             ))}
+            <ComingSoonCard index={brands.length} label={t("landing.comingSoon")} />
           </motion.div>
         )}
       </div>
