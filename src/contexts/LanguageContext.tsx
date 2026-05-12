@@ -204,6 +204,15 @@ const translations: Translations = {
   "insights.gen.silent": { en: "Silent Generation", it: "Silent Generation" },
   "insights.gen.unknown": { en: "Unknown", it: "Sconosciuto" },
 
+  // Landing (brand selector)
+  "landing.intro": {
+    en: "To activate AION protection, purchase a new product from one of our partner brands and register on the platform.",
+    it: "Per attivare la protezione AION, acquista un nuovo prodotto da uno dei nostri brand partner e registrati sulla piattaforma.",
+  },
+  "landing.selectBrand": { en: "Select your brand below to get started.", it: "Seleziona il tuo brand qui sotto per iniziare." },
+  "landing.noBrands": { en: "No brands available.", it: "Nessun brand disponibile." },
+  "landing.poweredBy": { en: "Powered by AION Cover", it: "Powered by AION Cover" },
+
   // Support
   "support.title": { en: "Contact Support", it: "Contatta il Supporto" },
   "support.desc": { en: "Describe your issue and our team will get back to you within 24 hours.", it: "Descrivi il tuo problema e il nostro team ti risponderà entro 24 ore." },

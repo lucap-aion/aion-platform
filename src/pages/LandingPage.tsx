@@ -5,6 +5,7 @@ import { ArrowRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import SmartLogo from "@/components/SmartLogo";
 import HeaderControls from "@/components/layout/HeaderControls";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Brand {
   id: number;
@@ -59,6 +60,7 @@ const SkeletonCard = () => (
 );
 
 const LandingPage = () => {
+  const { t } = useLanguage();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -96,8 +98,8 @@ const LandingPage = () => {
           <SmartLogo src="/aion_dark_logo.png" alt="AION Cover" className="h-9 object-contain" />
           <div className="w-8 h-px bg-primary/40 mt-1" />
           <p className="text-muted-foreground text-base max-w-lg mx-auto leading-relaxed">
-            To activate AION protection, purchase a new product from one of our partner brands and register on the platform.{" "}
-            <span className="text-foreground/60">Select your brand below to get started.</span>
+            {t("landing.intro")}{" "}
+            <span className="text-foreground/60">{t("landing.selectBrand")}</span>
           </p>
         </motion.div>
       </div>
@@ -109,7 +111,7 @@ const LandingPage = () => {
             {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
           </div>
         ) : brands.length === 0 ? (
-          <div className="text-center py-20 text-muted-foreground text-sm">No brands available.</div>
+          <div className="text-center py-20 text-muted-foreground text-sm">{t("landing.noBrands")}</div>
         ) : (
           <motion.div
             className="flex flex-wrap justify-center gap-5"
@@ -124,7 +126,7 @@ const LandingPage = () => {
       {/* Footer */}
       <div className="pb-10 text-center">
         <p className="text-xs text-muted-foreground/40 tracking-widest uppercase">
-          Powered by AION Cover
+          {t("landing.poweredBy")}
         </p>
       </div>
     </div>
