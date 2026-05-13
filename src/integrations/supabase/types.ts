@@ -83,6 +83,50 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_query_log: {
+        Row: {
+          admin_id: string | null
+          created_at: string
+          duration_ms: number | null
+          error: string | null
+          id: number
+          question: string | null
+          row_count: number | null
+          sql_text: string | null
+          user_id: string | null
+        }
+        Insert: {
+          admin_id?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          error?: string | null
+          id?: number
+          question?: string | null
+          row_count?: number | null
+          sql_text?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          admin_id?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          error?: string | null
+          id?: number
+          question?: string | null
+          row_count?: number | null
+          sql_text?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_query_log_admin_id_fkey"
+            columns: ["admin_id"]
+            isOneToOne: false
+            referencedRelation: "admins"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       brand_leads: {
         Row: {
           company_name: string | null
@@ -309,10 +353,49 @@ export type Database = {
           },
         ]
       }
+      external_api_credentials: {
+        Row: {
+          brand_id: number
+          created_at: string
+          description: string | null
+          id: number
+          is_active: boolean
+          provider: string
+          token: string
+        }
+        Insert: {
+          brand_id: number
+          created_at?: string
+          description?: string | null
+          id?: number
+          is_active?: boolean
+          provider: string
+          token: string
+        }
+        Update: {
+          brand_id?: number
+          created_at?: string
+          description?: string | null
+          id?: number
+          is_active?: boolean
+          provider?: string
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "external_api_credentials_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       external_requests: {
         Row: {
           brand_id: number | null
           created_at: string
+          credential_id: number | null
           id: number
           request: Json | null
           return_id: string | null
@@ -323,6 +406,7 @@ export type Database = {
         Insert: {
           brand_id?: number | null
           created_at?: string
+          credential_id?: number | null
           id?: number
           request?: Json | null
           return_id?: string | null
@@ -333,6 +417,7 @@ export type Database = {
         Update: {
           brand_id?: number | null
           created_at?: string
+          credential_id?: number | null
           id?: number
           request?: Json | null
           return_id?: string | null
@@ -346,6 +431,13 @@ export type Database = {
             columns: ["brand_id"]
             isOneToOne: false
             referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "external_requests_credential_id_fkey"
+            columns: ["credential_id"]
+            isOneToOne: false
+            referencedRelation: "external_api_credentials"
             referencedColumns: ["id"]
           },
         ]
@@ -456,11 +548,13 @@ export type Database = {
           quantity: number | null
           recommended_retail_price: number | null
           return_id: number | null
+          row_id: string | null
           selling_price: number | null
           shop_id: number | null
           source: string | null
           start_date: string
           status: string | null
+          sub_order_code: string | null
           transferred_at: string | null
           updated_at: string | null
         }
@@ -486,11 +580,13 @@ export type Database = {
           quantity?: number | null
           recommended_retail_price?: number | null
           return_id?: number | null
+          row_id?: string | null
           selling_price?: number | null
           shop_id?: number | null
           source?: string | null
           start_date: string
           status?: string | null
+          sub_order_code?: string | null
           transferred_at?: string | null
           updated_at?: string | null
         }
@@ -516,11 +612,13 @@ export type Database = {
           quantity?: number | null
           recommended_retail_price?: number | null
           return_id?: number | null
+          row_id?: string | null
           selling_price?: number | null
           shop_id?: number | null
           source?: string | null
           start_date?: string
           status?: string | null
+          sub_order_code?: string | null
           transferred_at?: string | null
           updated_at?: string | null
         }
@@ -883,16 +981,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      get_my_brand_id: { Args: never; Returns: number }
-      get_my_profile_id: { Args: never; Returns: string }
-      get_my_role: { Args: never; Returns: string }
-      mark_policies_expired: { Args: never; Returns: undefined }
       admin_dashboard_aggregates: {
         Args: {
-          p_brand_ids?: number[] | null
-          p_from_date?: string | null
-          p_to_date?: string | null
-          p_customer_ids?: string[] | null
+          p_brand_ids?: number[]
+          p_customer_ids?: string[]
+          p_from_date?: string
+          p_shop_ids?: number[]
+          p_to_date?: string
         }
         Returns: Json
       }
@@ -900,47 +995,65 @@ export type Database = {
         Args: never
         Returns: {
           brands: number
-          shops: number
-          customers: number
           claims: number
-          open_claims: number
           closed_claims: number
+          customers: number
+          open_claims: number
+          shops: number
+        }[]
+      }
+      ai_run_query: { Args: { p_sql: string }; Returns: Json }
+      brand_customer_aggregates: {
+        Args: { p_customer_ids: string[] }
+        Returns: {
+          claims: number
+          covers: number
+          customer_id: string
+          total_value: number
         }[]
       }
       brand_dashboard_metrics: {
         Args: { p_brand_id: number }
         Returns: {
-          customers: number
           covers: number
+          customers: number
           open_claims: number
           protected_value: number
         }[]
       }
-      brand_customer_aggregates: {
-        Args: { p_customer_ids: string[] }
-        Returns: {
-          customer_id: string
-          covers: number
-          claims: number
-          total_value: number
-        }[]
+      check_admin_eligibility: { Args: { p_email: string }; Returns: string }
+      check_brand_eligibility: {
+        Args: { p_brand_id: number; p_email: string }
+        Returns: string
+      }
+      check_brand_invitation: {
+        Args: { p_brand_id: number; p_email: string }
+        Returns: string
       }
       dashboard_policy_stats: {
         Args: {
-          p_brand_ids?: number[] | null
-          p_from_date?: string | null
-          p_to_date?: string | null
-          p_customer_ids?: string[] | null
+          p_brand_ids?: number[]
+          p_customer_ids?: string[]
+          p_from_date?: string
+          p_shop_ids?: number[]
+          p_to_date?: string
         }
         Returns: {
           brand_id: number
           covers: number
+          latest_start_date: string
           total_cogs: number
           total_rrp: number
           total_selling_price: number
-          latest_start_date: string
         }[]
       }
+      get_my_brand_id: { Args: never; Returns: number }
+      get_my_profile_id: { Args: never; Returns: string }
+      get_my_role: { Args: never; Returns: string }
+      is_brand_role: { Args: never; Returns: boolean }
+      mark_policies_expired: { Args: never; Returns: undefined }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
       [_ in never]: never

@@ -1,4 +1,4 @@
-import { House, Users, Building2, ClipboardList, Store, UserCog, LogOut, ChevronsUpDown, UserCircle, Package, TrendingUp, ShieldCheck, Users2, LineChart, Star } from "lucide-react";
+import { House, Users, Building2, ClipboardList, Store, UserCog, LogOut, ChevronsUpDown, UserCircle, Package, TrendingUp, ShieldCheck, Users2, LineChart, Star, Sparkles } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,6 +25,7 @@ import {
 
 const adminLinks = [
   { path: "/admin", icon: House, label: "Home" },
+  { path: "/admin/ai-query", icon: Sparkles, label: "Ask the data" },
   { path: "/admin/admins", icon: UserCog, label: "Admins" },
   { path: "/admin/shop-assistants", icon: Users2, label: "Brand Users" },
   { path: "/admin/brands", icon: Building2, label: "Brands" },
