@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -21,6 +23,7 @@ type AssistantMessage = {
   columns: string[];
   rows: Record<string, unknown>[];
   chart: ChartSpec | null;
+  streaming: boolean;
 };
 
 type Message =
@@ -36,6 +39,9 @@ const SUGGESTIONS = [
 ];
 
 const CHART_COLORS = ["#B8860B", "#2A7B5B", "#5B7FA5", "#C45A3C", "#8B6DAE", "#A0A0A0"];
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
 const toNumber = (v: unknown): number | null => {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
@@ -72,41 +78,90 @@ const AdminAIQuery = () => {
         : { role: "assistant", content: m.summary },
     );
 
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    // Append user msg + a placeholder assistant msg we'll mutate as events arrive
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: text },
+      {
+        role: "assistant",
+        summary: "",
+        sql: null,
+        columns: [],
+        rows: [],
+        chart: null,
+        streaming: true,
+      },
+    ]);
     setLoading(true);
 
-    try {
-      const { data, error } = await supabase.functions.invoke("query-ai", {
-        body: { question: text, history },
+    // The index of the assistant message we'll patch
+    const patch = (fn: (m: AssistantMessage) => AssistantMessage) =>
+      setMessages((prev) => {
+        const out = [...prev];
+        for (let i = out.length - 1; i >= 0; i--) {
+          if (out[i].role === "assistant") {
+            out[i] = fn(out[i] as AssistantMessage);
+            break;
+          }
+        }
+        return out;
       });
-      if (error) throw error;
-      if (!data || data.error) throw new Error(data?.error ?? "Unknown error");
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          summary: data.summary ?? "",
-          sql: data.sql ?? null,
-          columns: data.columns ?? [],
-          rows: data.rows ?? [],
-          chart: data.chart ?? null,
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("Not signed in");
+
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/query-ai`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "apikey": SUPABASE_ANON_KEY,
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream",
         },
-      ]);
+        body: JSON.stringify({ question: text, history }),
+      });
+
+      if (!res.ok || !res.body) {
+        const errBody = await res.text().catch(() => "");
+        let msg = `Request failed (${res.status})`;
+        try {
+          const parsed = JSON.parse(errBody);
+          if (parsed?.error) msg = parsed.error;
+        } catch { /* ignore */ }
+        throw new Error(msg);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE frames are separated by a blank line
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          const { event, data } = parseSse(frame);
+          if (!event) continue;
+          handleEvent(event, data, patch);
+        }
+      }
     } catch (err: any) {
-      toast.error(err?.message ?? "Query failed");
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          summary: `I couldn't answer that — ${err?.message ?? "unknown error"}.`,
-          sql: null,
-          columns: [],
-          rows: [],
-          chart: null,
-        },
-      ]);
+      const msg = err?.message ?? "Query failed";
+      toast.error(msg);
+      patch((m) => ({
+        ...m,
+        summary: m.summary || `I couldn't answer that — ${msg}.`,
+        streaming: false,
+      }));
     } finally {
+      patch((m) => ({ ...m, streaming: false }));
       setLoading(false);
       taRef.current?.focus();
     }
@@ -121,7 +176,6 @@ const AdminAIQuery = () => {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
       <div className="border-b border-border px-6 py-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
@@ -136,7 +190,6 @@ const AdminAIQuery = () => {
         </div>
       </div>
 
-      {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6">
         {messages.length === 0 ? (
           <EmptyState onPick={(q) => send(q)} />
@@ -149,12 +202,10 @@ const AdminAIQuery = () => {
                 <AssistantBlock key={i} message={m} />
               ),
             )}
-            {loading && <ThinkingBubble />}
           </div>
         )}
       </div>
 
-      {/* Input */}
       <div className="border-t border-border bg-background px-6 py-4">
         <div className="mx-auto flex max-w-4xl items-end gap-2">
           <textarea
@@ -185,6 +236,53 @@ const AdminAIQuery = () => {
     </div>
   );
 };
+
+// ─── SSE helpers ─────────────────────────────────────────────────────────────
+
+function parseSse(frame: string): { event: string | null; data: any } {
+  let event: string | null = null;
+  const dataLines: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  }
+  if (!event) return { event: null, data: null };
+  const raw = dataLines.join("\n");
+  try {
+    return { event, data: raw ? JSON.parse(raw) : null };
+  } catch {
+    return { event, data: raw };
+  }
+}
+
+function handleEvent(
+  event: string,
+  data: any,
+  patch: (fn: (m: AssistantMessage) => AssistantMessage) => void,
+) {
+  if (event === "text_delta") {
+    patch((m) => ({ ...m, summary: m.summary + (data?.text ?? "") }));
+  } else if (event === "sql_result") {
+    patch((m) => ({
+      ...m,
+      sql: data?.sql ?? m.sql,
+      columns: data?.columns ?? [],
+      rows: data?.rows ?? [],
+    }));
+  } else if (event === "chart") {
+    patch((m) => ({ ...m, chart: data as ChartSpec }));
+  } else if (event === "done") {
+    patch((m) => ({ ...m, streaming: false, sql: data?.sql ?? m.sql }));
+  } else if (event === "error") {
+    const msg = data?.message ?? "Unknown error";
+    toast.error(msg);
+    patch((m) => ({
+      ...m,
+      summary: m.summary || `I couldn't answer that — ${msg}.`,
+      streaming: false,
+    }));
+  }
+}
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -220,20 +318,27 @@ const UserBubble = ({ text }: { text: string }) => (
   </div>
 );
 
-const ThinkingBubble = () => (
-  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-    <Loader2 className="h-4 w-4 animate-spin" />
-    <span>Querying the database…</span>
-  </div>
-);
-
 const AssistantBlock = ({ message }: { message: AssistantMessage }) => {
-  const { summary, sql, columns, rows, chart } = message;
+  const { summary, sql, columns, rows, chart, streaming } = message;
+  const hasAnything = summary || rows.length > 0 || chart || sql;
+
+  if (!hasAnything && streaming) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span>Querying the database…</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
-      {summary && (
-        <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
-          {summary}
+      {(summary || streaming) && (
+        <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-a:text-primary prose-code:text-foreground prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-table:text-xs prose-th:bg-muted/40">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown>
+          {streaming && !summary && (
+            <span className="inline-block h-3 w-1.5 animate-pulse bg-foreground/40 align-middle" />
+          )}
         </div>
       )}
 
@@ -335,7 +440,6 @@ const ChartView = ({
   spec: ChartSpec;
   rows: Record<string, unknown>[];
 }) => {
-  // Coerce numerics
   const data = rows.map((r) => {
     const out: Record<string, unknown> = { ...r };
     spec.y_keys.forEach((k) => {
