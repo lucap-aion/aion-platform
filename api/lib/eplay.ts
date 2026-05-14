@@ -131,7 +131,7 @@ export async function parseSaleFromEplay(sale: any, credential: EplayCredential)
         .eq('brand_sale_id', s.id)
         .eq('brand_row_id', s.row_id);
 
-      const policyStatus = s.item.recommended_retail_price > 1000 ? 'live' : 'blocked';
+      const policyStatus = s.item.recommended_retail_price > 999 ? 'live' : 'blocked';
       const { cogs } = await calculateCategoryCogs(item.category.toUpperCase(), s.item.recommended_retail_price, credential.brand_id);
 
       if (!existingPolicies || existingPolicies.length === 0) {
