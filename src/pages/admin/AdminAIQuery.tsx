@@ -64,11 +64,88 @@ const toNumber = (v: unknown): number | null => {
 const humanizeColumn = (col: string): string =>
   col.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-const formatCell = (v: unknown): string => {
-  if (v === null || v === undefined) return "—";
+// ─── Cell formatting ─────────────────────────────────────────────────────────
+// Recognise common Postgres/Supabase return shapes and present them politely.
+
+const ISO_MONTH = /^\d{4}-\d{2}$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+const NUMERIC_STRING = /^-?\d+(\.\d+)?$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const bcp47 = (l: string) => (l === "it" ? "it-IT" : "en-GB");
+
+const isIdColumn = (col: string) =>
+  /(^|_)id$/i.test(col) || /(^|_)ids$/i.test(col) || col === "id";
+const isCurrencyColumn = (col: string) =>
+  /(price|cost|value|fee|premium|revenue|amount|cogs|rrp|spend|paid|sales|gross|net|protected_value)/i
+    .test(col);
+const isPercentColumn = (col: string) =>
+  /(^|_)pct(_|$)|percent|share_pct|_share$|^share_/i.test(col);
+
+const formatNumber = (n: number, col: string, bcp: string): string => {
+  if (!Number.isFinite(n)) return "—";
+  if (isIdColumn(col)) return String(n);
+  if (isCurrencyColumn(col)) {
+    return new Intl.NumberFormat(bcp, {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: Number.isInteger(n) ? 0 : 2,
+    }).format(n);
+  }
+  if (isPercentColumn(col)) {
+    // If the value is in 0–1 range, assume it's a fraction and scale to %.
+    const v = n >= -1 && n <= 1 ? n * 100 : n;
+    return new Intl.NumberFormat(bcp, { maximumFractionDigits: 1 }).format(v) + "%";
+  }
+  const opts: Intl.NumberFormatOptions = Number.isInteger(n)
+    ? { maximumFractionDigits: 0 }
+    : { maximumFractionDigits: 2 };
+  return new Intl.NumberFormat(bcp, opts).format(n);
+};
+
+const formatCell = (v: unknown, column: string = "", locale: string = "en"): string => {
+  if (v === null || v === undefined || v === "") return "—";
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (Array.isArray(v)) return v.length === 0 ? "—" : v.join(", ");
   if (typeof v === "object") return JSON.stringify(v);
-  if (typeof v === "boolean") return v ? "true" : "false";
+
+  const col = column.toLowerCase();
+  const bcp = bcp47(locale);
+
+  if (typeof v === "string") {
+    if (UUID.test(v)) return v.slice(0, 8) + "…";
+    if (ISO_MONTH.test(v)) {
+      const [y, m] = v.split("-").map(Number);
+      return new Intl.DateTimeFormat(bcp, { month: "short", year: "numeric" })
+        .format(new Date(Date.UTC(y, m - 1, 1)));
+    }
+    if (ISO_DATE.test(v)) {
+      return new Intl.DateTimeFormat(bcp, { day: "2-digit", month: "short", year: "numeric" })
+        .format(new Date(v + "T00:00:00Z"));
+    }
+    if (ISO_TS.test(v)) {
+      return new Intl.DateTimeFormat(bcp, {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(v));
+    }
+    if (NUMERIC_STRING.test(v)) return formatNumber(Number(v), col, bcp);
+    return v;
+  }
+
+  if (typeof v === "number") return formatNumber(v, col, bcp);
   return String(v);
+};
+
+// Lightweight tick/tooltip formatter for chart values (locale + currency aware).
+const formatAxis = (col: string, locale: string) => (v: any): string => {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  return formatNumber(n, col.toLowerCase(), bcp47(locale));
 };
 
 const titleFromQuestion = (q: string) => {
@@ -583,7 +660,7 @@ const UserBubble = ({ text }: { text: string }) => (
 );
 
 const AssistantBlock = ({ message }: { message: AssistantMessage }) => {
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
   const { summary, sql, columns, rows, chart, streaming } = message;
   const hasAnything = summary || rows.length > 0 || chart || sql;
 
@@ -607,10 +684,10 @@ const AssistantBlock = ({ message }: { message: AssistantMessage }) => {
         </div>
       )}
 
-      {chart && rows.length >= 2 && <ChartView spec={chart} rows={rows} />}
+      {chart && rows.length >= 2 && <ChartView spec={chart} rows={rows} locale={locale} />}
 
       {columns.length > 0 && rows.length > 0 && (
-        <ResultsTable columns={columns} rows={rows} />
+        <ResultsTable columns={columns} rows={rows} locale={locale} />
       )}
 
       {sql && <SqlBlock sql={sql} />}
@@ -621,9 +698,11 @@ const AssistantBlock = ({ message }: { message: AssistantMessage }) => {
 const ResultsTable = ({
   columns,
   rows,
+  locale,
 }: {
   columns: string[];
   rows: Record<string, unknown>[];
+  locale: string;
 }) => {
   const { t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
@@ -664,7 +743,7 @@ const ResultsTable = ({
               <tr key={i} className="border-b border-border/60 last:border-0 hover:bg-muted/20">
                 {columns.map((c) => (
                   <td key={c} className="px-4 py-2 text-foreground tabular-nums">
-                    {formatCell(row[c])}
+                    {formatCell(row[c], c, locale)}
                   </td>
                 ))}
               </tr>
@@ -703,9 +782,11 @@ const SqlBlock = ({ sql }: { sql: string }) => {
 const ChartView = ({
   spec,
   rows,
+  locale,
 }: {
   spec: ChartSpec;
   rows: Record<string, unknown>[];
+  locale: string;
 }) => {
   const data = rows.map((r) => {
     const out: Record<string, unknown> = { ...r };
@@ -714,6 +795,12 @@ const ChartView = ({
     });
     return out;
   });
+
+  // Pick the dominant Y-key to drive axis/tooltip currency/percent formatting.
+  const primaryY = spec.y_keys[0] ?? "";
+  const yTick = formatAxis(primaryY, locale);
+  const tooltipFmt = (value: any, name: any) =>
+    [formatNumber(Number(value), String(name).toLowerCase(), bcp47(locale)), humanizeColumn(String(name))];
 
   return (
     <div className="rounded-xl border border-border bg-card p-4">
@@ -727,8 +814,8 @@ const ChartView = ({
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey={spec.x_key} fontSize={11} stroke="hsl(var(--muted-foreground))" />
-            <YAxis fontSize={11} stroke="hsl(var(--muted-foreground))" />
-            <Tooltip />
+            <YAxis fontSize={11} stroke="hsl(var(--muted-foreground))" tickFormatter={yTick} />
+            <Tooltip formatter={tooltipFmt} />
             {spec.y_keys.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
             {spec.y_keys.map((k, i) => (
               <Line
@@ -754,14 +841,14 @@ const ChartView = ({
                 <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip formatter={tooltipFmt} />
           </PieChart>
         ) : (
           <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey={spec.x_key} fontSize={11} stroke="hsl(var(--muted-foreground))" />
-            <YAxis fontSize={11} stroke="hsl(var(--muted-foreground))" />
-            <Tooltip />
+            <YAxis fontSize={11} stroke="hsl(var(--muted-foreground))" tickFormatter={yTick} />
+            <Tooltip formatter={tooltipFmt} />
             {spec.y_keys.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
             {spec.y_keys.map((k, i) => (
               <Bar key={k} dataKey={k} fill={CHART_COLORS[i % CHART_COLORS.length]} radius={[4, 4, 0, 0]} />
