@@ -52,9 +52,17 @@ const ChubbUploadAlertBanner = () => {
 
   const load = useCallback(async () => {
     setState((s) => ({ ...s, loading: true }));
+    // Files: scan reports uploaded in the last LOOKBACK_DAYS days. Generous
+    // enough that yesterday's file shipped today (or earlier) is still in scope.
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - LOOKBACK_DAYS);
     const sinceIso = since.toISOString();
+    // Events: only check covers whose NEW or CAN event happened *yesterday*
+    // (UTC). That's what last night's cron upload should contain.
+    const yesterdayStart = new Date();
+    yesterdayStart.setUTCHours(0, 0, 0, 0);
+    yesterdayStart.setUTCDate(yesterdayStart.getUTCDate() - 1);
+    const yesterdayStartIso = yesterdayStart.toISOString();
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
     const todayStartIso = todayStart.toISOString();
@@ -127,7 +135,7 @@ const ChubbUploadAlertBanner = () => {
             .select("id, brand_id, created_at")
             .in("brand_id", brandIds)
             .eq("status", "live")
-            .gte("created_at", sinceIso)
+            .gte("created_at", yesterdayStartIso)
             .lt("created_at", todayStartIso),
       brandIds.length === 0
         ? Promise.resolve({ data: [] as any[] })
@@ -136,7 +144,7 @@ const ChubbUploadAlertBanner = () => {
             .select("id, brand_id, created_at, cancelled_at")
             .in("brand_id", brandIds)
             .eq("status", "cancelled")
-            .gte("cancelled_at", sinceIso)
+            .gte("cancelled_at", yesterdayStartIso)
             .lt("cancelled_at", todayStartIso),
     ]);
 
