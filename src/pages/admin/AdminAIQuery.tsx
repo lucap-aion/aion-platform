@@ -60,6 +60,9 @@ const toNumber = (v: unknown): number | null => {
   return null;
 };
 
+const humanizeColumn = (col: string): string =>
+  col.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
 const formatCell = (v: unknown): string => {
   if (v === null || v === undefined) return "—";
   if (typeof v === "object") return JSON.stringify(v);
@@ -156,13 +159,11 @@ const AdminAIQuery = () => {
   // ── Persistence helpers ────────────────────────────────────────────────────
   const persistChat = useCallback(
     async (msgs: Message[], existingId: string | null, firstUserMsg: string) => {
-      if (!adminRecord?.id) return existingId;
-      const payload = {
-        admin_id: adminRecord.id,
-        user_id: adminRecord.user_id ?? "",
-        title: titleFromQuestion(firstUserMsg),
-        messages: msgs as unknown as any,
-      };
+      if (!adminRecord?.id) {
+        console.warn("[ai-chats] no admin record yet — skipping save");
+        return existingId;
+      }
+
       if (existingId) {
         const { error } = await supabase
           .from("ai_chats")
@@ -170,23 +171,38 @@ const AdminAIQuery = () => {
           .eq("id", existingId);
         if (error) {
           console.error("[ai-chats update]", error);
-          toast.error("Couldn't save chat");
+          toast.error(`Couldn't save chat: ${error.message}`);
         }
         return existingId;
       }
+
+      // Fetch user_id at save time — adminRecord.user_id can be null on a
+      // freshly-claimed admin row, but auth always has the real auth uid.
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("Couldn't save chat: not signed in");
+        return null;
+      }
+
       const { data, error } = await supabase
         .from("ai_chats")
-        .insert(payload)
+        .insert({
+          admin_id: adminRecord.id,
+          user_id: user.id,
+          title: titleFromQuestion(firstUserMsg),
+          messages: msgs as unknown as any,
+        })
         .select("id")
         .single();
+
       if (error || !data) {
         console.error("[ai-chats insert]", error);
-        toast.error("Couldn't save chat");
+        toast.error(`Couldn't save chat: ${error?.message ?? "unknown error"}`);
         return null;
       }
       return data.id;
     },
-    [adminRecord?.id, adminRecord?.user_id],
+    [adminRecord?.id],
   );
 
   // ── New chat / select chat ─────────────────────────────────────────────────
@@ -624,9 +640,9 @@ const ResultsTable = ({
               {columns.map((c) => (
                 <th
                   key={c}
-                  className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+                  className="px-4 py-2 text-left text-xs font-semibold text-muted-foreground"
                 >
-                  {c}
+                  {humanizeColumn(c)}
                 </th>
               ))}
             </tr>
