@@ -37,7 +37,7 @@ interface BrandLite { id: number; name: string | null; }
 const REPORT_BUCKET = (type: string | null | undefined) =>
   type === "claims" ? "claims_daily_reports" : "policies_daily_reports";
 
-const LOOKBACK_DAYS = 14;
+const LOOKBACK_DAYS = 3;
 
 const bcp = (locale: string) => (locale === "it" ? "it-IT" : "en-GB");
 

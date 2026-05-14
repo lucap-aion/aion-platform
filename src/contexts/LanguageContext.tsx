@@ -279,7 +279,7 @@ const translations: Translations = {
   "chubbStatus.status.na": { en: "N/A", it: "N/D" },
   "chubbStatus.status.unknown": { en: "Unknown", it: "Sconosciuto" },
   "chubbStatus.alert.title": { en: "Chubb upload issues need attention", it: "Problemi nei caricamenti Chubb da verificare" },
-  "chubbStatus.alert.failed": { en: "{n} upload(s) failed in the last 14 days", it: "{n} caricamento/i fallito/i negli ultimi 14 giorni" },
+  "chubbStatus.alert.failed": { en: "{n} upload(s) failed in the last 3 days", it: "{n} caricamento/i fallito/i negli ultimi 3 giorni" },
   "chubbStatus.alert.pendingStuck": { en: "{n} upload(s) pending for more than 24 hours", it: "{n} caricamento/i in attesa da oltre 24 ore" },
   "chubbStatus.alert.missingEvents": { en: "{n} cover event(s) not yet uploaded to Chubb", it: "{n} evento/i polizza non ancora caricato/i su Chubb" },
   "chubbStatus.alert.moreCount": { en: " · +{n} more", it: " · +{n} altri" },
