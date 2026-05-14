@@ -7,13 +7,19 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowUp, ChevronDown, ChevronRight, Loader2, MessageSquarePlus,
+  ArrowUp, ChevronDown, ChevronRight, Download, Loader2, MessageSquarePlus,
   Sparkles, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type ChartSpec = {
   type: "bar" | "line" | "pie";
@@ -146,6 +152,105 @@ const formatAxis = (col: string, locale: string) => (v: any): string => {
   const n = typeof v === "number" ? v : Number(v);
   if (!Number.isFinite(n)) return String(v);
   return formatNumber(n, col.toLowerCase(), bcp47(locale));
+};
+
+// ─── Export helpers (CSV / XLSX) ─────────────────────────────────────────────
+// Raw values are exported (not the formatted display strings) so spreadsheets
+// can re-sort/filter/sum them as numbers and dates.
+
+const slugify = (s: string): string =>
+  s.toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 50);
+
+const exportFilename = (question: string, ext: string): string => {
+  const slug = slugify(question) || "aion-query";
+  const date = new Date().toISOString().slice(0, 10);
+  return `${slug}-${date}.${ext}`;
+};
+
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const escapeCsv = (v: unknown): string => {
+  if (v === null || v === undefined) return "";
+  const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+};
+
+const downloadCsv = (
+  columns: string[],
+  rows: Record<string, unknown>[],
+  filename: string,
+) => {
+  const header = columns.map((c) => escapeCsv(humanizeColumn(c))).join(",");
+  const body = rows
+    .map((r) => columns.map((c) => escapeCsv(r[c])).join(","))
+    .join("\n");
+  // Excel-friendly UTF-8 BOM so non-ASCII renders correctly on first open.
+  const blob = new Blob(["﻿" + header + "\n" + body], {
+    type: "text/csv;charset=utf-8",
+  });
+  downloadBlob(blob, filename);
+};
+
+const downloadXlsx = async (
+  columns: string[],
+  rows: Record<string, unknown>[],
+  filename: string,
+) => {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "AION Cover";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Results");
+  ws.columns = columns.map((c) => ({
+    header: humanizeColumn(c),
+    key: c,
+    width: Math.min(40, Math.max(12, humanizeColumn(c).length + 4)),
+  }));
+  // Coerce numeric-strings to numbers and ISO date-strings to Date so Excel
+  // gets native types rather than text.
+  ws.addRows(
+    rows.map((r) => {
+      const out: Record<string, unknown> = {};
+      for (const c of columns) {
+        const v = r[c];
+        if (typeof v === "string") {
+          if (/^-?\d+(\.\d+)?$/.test(v)) out[c] = Number(v);
+          else if (/^\d{4}-\d{2}-\d{2}(T|$)/.test(v)) {
+            const d = new Date(v.length === 10 ? v + "T00:00:00Z" : v);
+            out[c] = Number.isNaN(d.getTime()) ? v : d;
+          } else out[c] = v;
+        } else if (Array.isArray(v) || (v && typeof v === "object")) {
+          out[c] = JSON.stringify(v);
+        } else {
+          out[c] = v as any;
+        }
+      }
+      return out;
+    }),
+  );
+  ws.getRow(1).font = { bold: true };
+  ws.getRow(1).alignment = { vertical: "middle" };
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  downloadBlob(blob, filename);
 };
 
 const titleFromQuestion = (q: string) => {
@@ -486,13 +591,18 @@ const AdminAIQuery = () => {
             <EmptyState onPick={(q) => send(q)} />
           ) : (
             <div className="mx-auto flex max-w-4xl flex-col gap-6">
-              {messages.map((m, i) =>
-                m.role === "user" ? (
-                  <UserBubble key={i} text={m.content} />
-                ) : (
-                  <AssistantBlock key={i} message={m} />
-                ),
-              )}
+              {messages.map((m, i) => {
+                if (m.role === "user") return <UserBubble key={i} text={m.content} />;
+                // Find the preceding user message — used as the export filename slug.
+                let q = "aion-query";
+                for (let j = i - 1; j >= 0; j--) {
+                  if (messages[j].role === "user") {
+                    q = (messages[j] as { content: string }).content;
+                    break;
+                  }
+                }
+                return <AssistantBlock key={i} message={m} question={q} />;
+              })}
             </div>
           )}
         </div>
@@ -659,7 +769,13 @@ const UserBubble = ({ text }: { text: string }) => (
   </div>
 );
 
-const AssistantBlock = ({ message }: { message: AssistantMessage }) => {
+const AssistantBlock = ({
+  message,
+  question,
+}: {
+  message: AssistantMessage;
+  question: string;
+}) => {
   const { t, locale } = useLanguage();
   const { summary, sql, columns, rows, chart, streaming } = message;
   const hasAnything = summary || rows.length > 0 || chart || sql;
@@ -687,7 +803,7 @@ const AssistantBlock = ({ message }: { message: AssistantMessage }) => {
       {chart && rows.length >= 2 && <ChartView spec={chart} rows={rows} locale={locale} />}
 
       {columns.length > 0 && rows.length > 0 && (
-        <ResultsTable columns={columns} rows={rows} locale={locale} />
+        <ResultsTable columns={columns} rows={rows} locale={locale} question={question} />
       )}
 
       {sql && <SqlBlock sql={sql} />}
@@ -699,14 +815,31 @@ const ResultsTable = ({
   columns,
   rows,
   locale,
+  question,
 }: {
   columns: string[];
   rows: Record<string, unknown>[];
   locale: string;
+  question: string;
 }) => {
   const { t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? rows : rows.slice(0, 25);
+
+  const handleCsv = () => {
+    try {
+      downloadCsv(columns, rows, exportFilename(question, "csv"));
+    } catch (err: any) {
+      toast.error(`${t("aiQuery.downloadFailed")}: ${err?.message ?? ""}`);
+    }
+  };
+  const handleXlsx = async () => {
+    try {
+      await downloadXlsx(columns, rows, exportFilename(question, "xlsx"));
+    } catch (err: any) {
+      toast.error(`${t("aiQuery.downloadFailed")}: ${err?.message ?? ""}`);
+    }
+  };
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -714,15 +847,36 @@ const ResultsTable = ({
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {rows.length.toLocaleString()} {rows.length === 1 ? t("aiQuery.row") : t("aiQuery.rows")}
         </span>
-        {rows.length > 25 && (
-          <button
-            type="button"
-            onClick={() => setExpanded((e) => !e)}
-            className="text-xs text-primary hover:underline"
-          >
-            {expanded ? t("aiQuery.showFirst") : `${t("aiQuery.showAll")} ${rows.length}`}
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {rows.length > 25 && (
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              className="text-xs text-primary hover:underline"
+            >
+              {expanded ? t("aiQuery.showFirst") : `${t("aiQuery.showAll")} ${rows.length}`}
+            </button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center gap-1 rounded border border-border bg-background px-2 py-1 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                <Download className="h-3.5 w-3.5" />
+                {t("aiQuery.download")}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleCsv} className="cursor-pointer text-xs">
+                {t("aiQuery.downloadCsv")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleXlsx} className="cursor-pointer text-xs">
+                {t("aiQuery.downloadXlsx")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
