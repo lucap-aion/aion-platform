@@ -133,7 +133,7 @@ const ChubbUploadAlertBanner = () => {
         ? Promise.resolve({ data: [] as any[] })
         : supabase
             .from("policies")
-            .select("id, brand_id, cancelled_at")
+            .select("id, brand_id, created_at, cancelled_at")
             .in("brand_id", brandIds)
             .eq("status", "cancelled")
             .gte("cancelled_at", sinceIso)
@@ -158,6 +158,11 @@ const ChubbUploadAlertBanner = () => {
     for (const p of (canRes.data ?? []) as any[]) {
       const b = brandById.get(p.brand_id);
       if (!b?.chubb_policy_prefix) continue;
+      // Same-day created + cancelled: Chubb's daily cron handles these as a
+      // single transaction (or skips them entirely). Don't flag as missing.
+      const createdDay = (p.created_at ?? "").slice(0, 10);
+      const cancelledDay = (p.cancelled_at ?? "").slice(0, 10);
+      if (createdDay && createdDay === cancelledDay) continue;
       const pn = chubbPolicyNumber(b.chubb_policy_prefix, Number(p.id));
       if (!seen.has(`${pn}|CAN`)) {
         missing.push({
