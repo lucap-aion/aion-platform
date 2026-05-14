@@ -28,6 +28,16 @@ type ChartSpec = {
   title?: string;
 };
 
+type ReportFile = {
+  brand_id: number;
+  brand_name: string;
+  filename: string;
+  url: string;
+  row_count: number;
+  year: number;
+  month: number;
+};
+
 type AssistantMessage = {
   role: "assistant";
   summary: string;
@@ -35,6 +45,7 @@ type AssistantMessage = {
   columns: string[];
   rows: Record<string, unknown>[];
   chart: ChartSpec | null;
+  reports: ReportFile[];
   streaming: boolean;
 };
 
@@ -322,7 +333,15 @@ const AdminAIQuery = () => {
       return;
     }
     setChatId(data.id);
-    setMessages((data.messages as Message[]) ?? []);
+    // Older saved chats may lack the `reports` field on assistant messages;
+    // default to an empty array so the new type-shape stays consistent.
+    const raw = (data.messages as any[]) ?? [];
+    const restored: Message[] = raw.map((m) =>
+      m?.role === "assistant"
+        ? ({ reports: [], ...m } as AssistantMessage)
+        : m,
+    );
+    setMessages(restored);
   }, [t]);
 
   // React to ?chat= URL changes (deep links, back/forward)
@@ -434,6 +453,7 @@ const AdminAIQuery = () => {
         columns: [],
         rows: [],
         chart: null,
+        reports: [],
         streaming: true,
       },
     ];
@@ -676,6 +696,9 @@ function handleEvent(
     }));
   } else if (event === "chart") {
     patch((m) => ({ ...m, chart: data as ChartSpec }));
+  } else if (event === "report_files") {
+    const incoming = Array.isArray(data?.reports) ? data.reports as ReportFile[] : [];
+    patch((m) => ({ ...m, reports: [...(m.reports ?? []), ...incoming] }));
   } else if (event === "done") {
     patch((m) => ({ ...m, streaming: false, sql: data?.sql ?? m.sql }));
   } else if (event === "error") {
@@ -777,8 +800,10 @@ const AssistantBlock = ({
   question: string;
 }) => {
   const { t, locale } = useLanguage();
-  const { summary, sql, columns, rows, chart, streaming } = message;
-  const hasAnything = summary || rows.length > 0 || chart || sql;
+  const { summary, sql, columns, rows, chart, reports, streaming } = message;
+  const reportList = reports ?? [];
+  const hasAnything =
+    summary || rows.length > 0 || chart || sql || reportList.length > 0;
 
   if (!hasAnything && streaming) {
     return (
@@ -801,6 +826,8 @@ const AssistantBlock = ({
       )}
 
       {chart && rows.length >= 2 && <ChartView spec={chart} rows={rows} locale={locale} />}
+
+      {reportList.length > 0 && <ReportCards reports={reportList} locale={locale} />}
 
       {columns.length > 0 && rows.length > 0 && (
         <ResultsTable columns={columns} rows={rows} locale={locale} question={question} />
@@ -929,6 +956,56 @@ const SqlBlock = ({ sql }: { sql: string }) => {
           <code>{sql}</code>
         </pre>
       )}
+    </div>
+  );
+};
+
+const ReportCards = ({
+  reports,
+  locale,
+}: {
+  reports: ReportFile[];
+  locale: string;
+}) => {
+  const { t } = useLanguage();
+  const bcp = bcp47(locale);
+  return (
+    <div className="flex flex-col gap-2">
+      {reports.map((r) => {
+        const periodLabel = new Intl.DateTimeFormat(bcp, {
+          month: "long",
+          year: "numeric",
+        }).format(new Date(Date.UTC(r.year, r.month - 1, 1)));
+        return (
+          <a
+            key={`${r.brand_id}-${r.year}-${r.month}`}
+            href={r.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-muted/40"
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                <Download className="h-5 w-5 text-primary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-foreground">
+                  {r.brand_name} — {periodLabel}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {r.row_count.toLocaleString(bcp)}{" "}
+                  {r.row_count === 1 ? t("aiQuery.row") : t("aiQuery.rows")}
+                  {" · "}
+                  {r.filename}
+                </p>
+              </div>
+            </div>
+            <span className="shrink-0 text-xs font-medium text-primary">
+              {t("aiQuery.download")}
+            </span>
+          </a>
+        );
+      })}
     </div>
   );
 };

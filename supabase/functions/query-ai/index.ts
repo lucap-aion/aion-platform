@@ -191,6 +191,21 @@ LEFT JOIN policies p ON p.customer_id = s.customer_id
                      AND p.start_date BETWEEN s.cohort AND s.cohort + interval '30 days'
 GROUP BY s.cohort ORDER BY s.cohort;
 
+# Report generation
+- generate_monthly_internal_report({year, month, brand_id?}) creates the
+  standard "Monthly Internal Policies Report" (Excel) for each Chubb-reporting
+  brand, uploads it to storage, and returns one signed download URL per brand.
+  Use whenever the user asks for "the monthly report", "the internal report",
+  "the Chubb internal report for X", an Excel of "the policies for <month>",
+  or similar phrasings.
+- If month/year are omitted, the tool defaults to the previous month.
+- If the user names a brand but not the id, first call run_sql to look up the
+  brand id ("SELECT id, name FROM brands WHERE lower(name) LIKE '%<name>%'"),
+  then pass that integer as brand_id.
+- After the tool returns, summarise plainly which brands were generated and
+  for which month. Don't paste URLs into prose — the client renders download
+  cards from the same tool result.
+
 # Output style
 - Reply with a short summary (1–3 sentences). Markdown is fine; tables are
   already rendered by the client, so don't repeat raw rows in prose.
@@ -226,6 +241,40 @@ const TOOLS = [
         title: { type: "string" },
       },
       required: ["type", "x_key", "y_keys"],
+    },
+  },
+  {
+    name: "generate_monthly_internal_report",
+    description:
+      "Generate the standard Monthly Internal Policies Report (Excel) for a " +
+      "given month. By default it runs for every Chubb-reporting brand; pass " +
+      "brand_id to scope to a single brand. Returns one signed download URL " +
+      "per brand. Use when the user asks for 'the monthly report', 'internal " +
+      "report', 'Chubb internal report', or specifically asks for an Excel " +
+      "version of the month's policies.",
+    input_schema: {
+      type: "object",
+      properties: {
+        year: {
+          type: "integer",
+          description:
+            "Four-digit year. If omitted, defaults to the previous month's year.",
+        },
+        month: {
+          type: "integer",
+          minimum: 1,
+          maximum: 12,
+          description:
+            "Month (1-12). If omitted, defaults to the previous month.",
+        },
+        brand_id: {
+          type: "integer",
+          description:
+            "Optional brand id to scope to one brand. If you only know the " +
+            "brand name, first call run_sql to look up brands.id, then call " +
+            "this with that integer.",
+        },
+      },
     },
   },
 ];
@@ -421,6 +470,63 @@ Deno.serve(async (req: Request) => {
                 tool_use_id: block.id,
                 content: "chart spec accepted",
               });
+            } else if (block.name === "generate_monthly_internal_report") {
+              try {
+                const reportRes = await fetch(
+                  `${SUPABASE_URL}/functions/v1/generate-internal-report`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Authorization": authHeader,
+                      "apikey": SUPABASE_ANON_KEY,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      year: block.input?.year ?? null,
+                      month: block.input?.month ?? null,
+                      brand_id: block.input?.brand_id ?? null,
+                    }),
+                  },
+                );
+                const payload = await reportRes.json().catch(() => ({}));
+                if (!reportRes.ok) {
+                  toolResults.push({
+                    type: "tool_result",
+                    tool_use_id: block.id,
+                    is_error: true,
+                    content: `Report generation failed: ${
+                      payload?.error ?? `HTTP ${reportRes.status}`
+                    }`,
+                  });
+                } else {
+                  const reports = Array.isArray(payload?.reports)
+                    ? payload.reports
+                    : [];
+                  emit("report_files", { reports });
+                  toolResults.push({
+                    type: "tool_result",
+                    tool_use_id: block.id,
+                    content: JSON.stringify({
+                      generated: reports.length,
+                      brands: reports.map((r: any) => ({
+                        brand_name: r.brand_name,
+                        row_count: r.row_count,
+                        year: r.year,
+                        month: r.month,
+                      })),
+                    }),
+                  });
+                }
+              } catch (e: any) {
+                toolResults.push({
+                  type: "tool_result",
+                  tool_use_id: block.id,
+                  is_error: true,
+                  content: `Report generation crashed: ${
+                    e?.message ?? "unknown"
+                  }`,
+                });
+              }
             } else {
               toolResults.push({
                 type: "tool_result",
