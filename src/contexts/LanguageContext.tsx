@@ -240,6 +240,10 @@ const translations: Translations = {
   "aiQuery.showAll": { en: "Show all", it: "Mostra tutte" },
   "aiQuery.showFirst": { en: "Show first 25", it: "Mostra prime 25" },
   "aiQuery.sqlUsed": { en: "SQL used", it: "SQL utilizzata" },
+  "aiQuery.download": { en: "Download", it: "Scarica" },
+  "aiQuery.downloadCsv": { en: "Download as CSV", it: "Scarica come CSV" },
+  "aiQuery.downloadXlsx": { en: "Download as Excel", it: "Scarica come Excel" },
+  "aiQuery.downloadFailed": { en: "Download failed", it: "Download fallito" },
   "aiQuery.sendAria": { en: "Send", it: "Invia" },
   "aiQuery.deleteChatAria": { en: "Delete chat", it: "Elimina chat" },
   "aiQuery.error.prefix": { en: "I couldn't answer that — ", it: "Non sono riuscito a rispondere — " },
@@ -254,6 +258,10 @@ const translations: Translations = {
   "aiQuery.suggestion.3": { en: "Open claims grouped by brand and claim type.", it: "Reclami aperti raggruppati per brand e tipo." },
   "aiQuery.suggestion.4": { en: "Monthly new policies for the last 12 months.", it: "Nuove polizze mensili negli ultimi 12 mesi." },
   "aiQuery.suggestion.5": { en: "Average satisfaction rate per brand from feedback.", it: "Soddisfazione media per brand dai feedback." },
+  "aiQuery.section.suggestions": { en: "Suggestions", it: "Suggerimenti" },
+  "aiQuery.section.reports": { en: "Reports", it: "Report" },
+  "aiQuery.report.monthlyInternal": { en: "Generate the monthly internal report for last month.", it: "Genera il report mensile interno del mese scorso." },
+  "aiQuery.report.monthlyInternalPrevious": { en: "Generate the monthly internal report for two months ago.", it: "Genera il report mensile interno di due mesi fa." },
 };
 
 interface LanguageContextType {

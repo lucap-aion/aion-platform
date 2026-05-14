@@ -7,19 +7,35 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowUp, ChevronDown, ChevronRight, Loader2, MessageSquarePlus,
-  Sparkles, Trash2,
+  ArrowUp, ChevronDown, ChevronRight, Download, FileSpreadsheet, Loader2,
+  MessageSquarePlus, Sparkles, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type ChartSpec = {
   type: "bar" | "line" | "pie";
   x_key: string;
   y_keys: string[];
   title?: string;
+};
+
+type ReportFile = {
+  brand_id: number;
+  brand_name: string;
+  filename: string;
+  url: string;
+  row_count: number;
+  year: number;
+  month: number;
 };
 
 type AssistantMessage = {
@@ -29,6 +45,7 @@ type AssistantMessage = {
   columns: string[];
   rows: Record<string, unknown>[];
   chart: ChartSpec | null;
+  reports: ReportFile[];
   streaming: boolean;
 };
 
@@ -48,6 +65,11 @@ const SUGGESTION_KEYS = [
   "aiQuery.suggestion.3",
   "aiQuery.suggestion.4",
   "aiQuery.suggestion.5",
+];
+
+const REPORT_KEYS = [
+  "aiQuery.report.monthlyInternal",
+  "aiQuery.report.monthlyInternalPrevious",
 ];
 
 const CHART_COLORS = ["#B8860B", "#2A7B5B", "#5B7FA5", "#C45A3C", "#8B6DAE", "#A0A0A0"];
@@ -148,6 +170,105 @@ const formatAxis = (col: string, locale: string) => (v: any): string => {
   return formatNumber(n, col.toLowerCase(), bcp47(locale));
 };
 
+// ─── Export helpers (CSV / XLSX) ─────────────────────────────────────────────
+// Raw values are exported (not the formatted display strings) so spreadsheets
+// can re-sort/filter/sum them as numbers and dates.
+
+const slugify = (s: string): string =>
+  s.toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 50);
+
+const exportFilename = (question: string, ext: string): string => {
+  const slug = slugify(question) || "aion-query";
+  const date = new Date().toISOString().slice(0, 10);
+  return `${slug}-${date}.${ext}`;
+};
+
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const escapeCsv = (v: unknown): string => {
+  if (v === null || v === undefined) return "";
+  const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+};
+
+const downloadCsv = (
+  columns: string[],
+  rows: Record<string, unknown>[],
+  filename: string,
+) => {
+  const header = columns.map((c) => escapeCsv(humanizeColumn(c))).join(",");
+  const body = rows
+    .map((r) => columns.map((c) => escapeCsv(r[c])).join(","))
+    .join("\n");
+  // Excel-friendly UTF-8 BOM so non-ASCII renders correctly on first open.
+  const blob = new Blob(["﻿" + header + "\n" + body], {
+    type: "text/csv;charset=utf-8",
+  });
+  downloadBlob(blob, filename);
+};
+
+const downloadXlsx = async (
+  columns: string[],
+  rows: Record<string, unknown>[],
+  filename: string,
+) => {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "AION Cover";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Results");
+  ws.columns = columns.map((c) => ({
+    header: humanizeColumn(c),
+    key: c,
+    width: Math.min(40, Math.max(12, humanizeColumn(c).length + 4)),
+  }));
+  // Coerce numeric-strings to numbers and ISO date-strings to Date so Excel
+  // gets native types rather than text.
+  ws.addRows(
+    rows.map((r) => {
+      const out: Record<string, unknown> = {};
+      for (const c of columns) {
+        const v = r[c];
+        if (typeof v === "string") {
+          if (/^-?\d+(\.\d+)?$/.test(v)) out[c] = Number(v);
+          else if (/^\d{4}-\d{2}-\d{2}(T|$)/.test(v)) {
+            const d = new Date(v.length === 10 ? v + "T00:00:00Z" : v);
+            out[c] = Number.isNaN(d.getTime()) ? v : d;
+          } else out[c] = v;
+        } else if (Array.isArray(v) || (v && typeof v === "object")) {
+          out[c] = JSON.stringify(v);
+        } else {
+          out[c] = v as any;
+        }
+      }
+      return out;
+    }),
+  );
+  ws.getRow(1).font = { bold: true };
+  ws.getRow(1).alignment = { vertical: "middle" };
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  downloadBlob(blob, filename);
+};
+
 const titleFromQuestion = (q: string) => {
   const t = q.trim().replace(/\s+/g, " ");
   return t.length > 60 ? t.slice(0, 57) + "…" : t || "New chat";
@@ -217,7 +338,15 @@ const AdminAIQuery = () => {
       return;
     }
     setChatId(data.id);
-    setMessages((data.messages as Message[]) ?? []);
+    // Older saved chats may lack the `reports` field on assistant messages;
+    // default to an empty array so the new type-shape stays consistent.
+    const raw = (data.messages as any[]) ?? [];
+    const restored: Message[] = raw.map((m) =>
+      m?.role === "assistant"
+        ? ({ reports: [], ...m } as AssistantMessage)
+        : m,
+    );
+    setMessages(restored);
   }, [t]);
 
   // React to ?chat= URL changes (deep links, back/forward)
@@ -329,6 +458,7 @@ const AdminAIQuery = () => {
         columns: [],
         rows: [],
         chart: null,
+        reports: [],
         streaming: true,
       },
     ];
@@ -486,13 +616,18 @@ const AdminAIQuery = () => {
             <EmptyState onPick={(q) => send(q)} />
           ) : (
             <div className="mx-auto flex max-w-4xl flex-col gap-6">
-              {messages.map((m, i) =>
-                m.role === "user" ? (
-                  <UserBubble key={i} text={m.content} />
-                ) : (
-                  <AssistantBlock key={i} message={m} />
-                ),
-              )}
+              {messages.map((m, i) => {
+                if (m.role === "user") return <UserBubble key={i} text={m.content} />;
+                // Find the preceding user message — used as the export filename slug.
+                let q = "aion-query";
+                for (let j = i - 1; j >= 0; j--) {
+                  if (messages[j].role === "user") {
+                    q = (messages[j] as { content: string }).content;
+                    break;
+                  }
+                }
+                return <AssistantBlock key={i} message={m} question={q} />;
+              })}
             </div>
           )}
         </div>
@@ -566,6 +701,9 @@ function handleEvent(
     }));
   } else if (event === "chart") {
     patch((m) => ({ ...m, chart: data as ChartSpec }));
+  } else if (event === "report_files") {
+    const incoming = Array.isArray(data?.reports) ? data.reports as ReportFile[] : [];
+    patch((m) => ({ ...m, reports: [...(m.reports ?? []), ...incoming] }));
   } else if (event === "done") {
     patch((m) => ({ ...m, streaming: false, sql: data?.sql ?? m.sql }));
   } else if (event === "error") {
@@ -632,24 +770,50 @@ const EmptyState = ({ onPick }: { onPick: (q: string) => void }) => {
       </div>
       <h2 className="text-xl font-semibold text-foreground">{t("aiQuery.empty.title")}</h2>
       <p className="mt-1 text-sm text-muted-foreground">{t("aiQuery.empty.subtitle")}</p>
-      <div className="mt-8 grid w-full grid-cols-1 gap-2 text-left sm:grid-cols-2">
-        {SUGGESTION_KEYS.map((key) => {
-          const label = t(key);
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onPick(label)}
-              className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
+
+      <EmptySection
+        title={t("aiQuery.section.suggestions")}
+        items={SUGGESTION_KEYS.map((key) => ({ key, label: t(key), icon: Sparkles }))}
+        onPick={onPick}
+      />
+
+      <EmptySection
+        title={t("aiQuery.section.reports")}
+        items={REPORT_KEYS.map((key) => ({ key, label: t(key), icon: FileSpreadsheet }))}
+        onPick={onPick}
+      />
     </div>
   );
 };
+
+const EmptySection = ({
+  title,
+  items,
+  onPick,
+}: {
+  title: string;
+  items: { key: string; label: string; icon: React.ComponentType<{ className?: string }> }[];
+  onPick: (q: string) => void;
+}) => (
+  <div className="mt-8 w-full">
+    <p className="mb-2 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+      {title}
+    </p>
+    <div className="grid grid-cols-1 gap-2 text-left sm:grid-cols-2">
+      {items.map(({ key, label, icon: Icon }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onPick(label)}
+          className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
+        >
+          <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <span className="flex-1">{label}</span>
+        </button>
+      ))}
+    </div>
+  </div>
+);
 
 const UserBubble = ({ text }: { text: string }) => (
   <div className="flex justify-end">
@@ -659,10 +823,18 @@ const UserBubble = ({ text }: { text: string }) => (
   </div>
 );
 
-const AssistantBlock = ({ message }: { message: AssistantMessage }) => {
+const AssistantBlock = ({
+  message,
+  question,
+}: {
+  message: AssistantMessage;
+  question: string;
+}) => {
   const { t, locale } = useLanguage();
-  const { summary, sql, columns, rows, chart, streaming } = message;
-  const hasAnything = summary || rows.length > 0 || chart || sql;
+  const { summary, sql, columns, rows, chart, reports, streaming } = message;
+  const reportList = reports ?? [];
+  const hasAnything =
+    summary || rows.length > 0 || chart || sql || reportList.length > 0;
 
   if (!hasAnything && streaming) {
     return (
@@ -686,8 +858,10 @@ const AssistantBlock = ({ message }: { message: AssistantMessage }) => {
 
       {chart && rows.length >= 2 && <ChartView spec={chart} rows={rows} locale={locale} />}
 
+      {reportList.length > 0 && <ReportCards reports={reportList} locale={locale} />}
+
       {columns.length > 0 && rows.length > 0 && (
-        <ResultsTable columns={columns} rows={rows} locale={locale} />
+        <ResultsTable columns={columns} rows={rows} locale={locale} question={question} />
       )}
 
       {sql && <SqlBlock sql={sql} />}
@@ -699,14 +873,31 @@ const ResultsTable = ({
   columns,
   rows,
   locale,
+  question,
 }: {
   columns: string[];
   rows: Record<string, unknown>[];
   locale: string;
+  question: string;
 }) => {
   const { t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? rows : rows.slice(0, 25);
+
+  const handleCsv = () => {
+    try {
+      downloadCsv(columns, rows, exportFilename(question, "csv"));
+    } catch (err: any) {
+      toast.error(`${t("aiQuery.downloadFailed")}: ${err?.message ?? ""}`);
+    }
+  };
+  const handleXlsx = async () => {
+    try {
+      await downloadXlsx(columns, rows, exportFilename(question, "xlsx"));
+    } catch (err: any) {
+      toast.error(`${t("aiQuery.downloadFailed")}: ${err?.message ?? ""}`);
+    }
+  };
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -714,15 +905,36 @@ const ResultsTable = ({
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {rows.length.toLocaleString()} {rows.length === 1 ? t("aiQuery.row") : t("aiQuery.rows")}
         </span>
-        {rows.length > 25 && (
-          <button
-            type="button"
-            onClick={() => setExpanded((e) => !e)}
-            className="text-xs text-primary hover:underline"
-          >
-            {expanded ? t("aiQuery.showFirst") : `${t("aiQuery.showAll")} ${rows.length}`}
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {rows.length > 25 && (
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              className="text-xs text-primary hover:underline"
+            >
+              {expanded ? t("aiQuery.showFirst") : `${t("aiQuery.showAll")} ${rows.length}`}
+            </button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex items-center gap-1 rounded border border-border bg-background px-2 py-1 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                <Download className="h-3.5 w-3.5" />
+                {t("aiQuery.download")}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleCsv} className="cursor-pointer text-xs">
+                {t("aiQuery.downloadCsv")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleXlsx} className="cursor-pointer text-xs">
+                {t("aiQuery.downloadXlsx")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -775,6 +987,56 @@ const SqlBlock = ({ sql }: { sql: string }) => {
           <code>{sql}</code>
         </pre>
       )}
+    </div>
+  );
+};
+
+const ReportCards = ({
+  reports,
+  locale,
+}: {
+  reports: ReportFile[];
+  locale: string;
+}) => {
+  const { t } = useLanguage();
+  const bcp = bcp47(locale);
+  return (
+    <div className="flex flex-col gap-2">
+      {reports.map((r) => {
+        const periodLabel = new Intl.DateTimeFormat(bcp, {
+          month: "long",
+          year: "numeric",
+        }).format(new Date(Date.UTC(r.year, r.month - 1, 1)));
+        return (
+          <a
+            key={`${r.brand_id}-${r.year}-${r.month}`}
+            href={r.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-muted/40"
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                <Download className="h-5 w-5 text-primary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-foreground">
+                  {r.brand_name} — {periodLabel}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {r.row_count.toLocaleString(bcp)}{" "}
+                  {r.row_count === 1 ? t("aiQuery.row") : t("aiQuery.rows")}
+                  {" · "}
+                  {r.filename}
+                </p>
+              </div>
+            </div>
+            <span className="shrink-0 text-xs font-medium text-primary">
+              {t("aiQuery.download")}
+            </span>
+          </a>
+        );
+      })}
     </div>
   );
 };
