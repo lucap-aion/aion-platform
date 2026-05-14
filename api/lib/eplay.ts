@@ -125,8 +125,8 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
           item_id: item.id,
           brand_id: 2,
           shop_id: shopId,
-          start_date: s.sellDate ? new Date(s.sellDate).toISOString() : new Date().toISOString(),
-          expiration_date: getYearsAfter(s.sellDate ? new Date(s.sellDate).toISOString() : new Date().toISOString()),
+          start_date: s.sellDate ? italyLocalToUtc(s.sellDate) : new Date().toISOString(),
+          expiration_date: getYearsAfter(s.sellDate ? italyLocalToUtc(s.sellDate) : new Date().toISOString()),
           notes: '',
           purchase_receipt: null,
           recommended_retail_price: s.item.recommended_retail_price,
@@ -221,15 +221,16 @@ export async function parseReturnFromEplay(r: any): Promise<any> {
       const newReturn = {
         return_id: r.id,
         old_policy_id: existingPolicy.id,
-        returned_at: r.returned_at ? new Date(r.returned_at).toISOString() : new Date().toISOString(),
+        returned_at: r.returned_at ? italyLocalToUtc(r.returned_at) : new Date().toISOString(),
         return_shop_id: shopId
       };
       const { data: rItem, error: returnError } = await supabaseClient.from('returns').insert(newReturn).select('id').single();
       if (returnError) return { status: 500, policyId: null, message: `[RETURN] ${getErrorMessage(returnError)}` };
-
+      
       const policyData = {
         status: 'cancelled',
         return_id: rItem.id,
+        cancelled_at: r.returned_at ? italyLocalToUtc(r.returned_at) : new Date().toISOString(),
         external_request_id: externalRequest.id,
         updated_at: 'now()'
       };

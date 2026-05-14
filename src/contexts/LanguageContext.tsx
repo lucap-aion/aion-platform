@@ -232,7 +232,7 @@ const translations: Translations = {
   "aiQuery.placeholder": { en: "Ask anything about the data…", it: "Chiedi qualsiasi cosa sui dati…" },
   "aiQuery.disclaimer": { en: "Results are capped at 1000 rows. The assistant can occasionally get SQL wrong — verify before acting.", it: "I risultati sono limitati a 1000 righe. L'assistente può sbagliare la query — verifica prima di agire." },
   "aiQuery.empty.title": { en: "Ask anything", it: "Chiedi qualsiasi cosa" },
-  "aiQuery.empty.subtitle": { en: "The assistant writes read-only SQL and answers with a summary, table and chart.", it: "L'assistente scrive SQL in sola lettura e risponde con un riepilogo, una tabella e un grafico." },
+  "aiQuery.empty.subtitle": { en: "The assistant understands and answers with a summary, table and chart.", it: "L'assistente capisce e risponde con un riepilogo, una tabella e un grafico." },
   "aiQuery.loadingChat": { en: "Loading chat…", it: "Caricamento chat…" },
   "aiQuery.thinking": { en: "Thinking…", it: "Analizzando…" },
   "aiQuery.row": { en: "row", it: "riga" },
