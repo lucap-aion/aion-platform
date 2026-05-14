@@ -7,8 +7,8 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowUp, ChevronDown, ChevronRight, Download, Loader2, MessageSquarePlus,
-  Sparkles, Trash2,
+  ArrowUp, ChevronDown, ChevronRight, Download, FileSpreadsheet, Loader2,
+  MessageSquarePlus, Sparkles, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -65,6 +65,11 @@ const SUGGESTION_KEYS = [
   "aiQuery.suggestion.3",
   "aiQuery.suggestion.4",
   "aiQuery.suggestion.5",
+];
+
+const REPORT_KEYS = [
+  "aiQuery.report.monthlyInternal",
+  "aiQuery.report.monthlyInternalPrevious",
 ];
 
 const CHART_COLORS = ["#B8860B", "#2A7B5B", "#5B7FA5", "#C45A3C", "#8B6DAE", "#A0A0A0"];
@@ -765,24 +770,50 @@ const EmptyState = ({ onPick }: { onPick: (q: string) => void }) => {
       </div>
       <h2 className="text-xl font-semibold text-foreground">{t("aiQuery.empty.title")}</h2>
       <p className="mt-1 text-sm text-muted-foreground">{t("aiQuery.empty.subtitle")}</p>
-      <div className="mt-8 grid w-full grid-cols-1 gap-2 text-left sm:grid-cols-2">
-        {SUGGESTION_KEYS.map((key) => {
-          const label = t(key);
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onPick(label)}
-              className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
+
+      <EmptySection
+        title={t("aiQuery.section.suggestions")}
+        items={SUGGESTION_KEYS.map((key) => ({ key, label: t(key), icon: Sparkles }))}
+        onPick={onPick}
+      />
+
+      <EmptySection
+        title={t("aiQuery.section.reports")}
+        items={REPORT_KEYS.map((key) => ({ key, label: t(key), icon: FileSpreadsheet }))}
+        onPick={onPick}
+      />
     </div>
   );
 };
+
+const EmptySection = ({
+  title,
+  items,
+  onPick,
+}: {
+  title: string;
+  items: { key: string; label: string; icon: React.ComponentType<{ className?: string }> }[];
+  onPick: (q: string) => void;
+}) => (
+  <div className="mt-8 w-full">
+    <p className="mb-2 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+      {title}
+    </p>
+    <div className="grid grid-cols-1 gap-2 text-left sm:grid-cols-2">
+      {items.map(({ key, label, icon: Icon }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onPick(label)}
+          className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
+        >
+          <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <span className="flex-1">{label}</span>
+        </button>
+      ))}
+    </div>
+  </div>
+);
 
 const UserBubble = ({ text }: { text: string }) => (
   <div className="flex justify-end">
