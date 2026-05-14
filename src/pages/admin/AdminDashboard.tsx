@@ -492,9 +492,6 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* ── Chubb upload status (alerts admins to failed/missing daily uploads) ── */}
-      <ChubbUploadStatus brands={allBrands} />
-
       {/* ── Row 1: Platform KPIs ── */}
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Platform</p>
@@ -617,6 +614,9 @@ export default function AdminDashboard() {
           )}
         </div>
       </div>
+
+      {/* ── Chubb upload status (alerts admins to failed/missing daily uploads) ── */}
+      <ChubbUploadStatus brands={allBrands} />
     </div>
   );
 }

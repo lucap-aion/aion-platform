@@ -109,6 +109,7 @@ async function parseXlsx(arrayBuffer: ArrayBuffer): Promise<{ columns: string[];
 const ChubbUploadStatus = ({ brands }: { brands: BrandLite[] }) => {
   const { t, locale } = useLanguage();
   const [rows, setRows] = useState<ReportRow[]>([]);
+  const [chubbBrands, setChubbBrands] = useState<BrandLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
@@ -116,24 +117,31 @@ const ChubbUploadStatus = ({ brands }: { brands: BrandLite[] }) => {
     setLoading(true);
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - LOOKBACK_DAYS);
-    const { data, error } = await supabase
-      .from("reports")
-      .select(
-        "id, brand_id, name, type, direction, source, url, upload_status, upload_error, upload_attempts, row_count, start_date, end_date, created_at",
-      )
-      .in("type", ["policies", "claims"])
-      .eq("direction", "Outbound")
-      .eq("source", "automated")
-      .gte("created_at", since.toISOString())
-      .order("created_at", { ascending: false })
-      .limit(80);
-    if (error) {
-      console.error("[chubb-status]", error);
+    const [reportsRes, brandsRes] = await Promise.all([
+      supabase
+        .from("reports")
+        .select(
+          "id, brand_id, name, type, direction, source, url, upload_status, upload_error, upload_attempts, row_count, start_date, end_date, created_at",
+        )
+        .in("type", ["policies", "claims"])
+        .eq("direction", "Outbound")
+        .eq("source", "automated")
+        .gte("created_at", since.toISOString())
+        .order("created_at", { ascending: false })
+        .limit(80),
+      supabase
+        .from("brands")
+        .select("id, name")
+        .eq("enable_chubb_reporting", true),
+    ]);
+    if (reportsRes.error) {
+      console.error("[chubb-status]", reportsRes.error);
       toast.error(t("chubbStatus.loadFailed"));
       setLoading(false);
       return;
     }
-    setRows((data ?? []) as ReportRow[]);
+    setRows((reportsRes.data ?? []) as ReportRow[]);
+    setChubbBrands((brandsRes.data ?? []) as BrandLite[]);
     setLoading(false);
   }, [t]);
 
@@ -157,8 +165,55 @@ const ChubbUploadStatus = ({ brands }: { brands: BrandLite[] }) => {
     return c;
   }, [rows]);
 
+  // Alert detection: failed rows, pending > 24h, missing yesterday upload per
+  // Chubb-enabled brand (policies type only — claims aren't sent every day).
+  const alert = useMemo(() => {
+    const failedCount = rows.filter((r) => r.upload_status === "failed").length;
+    const stuckCutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const pendingStuckCount = rows.filter(
+      (r) => r.upload_status === "pending" && new Date(r.created_at).getTime() < stuckCutoff,
+    ).length;
+    // yesterday in UTC, YYYY-MM-DD
+    const y = new Date();
+    y.setUTCDate(y.getUTCDate() - 1);
+    const yesterdayIso = y.toISOString().slice(0, 10);
+    const haveYesterday = new Set(
+      rows
+        .filter((r) => r.type === "policies" && (r.start_date ?? "").slice(0, 10) === yesterdayIso)
+        .map((r) => r.brand_id),
+    );
+    const missingYesterday = chubbBrands.filter((b) => !haveYesterday.has(b.id));
+    const hasAny = failedCount > 0 || pendingStuckCount > 0 || missingYesterday.length > 0;
+    return { hasAny, failedCount, pendingStuckCount, missingYesterday };
+  }, [rows, chubbBrands]);
+
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <div className="space-y-4">
+      {alert.hasAny && !loading && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-destructive">
+            <AlertTriangle className="h-4 w-4" />
+            {t("chubbStatus.alert.title")}
+          </div>
+          <ul className="mt-2 ml-6 list-disc space-y-0.5 text-xs text-foreground/80">
+            {alert.failedCount > 0 && (
+              <li>{t("chubbStatus.alert.failed").replace("{n}", String(alert.failedCount))}</li>
+            )}
+            {alert.pendingStuckCount > 0 && (
+              <li>{t("chubbStatus.alert.pendingStuck").replace("{n}", String(alert.pendingStuckCount))}</li>
+            )}
+            {alert.missingYesterday.length > 0 && (
+              <li>
+                {t("chubbStatus.alert.missingYesterday").replace(
+                  "{brands}",
+                  alert.missingYesterday.map((b) => b.name ?? `Brand #${b.id}`).join(", "),
+                )}
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
+      <div className="rounded-xl border border-border bg-card">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-5 py-3">
         <div className="flex items-center gap-2">
@@ -226,6 +281,7 @@ const ChubbUploadStatus = ({ brands }: { brands: BrandLite[] }) => {
           ))}
         </ul>
       )}
+      </div>
     </div>
   );
 };
