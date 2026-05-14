@@ -215,7 +215,7 @@ const translations: Translations = {
 
   // Admin — Ask the data (AI query chat)
   "aiQuery.title": { en: "Ask the data", it: "Interroga i dati" },
-  "aiQuery.subtitle": { en: "Natural-language questions across the AION database. Read-only.", it: "Domande in linguaggio naturale sul database AION. Sola lettura." },
+  "aiQuery.subtitle": { en: "Ask questions to our AION database. Read-only.", it: "Fai domande sul database AION. Sola lettura." },
   "aiQuery.newChat": { en: "New chat", it: "Nuova chat" },
   "aiQuery.noChats": { en: "No chats yet", it: "Nessuna chat" },
   "aiQuery.placeholder": { en: "Ask anything about the data…", it: "Chiedi qualsiasi cosa sui dati…" },
