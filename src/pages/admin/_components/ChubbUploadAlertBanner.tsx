@@ -10,7 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { parseCsv, parseXlsx } from "./chubbReportParsers";
 
-const LOOKBACK_DAYS = 14;
+const LOOKBACK_DAYS = 3;
 const STUCK_PENDING_MS = 24 * 60 * 60 * 1000;
 const POLICIES_BUCKET = "policies_daily_reports";
 
