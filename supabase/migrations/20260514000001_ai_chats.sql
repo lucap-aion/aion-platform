@@ -16,6 +16,9 @@ create index if not exists ai_chats_admin_updated_idx
 
 alter table public.ai_chats enable row level security;
 
+grant select, insert, update, delete on public.ai_chats to authenticated;
+grant all on public.ai_chats to service_role;
+
 drop policy if exists "ai_chats: owner select" on public.ai_chats;
 create policy "ai_chats: owner select"
   on public.ai_chats for select
