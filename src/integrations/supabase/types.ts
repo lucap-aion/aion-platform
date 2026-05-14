@@ -822,9 +822,13 @@ export type Database = {
           end_date: string | null
           id: number
           name: string
+          row_count: number | null
           source: string | null
           start_date: string | null
           type: string | null
+          upload_attempts: number | null
+          upload_error: string | null
+          upload_status: string | null
           uploaded_to_chubb: boolean | null
           uploaded_to_chubb_at: string | null
           uploaded_to_chubb_by: string | null
@@ -838,9 +842,13 @@ export type Database = {
           end_date?: string | null
           id?: number
           name: string
+          row_count?: number | null
           source?: string | null
           start_date?: string | null
           type?: string | null
+          upload_attempts?: number | null
+          upload_error?: string | null
+          upload_status?: string | null
           uploaded_to_chubb?: boolean | null
           uploaded_to_chubb_at?: string | null
           uploaded_to_chubb_by?: string | null
@@ -854,9 +862,13 @@ export type Database = {
           end_date?: string | null
           id?: number
           name?: string
+          row_count?: number | null
           source?: string | null
           start_date?: string | null
           type?: string | null
+          upload_attempts?: number | null
+          upload_error?: string | null
+          upload_status?: string | null
           uploaded_to_chubb?: boolean | null
           uploaded_to_chubb_at?: string | null
           uploaded_to_chubb_by?: string | null
