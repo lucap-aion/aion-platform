@@ -194,17 +194,25 @@ GROUP BY s.cohort ORDER BY s.cohort;
 # Report generation
 - generate_monthly_internal_report({year, month, brand_id?}) creates the
   standard "Monthly Internal Policies Report" (Excel) for each Chubb-reporting
-  brand, uploads it to storage, and returns one signed download URL per brand.
-  Use whenever the user asks for "the monthly report", "the internal report",
-  "the Chubb internal report for X", an Excel of "the policies for <month>",
-  or similar phrasings.
-- If month/year are omitted, the tool defaults to the previous month.
-- If the user names a brand but not the id, first call run_sql to look up the
-  brand id ("SELECT id, name FROM brands WHERE lower(name) LIKE '%<name>%'"),
-  then pass that integer as brand_id.
-- After the tool returns, summarise plainly which brands were generated and
-  for which month. Don't paste URLs into prose — the client renders download
-  cards from the same tool result.
+  brand. Use for "the monthly report", "the internal report", "the Chubb
+  internal report for X". Defaults to the previous month if month/year are
+  omitted.
+- generate_daily_chubb_export({date, kind, brand_id?}) creates the daily
+  Chubb-formatted file. kind:
+    • "new_policies" — SalesFile CSV of policies that went live on the date
+      (matches aion_services run_daily_policies_report).
+    • "cancelled_policies" — SalesFile CSV of policies cancelled on the date.
+    • "claims" — Claims XLSX of claims reported on the date.
+  Defaults: date = yesterday, kind = "new_policies". This generates the
+  download only; it does NOT push to Chubb's SFTP — that stays on the
+  existing cron in aion_services. Use for asks like "give me yesterday's
+  Chubb file", "daily sales file for Roberto Coin", "today's cancellation
+  report", "today's claims for Chubb".
+- For both tools: if the user names a brand but not the id, first call
+  run_sql to look up brands.id, then pass that integer as brand_id.
+- After either tool returns, summarise plainly which brands were generated
+  and for which date/month. Don't paste URLs into prose — the client renders
+  download cards from the same tool result.
 
 # Output style
 - Reply with a short summary (1–3 sentences). Markdown is fine; tables are
@@ -241,6 +249,40 @@ const TOOLS = [
         title: { type: "string" },
       },
       required: ["type", "x_key", "y_keys"],
+    },
+  },
+  {
+    name: "generate_daily_chubb_export",
+    description:
+      "Generate the daily Chubb-formatted export (CSV or XLSX) for a given " +
+      "date. `kind` picks which export: 'new_policies' for the SalesFile of " +
+      "policies that started that day (status=live), 'cancelled_policies' " +
+      "for the cancellation SalesFile (status=cancelled, cancelled that " +
+      "day), 'claims' for the daily Claims XLSX (status=open, reported that " +
+      "day). Defaults to yesterday. Returns one signed download URL per " +
+      "Chubb-reporting brand. Does NOT push to Chubb SFTP — that stays on " +
+      "the existing cron in aion_services.",
+    input_schema: {
+      type: "object",
+      properties: {
+        date: {
+          type: "string",
+          description:
+            "Date in YYYY-MM-DD format. Defaults to yesterday (UTC).",
+        },
+        kind: {
+          type: "string",
+          enum: ["new_policies", "cancelled_policies", "claims"],
+          description:
+            "Which export to generate. Defaults to 'new_policies'.",
+        },
+        brand_id: {
+          type: "integer",
+          description:
+            "Optional brand id to scope to one brand. Look up via run_sql if " +
+            "the user only names the brand.",
+        },
+      },
     },
   },
   {
@@ -470,6 +512,61 @@ Deno.serve(async (req: Request) => {
                 tool_use_id: block.id,
                 content: "chart spec accepted",
               });
+            } else if (block.name === "generate_daily_chubb_export") {
+              try {
+                const dailyRes = await fetch(
+                  `${SUPABASE_URL}/functions/v1/generate-daily-chubb-export`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Authorization": authHeader,
+                      "apikey": SUPABASE_ANON_KEY,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      date: block.input?.date ?? null,
+                      kind: block.input?.kind ?? "new_policies",
+                      brand_id: block.input?.brand_id ?? null,
+                    }),
+                  },
+                );
+                const payload = await dailyRes.json().catch(() => ({}));
+                if (!dailyRes.ok) {
+                  toolResults.push({
+                    type: "tool_result",
+                    tool_use_id: block.id,
+                    is_error: true,
+                    content: `Daily export failed: ${
+                      payload?.error ?? `HTTP ${dailyRes.status}`
+                    }`,
+                  });
+                } else {
+                  const reports = Array.isArray(payload?.reports)
+                    ? payload.reports
+                    : [];
+                  emit("report_files", { reports });
+                  toolResults.push({
+                    type: "tool_result",
+                    tool_use_id: block.id,
+                    content: JSON.stringify({
+                      generated: reports.length,
+                      brands: reports.map((r: any) => ({
+                        brand_name: r.brand_name,
+                        row_count: r.row_count,
+                        date: r.date,
+                        kind: r.kind,
+                      })),
+                    }),
+                  });
+                }
+              } catch (e: any) {
+                toolResults.push({
+                  type: "tool_result",
+                  tool_use_id: block.id,
+                  is_error: true,
+                  content: `Daily export crashed: ${e?.message ?? "unknown"}`,
+                });
+              }
             } else if (block.name === "generate_monthly_internal_report") {
               try {
                 const reportRes = await fetch(

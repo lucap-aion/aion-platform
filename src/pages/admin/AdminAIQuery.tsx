@@ -34,8 +34,11 @@ type ReportFile = {
   filename: string;
   url: string;
   row_count: number;
-  year: number;
-  month: number;
+  // Monthly reports emit year + month; daily reports emit date (YYYY-MM-DD).
+  year?: number;
+  month?: number;
+  date?: string;
+  kind?: string;
 };
 
 type AssistantMessage = {
@@ -70,6 +73,9 @@ const SUGGESTION_KEYS = [
 const REPORT_KEYS = [
   "aiQuery.report.monthlyInternal",
   "aiQuery.report.monthlyInternalPrevious",
+  "aiQuery.report.dailyNewPolicies",
+  "aiQuery.report.dailyCancelledPolicies",
+  "aiQuery.report.dailyClaims",
 ];
 
 const CHART_COLORS = ["#B8860B", "#2A7B5B", "#5B7FA5", "#C45A3C", "#8B6DAE", "#A0A0A0"];
@@ -1003,13 +1009,23 @@ const ReportCards = ({
   return (
     <div className="flex flex-col gap-2">
       {reports.map((r) => {
-        const periodLabel = new Intl.DateTimeFormat(bcp, {
-          month: "long",
-          year: "numeric",
-        }).format(new Date(Date.UTC(r.year, r.month - 1, 1)));
+        let periodLabel = "";
+        if (r.date) {
+          const [y, m, d] = r.date.split("-").map(Number);
+          periodLabel = new Intl.DateTimeFormat(bcp, {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          }).format(new Date(Date.UTC(y, m - 1, d)));
+        } else if (r.year && r.month) {
+          periodLabel = new Intl.DateTimeFormat(bcp, {
+            month: "long",
+            year: "numeric",
+          }).format(new Date(Date.UTC(r.year, r.month - 1, 1)));
+        }
         return (
           <a
-            key={`${r.brand_id}-${r.year}-${r.month}`}
+            key={`${r.brand_id}-${r.date ?? `${r.year}-${r.month}`}-${r.kind ?? ""}`}
             href={r.url}
             target="_blank"
             rel="noopener noreferrer"
