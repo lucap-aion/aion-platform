@@ -223,7 +223,7 @@ const translations: Translations = {
   "aiQuery.empty.title": { en: "Ask anything", it: "Chiedi qualsiasi cosa" },
   "aiQuery.empty.subtitle": { en: "The assistant writes read-only SQL and answers with a summary, table and chart.", it: "L'assistente scrive SQL in sola lettura e risponde con un riepilogo, una tabella e un grafico." },
   "aiQuery.loadingChat": { en: "Loading chat…", it: "Caricamento chat…" },
-  "aiQuery.thinking": { en: "Querying the database…", it: "Interrogazione del database…" },
+  "aiQuery.thinking": { en: "Thinking…", it: "Analizzando…" },
   "aiQuery.row": { en: "row", it: "riga" },
   "aiQuery.rows": { en: "rows", it: "righe" },
   "aiQuery.showAll": { en: "Show all", it: "Mostra tutte" },
