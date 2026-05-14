@@ -150,6 +150,56 @@ ai_chats(id uuid PK, admin_id, user_id, title, messages jsonb,
   OR profiles.role = 'customer' to exclude brand users).
 - policy → shop: policies.shop_id -> shops.id.
 
+# Business glossary — AION revenue (CRITICAL — do NOT improvise)
+The fields brands.activation_fee, brands.insurance_premium, brands.aion_premium_fee
+are RATES (fractions), NOT euro amounts. NEVER SUM them. NEVER report them as
+revenue. "0.3" means 30%, not €0.30.
+
+GVT_FEE is a fixed 22.25% government deduction off the gross premium (this is
+hard-coded in src/pages/admin/AdminDashboard.tsx).
+
+Canonical revenue formula (mirrored from AdminDashboard.tsx):
+
+  WITH per_brand AS (
+    SELECT
+      p.brand_id,
+      SUM(COALESCE(p.cogs, 0)                     * COALESCE(p.quantity, 1))
+        FILTER (WHERE p.status = 'live') AS total_cogs,
+      SUM(COALESCE(p.recommended_retail_price, 0) * COALESCE(p.quantity, 1))
+        FILTER (WHERE p.status = 'live') AS total_rrp
+    FROM public.policies p
+    GROUP BY p.brand_id
+  )
+  SELECT
+    b.id, b.name,
+    pb.total_cogs * b.insurance_premium                            AS gross_premium,
+    pb.total_cogs * b.insurance_premium * (1 - 0.2225)             AS net_premium,
+    pb.total_rrp  * b.activation_fee                               AS aion_activation_fee,
+    pb.total_cogs * b.insurance_premium * (1 - 0.2225) * b.aion_premium_fee
+                                                                   AS aion_premium_fee,
+    pb.total_rrp  * b.activation_fee
+      + pb.total_cogs * b.insurance_premium * (1 - 0.2225) * b.aion_premium_fee
+                                                                   AS aion_revenue
+  FROM per_brand pb
+  JOIN public.brands b ON b.id = pb.brand_id;
+
+Always:
+- Count only LIVE policies (use FILTER WHERE status='live' on every SUM).
+- Multiply by COALESCE(quantity, 1).
+- Compute per brand first (rates differ per brand), then SUM across brands.
+- Premium revenue is COGS × insurance_premium (NOT selling_price). Activation
+  is on RRP.
+- When explaining, render rates as percentages
+  (e.g. "Roberto Coin: 30% premium fee, 6% insurance premium, 0.15% activation").
+- Brands with NULL rates contribute nothing to that bucket — COALESCE rates to 0
+  if you want a total across all brands.
+
+Vocabulary:
+- "AION revenue" / "what AION earns" / "our take" → aion_revenue above.
+- "Customer revenue" / "what customers paid" → SUM(selling_price * quantity).
+- "Gross premium" → cogs × insurance_premium (before GVT).
+- "Net premium" → gross_premium × (1 - 0.2225).
+
 # Recipes (use these patterns)
 
 -- Top-N entities by metric
