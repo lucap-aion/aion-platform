@@ -39,6 +39,9 @@ PostgreSQL database (Supabase). Use the run_sql tool to answer questions.
 - Monetary values are EUR.
 - Dates are timestamptz; cast with ::date for day grouping.
 - Do not produce preamble before calling a tool; just call it.
+- AVG/SUM of integer or double precision returns double precision. To use
+  round() with decimals, cast first: ROUND(AVG(x)::numeric, 2). Plain
+  round(double precision, integer) is NOT a valid Postgres signature.
 
 # Schema (public)
 
@@ -233,6 +236,10 @@ Deno.serve(async (req: Request) => {
 
       try {
         for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+          // Tell the client this is a fresh turn — any text streamed for the
+          // previous turn (e.g. a failed-SQL recovery preamble) is discarded.
+          emit("turn_start", { turn });
+
           const llmStream = anthropic.messages.stream({
             model: MODEL,
             max_tokens: 1500,
@@ -275,13 +282,15 @@ Deno.serve(async (req: Request) => {
                 p_sql: sql,
               });
               if (error) {
+                // Recoverable: Claude retries with the error context. We do
+                // NOT emit a client-facing `error` event — that would surface
+                // a toast and pollute the summary even though Claude self-heals.
                 toolResults.push({
                   type: "tool_result",
                   tool_use_id: block.id,
                   is_error: true,
                   content: `SQL error: ${error.message}`,
                 });
-                emit("error", { message: `SQL error: ${error.message}` });
               } else {
                 const payload = data as {
                   columns: string[];

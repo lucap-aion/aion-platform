@@ -260,7 +260,11 @@ function handleEvent(
   data: any,
   patch: (fn: (m: AssistantMessage) => AssistantMessage) => void,
 ) {
-  if (event === "text_delta") {
+  if (event === "turn_start") {
+    // Discard any text streamed during a previous turn (e.g. a recovery
+    // attempt after a failed SQL) so only the final-answer text remains.
+    patch((m) => ({ ...m, summary: "" }));
+  } else if (event === "text_delta") {
     patch((m) => ({ ...m, summary: m.summary + (data?.text ?? "") }));
   } else if (event === "sql_result") {
     patch((m) => ({
