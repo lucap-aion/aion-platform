@@ -9,6 +9,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUrlParam } from "@/hooks/useListUrlState";
+import ChubbUploadStatus from "./_components/ChubbUploadStatus";
 
 const GVT_FEE = 0.2225;
 
@@ -490,6 +491,9 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      {/* ── Chubb upload status (alerts admins to failed/missing daily uploads) ── */}
+      <ChubbUploadStatus brands={allBrands} />
 
       {/* ── Row 1: Platform KPIs ── */}
       <div>

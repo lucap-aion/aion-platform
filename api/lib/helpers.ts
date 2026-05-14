@@ -44,6 +44,12 @@ export function getErrorMessage(error: unknown): string {
 }
 
 export function italyLocalToUtc(dateString: string): string {
+  // If the input already carries an explicit timezone (Z or ±HH[:]MM),
+  // it's not Italy-local-without-tz — trust it and normalize.
+  if (/Z$|[+-]\d{2}:?\d{2}$/.test(dateString)) {
+    return new Date(dateString).toISOString();
+  }
+
   const [datePart, timePart] = dateString.split('T');
   const [year, month, day] = datePart.split('-').map(Number);
   const [hour, minute, secondFraction] = timePart.split(':');

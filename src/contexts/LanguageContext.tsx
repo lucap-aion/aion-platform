@@ -265,6 +265,31 @@ const translations: Translations = {
   "aiQuery.report.dailyNewPolicies": { en: "Daily Chubb sales file (new policies) for yesterday.", it: "File Chubb giornaliero (nuove polizze) di ieri." },
   "aiQuery.report.dailyCancelledPolicies": { en: "Daily Chubb sales file (cancellations) for yesterday.", it: "File Chubb giornaliero (cancellazioni) di ieri." },
   "aiQuery.report.dailyClaims": { en: "Daily Chubb claims report for yesterday.", it: "Report Chubb giornaliero dei sinistri di ieri." },
+
+  // Admin home — Chubb upload status widget
+  "chubbStatus.title": { en: "Chubb daily uploads", it: "Caricamenti giornalieri Chubb" },
+  "chubbStatus.lastNDays": { en: "last {n} days", it: "ultimi {n} giorni" },
+  "chubbStatus.loading": { en: "Loading recent uploads…", it: "Caricamento upload recenti…" },
+  "chubbStatus.empty": { en: "No uploads to show.", it: "Nessun upload da mostrare." },
+  "chubbStatus.loadFailed": { en: "Couldn't load upload history", it: "Impossibile caricare la cronologia degli upload" },
+  "chubbStatus.loadingFile": { en: "Loading file rows…", it: "Caricamento righe del file…" },
+  "chubbStatus.fileError": { en: "Couldn't load file", it: "Impossibile caricare il file" },
+  "chubbStatus.noFile": { en: "No file attached to this report.", it: "Nessun file associato a questo report." },
+  "chubbStatus.truncated": { en: "Showing first {shown} of {total} rows.", it: "Mostrate prime {shown} di {total} righe." },
+  "chubbStatus.colsHidden": { en: "{shown} of {total} columns shown (empty ones hidden)", it: "{shown} di {total} colonne mostrate (vuote nascoste)" },
+  "chubbStatus.refresh": { en: "Refresh", it: "Aggiorna" },
+  "chubbStatus.attempts": { en: "attempts", it: "tentativi" },
+  "chubbStatus.errorLabel": { en: "Error returned by Chubb SFTP", it: "Errore restituito dall'SFTP di Chubb" },
+  "chubbStatus.failed": { en: "failed", it: "falliti" },
+  "chubbStatus.pending": { en: "pending", it: "in attesa" },
+  "chubbStatus.ok": { en: "ok", it: "ok" },
+  "chubbStatus.typePolicies": { en: "Policies", it: "Polizze" },
+  "chubbStatus.typeClaims": { en: "Claims", it: "Sinistri" },
+  "chubbStatus.status.success": { en: "Success", it: "Successo" },
+  "chubbStatus.status.failed": { en: "Failed", it: "Fallito" },
+  "chubbStatus.status.pending": { en: "Pending", it: "In attesa" },
+  "chubbStatus.status.na": { en: "N/A", it: "N/D" },
+  "chubbStatus.status.unknown": { en: "Unknown", it: "Sconosciuto" },
 };
 
 interface LanguageContextType {

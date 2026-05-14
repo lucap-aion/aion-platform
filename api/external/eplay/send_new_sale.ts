@@ -1,10 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { parseSaleFromEplay } from '../../lib/eplay.js';
+import { parseSaleFromEplay, verifyEplayCredential } from '../../lib/eplay.js';
 import { cleanAndParseJSON } from '../../lib/helpers.js';
-
-function verifyToken(token: string | null): boolean {
-  return token === `Bearer ${process.env.EPLAY_TOKEN}`;
-}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -15,8 +11,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
 
   try {
-    const token = req.headers['x-api-key'] as string | null;
-    if (!token || !verifyToken(token)) {
+    const header = req.headers['x-api-key'] as string | null;
+    const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : null;
+    const credential = token ? await verifyEplayCredential(token) : null;
+    if (!credential) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
@@ -25,7 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ message: 'Error in processing the request body payload.' });
     }
 
-    const { status, message, results } = await parseSaleFromEplay(body.sale);
+    const { status, message, results } = await parseSaleFromEplay(body.sale, credential);
     return res.status(status).json({ message, results });
   } catch (error) {
     console.error('API Error:', error);

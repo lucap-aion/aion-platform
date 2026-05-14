@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
+    PostgrestVersion: "12.2.3 (519615d)"
   }
   public: {
     Tables: {
@@ -586,13 +586,11 @@ export type Database = {
           quantity: number | null
           recommended_retail_price: number | null
           return_id: number | null
-          row_id: string | null
           selling_price: number | null
           shop_id: number | null
           source: string | null
           start_date: string
           status: string | null
-          sub_order_code: string | null
           transferred_at: string | null
           updated_at: string | null
         }
@@ -618,13 +616,11 @@ export type Database = {
           quantity?: number | null
           recommended_retail_price?: number | null
           return_id?: number | null
-          row_id?: string | null
           selling_price?: number | null
           shop_id?: number | null
           source?: string | null
           start_date: string
           status?: string | null
-          sub_order_code?: string | null
           transferred_at?: string | null
           updated_at?: string | null
         }
@@ -650,13 +646,11 @@ export type Database = {
           quantity?: number | null
           recommended_retail_price?: number | null
           return_id?: number | null
-          row_id?: string | null
           selling_price?: number | null
           shop_id?: number | null
           source?: string | null
           start_date?: string
           status?: string | null
-          sub_order_code?: string | null
           transferred_at?: string | null
           updated_at?: string | null
         }
@@ -1236,3 +1230,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

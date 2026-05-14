@@ -1,6 +1,20 @@
 import { supabaseClient } from './supabase.js';
 import { getErrorMessage, getYearsAfter, italyLocalToUtc, convertKeysToCamelCase } from './helpers.js';
 
+export type EplayCredential = { id: number; brand_id: number };
+
+export async function verifyEplayCredential(token: string): Promise<EplayCredential | null> {
+  if (!token) return null;
+  const { data } = await supabaseClient
+    .from('external_api_credentials')
+    .select('id, brand_id')
+    .eq('provider', 'eplay')
+    .eq('token', token)
+    .eq('is_active', true)
+    .maybeSingle();
+  return data ?? null;
+}
+
 function duplicateSales(sale: any): any[] {
   if (sale.quantity === 1) return [sale];
   return Array.from({ length: sale.quantity }, (_, i) => ({
@@ -10,11 +24,15 @@ function duplicateSales(sale: any): any[] {
   }));
 }
 
-async function calculateCategoryCogs(category: any, recommendedRetailPrice: number): Promise<{ cogs: number }> {
+async function calculateCategoryCogs(
+  category: any,
+  recommendedRetailPrice: number,
+  brandId: number
+): Promise<{ cogs: number }> {
   const { data: manufacturingCosts } = await supabaseClient
     .from('manufacturing_costs')
     .select('category, cost_pct')
-    .eq('brand_id', 2);
+    .eq('brand_id', brandId);
 
   const costs = convertKeysToCamelCase(manufacturingCosts ?? []);
   const item = costs.find((c: any) => c.category.toUpperCase() === category.toUpperCase());
@@ -22,11 +40,12 @@ async function calculateCategoryCogs(category: any, recommendedRetailPrice: numb
   return { cogs: recommendedRetailPrice * factor };
 }
 
-export async function parseSaleFromEplay(sale: any): Promise<any> {
+export async function parseSaleFromEplay(sale: any, credential: EplayCredential): Promise<any> {
   try {
     // RAW REQUEST
     const req = {
-      brand_id: 2,
+      brand_id: credential.brand_id,
+      credential_id: credential.id,
       sale_id: sale.id,
       row_id: sale.row_id,
       request: sale,
@@ -41,13 +60,13 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
       let key = sale.customer.email ? 'email' : 'last_name';
       let field = sale.customer.email ? sale.customer.email : sale.customer.last_name;
 
-      const { data: existingCustomers } = await supabaseClient.from('profiles').select('*').eq(key, field).eq('brand_id', 2);
+      const { data: existingCustomers } = await supabaseClient.from('profiles').select('*').eq(key, field).eq('brand_id', credential.brand_id);
 
       if (!existingCustomers || existingCustomers.length === 0) {
         sale.customer.email = sale.customer.email ? sale.customer.email : `${sale.customer.first_name} ${sale.customer.last_name}`;
         sale.customer.role = 'customer';
         sale.customer.status = 'pending';
-        sale.customer.brand_id = 2;
+        sale.customer.brand_id = credential.brand_id;
 
         const { data: customer, error: customerError } = await supabaseClient.from('profiles').insert(sale.customer).select('id').single();
         if (customerError) return { status: 500, item: undefined, message: getErrorMessage(customerError) };
@@ -64,7 +83,7 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
     if (!existingItems || existingItems.length === 0) {
       const { recommended_retail_price, selling_price, id, ...catalogueItem } = sale.item;
       catalogueItem.brand_item_id = id;
-      catalogueItem.brand_id = 2;
+      catalogueItem.brand_id = credential.brand_id;
       catalogueItem.slug = catalogueItem.name.replaceAll(/[^a-zA-Z0-9]/g, '').toLowerCase();
       catalogueItem.category = catalogueItem.category.toUpperCase().replace(/([^S])$/, '$1S');
 
@@ -81,12 +100,12 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
     }
 
     // SHOP
-    const { data: existingShops } = await supabaseClient.from('shops').select('id').eq('brand_id', 2).eq('brand_shop_id', sale.shop.id);
+    const { data: existingShops } = await supabaseClient.from('shops').select('id').eq('brand_id', credential.brand_id).eq('brand_shop_id', sale.shop.id);
 
     let shopId: string | undefined;
     if (!existingShops || existingShops.length === 0) {
       const shopItem = {
-        brand_id: 2,
+        brand_id: credential.brand_id,
         brand_shop_id: sale.shop.id,
         name: sale.shop.name,
         status: 'verified'
@@ -113,7 +132,7 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
         .eq('brand_row_id', s.row_id);
 
       const policyStatus = s.item.recommended_retail_price > 1000 ? 'live' : 'blocked';
-      const { cogs } = await calculateCategoryCogs(item.category.toUpperCase(), s.item.recommended_retail_price);
+      const { cogs } = await calculateCategoryCogs(item.category.toUpperCase(), s.item.recommended_retail_price, credential.brand_id);
 
       if (!existingPolicies || existingPolicies.length === 0) {
         const policyData = {
@@ -123,7 +142,7 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
           customer_id: customerId,
           quantity: s.quantity,
           item_id: item.id,
-          brand_id: 2,
+          brand_id: credential.brand_id,
           shop_id: shopId,
           start_date: s.sellDate ? italyLocalToUtc(s.sellDate) : new Date().toISOString(),
           expiration_date: getYearsAfter(s.sellDate ? italyLocalToUtc(s.sellDate) : new Date().toISOString()),
@@ -174,10 +193,11 @@ export async function parseSaleFromEplay(sale: any): Promise<any> {
 }
 
 // RETURN
-export async function parseReturnFromEplay(r: any): Promise<any> {
+export async function parseReturnFromEplay(r: any, credential: EplayCredential): Promise<any> {
   try {
     const req = {
-      brand_id: 2,
+      brand_id: credential.brand_id,
+      credential_id: credential.id,
       return_id: r.id,
       sale_id: r.sale_id,
       row_id: r.row_id,
@@ -188,12 +208,12 @@ export async function parseReturnFromEplay(r: any): Promise<any> {
     if (requestError) return { status: 500, policyId: null, message: `[EXTERNAL REQUEST] ${getErrorMessage(requestError)}` };
 
     // SHOP
-    const { data: existingShops } = await supabaseClient.from('shops').select('id').eq('brand_id', 2).eq('brand_shop_id', r.shop.id);
+    const { data: existingShops } = await supabaseClient.from('shops').select('id').eq('brand_id', credential.brand_id).eq('brand_shop_id', r.shop.id);
 
     let shopId: string | undefined;
     if (!existingShops || existingShops.length === 0) {
       const shopItem = {
-        brand_id: 2,
+        brand_id: credential.brand_id,
         brand_shop_id: r.shop.id,
         name: r.shop.name,
         status: 'verified'
@@ -226,7 +246,7 @@ export async function parseReturnFromEplay(r: any): Promise<any> {
       };
       const { data: rItem, error: returnError } = await supabaseClient.from('returns').insert(newReturn).select('id').single();
       if (returnError) return { status: 500, policyId: null, message: `[RETURN] ${getErrorMessage(returnError)}` };
-      
+
       const policyData = {
         status: 'cancelled',
         return_id: rItem.id,
@@ -257,10 +277,11 @@ export async function parseReturnFromEplay(r: any): Promise<any> {
 }
 
 // CANCELLATION
-export async function parseCancellationFromEplay(r: any): Promise<any> {
+export async function parseCancellationFromEplay(r: any, credential: EplayCredential): Promise<any> {
   try {
     const req = {
-      brand_id: 2,
+      brand_id: credential.brand_id,
+      credential_id: credential.id,
       sale_id: r.sale_id,
       row_id: r.row_id,
       request: r,
