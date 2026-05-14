@@ -44,7 +44,6 @@ const translations: Translations = {
   "dashboard.completeProfileDesc": { en: "Complete your profile to unlock all features.", it: "Completa il tuo profilo per sbloccare tutte le funzionalità." },
   "dashboard.completeProfileBtn": { en: "Complete Profile", it: "Completa Profilo" },
   "dashboard.heroTitle": { en: "Prestige Protection", it: "Protezione di Prestigio" },
-  "dashboard.heroDesc": { en: "Your luxury pieces deserve world-class coverage. AION Cover safeguards your treasures against theft and accidental damage.", it: "I tuoi pezzi di lusso meritano una copertura di livello mondiale. AION Cover protegge i tuoi tesori da furto e danni accidentali." },
   "dashboard.viewCovers": { en: "View My Covers", it: "Vedi le Mie Coperture" },
   "dashboard.activeCovers": { en: "Active Covers", it: "Coperture Attive" },
   "dashboard.openClaims": { en: "Open Claims", it: "Incidenti Aperti" },
@@ -282,7 +281,8 @@ const translations: Translations = {
   "chubbStatus.alert.title": { en: "Chubb upload issues need attention", it: "Problemi nei caricamenti Chubb da verificare" },
   "chubbStatus.alert.failed": { en: "{n} upload(s) failed in the last 14 days", it: "{n} caricamento/i fallito/i negli ultimi 14 giorni" },
   "chubbStatus.alert.pendingStuck": { en: "{n} upload(s) pending for more than 24 hours", it: "{n} caricamento/i in attesa da oltre 24 ore" },
-  "chubbStatus.alert.missingYesterday": { en: "No upload found for yesterday: {brands}", it: "Nessun caricamento trovato per ieri: {brands}" },
+  "chubbStatus.alert.missingEvents": { en: "{n} cover event(s) not yet uploaded to Chubb", it: "{n} evento/i polizza non ancora caricato/i su Chubb" },
+  "chubbStatus.alert.moreCount": { en: " · +{n} more", it: " · +{n} altri" },
 };
 
 interface LanguageContextType {

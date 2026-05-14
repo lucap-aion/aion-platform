@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUrlParam } from "@/hooks/useListUrlState";
 import ChubbUploadStatus from "./_components/ChubbUploadStatus";
+import ChubbUploadAlertBanner from "./_components/ChubbUploadAlertBanner";
 
 const GVT_FEE = 0.2225;
 
@@ -408,6 +409,9 @@ export default function AdminDashboard() {
 
   return (
     <div className="p-6 md:p-8 space-y-6">
+
+      {/* ── Chubb upload alert (only renders when there are issues) ── */}
+      <ChubbUploadAlertBanner />
 
       {/* ── Header ── */}
       <div className="space-y-4">
