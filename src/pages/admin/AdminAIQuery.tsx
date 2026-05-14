@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 type ChartSpec = {
   type: "bar" | "line" | "pie";
@@ -41,12 +42,12 @@ type ChatSummary = {
   updated_at: string;
 };
 
-const SUGGESTIONS = [
-  "How many customers signed up in the last 30 days, by brand?",
-  "Top 10 products by number of active covers.",
-  "Open claims grouped by brand and claim type.",
-  "Monthly new policies for the last 12 months.",
-  "Average satisfaction rate per brand from feedback.",
+const SUGGESTION_KEYS = [
+  "aiQuery.suggestion.1",
+  "aiQuery.suggestion.2",
+  "aiQuery.suggestion.3",
+  "aiQuery.suggestion.4",
+  "aiQuery.suggestion.5",
 ];
 
 const CHART_COLORS = ["#B8860B", "#2A7B5B", "#5B7FA5", "#C45A3C", "#8B6DAE", "#A0A0A0"];
@@ -87,6 +88,7 @@ const formatRelative = (iso: string) => {
 
 const AdminAIQuery = () => {
   const { adminRecord } = useAuth();
+  const { t, locale } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlChatId = searchParams.get("chat");
 
@@ -134,12 +136,12 @@ const AdminAIQuery = () => {
       .maybeSingle();
     setChatLoading(false);
     if (error || !data) {
-      toast.error("Couldn't load chat");
+      toast.error(t("aiQuery.error.couldntLoad"));
       return;
     }
     setChatId(data.id);
     setMessages((data.messages as Message[]) ?? []);
-  }, []);
+  }, [t]);
 
   // React to ?chat= URL changes (deep links, back/forward)
   useEffect(() => {
@@ -171,7 +173,7 @@ const AdminAIQuery = () => {
           .eq("id", existingId);
         if (error) {
           console.error("[ai-chats update]", error);
-          toast.error(`Couldn't save chat: ${error.message}`);
+          toast.error(`${t("aiQuery.error.couldntSave")}: ${error.message}`);
         }
         return existingId;
       }
@@ -180,7 +182,7 @@ const AdminAIQuery = () => {
       // freshly-claimed admin row, but auth always has the real auth uid.
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        toast.error("Couldn't save chat: not signed in");
+        toast.error(t("aiQuery.error.notSignedIn"));
         return null;
       }
 
@@ -197,12 +199,12 @@ const AdminAIQuery = () => {
 
       if (error || !data) {
         console.error("[ai-chats insert]", error);
-        toast.error(`Couldn't save chat: ${error?.message ?? "unknown error"}`);
+        toast.error(`${t("aiQuery.error.couldntSave")}: ${error?.message ?? t("aiQuery.error.unknown")}`);
         return null;
       }
       return data.id;
     },
-    [adminRecord?.id],
+    [adminRecord?.id, t],
   );
 
   // ── New chat / select chat ─────────────────────────────────────────────────
@@ -221,7 +223,7 @@ const AdminAIQuery = () => {
   const deleteChat = async (id: string) => {
     const { error } = await supabase.from("ai_chats").delete().eq("id", id);
     if (error) {
-      toast.error("Couldn't delete chat");
+      toast.error(t("aiQuery.error.couldntDelete"));
       return;
     }
     setChats((cs) => cs.filter((c) => c.id !== id));
@@ -281,7 +283,7 @@ const AdminAIQuery = () => {
           "Content-Type": "application/json",
           "Accept": "text/event-stream",
         },
-        body: JSON.stringify({ question: text, history: priorHistory }),
+        body: JSON.stringify({ question: text, history: priorHistory, locale }),
       });
 
       if (!res.ok || !res.body) {
@@ -308,15 +310,15 @@ const AdminAIQuery = () => {
           buffer = buffer.slice(idx + 2);
           const { event, data } = parseSse(frame);
           if (!event) continue;
-          handleEvent(event, data, patch);
+          handleEvent(event, data, patch, t);
         }
       }
     } catch (err: any) {
-      const msg = err?.message ?? "Query failed";
+      const msg = err?.message ?? t("aiQuery.error.queryFailed");
       toast.error(msg);
       patch((m) => ({
         ...m,
-        summary: m.summary || `I couldn't answer that — ${msg}.`,
+        summary: m.summary || `${t("aiQuery.error.prefix")}${msg}.`,
         streaming: false,
       }));
     } finally {
@@ -356,13 +358,13 @@ const AdminAIQuery = () => {
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
           >
             <MessageSquarePlus className="h-4 w-4" />
-            New chat
+            {t("aiQuery.newChat")}
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {chats.length === 0 ? (
             <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-              No chats yet
+              {t("aiQuery.noChats")}
             </p>
           ) : (
             <ul className="flex flex-col gap-0.5">
@@ -389,9 +391,9 @@ const AdminAIQuery = () => {
               <Sparkles className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-foreground">Ask the data</h1>
+              <h1 className="text-lg font-semibold text-foreground">{t("aiQuery.title")}</h1>
               <p className="text-xs text-muted-foreground">
-                Natural-language questions across the AION database. Read-only.
+                {t("aiQuery.subtitle")}
               </p>
             </div>
           </div>
@@ -401,7 +403,7 @@ const AdminAIQuery = () => {
           {chatLoading ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading chat…
+              {t("aiQuery.loadingChat")}
             </div>
           ) : messages.length === 0 ? (
             <EmptyState onPick={(q) => send(q)} />
@@ -425,7 +427,7 @@ const AdminAIQuery = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Ask anything about the data…"
+              placeholder={t("aiQuery.placeholder")}
               rows={1}
               disabled={loading}
               className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
@@ -436,13 +438,13 @@ const AdminAIQuery = () => {
               onClick={() => void send(input)}
               disabled={loading || !input.trim()}
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
-              aria-label="Send"
+              aria-label={t("aiQuery.sendAria")}
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
             </button>
           </div>
           <p className="mx-auto mt-2 max-w-4xl text-center text-[11px] text-muted-foreground/60">
-            Results are capped at 1000 rows. The assistant can occasionally get SQL wrong — verify before acting.
+            {t("aiQuery.disclaimer")}
           </p>
         </div>
       </div>
@@ -472,6 +474,7 @@ function handleEvent(
   event: string,
   data: any,
   patch: (fn: (m: AssistantMessage) => AssistantMessage) => void,
+  t: (k: string) => string,
 ) {
   if (event === "turn_start") {
     patch((m) => ({ ...m, summary: "" }));
@@ -489,11 +492,11 @@ function handleEvent(
   } else if (event === "done") {
     patch((m) => ({ ...m, streaming: false, sql: data?.sql ?? m.sql }));
   } else if (event === "error") {
-    const msg = data?.message ?? "Unknown error";
+    const msg = data?.message ?? t("aiQuery.error.unknown");
     toast.error(msg);
     patch((m) => ({
       ...m,
-      summary: m.summary || `I couldn't answer that — ${msg}.`,
+      summary: m.summary || `${t("aiQuery.error.prefix")}${msg}.`,
       streaming: false,
     }));
   }
@@ -511,58 +514,65 @@ const ChatRailItem = ({
   active: boolean;
   onSelect: () => void;
   onDelete: () => void;
-}) => (
-  <div
-    onClick={onSelect}
-    className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
-      active
-        ? "bg-primary/10 text-primary"
-        : "text-foreground hover:bg-muted"
-    }`}
-  >
-    <div className="flex min-w-0 flex-1 flex-col">
-      <span className="truncate text-sm font-medium">{chat.title}</span>
-      <span className="text-[11px] text-muted-foreground">
-        {formatRelative(chat.updated_at)}
-      </span>
-    </div>
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onDelete();
-      }}
-      className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-      aria-label="Delete chat"
+}) => {
+  const { t } = useLanguage();
+  return (
+    <div
+      onClick={onSelect}
+      className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+        active
+          ? "bg-primary/10 text-primary"
+          : "text-foreground hover:bg-muted"
+      }`}
     >
-      <Trash2 className="h-3.5 w-3.5" />
-    </button>
-  </div>
-);
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm font-medium">{chat.title}</span>
+        <span className="text-[11px] text-muted-foreground">
+          {formatRelative(chat.updated_at)}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+        aria-label={t("aiQuery.deleteChatAria")}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+};
 
-const EmptyState = ({ onPick }: { onPick: (q: string) => void }) => (
-  <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
-    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-      <Sparkles className="h-6 w-6 text-primary" />
+const EmptyState = ({ onPick }: { onPick: (q: string) => void }) => {
+  const { t } = useLanguage();
+  return (
+    <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+        <Sparkles className="h-6 w-6 text-primary" />
+      </div>
+      <h2 className="text-xl font-semibold text-foreground">{t("aiQuery.empty.title")}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{t("aiQuery.empty.subtitle")}</p>
+      <div className="mt-8 grid w-full grid-cols-1 gap-2 text-left sm:grid-cols-2">
+        {SUGGESTION_KEYS.map((key) => {
+          const label = t(key);
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onPick(label)}
+              className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
     </div>
-    <h2 className="text-xl font-semibold text-foreground">Ask anything</h2>
-    <p className="mt-1 text-sm text-muted-foreground">
-      The assistant writes read-only SQL and answers with a summary, table and chart.
-    </p>
-    <div className="mt-8 grid w-full grid-cols-1 gap-2 text-left sm:grid-cols-2">
-      {SUGGESTIONS.map((s) => (
-        <button
-          key={s}
-          type="button"
-          onClick={() => onPick(s)}
-          className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
-        >
-          {s}
-        </button>
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 const UserBubble = ({ text }: { text: string }) => (
   <div className="flex justify-end">
@@ -573,6 +583,7 @@ const UserBubble = ({ text }: { text: string }) => (
 );
 
 const AssistantBlock = ({ message }: { message: AssistantMessage }) => {
+  const { t } = useLanguage();
   const { summary, sql, columns, rows, chart, streaming } = message;
   const hasAnything = summary || rows.length > 0 || chart || sql;
 
@@ -580,7 +591,7 @@ const AssistantBlock = ({ message }: { message: AssistantMessage }) => {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
-        <span>Querying the database…</span>
+        <span>{t("aiQuery.thinking")}</span>
       </div>
     );
   }
@@ -614,6 +625,7 @@ const ResultsTable = ({
   columns: string[];
   rows: Record<string, unknown>[];
 }) => {
+  const { t } = useLanguage();
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? rows : rows.slice(0, 25);
 
@@ -621,7 +633,7 @@ const ResultsTable = ({
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-2">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {rows.length.toLocaleString()} {rows.length === 1 ? "row" : "rows"}
+          {rows.length.toLocaleString()} {rows.length === 1 ? t("aiQuery.row") : t("aiQuery.rows")}
         </span>
         {rows.length > 25 && (
           <button
@@ -629,7 +641,7 @@ const ResultsTable = ({
             onClick={() => setExpanded((e) => !e)}
             className="text-xs text-primary hover:underline"
           >
-            {expanded ? "Show first 25" : `Show all ${rows.length}`}
+            {expanded ? t("aiQuery.showFirst") : `${t("aiQuery.showAll")} ${rows.length}`}
           </button>
         )}
       </div>
@@ -665,6 +677,7 @@ const ResultsTable = ({
 };
 
 const SqlBlock = ({ sql }: { sql: string }) => {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   return (
     <div className="rounded-xl border border-border bg-muted/30">
@@ -675,7 +688,7 @@ const SqlBlock = ({ sql }: { sql: string }) => {
       >
         <span className="flex items-center gap-1.5">
           {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-          SQL used
+          {t("aiQuery.sqlUsed")}
         </span>
       </button>
       {open && (

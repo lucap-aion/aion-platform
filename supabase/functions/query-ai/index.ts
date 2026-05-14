@@ -209,6 +209,7 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => ({}));
   question = String(body.question ?? "").trim();
   const history = Array.isArray(body.history) ? body.history : [];
+  const locale = body.locale === "it" ? "it" : "en";
   if (!question) {
     return new Response(
       JSON.stringify({ error: "question is required" }),
@@ -235,6 +236,11 @@ Deno.serve(async (req: Request) => {
       };
 
       try {
+        const languageInstruction =
+          locale === "it"
+            ? "\n\n# Language\nThe user's UI is in Italian. Write your natural-language reply (summary, comments) in Italian. SQL identifiers stay English."
+            : "";
+
         for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
           // Tell the client this is a fresh turn — any text streamed for the
           // previous turn (e.g. a failed-SQL recovery preamble) is discarded.
@@ -249,6 +255,9 @@ Deno.serve(async (req: Request) => {
                 text: SCHEMA_DOC,
                 cache_control: { type: "ephemeral" },
               },
+              ...(languageInstruction
+                ? [{ type: "text" as const, text: languageInstruction }]
+                : []),
             ],
             tools: TOOLS as any,
             messages,
