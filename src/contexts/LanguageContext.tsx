@@ -251,6 +251,9 @@ const translations: Translations = {
   "aiQuery.section.reports": { en: "Reports", it: "Report" },
   "aiQuery.report.monthlyInternal": { en: "Generate the monthly internal report for last month.", it: "Genera il report mensile interno del mese scorso." },
   "aiQuery.report.monthlyInternalPrevious": { en: "Generate the monthly internal report for two months ago.", it: "Genera il report mensile interno di due mesi fa." },
+  "aiQuery.report.dailyNewPolicies": { en: "Daily Chubb sales file (new policies) for yesterday.", it: "File Chubb giornaliero (nuove polizze) di ieri." },
+  "aiQuery.report.dailyCancelledPolicies": { en: "Daily Chubb sales file (cancellations) for yesterday.", it: "File Chubb giornaliero (cancellazioni) di ieri." },
+  "aiQuery.report.dailyClaims": { en: "Daily Chubb claims report for yesterday.", it: "Report Chubb giornaliero dei sinistri di ieri." },
 };
 
 interface LanguageContextType {
