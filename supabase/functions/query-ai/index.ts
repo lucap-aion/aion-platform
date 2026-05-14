@@ -158,8 +158,15 @@ ai_chats(id uuid PK, admin_id, user_id, title, messages jsonb,
   return them as revenue.
 - "Live" rule: financial sums and "Customers" use only status='live'. "Covers"
   is the only metric that counts ALL policy statuses.
-- Quantity rule: every monetary sum is SUM(col * COALESCE(quantity, 1)).
-  Counts (covers, claims, customers, shops) do NOT multiply by quantity.
+- Quantity rule: monetary sums for revenue / premium / activation match what
+  the admin dashboard's RPC actually does, which is SUM(col) WITHOUT a
+  quantity multiplier. (The current admin_dashboard_aggregates and
+  dashboard_policy_stats RPCs, per migration 20260427000010, drop the
+  COALESCE(quantity, 1) factor. A few policies have fractional quantity
+  like 0.5, so this matters — without the multiplier matches the dashboard.)
+  Counts (covers, claims, customers, shops) do NOT multiply by quantity either.
+  Only use SUM(col * quantity) when the question is explicitly about
+  quantity-weighted volume (e.g. "total units sold").
 - Per-brand rule: rates differ per brand. Compute revenue per brand first via
   CTE, then SUM across brands. Brands with NULL rates contribute zero (use
   COALESCE(rate, 0) if mixing all brands).
@@ -167,10 +174,11 @@ ai_chats(id uuid PK, admin_id, user_id, title, messages jsonb,
   src/pages/admin/AdminDashboard.tsx).
 
 ## Revenue stack (canonical, from AdminDashboard.tsx lines 332–347)
-For each brand b and aggregate of its LIVE policies:
-  total_cogs = SUM(cogs    * quantity)
-  total_rrp  = SUM(rrp     * quantity)
-  total_sp   = SUM(selling_price * quantity)
+For each brand b and aggregate of its LIVE policies (NO quantity multiplier —
+matches the deployed admin_dashboard_aggregates RPC):
+  total_cogs = SUM(cogs)
+  total_rrp  = SUM(recommended_retail_price)
+  total_sp   = SUM(selling_price)
 
   gross_premium       = total_cogs * b.insurance_premium
   net_premium         = gross_premium * (1 - 0.2225)
@@ -183,12 +191,9 @@ or any premium/activation breakdown:
 
   WITH per_brand AS (
     SELECT p.brand_id,
-      SUM(COALESCE(p.cogs,0)*COALESCE(p.quantity,1))
-        FILTER (WHERE p.status='live') AS total_cogs,
-      SUM(COALESCE(p.recommended_retail_price,0)*COALESCE(p.quantity,1))
-        FILTER (WHERE p.status='live') AS total_rrp,
-      SUM(COALESCE(p.selling_price,0)*COALESCE(p.quantity,1))
-        FILTER (WHERE p.status='live') AS total_sp
+      SUM(COALESCE(p.cogs,0))                     FILTER (WHERE p.status='live') AS total_cogs,
+      SUM(COALESCE(p.recommended_retail_price,0)) FILTER (WHERE p.status='live') AS total_rrp,
+      SUM(COALESCE(p.selling_price,0))            FILTER (WHERE p.status='live') AS total_sp
     FROM public.policies p GROUP BY p.brand_id
   )
   SELECT b.name,
@@ -251,8 +256,8 @@ and the pool denominator is INDEPENDENT of the "Customers" count above.
 - "AION revenue" / "our take" / "what AION earns"  → aion_revenue (formula above)
 - "Premium revenue" / "AION premium fee"            → premium_revenue
 - "Activation revenue" / "activation fees we took"  → activation_revenue
-- "Customer revenue" / "what customers paid"        → SUM(selling_price * quantity)
-                                                       on LIVE policies
+- "Customer revenue" / "what customers paid"        → SUM(selling_price)
+                                                       on LIVE policies (no qty)
 - "Gross premium"                                   → cogs × insurance_premium
 - "Net premium"                                     → gross_premium × (1 - 0.2225)
 - "Protected value"                                 → SUM(selling_price) WHERE live
@@ -264,13 +269,13 @@ and the pool denominator is INDEPENDENT of the "Customers" count above.
 ## Common pitfalls (the assistant has fallen into these before)
 - Summing the brand rate columns as money — they are fractions.
 - Using selling_price for premium revenue — premium is on COGS, not selling_price.
-- Skipping the * quantity factor on monetary sums.
+- Applying a * quantity factor on monetary sums when matching the dashboard —
+  the deployed RPCs sum the raw column (some policies have qty=0.5).
 - Counting cancelled/expired policies in financial totals — only live counts.
 - Mixing the policy-based "Customers" count with the profile-based engagement
   pool — they are different concepts.
 - Forgetting GVT_FEE (1 - 0.2225) between gross_premium and net_premium.
-- Reporting the "Protected value" with quantity multiplier — it does NOT use one
-  in the canonical brand RPC.
+- (No quantity multiplier anywhere in the canonical RPCs — see Universal rules.)
 
 # Recipes (use these patterns)
 
