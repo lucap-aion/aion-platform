@@ -150,55 +150,127 @@ ai_chats(id uuid PK, admin_id, user_id, title, messages jsonb,
   OR profiles.role = 'customer' to exclude brand users).
 - policy → shop: policies.shop_id -> shops.id.
 
-# Business glossary — AION revenue (CRITICAL — do NOT improvise)
-The fields brands.activation_fee, brands.insurance_premium, brands.aion_premium_fee
-are RATES (fractions), NOT euro amounts. NEVER SUM them. NEVER report them as
-revenue. "0.3" means 30%, not €0.30.
+# Business glossary — CRITICAL (do NOT improvise these; use the exact SQL)
 
-GVT_FEE is a fixed 22.25% government deduction off the gross premium (this is
-hard-coded in src/pages/admin/AdminDashboard.tsx).
+## Universal rules
+- brands.activation_fee, brands.insurance_premium, brands.aion_premium_fee are
+  RATES (fractions). 0.3 = 30%, not €0.30. NEVER SUM them as money. NEVER
+  return them as revenue.
+- "Live" rule: financial sums and "Customers" use only status='live'. "Covers"
+  is the only metric that counts ALL policy statuses.
+- Quantity rule: every monetary sum is SUM(col * COALESCE(quantity, 1)).
+  Counts (covers, claims, customers, shops) do NOT multiply by quantity.
+- Per-brand rule: rates differ per brand. Compute revenue per brand first via
+  CTE, then SUM across brands. Brands with NULL rates contribute zero (use
+  COALESCE(rate, 0) if mixing all brands).
+- Constants: GVT_FEE = 0.2225 (22.25% government deduction; hard-coded in
+  src/pages/admin/AdminDashboard.tsx).
 
-Canonical revenue formula (mirrored from AdminDashboard.tsx):
+## Revenue stack (canonical, from AdminDashboard.tsx lines 332–347)
+For each brand b and aggregate of its LIVE policies:
+  total_cogs = SUM(cogs    * quantity)
+  total_rrp  = SUM(rrp     * quantity)
+  total_sp   = SUM(selling_price * quantity)
+
+  gross_premium       = total_cogs * b.insurance_premium
+  net_premium         = gross_premium * (1 - 0.2225)
+  aion_activation_fee = total_rrp  * b.activation_fee
+  aion_premium_fee    = net_premium * b.aion_premium_fee
+  aion_revenue        = aion_activation_fee + aion_premium_fee
+
+Canonical SQL skeleton — re-use this whenever the user asks about revenue
+or any premium/activation breakdown:
 
   WITH per_brand AS (
-    SELECT
-      p.brand_id,
-      SUM(COALESCE(p.cogs, 0)                     * COALESCE(p.quantity, 1))
-        FILTER (WHERE p.status = 'live') AS total_cogs,
-      SUM(COALESCE(p.recommended_retail_price, 0) * COALESCE(p.quantity, 1))
-        FILTER (WHERE p.status = 'live') AS total_rrp
-    FROM public.policies p
-    GROUP BY p.brand_id
+    SELECT p.brand_id,
+      SUM(COALESCE(p.cogs,0)*COALESCE(p.quantity,1))
+        FILTER (WHERE p.status='live') AS total_cogs,
+      SUM(COALESCE(p.recommended_retail_price,0)*COALESCE(p.quantity,1))
+        FILTER (WHERE p.status='live') AS total_rrp,
+      SUM(COALESCE(p.selling_price,0)*COALESCE(p.quantity,1))
+        FILTER (WHERE p.status='live') AS total_sp
+    FROM public.policies p GROUP BY p.brand_id
   )
-  SELECT
-    b.id, b.name,
-    pb.total_cogs * b.insurance_premium                            AS gross_premium,
-    pb.total_cogs * b.insurance_premium * (1 - 0.2225)             AS net_premium,
-    pb.total_rrp  * b.activation_fee                               AS aion_activation_fee,
+  SELECT b.name,
+    pb.total_cogs * b.insurance_premium                              AS gross_premium,
+    pb.total_cogs * b.insurance_premium * (1 - 0.2225)               AS net_premium,
+    pb.total_rrp  * b.activation_fee                                 AS activation_revenue,
     pb.total_cogs * b.insurance_premium * (1 - 0.2225) * b.aion_premium_fee
-                                                                   AS aion_premium_fee,
+                                                                     AS premium_revenue,
     pb.total_rrp  * b.activation_fee
       + pb.total_cogs * b.insurance_premium * (1 - 0.2225) * b.aion_premium_fee
-                                                                   AS aion_revenue
-  FROM per_brand pb
-  JOIN public.brands b ON b.id = pb.brand_id;
+                                                                     AS aion_revenue
+  FROM per_brand pb JOIN public.brands b ON b.id = pb.brand_id;
 
-Always:
-- Count only LIVE policies (use FILTER WHERE status='live' on every SUM).
-- Multiply by COALESCE(quantity, 1).
-- Compute per brand first (rates differ per brand), then SUM across brands.
-- Premium revenue is COGS × insurance_premium (NOT selling_price). Activation
-  is on RRP.
-- When explaining, render rates as percentages
-  (e.g. "Roberto Coin: 30% premium fee, 6% insurance premium, 0.15% activation").
-- Brands with NULL rates contribute nothing to that bucket — COALESCE rates to 0
-  if you want a total across all brands.
+## Counts
+- covers (all statuses):  COUNT(*)                              FROM policies
+- live covers:            COUNT(*)        FILTER (WHERE status='live')
+- customers (transactional, "active customers"):
+                           COUNT(DISTINCT customer_id) FILTER (WHERE status='live')
+                           — policy-based; a customer with no live policy doesn't count.
+- shops (with activity):   COUNT(DISTINCT shop_id)     FILTER (WHERE status='live')
+- claims (any status):     COUNT(*) FROM claims c
+                           JOIN policies p ON p.id=c.policy_id WHERE p.status='live'
+- open claims:             same + AND c.status='open'
 
-Vocabulary:
-- "AION revenue" / "what AION earns" / "our take" → aion_revenue above.
-- "Customer revenue" / "what customers paid" → SUM(selling_price * quantity).
-- "Gross premium" → cogs × insurance_premium (before GVT).
-- "Net premium" → gross_premium × (1 - 0.2225).
+## Engagement rates (profile-pool based, from migration 20260508000001)
+Denominator = "customer pool" = profiles WHERE role='customer' (scoped to
+brand and, when applicable, period via profiles.created_at and shop via
+EXISTS(live policy at that shop)). These are PROFILE-based, NOT policy-based,
+and the pool denominator is INDEPENDENT of the "Customers" count above.
+
+- registration_rate = COUNT(DISTINCT id) FILTER (WHERE registered_at IS NOT NULL)
+                        / COUNT(DISTINCT id)
+- profilation_rate  = same numerator FILTER, plus ALL of:
+                        date_of_birth, country, city, postcode, address,
+                        province, nationality, phone_number IS NOT NULL.
+- feedback_rate     = COUNT(DISTINCT p.id) WHERE EXISTS(
+                        SELECT 1 FROM feedback fb
+                        WHERE fb.user_id=p.id AND fb.brand_id=p.brand_id)
+                      / pool denominator.
+
+## Other derived KPIs
+- claim_rate          = open_or_closed_claims_on_live_policies / live_covers
+                        (from AdminDashboard.tsx line 359)
+- effective_premium_pct        = gross_premium / total_cogs
+- effective_activation_fee_pct = activation_revenue / total_rrp
+- effective_premium_fee_pct    = premium_revenue / net_premium
+
+## Brand-dashboard scalars (per single brand, RPC brand_dashboard_metrics)
+- customers       = COUNT(DISTINCT customer_id) WHERE status='live'
+- covers          = COUNT(*)                    WHERE status='live'
+- protected_value = SUM(selling_price)          WHERE status='live'   -- NO quantity!
+- open_claims     = COUNT(*) FROM claims JOIN live policies WHERE claims.status='open'
+
+## Per-customer scalars (RPC brand_customer_aggregates)
+- covers      = COUNT(*) per customer        WHERE status='live'
+- total_value = SUM(selling_price)            WHERE status='live'    -- NO quantity!
+- claims      = COUNT(claims) on customer's LIVE policies (any claim status)
+
+## Vocabulary
+- "AION revenue" / "our take" / "what AION earns"  → aion_revenue (formula above)
+- "Premium revenue" / "AION premium fee"            → premium_revenue
+- "Activation revenue" / "activation fees we took"  → activation_revenue
+- "Customer revenue" / "what customers paid"        → SUM(selling_price * quantity)
+                                                       on LIVE policies
+- "Gross premium"                                   → cogs × insurance_premium
+- "Net premium"                                     → gross_premium × (1 - 0.2225)
+- "Protected value"                                 → SUM(selling_price) WHERE live
+                                                       (NO quantity)
+- "Active customers" / "Customers"                  → distinct customer_id on LIVE
+- "Customer pool" / "registered customers"           → profiles.role='customer'
+                                                       (engagement-rate denominator)
+
+## Common pitfalls (the assistant has fallen into these before)
+- Summing the brand rate columns as money — they are fractions.
+- Using selling_price for premium revenue — premium is on COGS, not selling_price.
+- Skipping the * quantity factor on monetary sums.
+- Counting cancelled/expired policies in financial totals — only live counts.
+- Mixing the policy-based "Customers" count with the profile-based engagement
+  pool — they are different concepts.
+- Forgetting GVT_FEE (1 - 0.2225) between gross_premium and net_premium.
+- Reporting the "Protected value" with quantity multiplier — it does NOT use one
+  in the canonical brand RPC.
 
 # Recipes (use these patterns)
 
