@@ -897,7 +897,7 @@ function OverviewTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
 
 function PriceBandChart({ title, data, t }: { title: string; data: { name: string; coversPct: number; rrpPct: number; custPct: number }[]; t: T }) {
   if (!data.length || data.every(b => b.coversPct === 0 && b.rrpPct === 0 && b.custPct === 0)) return null;
-  const yMax = Math.min(100, Math.max(20, Math.ceil(Math.max(...data.map(r => Math.max(r.coversPct, r.rrpPct, r.custPct))) / 10) * 10 + 10));
+  const yMax = Math.min(100, Math.max(20, Math.ceil(Math.max(...data.map(r => Math.max(r.coversPct, r.rrpPct))) / 10) * 10 + 10));
   const renderPctLabel = ({ x, y, width, height, value, fill }: any) => {
     if (value === null || value === undefined) return null;
     const inside = height > 22;
@@ -913,7 +913,6 @@ function PriceBandChart({ title, data, t }: { title: string; data: { name: strin
       <ColorLegend items={[
         { color: C2, label: `RRP (%)` },
         { color: C1, label: `${t("insights.label.covers")} (%)` },
-        { color: C3, label: `${t("insights.label.customers")} (%)` },
       ]} />
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={data} margin={{ top: 28, right: 10, left: 0, bottom: 0 }} barCategoryGap="20%">
@@ -926,9 +925,6 @@ function PriceBandChart({ title, data, t }: { title: string; data: { name: strin
           <Bar dataKey="coversPct" fill={C1} radius={[6, 6, 0, 0]} name={t("insights.label.covers")}>
             <LabelList dataKey="coversPct" content={(p: any) => renderPctLabel({ ...p, fill: C1 })} />
           </Bar>
-          <Bar dataKey="custPct" fill={C3} radius={[6, 6, 0, 0]} name={t("insights.label.customers")}>
-            <LabelList dataKey="custPct" content={(p: any) => renderPctLabel({ ...p, fill: C3 })} />
-          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </ChartCard>
@@ -940,7 +936,7 @@ function CategoryChart({ title, data, t }: { title: string; data: { cat: string;
   // Re-sort by RRP descending so the largest RRP share leads — keeps the visual hierarchy meaningful
   // when RRP and volume distributions diverge.
   const sorted = [...data].sort((a, b) => b.rrpPct - a.rrpPct);
-  const yMax = Math.min(100, Math.max(20, Math.ceil(Math.max(...sorted.map(r => Math.max(r.volPct, r.rrpPct, r.custPct))) / 10) * 10 + 10));
+  const yMax = Math.min(100, Math.max(20, Math.ceil(Math.max(...sorted.map(r => Math.max(r.volPct, r.rrpPct))) / 10) * 10 + 10));
   const renderPctLabel = ({ x, y, width, height, value, fill }: any) => {
     if (value === null || value === undefined) return null;
     const inside = height > 22;
@@ -958,7 +954,6 @@ function CategoryChart({ title, data, t }: { title: string; data: { cat: string;
       <ColorLegend items={[
         { color: C2, label: `RRP (%)` },
         { color: C1, label: `${t("insights.label.volume")} (%)` },
-        { color: C3, label: `${t("insights.label.customers")} (%)` },
       ]} />
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={sorted} margin={{ top: 28, right: 10, left: 0, bottom: 0 }} barCategoryGap="20%">
@@ -970,9 +965,6 @@ function CategoryChart({ title, data, t }: { title: string; data: { cat: string;
           </Bar>
           <Bar dataKey="volPct" fill={C1} radius={[6, 6, 0, 0]} name={t("insights.label.volume")}>
             <LabelList dataKey="volPct" content={(p: any) => renderPctLabel({ ...p, fill: C1 })} />
-          </Bar>
-          <Bar dataKey="custPct" fill={C3} radius={[6, 6, 0, 0]} name={t("insights.label.customers")}>
-            <LabelList dataKey="custPct" content={(p: any) => renderPctLabel({ ...p, fill: C3 })} />
           </Bar>
         </BarChart>
       </ResponsiveContainer>
