@@ -7,7 +7,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowUp, BookOpen, ChevronDown, ChevronRight, Download, FileSpreadsheet,
+  ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, Download, FileSpreadsheet,
   Loader2, MessageSquarePlus, Search, Sparkles, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -41,6 +41,8 @@ type ReportFile = {
   kind?: string;
 };
 
+type SqlStep = { label: string; rowCount: number };
+
 type AssistantMessage = {
   role: "assistant";
   summary: string;
@@ -49,11 +51,12 @@ type AssistantMessage = {
   rows: Record<string, unknown>[];
   chart: ChartSpec | null;
   reports: ReportFile[];
+  sqlSteps: SqlStep[];
   streaming: boolean;
 };
 
 type Message =
-  | { role: "user"; content: string }
+  | { role: "user"; content: string; display?: string }
   | AssistantMessage;
 
 type ChatSummary = {
@@ -96,6 +99,38 @@ const toNumber = (v: unknown): number | null => {
 
 const humanizeColumn = (col: string): string =>
   col.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+// Turn a SQL string into a short human label for the live step indicator.
+// Heuristic — recognises the canonical playbook queries; falls back to
+// "Running query" so we never crash on an unfamiliar shape.
+const summarizeSql = (sql: string): string => {
+  const s = sql.toLowerCase();
+  const hasFrom = (table: string) =>
+    s.includes(`from ${table}`) || s.includes(`from public.${table}`);
+
+  if (hasFrom("profiles") && (s.includes("ilike") || s.includes("p.id::text"))) {
+    return "Resolving customer";
+  }
+  if (hasFrom("catalogues") && s.includes("not in")) {
+    return "Finding cross-sell candidates";
+  }
+  if (hasFrom("policies") && s.includes("customer_id")) {
+    if (s.includes("filter (where status='live')") || s.includes("sum(selling_price)")) {
+      return "Computing lifetime value";
+    }
+    return "Loading purchase history";
+  }
+  if (hasFrom("claims")) return "Loading claims";
+  if (hasFrom("feedback")) return "Loading feedback";
+  if (hasFrom("support_messages")) return "Loading support history";
+  if (hasFrom("catalogues") && (s.includes("buyers") || s.includes("co_owned"))) {
+    return "Finding co-owned products";
+  }
+  if (hasFrom("catalogues")) return "Loading product";
+  if (hasFrom("policies") && s.includes("item_id =")) return "Analysing product covers";
+  if (hasFrom("brands")) return "Loading brand";
+  return "Running query";
+};
 
 // ─── Cell formatting ─────────────────────────────────────────────────────────
 // Recognise common Postgres/Supabase return shapes and present them politely.
@@ -354,7 +389,7 @@ const AdminAIQuery = () => {
     const raw = (data.messages as any[]) ?? [];
     const restored: Message[] = raw.map((m) =>
       m?.role === "assistant"
-        ? ({ reports: [], ...m } as AssistantMessage)
+        ? ({ reports: [], sqlSteps: [], ...m } as AssistantMessage)
         : m,
     );
     setMessages(restored);
@@ -379,9 +414,11 @@ const AdminAIQuery = () => {
     if (!adminRecord?.id) return;
     const pb = searchParams.get("playbook");
     const id = searchParams.get("id");
+    const label = searchParams.get("label") ?? undefined;
     if (!pb || !id) return;
     const fireKey = `${pb}:${id}`;
     if (playbookFiredRef.current === fireKey) return;
+    const forPrep = locale === "it" ? "per" : "for";
     const prompt =
       pb === "customer360"
         ? `Customer 360 brief for: ${id}`
@@ -389,11 +426,16 @@ const AdminAIQuery = () => {
           ? `Product analysis for: ${id}`
           : null;
     if (!prompt) return;
+    const titleKey =
+      pb === "customer360"
+        ? "aiQuery.playbook.customer360.title"
+        : "aiQuery.playbook.productAnalysis.title";
+    const display = label ? `${t(titleKey)} ${forPrep}: ${label}` : undefined;
     playbookFiredRef.current = fireKey;
     setChatId(null);
     setMessages([]);
     setSearchParams({}, { replace: true });
-    void send(prompt);
+    void send(prompt, display);
   }, [adminRecord?.id, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-scroll messages ───────────────────────────────────────────────────
@@ -474,7 +516,10 @@ const AdminAIQuery = () => {
   };
 
   // ── Send a question ────────────────────────────────────────────────────────
-  const send = async (question: string) => {
+  // `display` is an optional user-facing version of `question`. When a
+  // playbook is triggered we send the entity id to the model but show the
+  // entity name in the chat bubble.
+  const send = async (question: string, display?: string) => {
     const text = question.trim();
     if (!text || loading) return;
     setInput("");
@@ -487,7 +532,7 @@ const AdminAIQuery = () => {
 
     const seedMessages: Message[] = [
       ...messages,
-      { role: "user", content: text },
+      { role: "user", content: text, ...(display ? { display } : {}) },
       {
         role: "assistant",
         summary: "",
@@ -496,6 +541,7 @@ const AdminAIQuery = () => {
         rows: [],
         chart: null,
         reports: [],
+        sqlSteps: [],
         streaming: true,
       },
     ];
@@ -651,12 +697,12 @@ const AdminAIQuery = () => {
             </div>
           ) : messages.length === 0 ? (
             <EmptyState
-              onPick={(q) => send(q)}
+              onPick={(q, display) => send(q, display)}
             />
           ) : (
             <div className="mx-auto flex max-w-4xl flex-col gap-6">
               {messages.map((m, i) => {
-                if (m.role === "user") return <UserBubble key={i} text={m.content} />;
+                if (m.role === "user") return <UserBubble key={i} text={m.display ?? m.content} />;
                 // Find the preceding user message — used as the export filename slug.
                 let q = "aion-query";
                 for (let j = i - 1; j >= 0; j--) {
@@ -732,11 +778,20 @@ function handleEvent(
   } else if (event === "text_delta") {
     patch((m) => ({ ...m, summary: m.summary + (data?.text ?? "") }));
   } else if (event === "sql_result") {
+    const sql = data?.sql ?? "";
+    const rowCount =
+      typeof data?.row_count === "number"
+        ? data.row_count
+        : Array.isArray(data?.rows)
+          ? data.rows.length
+          : 0;
+    const stepLabel = summarizeSql(sql);
     patch((m) => ({
       ...m,
       sql: data?.sql ?? m.sql,
       columns: data?.columns ?? [],
       rows: data?.rows ?? [],
+      sqlSteps: [...(m.sqlSteps ?? []), { label: stepLabel, rowCount }],
     }));
   } else if (event === "chart") {
     patch((m) => ({ ...m, chart: data as ChartSpec }));
@@ -800,7 +855,7 @@ const ChatRailItem = ({
   );
 };
 
-const EmptyState = ({ onPick }: { onPick: (q: string) => void }) => {
+const EmptyState = ({ onPick }: { onPick: (q: string, display?: string) => void }) => {
   const { t } = useLanguage();
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
@@ -829,8 +884,9 @@ const EmptyState = ({ onPick }: { onPick: (q: string) => void }) => {
 
 type SearchResult = { id: string; label: string; sub?: string };
 
-const PlaybookPicker = ({ onPick }: { onPick: (q: string) => void }) => {
-  const { t } = useLanguage();
+const PlaybookPicker = ({ onPick }: { onPick: (q: string, display?: string) => void }) => {
+  const { t, locale } = useLanguage();
+  const forPrep = locale === "it" ? "per" : "for";
   return (
     <div className="mt-8 w-full">
       <p className="mb-2 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
@@ -841,13 +897,23 @@ const PlaybookPicker = ({ onPick }: { onPick: (q: string) => void }) => {
           title={t("aiQuery.playbook.customer360.title")}
           placeholder={t("aiQuery.playbook.customer360.searchPlaceholder")}
           search={searchCustomers}
-          onPick={(id) => onPick(`Customer 360 brief for: ${id}`)}
+          onPick={(id, label) =>
+            onPick(
+              `Customer 360 brief for: ${id}`,
+              `${t("aiQuery.playbook.customer360.title")} ${forPrep}: ${label}`,
+            )
+          }
         />
         <PlaybookCard
           title={t("aiQuery.playbook.productAnalysis.title")}
           placeholder={t("aiQuery.playbook.productAnalysis.searchPlaceholder")}
           search={searchProducts}
-          onPick={(id) => onPick(`Product analysis for: ${id}`)}
+          onPick={(id, label) =>
+            onPick(
+              `Product analysis for: ${id}`,
+              `${t("aiQuery.playbook.productAnalysis.title")} ${forPrep}: ${label}`,
+            )
+          }
         />
       </div>
     </div>
@@ -863,7 +929,7 @@ const PlaybookCard = ({
   title: string;
   placeholder: string;
   search: (q: string) => Promise<SearchResult[]>;
-  onPick: (id: string) => void;
+  onPick: (id: string, label: string) => void;
 }) => {
   const { t } = useLanguage();
   const [q, setQ] = useState("");
@@ -902,11 +968,11 @@ const PlaybookCard = ({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const handlePick = (id: string) => {
+  const handlePick = (id: string, label: string) => {
     setOpen(false);
     setQ("");
     setResults([]);
-    onPick(id);
+    onPick(id, label);
   };
 
   return (
@@ -947,7 +1013,7 @@ const PlaybookCard = ({
               <button
                 key={r.id}
                 type="button"
-                onClick={() => handlePick(r.id)}
+                onClick={() => handlePick(r.id, r.label)}
                 className="block w-full px-3 py-2 text-left text-sm hover:bg-muted focus:bg-muted focus:outline-none"
               >
                 <div className="text-foreground">{r.label}</div>
@@ -1093,8 +1159,9 @@ const AssistantBlock = ({
   const { t, locale } = useLanguage();
   const { summary, sql, columns, rows, chart, reports, streaming } = message;
   const reportList = reports ?? [];
+  const sqlSteps = message.sqlSteps ?? [];
   const hasAnything =
-    summary || rows.length > 0 || chart || sql || reportList.length > 0;
+    summary || rows.length > 0 || chart || sql || reportList.length > 0 || sqlSteps.length > 0;
 
   if (!hasAnything && streaming) {
     return (
@@ -1104,6 +1171,12 @@ const AssistantBlock = ({
       </div>
     );
   }
+
+  // While the assistant is still working, show a step-by-step progress
+  // indicator instead of letting the rich table flicker as each new
+  // sql_result event lands. Once streaming ends, the markdown brief
+  // takes over and the final table is rendered normally.
+  const showSteps = streaming && sqlSteps.length > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -1116,18 +1189,44 @@ const AssistantBlock = ({
         </div>
       )}
 
+      {showSteps && <StepProgress steps={sqlSteps} writingSummary={!!summary} />}
+
       {chart && rows.length >= 2 && <ChartView spec={chart} rows={rows} locale={locale} />}
 
       {reportList.length > 0 && <ReportCards reports={reportList} locale={locale} />}
 
-      {columns.length > 0 && rows.length > 0 && (
+      {!streaming && columns.length > 0 && rows.length > 0 && (
         <ResultsTable columns={columns} rows={rows} locale={locale} question={question} />
       )}
 
-      {sql && <SqlBlock sql={sql} />}
+      {!streaming && sql && <SqlBlock sql={sql} />}
     </div>
   );
 };
+
+const StepProgress = ({
+  steps,
+  writingSummary,
+}: {
+  steps: SqlStep[];
+  writingSummary: boolean;
+}) => (
+  <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm">
+    {steps.map((step, i) => (
+      <div key={i} className="flex items-center gap-2 text-foreground">
+        <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+        <span className="flex-1">{step.label}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {step.rowCount.toLocaleString()} {step.rowCount === 1 ? "row" : "rows"}
+        </span>
+      </div>
+    ))}
+    <div className="flex items-center gap-2 text-muted-foreground">
+      <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+      <span>{writingSummary ? "Writing brief…" : "Working…"}</span>
+    </div>
+  </div>
+);
 
 const ResultsTable = ({
   columns,
