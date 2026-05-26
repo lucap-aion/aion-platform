@@ -962,20 +962,30 @@ const PlaybookCard = ({
 };
 
 const escapeIlike = (s: string) =>
-  s.trim().replace(/[\\%_,()]/g, (c) => `\\${c}`);
+  s.replace(/[\\%_,()]/g, (c) => `\\${c}`);
+
+// Split the user input on whitespace so a multi-token query like
+// "Angela G" matches a row where the tokens live in different columns
+// (e.g. first_name='Angela', last_name='Gemma'). PostgREST chains
+// multiple .or() calls with AND between groups.
+const tokenize = (s: string): string[] =>
+  s.trim().split(/\s+/).filter((t) => t.length > 0);
 
 const searchCustomers = async (q: string): Promise<SearchResult[]> => {
-  const term = escapeIlike(q);
-  if (!term) return [];
-  const pattern = `%${term}%`;
-  const { data, error } = await supabase
+  const tokens = tokenize(q);
+  if (tokens.length === 0) return [];
+
+  let query = supabase
     .from("profiles")
     .select("id, first_name, last_name, email, brands(name)")
-    .or("role.is.null,role.eq.customer")
-    .or(
+    .or("role.is.null,role.eq.customer");
+  for (const tok of tokens) {
+    const pattern = `%${escapeIlike(tok)}%`;
+    query = query.or(
       `first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},phone_number.ilike.${pattern}`,
-    )
-    .limit(8);
+    );
+  }
+  const { data, error } = await query.limit(8);
   if (error) {
     console.error("[playbook customer search]", error);
     return [];
@@ -999,14 +1009,17 @@ const searchCustomers = async (q: string): Promise<SearchResult[]> => {
 };
 
 const searchProducts = async (q: string): Promise<SearchResult[]> => {
-  const term = escapeIlike(q);
-  if (!term) return [];
-  const pattern = `%${term}%`;
-  const { data, error } = await supabase
+  const tokens = tokenize(q);
+  if (tokens.length === 0) return [];
+
+  let query = supabase
     .from("catalogues")
-    .select("id, name, sku, category, brands(name)")
-    .or(`name.ilike.${pattern},sku.ilike.${pattern}`)
-    .limit(8);
+    .select("id, name, sku, category, brands(name)");
+  for (const tok of tokens) {
+    const pattern = `%${escapeIlike(tok)}%`;
+    query = query.or(`name.ilike.${pattern},sku.ilike.${pattern}`);
+  }
+  const { data, error } = await query.limit(8);
   if (error) {
     console.error("[playbook product search]", error);
     return [];
