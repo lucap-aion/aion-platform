@@ -28,6 +28,7 @@ import { SearchableSelect } from "./_components/SearchableSelect";
 import { ImageUpload } from "./_components/ImageUpload";
 import { BookOpen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Catalogue {
   id: number;
@@ -191,19 +192,36 @@ const AdminCatalogues = () => {
         onFilterChange={setFilter}
         columns={[
           {
-            key: "name", label: "Item", sortable: true, width: 220,
+            key: "name", label: "Item", sortable: true, width: 260,
             render: (row) => {
               const r = row as unknown as Catalogue;
               return (
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const params = new URLSearchParams({ playbook: "productAnalysis", id: String(r.id) });
+                          if (r.name) params.set("label", r.name);
+                          navigate(`/admin/ai-query?${params.toString()}`);
+                        }}
+                        className="rounded-md p-1.5 text-primary hover:bg-primary/10 transition-colors shrink-0"
+                      >
+                        <BookOpen className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Product analysis</TooltipContent>
+                  </Tooltip>
                   {r.picture ? (
                     <img src={r.picture} alt={r.name ?? ""} className="h-9 w-9 rounded-lg object-cover shrink-0 border border-border" />
                   ) : (
                     <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center text-xs font-semibold shrink-0">{(r.name?.[0] ?? "?").toUpperCase()}</div>
                   )}
-                  <div>
-                    <p className="font-medium text-foreground">{r.name ?? "—"}</p>
-                    <p className="text-xs text-muted-foreground">{r.sku ?? "—"}</p>
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground truncate">{r.name ?? "—"}</p>
+                    <p className="text-xs text-muted-foreground truncate">{r.sku ?? "—"}</p>
                   </div>
                 </div>
               );
@@ -288,7 +306,15 @@ const AdminCatalogues = () => {
                 {editing.id !== undefined && editing.id !== null && (
                   <button
                     type="button"
-                    onClick={() => navigate(`/admin/ai-query?playbook=productAnalysis&id=${editing.id}`)}
+                    onClick={() => {
+                      const name = editing.name ?? "";
+                      const params = new URLSearchParams({
+                        playbook: "productAnalysis",
+                        id: String(editing.id),
+                      });
+                      if (name) params.set("label", name);
+                      navigate(`/admin/ai-query?${params.toString()}`);
+                    }}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:border-primary/40 hover:bg-muted transition-colors"
                   >
                     <BookOpen className="h-4 w-4 text-primary" />

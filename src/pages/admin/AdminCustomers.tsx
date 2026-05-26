@@ -354,17 +354,35 @@ const AdminCustomers = () => {
         }}
         columns={[
           {
-            key: "first_name", label: "Name", sortable: true, width: 220,
+            key: "first_name", label: "Name", sortable: true, width: 260,
             render: (row) => {
               const r = row as unknown as Customer;
               const name = [r.first_name, r.last_name].filter(Boolean).join(" ") || "—";
               const initials = `${(r.first_name?.[0] || r.email?.[0] || "?").toUpperCase()}${(r.last_name?.[0] || "").toUpperCase()}`;
+              const briefLabel = name !== "—" ? name : r.email || "";
               return (
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const params = new URLSearchParams({ playbook: "customer360", id: String(r.id) });
+                          if (briefLabel) params.set("label", briefLabel);
+                          navigate(`/admin/ai-query?${params.toString()}`);
+                        }}
+                        className="rounded-md p-1.5 text-primary hover:bg-primary/10 transition-colors shrink-0"
+                      >
+                        <BookOpen className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Customer 360 brief</TooltipContent>
+                  </Tooltip>
                   <div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
                     {r.avatar ? <img src={r.avatar} alt={name} className="h-full w-full object-cover" /> : initials}
                   </div>
-                  <div><p className="font-medium text-foreground">{name}</p><p className="text-xs text-muted-foreground">{r.email}</p></div>
+                  <div className="min-w-0"><p className="font-medium text-foreground truncate">{name}</p><p className="text-xs text-muted-foreground truncate">{r.email}</p></div>
                 </div>
               );
             },
@@ -467,7 +485,18 @@ const AdminCustomers = () => {
                 {editing.id && (
                   <button
                     type="button"
-                    onClick={() => navigate(`/admin/ai-query?playbook=customer360&id=${editing.id}`)}
+                    onClick={() => {
+                      const name = [editing.first_name, editing.last_name]
+                        .filter(Boolean)
+                        .join(" ")
+                        .trim() || editing.email || "";
+                      const params = new URLSearchParams({
+                        playbook: "customer360",
+                        id: String(editing.id),
+                      });
+                      if (name) params.set("label", name);
+                      navigate(`/admin/ai-query?${params.toString()}`);
+                    }}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:border-primary/40 hover:bg-muted transition-colors"
                   >
                     <BookOpen className="h-4 w-4 text-primary" />
