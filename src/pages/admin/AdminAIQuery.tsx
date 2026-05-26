@@ -8,7 +8,7 @@ import {
 } from "recharts";
 import {
   ArrowUp, BookOpen, ChevronDown, ChevronRight, Download, FileSpreadsheet,
-  Loader2, MessageSquarePlus, Sparkles, Trash2,
+  Loader2, MessageSquarePlus, Search, Sparkles, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -370,6 +370,32 @@ const AdminAIQuery = () => {
     }
   }, [urlChatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Deep-link auto-send: `?playbook=customer360&id=<uuid>` or
+  // `?playbook=productAnalysis&id=<int>` arrives from the admin
+  // customer/product drawers. Run once per playbook+id pair, then strip
+  // the params so a refresh doesn't replay.
+  const playbookFiredRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!adminRecord?.id) return;
+    const pb = searchParams.get("playbook");
+    const id = searchParams.get("id");
+    if (!pb || !id) return;
+    const fireKey = `${pb}:${id}`;
+    if (playbookFiredRef.current === fireKey) return;
+    const prompt =
+      pb === "customer360"
+        ? `Customer 360 brief for: ${id}`
+        : pb === "productAnalysis"
+          ? `Product analysis for: ${id}`
+          : null;
+    if (!prompt) return;
+    playbookFiredRef.current = fireKey;
+    setChatId(null);
+    setMessages([]);
+    setSearchParams({}, { replace: true });
+    void send(prompt);
+  }, [adminRecord?.id, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Auto-scroll messages ───────────────────────────────────────────────────
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -626,22 +652,6 @@ const AdminAIQuery = () => {
           ) : messages.length === 0 ? (
             <EmptyState
               onPick={(q) => send(q)}
-              onFill={(template) => {
-                setInput(template);
-                // Defer to next frame so the textarea reflects the new value
-                // before we focus and select the [bracketed] placeholder.
-                requestAnimationFrame(() => {
-                  const ta = taRef.current;
-                  if (!ta) return;
-                  ta.focus();
-                  const match = template.match(/\[[^\]]+\]/);
-                  if (match && match.index !== undefined) {
-                    ta.setSelectionRange(match.index, match.index + match[0].length);
-                  } else {
-                    ta.setSelectionRange(template.length, template.length);
-                  }
-                });
-              }}
             />
           ) : (
             <div className="mx-auto flex max-w-4xl flex-col gap-6">
@@ -790,17 +800,8 @@ const ChatRailItem = ({
   );
 };
 
-const EmptyState = ({
-  onPick,
-  onFill,
-}: {
-  onPick: (q: string) => void;
-  onFill: (q: string) => void;
-}) => {
+const EmptyState = ({ onPick }: { onPick: (q: string) => void }) => {
   const { t } = useLanguage();
-  // Playbook labels are multi-line templates — show a short headline in the
-  // button instead of the full prompt.
-  const playbookHeadline = (label: string) => label.split("\n")[0];
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
@@ -809,16 +810,7 @@ const EmptyState = ({
       <h2 className="text-xl font-semibold text-foreground">{t("aiQuery.empty.title")}</h2>
       <p className="mt-1 text-sm text-muted-foreground">{t("aiQuery.empty.subtitle")}</p>
 
-      <EmptySection
-        title={t("aiQuery.section.playbooks")}
-        items={PLAYBOOK_KEYS.map((key) => ({
-          key,
-          label: t(key),
-          display: playbookHeadline(t(key)),
-          icon: BookOpen,
-        }))}
-        onPick={onFill}
-      />
+      <PlaybookPicker onPick={onPick} />
 
       <EmptySection
         title={t("aiQuery.section.suggestions")}
@@ -833,6 +825,207 @@ const EmptyState = ({
       />
     </div>
   );
+};
+
+type SearchResult = { id: string; label: string; sub?: string };
+
+const PlaybookPicker = ({ onPick }: { onPick: (q: string) => void }) => {
+  const { t } = useLanguage();
+  return (
+    <div className="mt-8 w-full">
+      <p className="mb-2 text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+        {t("aiQuery.section.playbooks")}
+      </p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <PlaybookCard
+          title={t("aiQuery.playbook.customer360.title")}
+          placeholder={t("aiQuery.playbook.customer360.searchPlaceholder")}
+          search={searchCustomers}
+          onPick={(id) => onPick(`Customer 360 brief for: ${id}`)}
+        />
+        <PlaybookCard
+          title={t("aiQuery.playbook.productAnalysis.title")}
+          placeholder={t("aiQuery.playbook.productAnalysis.searchPlaceholder")}
+          search={searchProducts}
+          onPick={(id) => onPick(`Product analysis for: ${id}`)}
+        />
+      </div>
+    </div>
+  );
+};
+
+const PlaybookCard = ({
+  title,
+  placeholder,
+  search,
+  onPick,
+}: {
+  title: string;
+  placeholder: string;
+  search: (q: string) => Promise<SearchResult[]>;
+  onPick: (id: string) => void;
+}) => {
+  const { t } = useLanguage();
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (q.trim().length < 2) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const handle = window.setTimeout(async () => {
+      // Capture the query at request-time so a stale slower response doesn't
+      // overwrite a faster newer one.
+      const queryAtCall = q;
+      const rows = await search(queryAtCall);
+      if (queryAtCall === q) {
+        setResults(rows);
+        setSearching(false);
+      }
+    }, 200);
+    return () => window.clearTimeout(handle);
+  }, [q, search]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const handlePick = (id: string) => {
+    setOpen(false);
+    setQ("");
+    setResults([]);
+    onPick(id);
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      className="relative rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-primary/40"
+    >
+      <div className="mb-2 flex items-center gap-2">
+        <BookOpen className="h-4 w-4 shrink-0 text-primary" />
+        <span className="text-sm font-medium text-foreground">{title}</span>
+      </div>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          placeholder={placeholder}
+          className="w-full rounded-md border border-border bg-background py-2 pl-7 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+        />
+      </div>
+      {open && q.trim().length >= 2 && (
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          {searching ? (
+            <div className="px-3 py-2 text-xs text-muted-foreground">
+              {t("aiQuery.playbook.searching")}
+            </div>
+          ) : results.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-muted-foreground">
+              {t("aiQuery.playbook.noResults")}
+            </div>
+          ) : (
+            results.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => handlePick(r.id)}
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-muted focus:bg-muted focus:outline-none"
+              >
+                <div className="text-foreground">{r.label}</div>
+                {r.sub && <div className="text-xs text-muted-foreground">{r.sub}</div>}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const escapeIlike = (s: string) =>
+  s.trim().replace(/[\\%_,()]/g, (c) => `\\${c}`);
+
+const searchCustomers = async (q: string): Promise<SearchResult[]> => {
+  const term = escapeIlike(q);
+  if (!term) return [];
+  const pattern = `%${term}%`;
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, first_name, last_name, email, brands(name)")
+    .or("role.is.null,role.eq.customer")
+    .or(
+      `first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},phone_number.ilike.${pattern}`,
+    )
+    .limit(8);
+  if (error) {
+    console.error("[playbook customer search]", error);
+    return [];
+  }
+  return (data ?? []).map((r) => {
+    const row = r as {
+      id: string;
+      first_name: string | null;
+      last_name: string | null;
+      email: string | null;
+      brands: { name: string | null } | { name: string | null }[] | null;
+    };
+    const name = [row.first_name, row.last_name].filter(Boolean).join(" ").trim();
+    const brand = Array.isArray(row.brands) ? row.brands[0]?.name : row.brands?.name;
+    return {
+      id: row.id,
+      label: name || row.email || row.id,
+      sub: [row.email && name ? row.email : null, brand].filter(Boolean).join(" · "),
+    };
+  });
+};
+
+const searchProducts = async (q: string): Promise<SearchResult[]> => {
+  const term = escapeIlike(q);
+  if (!term) return [];
+  const pattern = `%${term}%`;
+  const { data, error } = await supabase
+    .from("catalogues")
+    .select("id, name, sku, category, brands(name)")
+    .or(`name.ilike.${pattern},sku.ilike.${pattern}`)
+    .limit(8);
+  if (error) {
+    console.error("[playbook product search]", error);
+    return [];
+  }
+  return (data ?? []).map((r) => {
+    const row = r as {
+      id: number;
+      name: string | null;
+      sku: string | null;
+      category: string | null;
+      brands: { name: string | null } | { name: string | null }[] | null;
+    };
+    const brand = Array.isArray(row.brands) ? row.brands[0]?.name : row.brands?.name;
+    return {
+      id: String(row.id),
+      label: row.name || `#${row.id}`,
+      sub: [row.sku, row.category, brand].filter(Boolean).join(" · "),
+    };
+  });
 };
 
 const EmptySection = ({

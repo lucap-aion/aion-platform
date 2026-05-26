@@ -26,6 +26,8 @@ import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, TextArea, SaveBar } from "./_components/FormField";
 import { SearchableSelect } from "./_components/SearchableSelect";
 import { ImageUpload } from "./_components/ImageUpload";
+import { BookOpen } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 interface Catalogue {
   id: number;
@@ -56,6 +58,7 @@ const empty = (): Partial<Catalogue> => ({
 });
 
 const AdminCatalogues = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [catalogues, setCatalogues] = useState<Catalogue[]>([]);
   const [brands, setBrands] = useState<BrandOption[]>([]);
@@ -281,7 +284,19 @@ const AdminCatalogues = () => {
           {ro ? (
             <div className="flex justify-between gap-2 pt-4 border-t border-border mt-4">
               <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">Close</button>
-              <button type="button" onClick={() => setMode("edit")} className="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">Edit</button>
+              <div className="flex gap-2">
+                {editing.id !== undefined && editing.id !== null && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/admin/ai-query?playbook=productAnalysis&id=${editing.id}`)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:border-primary/40 hover:bg-muted transition-colors"
+                  >
+                    <BookOpen className="h-4 w-4 text-primary" />
+                    AI brief
+                  </button>
+                )}
+                <button type="button" onClick={() => setMode("edit")} className="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">Edit</button>
+              </div>
             </div>
           ) : (
             <SaveBar onCancel={() => setDrawerOpen(false)} loading={saving} label={mode === "add" ? "Create Item" : "Save Changes"} />

@@ -34,7 +34,8 @@ import { SearchableSelect } from "./_components/SearchableSelect";
 import { fmtDate } from "./_components/fmtDate";
 import { sendEmail } from "@/utils/sendEmail";
 import { siteUrl } from "@/utils/siteUrl";
-import { Mail, MailCheck, Loader2 } from "lucide-react";
+import { BookOpen, Mail, MailCheck, Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Customer {
@@ -73,6 +74,7 @@ const empty = (): Partial<Customer> => ({
 });
 
 const AdminCustomers = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [brands, setBrands] = useState<BrandOption[]>([]);
@@ -461,7 +463,19 @@ const AdminCustomers = () => {
           {ro ? (
             <div className="flex justify-between gap-2 pt-4 border-t border-border mt-4">
               <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">Close</button>
-              <button type="button" onClick={() => setMode("edit")} className="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">Edit</button>
+              <div className="flex gap-2">
+                {editing.id && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/admin/ai-query?playbook=customer360&id=${editing.id}`)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:border-primary/40 hover:bg-muted transition-colors"
+                  >
+                    <BookOpen className="h-4 w-4 text-primary" />
+                    AI brief
+                  </button>
+                )}
+                <button type="button" onClick={() => setMode("edit")} className="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">Edit</button>
+              </div>
             </div>
           ) : (
             <SaveBar onCancel={() => setDrawerOpen(false)} loading={saving} label={mode === "add" ? "Create Customer" : "Save Changes"} />
