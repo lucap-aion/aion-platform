@@ -7,8 +7,8 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowUp, ChevronDown, ChevronRight, Download, FileSpreadsheet, Loader2,
-  MessageSquarePlus, Sparkles, Trash2,
+  ArrowUp, BookOpen, ChevronDown, ChevronRight, Download, FileSpreadsheet,
+  Loader2, MessageSquarePlus, Sparkles, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -61,6 +61,11 @@ type ChatSummary = {
   title: string;
   updated_at: string;
 };
+
+const PLAYBOOK_KEYS = [
+  "aiQuery.playbook.customer360",
+  "aiQuery.playbook.productAnalysis",
+];
 
 const SUGGESTION_KEYS = [
   "aiQuery.suggestion.1",
@@ -619,7 +624,25 @@ const AdminAIQuery = () => {
               {t("aiQuery.loadingChat")}
             </div>
           ) : messages.length === 0 ? (
-            <EmptyState onPick={(q) => send(q)} />
+            <EmptyState
+              onPick={(q) => send(q)}
+              onFill={(template) => {
+                setInput(template);
+                // Defer to next frame so the textarea reflects the new value
+                // before we focus and select the [bracketed] placeholder.
+                requestAnimationFrame(() => {
+                  const ta = taRef.current;
+                  if (!ta) return;
+                  ta.focus();
+                  const match = template.match(/\[[^\]]+\]/);
+                  if (match && match.index !== undefined) {
+                    ta.setSelectionRange(match.index, match.index + match[0].length);
+                  } else {
+                    ta.setSelectionRange(template.length, template.length);
+                  }
+                });
+              }}
+            />
           ) : (
             <div className="mx-auto flex max-w-4xl flex-col gap-6">
               {messages.map((m, i) => {
@@ -767,8 +790,17 @@ const ChatRailItem = ({
   );
 };
 
-const EmptyState = ({ onPick }: { onPick: (q: string) => void }) => {
+const EmptyState = ({
+  onPick,
+  onFill,
+}: {
+  onPick: (q: string) => void;
+  onFill: (q: string) => void;
+}) => {
   const { t } = useLanguage();
+  // Playbook labels are multi-line templates — show a short headline in the
+  // button instead of the full prompt.
+  const playbookHeadline = (label: string) => label.split("\n")[0];
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
@@ -776,6 +808,17 @@ const EmptyState = ({ onPick }: { onPick: (q: string) => void }) => {
       </div>
       <h2 className="text-xl font-semibold text-foreground">{t("aiQuery.empty.title")}</h2>
       <p className="mt-1 text-sm text-muted-foreground">{t("aiQuery.empty.subtitle")}</p>
+
+      <EmptySection
+        title={t("aiQuery.section.playbooks")}
+        items={PLAYBOOK_KEYS.map((key) => ({
+          key,
+          label: t(key),
+          display: playbookHeadline(t(key)),
+          icon: BookOpen,
+        }))}
+        onPick={onFill}
+      />
 
       <EmptySection
         title={t("aiQuery.section.suggestions")}
@@ -798,7 +841,12 @@ const EmptySection = ({
   onPick,
 }: {
   title: string;
-  items: { key: string; label: string; icon: React.ComponentType<{ className?: string }> }[];
+  items: {
+    key: string;
+    label: string;
+    display?: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }[];
   onPick: (q: string) => void;
 }) => (
   <div className="mt-8 w-full">
@@ -806,7 +854,7 @@ const EmptySection = ({
       {title}
     </p>
     <div className="grid grid-cols-1 gap-2 text-left sm:grid-cols-2">
-      {items.map(({ key, label, icon: Icon }) => (
+      {items.map(({ key, label, display, icon: Icon }) => (
         <button
           key={key}
           type="button"
@@ -814,7 +862,7 @@ const EmptySection = ({
           className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
         >
           <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-          <span className="flex-1">{label}</span>
+          <span className="flex-1">{display ?? label}</span>
         </button>
       ))}
     </div>

@@ -259,6 +259,15 @@ const translations: Translations = {
   "aiQuery.suggestion.5": { en: "Average satisfaction rate per brand from feedback.", it: "Soddisfazione media per brand dai feedback." },
   "aiQuery.section.suggestions": { en: "Suggestions", it: "Suggerimenti" },
   "aiQuery.section.reports": { en: "Reports", it: "Report" },
+  "aiQuery.section.playbooks": { en: "Playbooks", it: "Playbook" },
+  "aiQuery.playbook.customer360": {
+    en: "Customer 360 brief for: [name, email, phone, or customer id]\n\nBuild the full brief for a store manager about to talk to this customer: identity, full purchase history, lifetime value snapshot, claims and feedback signals, support history, ranked cross-sell recommendations from the customer's brand catalogue, and concrete action items for the call.",
+    it: "Brief Customer 360 per: [nome, email, telefono o id cliente]\n\nPrepara il brief completo per uno store manager che sta per parlare con questo cliente: identità, storico acquisti, lifetime value, segnali da reclami e feedback, storico assistenza, raccomandazioni di cross-sell ordinate dal catalogo del brand del cliente e azioni concrete per la chiamata.",
+  },
+  "aiQuery.playbook.productAnalysis": {
+    en: "Product analysis for: [product name, SKU, or catalogue id]\n\nAnalyse the customer base of this product: buyer demographics (city, country, age bands), repeat-purchase rate, top co-owned products (basket affinity), cancellation rate vs brand average, claim profile (rate and dominant types), feedback vs brand average, top shops and seasonality, and recommended actions on bundling, pricing, and targeting.",
+    it: "Analisi prodotto per: [nome prodotto, SKU o id catalogo]\n\nAnalizza la base clienti di questo prodotto: demografia degli acquirenti (città, paese, fasce d'età), tasso di riacquisto, top prodotti co-posseduti (affinità di carrello), tasso di cancellazione vs media del brand, profilo reclami (tasso e tipi prevalenti), feedback vs media del brand, top negozi e stagionalità, e raccomandazioni concrete su bundle, prezzo e targeting.",
+  },
   "aiQuery.report.monthlyInternal": { en: "Generate the monthly internal report for last month.", it: "Genera il report mensile interno del mese scorso." },
   "aiQuery.report.monthlyInternalPrevious": { en: "Generate the monthly internal report for two months ago.", it: "Genera il report mensile interno di due mesi fa." },
   "aiQuery.report.dailyNewPolicies": { en: "Daily Chubb sales file (new policies) for yesterday.", it: "File Chubb giornaliero (nuove polizze) di ieri." },
