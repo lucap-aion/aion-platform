@@ -18,9 +18,10 @@ const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 
 const MODEL = "claude-haiku-4-5-20251001";
 // Playbooks (Customer 360, Product analysis) chain ~6–8 run_sql calls;
-// 12 gives headroom for retries on first-pass SQL errors.
-const MAX_TOOL_TURNS = 12;
-const MAX_TOKENS = 3000;
+// 16 gives headroom for retries on first-pass SQL errors.
+const MAX_TOOL_TURNS = 16;
+// 4000 leaves enough room for a full markdown brief with inline tables.
+const MAX_TOKENS = 4000;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -328,6 +329,12 @@ prodotto"). When you do, follow the steps below exactly. If you cannot
 resolve the entity (no match, or multiple matches), STOP after the
 disambiguation step — do not invent data.
 
+NON-NEGOTIABLE RULE for both playbooks: your final response MUST be a
+markdown reply written as text. NEVER end a playbook with only tool calls.
+Stop calling tools after at most 5 run_sql calls. If a query errored or
+returned 0 rows, write the brief with whatever data the prior queries
+returned — a partial brief is better than no brief.
+
 ## Customer 360 playbook
 Inputs: a free-text identifier in the user message (name, email, phone, or
 profiles.id). The customer is a profiles row with role IS NULL or
@@ -441,6 +448,8 @@ items from the customer's brand that the customer does NOT already own:
     AND cat.id NOT IN (SELECT item_id FROM owned WHERE item_id IS NOT NULL)
   ORDER BY same_category DESC, lookalike_n DESC, shop_n DESC, cat.name
   LIMIT 5;
+KEEP THE 'LIMIT 5' AS-IS. Do not raise it, drop it, or "explore more".
+The brief shows 5 candidates — no more.
 
 Step 4 — Action items. Derive these from the data already returned (do not
 re-query). Emit a bulleted list, choosing only the ones that apply:
@@ -1129,6 +1138,54 @@ Deno.serve(async (req: Request) => {
           }
 
           messages.push({ role: "user", content: toolResults });
+        }
+
+        // Defensive: if the tool loop ended (either because we hit
+        // MAX_TOOL_TURNS or the model just kept calling tools), the user
+        // might be left staring at a sql_result with no narrative. Force
+        // one final text-only turn so we always produce a summary.
+        const lastAssistant = [...messages].reverse().find(
+          (m) => m.role === "assistant",
+        );
+        const lastAssistantHasText =
+          lastAssistant &&
+          Array.isArray(lastAssistant.content) &&
+          (lastAssistant.content as any[]).some(
+            (b) => b?.type === "text" && (b.text ?? "").trim().length > 0,
+          );
+        if (!lastAssistantHasText) {
+          emit("turn_start", { turn: -1 });
+          try {
+            const recoveryStream = anthropic.messages.stream({
+              model: MODEL,
+              max_tokens: MAX_TOKENS,
+              system: [
+                {
+                  type: "text",
+                  text:
+                    SCHEMA_DOC +
+                    "\n\n# Recovery — MANDATORY\nYour prior turns gathered data via tools but produced NO summary text. Write the final response NOW, as markdown only. Do NOT request any tools. If a playbook was triggered (Customer 360 / Product analysis), follow its output structure (## headings + inline GFM tables). If you don't have all the data the playbook wants, write what you can from what was fetched — partial is better than empty.",
+                  cache_control: { type: "ephemeral" },
+                },
+                ...(languageInstruction
+                  ? [{ type: "text" as const, text: languageInstruction }]
+                  : []),
+              ],
+              // No tools — forces text-only output.
+              messages,
+            });
+            for await (const ev of recoveryStream) {
+              if (
+                ev.type === "content_block_delta" &&
+                (ev.delta as any).type === "text_delta"
+              ) {
+                const text = (ev.delta as any).text ?? "";
+                if (text) emit("text_delta", { text });
+              }
+            }
+          } catch (e) {
+            console.error("[query-ai recovery]", e);
+          }
         }
 
         emit("done", { sql: lastSql });
