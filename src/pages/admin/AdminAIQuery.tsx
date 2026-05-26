@@ -617,9 +617,13 @@ const AdminAIQuery = () => {
       taRef.current?.focus();
 
       // Persist the completed turn. messagesRef has the latest state.
-      const firstUser = (messagesRef.current.find((m) => m.role === "user") as
-        | { role: "user"; content: string }
-        | undefined)?.content ?? text;
+      // Prefer the user-facing display (e.g. "Customer 360 brief for: Angela
+      // Gemma") over the model-facing content (which carries the UUID) for
+      // the chat title.
+      const firstUserMsg = messagesRef.current.find((m) => m.role === "user") as
+        | { role: "user"; content: string; display?: string }
+        | undefined;
+      const firstUser = firstUserMsg?.display ?? firstUserMsg?.content ?? text;
       const newId = await persistChat(messagesRef.current, chatId, firstUser);
       if (newId && newId !== chatId) {
         setChatId(newId);
