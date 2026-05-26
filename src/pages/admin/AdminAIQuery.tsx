@@ -617,9 +617,13 @@ const AdminAIQuery = () => {
       taRef.current?.focus();
 
       // Persist the completed turn. messagesRef has the latest state.
-      const firstUser = (messagesRef.current.find((m) => m.role === "user") as
-        | { role: "user"; content: string }
-        | undefined)?.content ?? text;
+      // Prefer the user-facing display (e.g. "Customer 360 brief for: Angela
+      // Gemma") over the model-facing content (which carries the UUID) for
+      // the chat title.
+      const firstUserMsg = messagesRef.current.find((m) => m.role === "user") as
+        | { role: "user"; content: string; display?: string }
+        | undefined;
+      const firstUser = firstUserMsg?.display ?? firstUserMsg?.content ?? text;
       const newId = await persistChat(messagesRef.current, chatId, firstUser);
       if (newId && newId !== chatId) {
         setChatId(newId);
@@ -1178,6 +1182,13 @@ const AssistantBlock = ({
   // takes over and the final table is rendered normally.
   const showSteps = streaming && sqlSteps.length > 0;
 
+  // For playbook responses (Customer 360 / Product analysis) the brief
+  // already embeds the data inline as markdown, so the trailing rich
+  // table and SQL accordion are noise. Detect from the originating user
+  // message — that's the raw model-side prompt, not the display label.
+  const isPlaybookResponse = /^(customer 360 brief|product analysis|brief customer 360|analisi prodotto)/i
+    .test(question);
+
   return (
     <div className="flex flex-col gap-4">
       {(summary || streaming) && (
@@ -1195,11 +1206,11 @@ const AssistantBlock = ({
 
       {reportList.length > 0 && <ReportCards reports={reportList} locale={locale} />}
 
-      {!streaming && columns.length > 0 && rows.length > 0 && (
+      {!streaming && !isPlaybookResponse && columns.length > 0 && rows.length > 0 && (
         <ResultsTable columns={columns} rows={rows} locale={locale} question={question} />
       )}
 
-      {!streaming && sql && <SqlBlock sql={sql} />}
+      {!streaming && !isPlaybookResponse && sql && <SqlBlock sql={sql} />}
     </div>
   );
 };
