@@ -34,7 +34,7 @@ import { SearchableSelect } from "./_components/SearchableSelect";
 import { fmtDate } from "./_components/fmtDate";
 import { sendEmail } from "@/utils/sendEmail";
 import { siteUrl } from "@/utils/siteUrl";
-import { BookOpen, Mail, MailCheck, Loader2 } from "lucide-react";
+import { WandSparkles, Mail, MailCheck, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -374,7 +374,7 @@ const AdminCustomers = () => {
                         }}
                         className="rounded-md p-1.5 text-primary hover:bg-primary/10 transition-colors shrink-0"
                       >
-                        <BookOpen className="h-4 w-4" />
+                        <WandSparkles className="h-4 w-4" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Customer 360 brief</TooltipContent>
@@ -499,7 +499,7 @@ const AdminCustomers = () => {
                     }}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:border-primary/40 hover:bg-muted transition-colors"
                   >
-                    <BookOpen className="h-4 w-4 text-primary" />
+                    <WandSparkles className="h-4 w-4 text-primary" />
                     AI brief
                   </button>
                 )}

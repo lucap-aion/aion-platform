@@ -7,7 +7,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowUp, BookOpen, Check, ChevronDown, ChevronRight, Download, FileSpreadsheet,
+  ArrowUp, WandSparkles, Check, ChevronDown, ChevronRight, Download, FileSpreadsheet,
   Loader2, MessageSquarePlus, Search, Sparkles, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -981,7 +981,7 @@ const PlaybookCard = ({
       className="relative rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-primary/40"
     >
       <div className="mb-2 flex items-center gap-2">
-        <BookOpen className="h-4 w-4 shrink-0 text-primary" />
+        <WandSparkles className="h-4 w-4 shrink-0 text-primary" />
         <span className="text-sm font-medium text-foreground">{title}</span>
       </div>
       <div className="relative">
@@ -1216,9 +1216,6 @@ const StepProgress = ({
       <div key={i} className="flex items-center gap-2 text-foreground">
         <Check className="h-3.5 w-3.5 text-primary shrink-0" />
         <span className="flex-1">{step.label}</span>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {step.rowCount.toLocaleString()} {step.rowCount === 1 ? "row" : "rows"}
-        </span>
       </div>
     ))}
     <div className="flex items-center gap-2 text-muted-foreground">
