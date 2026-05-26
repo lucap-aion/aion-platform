@@ -437,19 +437,30 @@ items from the customer's brand that the customer does NOT already own:
       AND pol.start_date >= now() - interval '90 days'
     GROUP BY pol.item_id
   )
-  SELECT cat.id, cat.name, cat.category, cat.sku,
-         (cat.category IN (SELECT category FROM past_categories))::int AS same_category,
-         COALESCE(lo.lookalike_n, 0) AS lookalike_n,
-         COALESCE(sp.shop_n, 0)      AS shop_n
+  SELECT cat.name AS product, cat.category, cat.sku,
+         CASE
+           WHEN cat.category IN (SELECT category FROM past_categories)
+             THEN 'Same category as past purchases'
+           WHEN COALESCE(lo.lookalike_n, 0) > 0
+             THEN 'Bought by ' || lo.lookalike_n || ' similar customer(s)'
+           WHEN COALESCE(sp.shop_n, 0) > 0
+             THEN 'Popular at this shop (last 90 days)'
+           ELSE 'Catalogue item from same brand'
+         END AS reason
   FROM catalogues cat
   LEFT JOIN lookalike_owned lo ON lo.item_id = cat.id
   LEFT JOIN shop_pop sp        ON sp.item_id = cat.id
   WHERE cat.brand_id = (SELECT brand_id FROM customer_brand)
     AND cat.id NOT IN (SELECT item_id FROM owned WHERE item_id IS NOT NULL)
-  ORDER BY same_category DESC, lookalike_n DESC, shop_n DESC, cat.name
+  ORDER BY (cat.category IN (SELECT category FROM past_categories)) DESC,
+           COALESCE(lo.lookalike_n, 0) DESC,
+           COALESCE(sp.shop_n, 0) DESC,
+           cat.name
   LIMIT 5;
 KEEP THE 'LIMIT 5' AS-IS. Do not raise it, drop it, or "explore more".
-The brief shows 5 candidates — no more.
+The brief shows 5 candidates — no more. The result columns must be exactly
+(product, category, sku, reason) — store managers see these names if any
+client renders the table.
 
 Step 4 — Action items. Derive these from the data already returned (do not
 re-query). Emit a bulleted list, choosing only the ones that apply:
