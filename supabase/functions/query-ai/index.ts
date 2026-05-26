@@ -329,11 +329,21 @@ prodotto"). When you do, follow the steps below exactly. If you cannot
 resolve the entity (no match, or multiple matches), STOP after the
 disambiguation step — do not invent data.
 
-NON-NEGOTIABLE RULE for both playbooks: your final response MUST be a
-markdown reply written as text. NEVER end a playbook with only tool calls.
-Stop calling tools after at most 5 run_sql calls. If a query errored or
-returned 0 rows, write the brief with whatever data the prior queries
-returned — a partial brief is better than no brief.
+NON-NEGOTIABLE RULES for both playbooks:
+1. Your final response MUST be a markdown reply written as text. NEVER end a
+   playbook with only tool calls.
+2. Stop calling tools after at most 5 run_sql calls.
+3. If a run_sql call returns an error (is_error: true in the tool result),
+   retry that section ONCE with a simpler version of the query (drop CTEs,
+   drop window functions, run a basic SELECT). If the retry also errors,
+   skip that section and continue with the next step. Never abandon the
+   playbook because one section failed.
+4. If a section legitimately returns 0 rows (not an error), still write that
+   section in the brief — just say "No data" plainly.
+5. A partial brief (some sections empty) is better than no brief.
+6. If every data query failed, still write the brief skeleton with the
+   customer's name from step 1 and a clear note: "Couldn't retrieve full
+   data — try the brief again, or check the customer/product identifier."
 
 ## Customer 360 playbook
 Inputs: a free-text identifier in the user message (name, email, phone, or
@@ -1166,6 +1176,7 @@ Deno.serve(async (req: Request) => {
           );
         if (!lastAssistantHasText) {
           emit("turn_start", { turn: -1 });
+          let recoveryProducedText = false;
           try {
             const recoveryStream = anthropic.messages.stream({
               model: MODEL,
@@ -1175,7 +1186,7 @@ Deno.serve(async (req: Request) => {
                   type: "text",
                   text:
                     SCHEMA_DOC +
-                    "\n\n# Recovery — MANDATORY\nYour prior turns gathered data via tools but produced NO summary text. Write the final response NOW, as markdown only. Do NOT request any tools. If a playbook was triggered (Customer 360 / Product analysis), follow its output structure (## headings + inline GFM tables). If you don't have all the data the playbook wants, write what you can from what was fetched — partial is better than empty.",
+                    "\n\n# Recovery — MANDATORY\nYour prior turns gathered (or tried to gather) data via tools but produced NO summary text. Write the final response NOW, as markdown only. Do NOT request any tools. If a playbook was triggered (Customer 360 / Product analysis), follow its output structure (## headings + inline GFM tables). Write what you CAN from the data you fetched. If a section has no data, say so plainly under its heading. If all data queries failed, still write the brief skeleton and add a clear note at the top: 'Couldn't retrieve full data — try the brief again, or check the customer/product identifier.' Never produce an empty response.",
                   cache_control: { type: "ephemeral" },
                 },
                 ...(languageInstruction
@@ -1191,11 +1202,23 @@ Deno.serve(async (req: Request) => {
                 (ev.delta as any).type === "text_delta"
               ) {
                 const text = (ev.delta as any).text ?? "";
-                if (text) emit("text_delta", { text });
+                if (text) {
+                  emit("text_delta", { text });
+                  recoveryProducedText = true;
+                }
               }
             }
           } catch (e) {
             console.error("[query-ai recovery]", e);
+          }
+          // Last-resort: if even the recovery call wrote nothing, emit a
+          // hard-coded apology so the user doesn't stare at a blank panel.
+          if (!recoveryProducedText) {
+            const fallbackMsg =
+              locale === "it"
+                ? "Non sono riuscito a generare il brief — riprova tra qualche secondo o controlla l'identificativo cliente/prodotto."
+                : "I couldn't generate the brief — please try again in a moment, or double-check the customer/product identifier.";
+            emit("text_delta", { text: fallbackMsg });
           }
         }
 
