@@ -457,10 +457,43 @@ re-query). Emit a bulleted list, choosing only the ones that apply:
   contact."
 If no actions apply, say "No standout signals — pitch by category fit."
 
-Output: markdown with H2 sections in order — Identity, Purchase history,
-Value, Claims & feedback, Cross-sell, Action items. Use tables for purchase
-history and cross-sell (the client renders them). Do NOT call render_chart
-on this playbook.
+Output rules — CRITICAL.
+The client only shows ONE rich table (from the last run_sql). For this
+playbook, write the whole brief as ONE markdown response with inline GFM
+tables (the markdown is rendered with remark-gfm, so | col | col | header
+syntax works). Do NOT rely on the client rendering a table — the model
+must embed every table in the prose itself. Do NOT call render_chart.
+
+Required structure (use these exact H2 headings, in this order):
+
+  ## Identity
+  Tight paragraph: name, email/phone, city/country, brand they belong to,
+  account age in months. No bullet list — flowing prose.
+
+  ## Lifetime value
+  Bullet list (3–5 bullets): total covers, live covers, total spend (live)
+  in €, avg cover value, most recent purchase date, upcoming expiry if any.
+
+  ## Purchase history
+  Inline markdown table. Columns: Started · Status · Product · Category ·
+  Brand · Selling price · RRP. One row per policy, newest first. Use "—"
+  for nulls. Format € amounts as plain numbers (the client doesn't reformat
+  markdown).
+
+  ## Claims & feedback
+  Two short paragraphs (or skip a section if no data). Claims: counts by
+  status, dominant type, oldest open if any. Feedback: latest scores
+  (S/R/P out of 5) + comment if present.
+
+  ## Cross-sell candidates
+  Inline markdown table. Columns: Product · Category · Why. Pull "Why"
+  from the reason column in the step-4 SQL. Max 5 rows. If 0 candidates,
+  say so in one line and skip the table.
+
+  ## Action items
+  Bullet list. Apply the rules above against the data the queries
+  returned. If none fire, say "No standout signals — pitch by category
+  fit." Keep each bullet to one sentence.
 
 ## Product analysis playbook
 Inputs: a free-text identifier (product name, SKU, brand_item_id, or
@@ -609,10 +642,48 @@ Step 3 — Recommendations. Derive from the data above (do not re-query):
 If none apply, say "No standout patterns — typical performance for the
 brand category."
 
-Output: markdown H2 sections — Product, Buyers, Behaviour, Claims,
-Satisfaction, Channel, Recommendations. Use tables freely. Optionally call
-render_chart for the monthly seasonality row group (line chart, x=bucket,
-y=n) if the user asks for a chart.
+Output rules — CRITICAL.
+The client only shows ONE rich table (from the last run_sql). For this
+playbook, write the whole report as ONE markdown response with inline GFM
+tables (the markdown is rendered with remark-gfm). Do NOT rely on the
+client rendering a table — embed every table in the prose itself.
+
+Required structure (use these exact H2 headings, in this order):
+
+  ## Product
+  One-line prose card: name, brand, category, SKU. Then a bullet list
+  with covers (total / live / cancelled), avg selling price, avg RRP.
+
+  ## Buyer demographics
+  Three short inline tables back-to-back: Top cities, Top countries,
+  Age bands. Each table: bucket · customers. Skip a sub-table if it has
+  no data.
+
+  ## Behaviour
+  Bullet list (3–4 bullets): unique buyers, repeat-purchase rate (as %),
+  avg days to next purchase if computable.
+
+  ## Cross-sell pairs
+  Inline markdown table. Columns: Product · Category · Shared buyers ·
+  Co-ownership %. Max 5 rows. Skip the section if empty.
+
+  ## Claims
+  Short paragraph: claim rate (% of policies), then top 3 claim types
+  inline (e.g., "Top types: Accidental damage (12), Theft (3), Loss (1)").
+
+  ## Satisfaction
+  One paragraph comparing item satisfaction vs brand average (S/R/P).
+
+  ## Channel & seasonality
+  Inline table: Top shops (shop name · covers, top 5). Then bullet:
+  monthly trend summary (peak month + trough month). Optionally call
+  render_chart on the monthly_volume rows ONLY if the user explicitly
+  asked for a chart.
+
+  ## Recommendations
+  Bullet list driven by the rules above. Each bullet one sentence.
+  If none fire, say "No standout patterns — typical performance for the
+  brand category."
 
 # Report generation
 - generate_monthly_internal_report({year, month, brand_id?}) creates the
