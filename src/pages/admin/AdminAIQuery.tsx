@@ -1221,20 +1221,25 @@ const StepProgress = ({
 }: {
   steps: SqlStep[];
   writingSummary: boolean;
-}) => (
-  <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm">
-    {steps.map((step, i) => (
-      <div key={i} className="flex items-center gap-2 text-foreground">
-        <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-        <span className="flex-1">{step.label}</span>
+}) => {
+  // Collapse consecutive duplicates — retries and heuristic collisions
+  // shouldn't add noise to the progress list.
+  const deduped = steps.filter((s, i) => i === 0 || s.label !== steps[i - 1].label);
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm">
+      {deduped.map((step, i) => (
+        <div key={i} className="flex items-center gap-2 text-foreground">
+          <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+          <span className="flex-1">{step.label}</span>
+        </div>
+      ))}
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+        <span>{writingSummary ? "Writing brief…" : "Working…"}</span>
       </div>
-    ))}
-    <div className="flex items-center gap-2 text-muted-foreground">
-      <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-      <span>{writingSummary ? "Writing brief…" : "Working…"}</span>
     </div>
-  </div>
-);
+  );
+};
 
 const ResultsTable = ({
   columns,
