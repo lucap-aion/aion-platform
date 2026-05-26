@@ -17,7 +17,9 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 
 const MODEL = "claude-haiku-4-5-20251001";
-const MAX_TOOL_TURNS = 6;
+// Playbooks (Customer 360, Product analysis) chain ~6–8 run_sql calls;
+// 12 gives headroom for retries on first-pass SQL errors.
+const MAX_TOOL_TURNS = 12;
 const MAX_TOKENS = 3000;
 
 const CORS = {
@@ -317,6 +319,300 @@ FROM signups s
 LEFT JOIN policies p ON p.customer_id = s.customer_id
                      AND p.start_date BETWEEN s.cohort AND s.cohort + interval '30 days'
 GROUP BY s.cohort ORDER BY s.cohort;
+
+# Playbooks
+The user may trigger one of two structured playbooks. Recognise them by the
+opening line of the question ("Customer 360 brief for: ..." or "Product
+analysis for: ...", in English or Italian — "Brief Customer 360" / "Analisi
+prodotto"). When you do, follow the steps below exactly. If you cannot
+resolve the entity (no match, or multiple matches), STOP after the
+disambiguation step — do not invent data.
+
+## Customer 360 playbook
+Inputs: a free-text identifier in the user message (name, email, phone, or
+profiles.id). The customer is a profiles row with role IS NULL or
+role = 'customer'.
+
+Step 1 — Resolve the customer. ONE run_sql call:
+  SELECT p.id, p.first_name, p.last_name, p.email, p.phone_number, p.city,
+         p.country, p.registered_at, b.id AS brand_id, b.name AS brand,
+         (SELECT COUNT(*) FROM policies pol WHERE pol.customer_id = p.id) AS covers
+  FROM profiles p
+  LEFT JOIN brands b ON b.id = p.brand_id
+  WHERE (p.role IS NULL OR p.role = 'customer')
+    AND (
+      lower(p.email)         = lower(:q)
+      OR p.phone_number       = :q
+      OR p.id::text           = :q
+      OR lower(p.first_name || ' ' || p.last_name) ILIKE '%' || lower(:q) || '%'
+      OR lower(p.email)       ILIKE '%' || lower(:q) || '%'
+    )
+  ORDER BY p.registered_at DESC NULLS LAST
+  LIMIT 25;
+Replace :q with the literal value, properly escaped via single quotes.
+If 0 rows: tell the user no customer matched and STOP.
+If >1 rows: render the table as a disambiguation list, ask the user to pick
+one by id, and STOP. Do NOT proceed to step 2 on ambiguous input.
+
+Step 2 — Once exactly one customer.id is known, run the brief queries.
+Prefer batching with CTEs in one query to stay within tool-turn budget. The
+brief has these blocks (label each section in the markdown output):
+
+  -- Identity (already in step 1).
+  -- Purchase history
+  SELECT pol.id, pol.start_date, pol.expiration_date, pol.status,
+         cat.name AS product, cat.category, b.name AS brand,
+         pol.selling_price, pol.recommended_retail_price
+  FROM policies pol
+  LEFT JOIN catalogues cat ON cat.id = pol.item_id
+  LEFT JOIN brands b ON b.id = pol.brand_id
+  WHERE pol.customer_id = :customer_id
+  ORDER BY pol.start_date DESC;
+
+  -- Value snapshot (single row)
+  SELECT COUNT(*)                                        AS covers_total,
+         COUNT(*) FILTER (WHERE status='live')           AS covers_live,
+         SUM(selling_price) FILTER (WHERE status='live') AS spend_live,
+         AVG(selling_price) FILTER (WHERE status='live') AS avg_cover_value,
+         MAX(start_date)                                 AS last_purchase
+  FROM policies WHERE customer_id = :customer_id;
+
+  -- Claims grouped by normalised type
+  SELECT initcap(replace(lower(replace(c.type,' ','_')),'_',' ')) AS claim_type,
+         c.status, COUNT(*) AS n,
+         MIN(c.created_at) AS oldest_open
+  FROM claims c
+  JOIN policies p ON p.id = c.policy_id
+  WHERE p.customer_id = :customer_id
+  GROUP BY 1, c.status ORDER BY n DESC;
+
+  -- Latest feedback (most recent row)
+  SELECT satisfaction_rate, recommendation_rate, peace_of_mind_rate, comment,
+         created_at
+  FROM feedback WHERE user_id = :customer_id
+  ORDER BY created_at DESC LIMIT 1;
+
+  -- Support touchpoints
+  SELECT COUNT(*) AS msgs, MAX(created_at) AS last_msg
+  FROM support_messages WHERE customer_id = :customer_id;
+
+Step 3 — Cross-sell recommendations (one query). Rank candidate catalogue
+items from the customer's brand that the customer does NOT already own:
+  WITH owned AS (
+    SELECT DISTINCT item_id FROM policies WHERE customer_id = :customer_id
+  ),
+  customer_brand AS (
+    SELECT brand_id FROM profiles WHERE id = :customer_id
+  ),
+  past_categories AS (
+    SELECT DISTINCT cat.category
+    FROM policies pol JOIN catalogues cat ON cat.id = pol.item_id
+    WHERE pol.customer_id = :customer_id
+  ),
+  -- customers who share at least one product with this customer
+  lookalikes AS (
+    SELECT DISTINCT pol.customer_id
+    FROM policies pol
+    WHERE pol.item_id IN (SELECT item_id FROM owned)
+      AND pol.customer_id <> :customer_id
+  ),
+  lookalike_owned AS (
+    SELECT pol.item_id, COUNT(DISTINCT pol.customer_id) AS lookalike_n
+    FROM policies pol
+    WHERE pol.customer_id IN (SELECT customer_id FROM lookalikes)
+      AND pol.item_id NOT IN (SELECT item_id FROM owned)
+    GROUP BY pol.item_id
+  ),
+  shop_pop AS (
+    SELECT pol.item_id, COUNT(*) AS shop_n
+    FROM policies pol
+    WHERE pol.shop_id = (SELECT shop_id FROM profiles WHERE id = :customer_id)
+      AND pol.start_date >= now() - interval '90 days'
+    GROUP BY pol.item_id
+  )
+  SELECT cat.id, cat.name, cat.category, cat.sku,
+         (cat.category IN (SELECT category FROM past_categories))::int AS same_category,
+         COALESCE(lo.lookalike_n, 0) AS lookalike_n,
+         COALESCE(sp.shop_n, 0)      AS shop_n
+  FROM catalogues cat
+  LEFT JOIN lookalike_owned lo ON lo.item_id = cat.id
+  LEFT JOIN shop_pop sp        ON sp.item_id = cat.id
+  WHERE cat.brand_id = (SELECT brand_id FROM customer_brand)
+    AND cat.id NOT IN (SELECT item_id FROM owned WHERE item_id IS NOT NULL)
+  ORDER BY same_category DESC, lookalike_n DESC, shop_n DESC, cat.name
+  LIMIT 5;
+
+Step 4 — Action items. Derive these from the data already returned (do not
+re-query). Emit a bulleted list, choosing only the ones that apply:
+- Any claim row with status='open' or 'in_review' AND oldest_open older
+  than 7 days → "Acknowledge open <claim_type> claim before pitching."
+- Latest feedback row, satisfaction_rate >= 4 → "Highly satisfied — pitch
+  premium category or higher-tier cover."
+- No feedback row but covers_live > 0 → "Ask for first-time feedback."
+- Any live policy with expiration_date within 30 days from now → "Renewal
+  coming up on <product> — confirm before pitching new items."
+- past_categories includes A but not B (where B is a common companion) →
+  "Introduce <B> — gap vs typical buyer."
+- support_messages.msgs > 0 in last 30 days → "Acknowledge recent support
+  contact."
+If no actions apply, say "No standout signals — pitch by category fit."
+
+Output: markdown with H2 sections in order — Identity, Purchase history,
+Value, Claims & feedback, Cross-sell, Action items. Use tables for purchase
+history and cross-sell (the client renders them). Do NOT call render_chart
+on this playbook.
+
+## Product analysis playbook
+Inputs: a free-text identifier (product name, SKU, brand_item_id, or
+catalogues.id).
+
+Step 1 — Resolve the product. ONE run_sql call:
+  SELECT cat.id, cat.name, cat.sku, cat.brand_item_id, cat.category,
+         b.name AS brand,
+         (SELECT COUNT(*) FROM policies pol WHERE pol.item_id = cat.id) AS covers
+  FROM catalogues cat
+  LEFT JOIN brands b ON b.id = cat.brand_id
+  WHERE cat.id::text       = :q
+     OR cat.sku            = :q
+     OR cat.brand_item_id  = :q
+     OR lower(cat.name)    ILIKE '%' || lower(:q) || '%'
+  ORDER BY covers DESC LIMIT 25;
+0 rows → say so and STOP. >1 rows → disambiguation table, STOP.
+
+Step 2 — Product card + customer set (one query each, or batched):
+
+  -- Product card
+  SELECT COUNT(*)                              AS covers_total,
+         COUNT(*) FILTER (WHERE status='live') AS covers_live,
+         COUNT(*) FILTER (WHERE status='cancelled') AS covers_cancelled,
+         AVG(selling_price)            AS avg_selling_price,
+         AVG(recommended_retail_price) AS avg_rrp
+  FROM policies WHERE item_id = :product_id;
+
+  -- Buyer demographics (top cities + top countries + age bands)
+  WITH buyers AS (
+    SELECT DISTINCT pol.customer_id
+    FROM policies pol WHERE pol.item_id = :product_id
+  )
+  SELECT 'city' AS dim, COALESCE(p.city, '—') AS bucket, COUNT(*) AS n
+  FROM buyers JOIN profiles p ON p.id = buyers.customer_id
+  GROUP BY 2
+  UNION ALL
+  SELECT 'country', COALESCE(p.country, '—'), COUNT(*)
+  FROM buyers JOIN profiles p ON p.id = buyers.customer_id
+  GROUP BY 2
+  UNION ALL
+  SELECT 'age_band',
+         CASE
+           WHEN p.date_of_birth IS NULL THEN 'unknown'
+           WHEN extract(year FROM age(p.date_of_birth)) < 26 THEN '18-25'
+           WHEN extract(year FROM age(p.date_of_birth)) < 36 THEN '26-35'
+           WHEN extract(year FROM age(p.date_of_birth)) < 46 THEN '36-45'
+           WHEN extract(year FROM age(p.date_of_birth)) < 56 THEN '46-55'
+           ELSE '56+'
+         END, COUNT(*)
+  FROM buyers JOIN profiles p ON p.id = buyers.customer_id
+  GROUP BY 2
+  ORDER BY 1, n DESC;
+
+  -- Repeat-purchase rate
+  WITH per_customer AS (
+    SELECT customer_id, COUNT(*) AS n
+    FROM policies WHERE item_id = :product_id GROUP BY customer_id
+  )
+  SELECT COUNT(*) FILTER (WHERE n > 1)::numeric
+         / NULLIF(COUNT(*), 0) AS repeat_rate,
+         COUNT(*) AS unique_buyers
+  FROM per_customer;
+
+  -- Top 5 co-owned products (basket affinity)
+  WITH buyers AS (
+    SELECT DISTINCT customer_id FROM policies WHERE item_id = :product_id
+  )
+  SELECT cat.id, cat.name, cat.category,
+         COUNT(DISTINCT pol.customer_id) AS shared_buyers,
+         ROUND(100 * COUNT(DISTINCT pol.customer_id)::numeric
+               / NULLIF((SELECT COUNT(*) FROM buyers), 0), 1) AS pct_overlap
+  FROM policies pol JOIN catalogues cat ON cat.id = pol.item_id
+  WHERE pol.customer_id IN (SELECT customer_id FROM buyers)
+    AND pol.item_id <> :product_id
+  GROUP BY cat.id, cat.name, cat.category
+  ORDER BY shared_buyers DESC LIMIT 5;
+
+  -- Cancellation rate vs brand average
+  WITH this_item AS (
+    SELECT COUNT(*) FILTER (WHERE status='cancelled')::numeric
+           / NULLIF(COUNT(*), 0) AS rate
+    FROM policies WHERE item_id = :product_id
+  ),
+  brand_avg AS (
+    SELECT COUNT(*) FILTER (WHERE pol.status='cancelled')::numeric
+           / NULLIF(COUNT(*), 0) AS rate
+    FROM policies pol
+    WHERE pol.brand_id = (SELECT brand_id FROM catalogues WHERE id = :product_id)
+  )
+  SELECT this_item.rate AS item_cancel_rate, brand_avg.rate AS brand_cancel_rate
+  FROM this_item, brand_avg;
+
+  -- Claim profile (rate + top 3 normalised types)
+  WITH item_policies AS (
+    SELECT id FROM policies WHERE item_id = :product_id
+  )
+  SELECT COUNT(c.*)::numeric / NULLIF((SELECT COUNT(*) FROM item_policies), 0)
+                                                    AS claim_rate,
+         initcap(replace(lower(replace(c.type,' ','_')),'_',' ')) AS claim_type,
+         COUNT(*)                                    AS n
+  FROM claims c
+  WHERE c.policy_id IN (SELECT id FROM item_policies)
+  GROUP BY claim_type ORDER BY n DESC LIMIT 3;
+
+  -- Feedback vs brand average
+  WITH buyers AS (
+    SELECT DISTINCT customer_id FROM policies WHERE item_id = :product_id
+  )
+  SELECT 'item' AS scope,
+         AVG(satisfaction_rate)   AS satisfaction,
+         AVG(recommendation_rate) AS recommendation,
+         AVG(peace_of_mind_rate)  AS peace_of_mind
+  FROM feedback WHERE user_id IN (SELECT customer_id FROM buyers)
+  UNION ALL
+  SELECT 'brand',
+         AVG(satisfaction_rate),
+         AVG(recommendation_rate),
+         AVG(peace_of_mind_rate)
+  FROM feedback
+  WHERE brand_id = (SELECT brand_id FROM catalogues WHERE id = :product_id);
+
+  -- Top shops + monthly seasonality (last 12 months)
+  SELECT 'shop' AS dim, COALESCE(s.name,'—') AS bucket, COUNT(*) AS n
+  FROM policies pol LEFT JOIN shops s ON s.id = pol.shop_id
+  WHERE pol.item_id = :product_id
+  GROUP BY 2
+  UNION ALL
+  SELECT 'month', to_char(date_trunc('month', start_date),'YYYY-MM'), COUNT(*)
+  FROM policies WHERE item_id = :product_id
+    AND start_date >= now() - interval '12 months'
+  GROUP BY 2
+  ORDER BY 1, n DESC;
+
+Step 3 — Recommendations. Derive from the data above (do not re-query):
+- pct_overlap >= 25 on any co-owned product → "Bundle with <product>:
+  <pct_overlap>% of buyers already own it."
+- item_cancel_rate >= 1.5 × brand_cancel_rate → "Investigate cancellation
+  drivers — <X>× brand average."
+- Top claim_type with n / covers_live >= 2 × brand baseline → "Review fit
+  for <claim_type>."
+- avg_selling_price < median of same-category, same-brand items by 10%+ →
+  "Consider raising selling price toward category median."
+- Strong age_band concentration (>=60% in one band) → "Targeting skews to
+  <band> — consider promo angles tuned to that cohort."
+If none apply, say "No standout patterns — typical performance for the
+brand category."
+
+Output: markdown H2 sections — Product, Buyers, Behaviour, Claims,
+Satisfaction, Channel, Recommendations. Use tables freely. Optionally call
+render_chart for the monthly seasonality row group (line chart, x=bucket,
+y=n) if the user asks for a chart.
 
 # Report generation
 - generate_monthly_internal_report({year, month, brand_id?}) creates the
