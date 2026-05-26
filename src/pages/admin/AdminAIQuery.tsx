@@ -100,36 +100,36 @@ const toNumber = (v: unknown): number | null => {
 const humanizeColumn = (col: string): string =>
   col.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-// Turn a SQL string into a short human label for the live step indicator.
-// Heuristic — recognises the canonical playbook queries; falls back to
-// "Running query" so we never crash on an unfamiliar shape.
+// Turn a SQL string into a translation key for a short, store-manager-
+// friendly step label. The component resolves the key via useLanguage(),
+// so the indicator reads in the user's locale.
 const summarizeSql = (sql: string): string => {
   const s = sql.toLowerCase();
   const hasFrom = (table: string) =>
     s.includes(`from ${table}`) || s.includes(`from public.${table}`);
 
   if (hasFrom("profiles") && (s.includes("ilike") || s.includes("p.id::text"))) {
-    return "Resolving customer";
+    return "aiQuery.step.lookingUpCustomer";
   }
   if (hasFrom("catalogues") && s.includes("not in")) {
-    return "Finding cross-sell candidates";
+    return "aiQuery.step.pickingSuggestions";
   }
   if (hasFrom("policies") && s.includes("customer_id")) {
     if (s.includes("filter (where status='live')") || s.includes("sum(selling_price)")) {
-      return "Computing lifetime value";
+      return "aiQuery.step.addingSpend";
     }
-    return "Loading purchase history";
+    return "aiQuery.step.pullingOrders";
   }
-  if (hasFrom("claims")) return "Loading claims";
-  if (hasFrom("feedback")) return "Loading feedback";
-  if (hasFrom("support_messages")) return "Loading support history";
+  if (hasFrom("claims")) return "aiQuery.step.checkingClaims";
+  if (hasFrom("feedback")) return "aiQuery.step.readingFeedback";
+  if (hasFrom("support_messages")) return "aiQuery.step.checkingSupport";
   if (hasFrom("catalogues") && (s.includes("buyers") || s.includes("co_owned"))) {
-    return "Finding co-owned products";
+    return "aiQuery.step.findingSimilar";
   }
-  if (hasFrom("catalogues")) return "Loading product";
-  if (hasFrom("policies") && s.includes("item_id =")) return "Analysing product covers";
-  if (hasFrom("brands")) return "Loading brand";
-  return "Running query";
+  if (hasFrom("catalogues")) return "aiQuery.step.lookingUpProduct";
+  if (hasFrom("policies") && s.includes("item_id =")) return "aiQuery.step.whoBoughtThis";
+  if (hasFrom("brands")) return "aiQuery.step.loadingBrand";
+  return "aiQuery.step.crunching";
 };
 
 // ─── Cell formatting ─────────────────────────────────────────────────────────
@@ -1222,20 +1222,23 @@ const StepProgress = ({
   steps: SqlStep[];
   writingSummary: boolean;
 }) => {
+  const { t } = useLanguage();
   // Collapse consecutive duplicates — retries and heuristic collisions
-  // shouldn't add noise to the progress list.
+  // shouldn't add noise to the progress list. step.label is a translation
+  // key (e.g. "aiQuery.step.pullingOrders"); resolve it via t() for the
+  // user's locale.
   const deduped = steps.filter((s, i) => i === 0 || s.label !== steps[i - 1].label);
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm">
       {deduped.map((step, i) => (
         <div key={i} className="flex items-center gap-2 text-foreground">
           <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-          <span className="flex-1">{step.label}</span>
+          <span className="flex-1">{t(step.label)}</span>
         </div>
       ))}
       <div className="flex items-center gap-2 text-muted-foreground">
         <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-        <span>{writingSummary ? "Writing brief…" : "Working…"}</span>
+        <span>{t(writingSummary ? "aiQuery.step.puttingTogether" : "aiQuery.step.justMoment")}</span>
       </div>
     </div>
   );
