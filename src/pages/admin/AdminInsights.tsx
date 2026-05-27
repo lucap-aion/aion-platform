@@ -1708,7 +1708,7 @@ function TourismTab({ t, locale }: { t: T; locale: "it" | "en" }) {
           <label className="flex flex-col text-[11px] text-muted-foreground">
             {t("insights.tourism.lag")}
             <select className={selectCls + " mt-1"} value={lag} onChange={e => setLag(Number(e.target.value))}>
-              {[-3, -2, -1, 0, 1, 2, 3, 6, 12].map(n => <option key={n} value={n}>{n > 0 ? `+${n}` : n}</option>)}
+              {[-3, -2, -1, 0, 1, 2, 3, 6, 12, 15, 18, 24].map(n => <option key={n} value={n}>{n > 0 ? `+${n}` : n}</option>)}
             </select>
           </label>
           <button
