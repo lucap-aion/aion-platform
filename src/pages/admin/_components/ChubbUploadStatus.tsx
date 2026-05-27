@@ -1,12 +1,14 @@
-// Admin home alert card for the daily Chubb uploads done by aion_services.
-// Reads from public.reports (filtered to outbound automated runs), groups by
-// (date, brand, type), and lets the admin expand each card to inspect the file
-// rows inline (CSV parsed in-browser; XLSX lazy-loaded via ExcelJS).
+// Admin home alert card for the daily Chubb uploads/downloads done by
+// aion_services. Reads from public.reports (automated runs only) and lets the
+// admin expand each card to inspect the file rows inline (CSV parsed
+// in-browser; XLSX lazy-loaded via ExcelJS). For Inbound (returned) files we
+// also count Registration_Status=KO rows so the admin sees rejections at a
+// glance.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Clock,
-  Download, FileSpreadsheet, HelpCircle, Loader2, RefreshCw, XCircle,
+  AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRight, Clock,
+  Download, FileSpreadsheet, HelpCircle, Inbox, Loader2, RefreshCw, Send, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -54,14 +56,24 @@ const fmtDateTime = (iso: string, locale: string) =>
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
+// KO check state for Inbound (returned) rows. We download the file once in
+// the background and count Registration_Status="KO" rows so the admin sees
+// rejections without expanding each card.
+type KoState =
+  | { status: "loading" }
+  | { status: "ready"; total: number; ko: number; hasKoColumn: boolean }
+  | { status: "error" };
+
 const ChubbUploadStatus = ({ brands }: { brands: BrandLite[] }) => {
   const { t, locale } = useLanguage();
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [koByRow, setKoByRow] = useState<Record<number, KoState>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
+    setKoByRow({});
     const since = new Date();
     since.setUTCDate(since.getUTCDate() - LOOKBACK_DAYS);
     const { data, error } = await supabase
@@ -70,7 +82,7 @@ const ChubbUploadStatus = ({ brands }: { brands: BrandLite[] }) => {
         "id, brand_id, name, type, direction, source, url, upload_status, upload_error, upload_attempts, row_count, start_date, end_date, created_at",
       )
       .in("type", ["policies", "claims"])
-      .eq("direction", "Outbound")
+      .in("direction", ["Outbound", "Inbound"])
       .eq("source", "automated")
       .gte("created_at", since.toISOString())
       .order("created_at", { ascending: false })
@@ -86,6 +98,62 @@ const ChubbUploadStatus = ({ brands }: { brands: BrandLite[] }) => {
   }, [t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Background KO scan for Inbound rows. Limited concurrency keeps signed-URL
+  // generation and storage downloads from running 10+ in parallel on refresh.
+  useEffect(() => {
+    const inbound = rows.filter((r) => r.direction === "Inbound" && r.url);
+    if (inbound.length === 0) return;
+    let cancelled = false;
+
+    setKoByRow((prev) => {
+      const next = { ...prev };
+      for (const r of inbound) if (!next[r.id]) next[r.id] = { status: "loading" };
+      return next;
+    });
+
+    const queue = [...inbound];
+    const worker = async () => {
+      while (queue.length > 0) {
+        const r = queue.shift();
+        if (!r || cancelled) return;
+        try {
+          const bucket = REPORT_BUCKET(r.type);
+          const { data: signed, error: signErr } = await supabase.storage
+            .from(bucket)
+            .createSignedUrl(r.url!, 60 * 30);
+          if (signErr || !signed?.signedUrl) throw new Error(signErr?.message ?? "sign failed");
+          const res = await fetch(signed.signedUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const isXlsx = (r.name ?? "").toLowerCase().endsWith(".xlsx");
+          const parsed = isXlsx
+            ? await parseXlsx(await res.arrayBuffer())
+            : parseCsv(await res.text());
+          const idx = parsed.columns.findIndex(
+            (c) => c.trim().toLowerCase() === "registration_status",
+          );
+          let ko = 0;
+          if (idx >= 0) {
+            for (const row of parsed.rows) {
+              if ((row[idx] ?? "").trim().toUpperCase() === "KO") ko++;
+            }
+          }
+          if (cancelled) return;
+          setKoByRow((prev) => ({
+            ...prev,
+            [r.id]: { status: "ready", total: parsed.rows.length, ko, hasKoColumn: idx >= 0 },
+          }));
+        } catch (err) {
+          console.warn("[chubb-status] KO scan failed", { id: r.id, err });
+          if (cancelled) return;
+          setKoByRow((prev) => ({ ...prev, [r.id]: { status: "error" } }));
+        }
+      }
+    };
+
+    void Promise.all([worker(), worker(), worker()]);
+    return () => { cancelled = true; };
+  }, [rows]);
 
   const brandName = useCallback(
     (id: number | null) =>
@@ -104,6 +172,15 @@ const ChubbUploadStatus = ({ brands }: { brands: BrandLite[] }) => {
     }
     return c;
   }, [rows]);
+
+  // Total KO rows across all returned files where the scan has finished.
+  const koTotal = useMemo(() => {
+    let n = 0;
+    for (const v of Object.values(koByRow)) {
+      if (v.status === "ready") n += v.ko;
+    }
+    return n;
+  }, [koByRow]);
 
   return (
     <div className="rounded-xl border border-border bg-card">
@@ -132,6 +209,11 @@ const ChubbUploadStatus = ({ brands }: { brands: BrandLite[] }) => {
           {counts.success > 0 && (
             <span className="flex items-center gap-1 font-medium text-emerald-600">
               <CheckCircle2 className="h-3.5 w-3.5" /> {counts.success} {t("chubbStatus.ok")}
+            </span>
+          )}
+          {koTotal > 0 && (
+            <span className="flex items-center gap-1 font-medium text-red-600">
+              <Ban className="h-3.5 w-3.5" /> {koTotal} {t("chubbStatus.ko")}
             </span>
           )}
           <button
@@ -169,6 +251,7 @@ const ChubbUploadStatus = ({ brands }: { brands: BrandLite[] }) => {
                 expanded={expandedId === r.id}
                 onToggle={() => setExpandedId((id) => (id === r.id ? null : r.id))}
                 locale={locale}
+                koState={koByRow[r.id]}
               />
             </li>
           ))}
@@ -186,16 +269,21 @@ const UploadRow = ({
   expanded,
   onToggle,
   locale,
+  koState,
 }: {
   row: ReportRow;
   brandName: string;
   expanded: boolean;
   onToggle: () => void;
   locale: string;
+  koState: KoState | undefined;
 }) => {
   const { t } = useLanguage();
   const typeLabel = row.type === "claims" ? t("chubbStatus.typeClaims") : t("chubbStatus.typePolicies");
   const dayLabel = row.start_date ? fmtDate(row.start_date, locale) : "—";
+  const isInbound = row.direction === "Inbound";
+  const inboundTotal =
+    isInbound && koState?.status === "ready" ? koState.total : null;
 
   return (
     <div>
@@ -208,6 +296,8 @@ const UploadRow = ({
           ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
           : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
         <StatusPill status={row.upload_status} />
+        <DirectionPill direction={row.direction} />
+        {isInbound && <KoBadge state={koState} />}
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-foreground">
             {brandName} <span className="text-muted-foreground">·</span> {typeLabel}
@@ -217,6 +307,9 @@ const UploadRow = ({
             {row.name}
             {row.row_count != null && (
               <> · {row.row_count} {row.row_count === 1 ? t("aiQuery.row") : t("aiQuery.rows")}</>
+            )}
+            {inboundTotal != null && row.row_count == null && (
+              <> · {inboundTotal} {inboundTotal === 1 ? t("aiQuery.row") : t("aiQuery.rows")}</>
             )}
             {row.upload_attempts && row.upload_attempts > 1 ? (
               <> · {row.upload_attempts} {t("chubbStatus.attempts")}</>
@@ -238,10 +331,54 @@ const UploadRow = ({
               <p className="mt-1 text-xs text-foreground whitespace-pre-wrap">{row.upload_error}</p>
             </div>
           )}
-          <FileViewer row={row} />
+          <FileViewer row={row} highlightKo={isInbound} />
         </div>
       )}
     </div>
+  );
+};
+
+// ─── Direction + KO pills ───────────────────────────────────────────────────
+
+const DirectionPill = ({ direction }: { direction: string | null }) => {
+  const { t } = useLanguage();
+  if (direction !== "Inbound" && direction !== "Outbound") return null;
+  const isInbound = direction === "Inbound";
+  const Icon = isInbound ? Inbox : Send;
+  const label = isInbound ? t("chubbStatus.directionReturned") : t("chubbStatus.directionSent");
+  const cls = isInbound
+    ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
+    : "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300";
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${cls}`}>
+      <Icon className="h-3 w-3" /> {label}
+    </span>
+  );
+};
+
+const KoBadge = ({ state }: { state: KoState | undefined }) => {
+  const { t } = useLanguage();
+  if (!state) return null;
+  if (state.status === "loading") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" /> {t("chubbStatus.checkingKo")}
+      </span>
+    );
+  }
+  if (state.status === "error") return null;
+  if (!state.hasKoColumn) return null;
+  if (state.ko === 0) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+        <CheckCircle2 className="h-3 w-3" /> {t("chubbStatus.allOk")}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+      <Ban className="h-3 w-3" /> {state.ko} {t("chubbStatus.ko")}
+    </span>
   );
 };
 
@@ -267,7 +404,7 @@ const StatusPill = ({ status }: { status: UploadStatus | null }) => {
 
 // ─── File row viewer ────────────────────────────────────────────────────────
 
-const FileViewer = ({ row }: { row: ReportRow }) => {
+const FileViewer = ({ row, highlightKo = false }: { row: ReportRow; highlightKo?: boolean }) => {
   const { t } = useLanguage();
   const [columns, setColumns] = useState<string[] | null>(null);
   const [data, setData] = useState<string[][]>([]);
@@ -344,7 +481,20 @@ const FileViewer = ({ row }: { row: ReportRow }) => {
   const nonEmptyCols = columns
     .map((c, i) => ({ name: c, i, hasValue: data.some((r) => (r[i] ?? "").trim() !== "") }))
     .filter((c) => c.hasValue);
-  const visibleData = data.slice(0, 50);
+  const koColIndex = highlightKo
+    ? columns.findIndex((c) => c.trim().toLowerCase() === "registration_status")
+    : -1;
+
+  // For Inbound files with KO rows, surface the rejected ones first.
+  const sortedData =
+    koColIndex >= 0
+      ? [...data].sort((a, b) => {
+          const aKo = (a[koColIndex] ?? "").trim().toUpperCase() === "KO" ? 0 : 1;
+          const bKo = (b[koColIndex] ?? "").trim().toUpperCase() === "KO" ? 0 : 1;
+          return aKo - bKo;
+        })
+      : data;
+  const visibleData = sortedData.slice(0, 50);
 
   return (
     <div>
@@ -379,15 +529,34 @@ const FileViewer = ({ row }: { row: ReportRow }) => {
             </tr>
           </thead>
           <tbody>
-            {visibleData.map((r, ri) => (
-              <tr key={ri} className="border-t border-border/60">
-                {nonEmptyCols.map((c) => (
-                  <td key={c.i} className="px-3 py-1.5 text-foreground tabular-nums">
-                    {r[c.i] ?? ""}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {visibleData.map((r, ri) => {
+              const isKoRow =
+                koColIndex >= 0 &&
+                (r[koColIndex] ?? "").trim().toUpperCase() === "KO";
+              return (
+                <tr
+                  key={ri}
+                  className={
+                    isKoRow
+                      ? "border-t border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/30"
+                      : "border-t border-border/60"
+                  }
+                >
+                  {nonEmptyCols.map((c) => (
+                    <td
+                      key={c.i}
+                      className={
+                        isKoRow
+                          ? "px-3 py-1.5 text-red-900 tabular-nums dark:text-red-200"
+                          : "px-3 py-1.5 text-foreground tabular-nums"
+                      }
+                    >
+                      {r[c.i] ?? ""}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

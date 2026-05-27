@@ -296,7 +296,7 @@ const translations: Translations = {
   "aiQuery.report.dailyClaims": { en: "Daily Chubb claims report for yesterday.", it: "Report Chubb giornaliero dei sinistri di ieri." },
 
   // Admin home — Chubb upload status widget
-  "chubbStatus.title": { en: "Chubb daily uploads", it: "Caricamenti giornalieri Chubb" },
+  "chubbStatus.title": { en: "Chubb daily files", it: "File giornalieri Chubb" },
   "chubbStatus.lastNDays": { en: "last {n} days", it: "ultimi {n} giorni" },
   "chubbStatus.loading": { en: "Loading recent uploads…", it: "Caricamento upload recenti…" },
   "chubbStatus.empty": { en: "No uploads to show.", it: "Nessun upload da mostrare." },
@@ -312,6 +312,11 @@ const translations: Translations = {
   "chubbStatus.failed": { en: "failed", it: "falliti" },
   "chubbStatus.pending": { en: "pending", it: "in attesa" },
   "chubbStatus.ok": { en: "ok", it: "ok" },
+  "chubbStatus.ko": { en: "KO", it: "KO" },
+  "chubbStatus.allOk": { en: "All OK", it: "Tutto OK" },
+  "chubbStatus.checkingKo": { en: "Checking…", it: "Verifica…" },
+  "chubbStatus.directionSent": { en: "Sent", it: "Inviato" },
+  "chubbStatus.directionReturned": { en: "Returned", it: "Ricevuto" },
   "chubbStatus.typePolicies": { en: "Policies", it: "Polizze" },
   "chubbStatus.typeClaims": { en: "Claims", it: "Sinistri" },
   "chubbStatus.status.success": { en: "Success", it: "Successo" },
