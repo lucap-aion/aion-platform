@@ -6,6 +6,7 @@ import { useUrlParam } from "@/hooks/useListUrlState";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, LabelList, Legend,
+  ComposedChart, Line, CartesianGrid,
 } from "recharts";
 
 // ─── Chart palette — high-contrast, brand-aligned ────────────────────────────
@@ -600,13 +601,14 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
 }
 
 // ─── Tab definitions ─────────────────────────────────────────────────────────
-type TabId = "ov" | "wk" | "mo" | "dd" | "rt";
+type TabId = "ov" | "wk" | "mo" | "dd" | "rt" | "tr";
 const TAB_KEYS: { id: TabId; key: string }[] = [
   { id: "ov", key: "insights.tab.overview" },
   { id: "wk", key: "insights.tab.weekly" },
   { id: "mo", key: "insights.tab.monthly" },
   { id: "dd", key: "insights.tab.deepDive" },
   { id: "rt", key: "insights.tab.regTime" },
+  { id: "tr", key: "insights.tab.tourism" },
 ];
 
 type T = (key: string) => string;
@@ -813,7 +815,10 @@ export default function AdminInsights() {
         ))}
       </div>
 
-      {loading ? (
+      {/* Tourism tab is brand-agnostic — render it even when there are no policies. */}
+      {tab === "tr" ? (
+        <TourismTab t={t} locale={locale} />
+      ) : loading ? (
         <div className="space-y-5">
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
             {Array.from({ length: 6 }).map((_, i) => <KpiSkeleton key={i} />)}
@@ -1586,6 +1591,248 @@ function RegTimeTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
+    </div>
+  );
+}
+
+// ─── Tourism (Veneto) ────────────────────────────────────────────────────────
+type TourismMetric = "arrivals" | "presences";
+interface TourismCorrelation {
+  province: string;
+  area_code: string;
+  n_periods: number;
+  pearson: number | null;
+  spearman: number | null;
+  total_activations: number;
+  total_tourism: number;
+  series: { m: string; a: number; t: number }[];
+}
+interface UnmatchedShop { city: string; shop_count: number; policy_count: number }
+
+function TourismTab({ t, locale }: { t: T; locale: "it" | "en" }) {
+  const [metric, setMetric] = useState<TourismMetric>("presences");
+  const [lag, setLag] = useState<number>(0);
+  const [correlations, setCorrelations] = useState<TourismCorrelation[] | null>(null);
+  const [narrative, setNarrative] = useState<string>("");
+  const [narrativeLoading, setNarrativeLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [unmatched, setUnmatched] = useState<UnmatchedShop[]>([]);
+  const [lastScrape, setLastScrape] = useState<string | null>(null);
+  const [selectedProvince, setSelectedProvince] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Fetch correlations + last scrape timestamp.
+  // RPC/table names are escape-cast because types.ts is regenerated on every
+  // `supabase gen types` and won't include our new objects until then.
+  const load = useCallback(async () => {
+    setErr(null);
+    const sb = supabase as unknown as {
+      rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
+      from: (tbl: string) => {
+        select: (cols: string) => {
+          order: (col: string, opts: { ascending: boolean }) => {
+            limit: (n: number) => Promise<{ data: unknown }>;
+          };
+        };
+      };
+    };
+    const { data, error } = await sb.rpc("compute_tourism_correlations", {
+      p_from: null,
+      p_to: null,
+      p_lag_months: lag,
+      p_metric: metric,
+      p_min_periods: 6,
+    });
+    if (error) { setErr(error.message); setCorrelations([]); return; }
+    const rows = (data as TourismCorrelation[]) ?? [];
+    setCorrelations(rows);
+    if (rows.length > 0 && !selectedProvince) setSelectedProvince(rows[0].province);
+
+    const { data: tsRows } = await sb.from("tourism_stats")
+      .select("scraped_at").order("scraped_at", { ascending: false }).limit(1);
+    setLastScrape((tsRows as { scraped_at?: string }[] | null)?.[0]?.scraped_at ?? null);
+
+    const { data: unm } = await sb.rpc("tourism_unmatched_shops");
+    setUnmatched((unm as UnmatchedShop[]) ?? []);
+  }, [metric, lag, selectedProvince]);
+
+  useEffect(() => { void load(); }, [metric, lag]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Narrative — called separately, only when there's something to narrate.
+  useEffect(() => {
+    if (!correlations || correlations.length === 0) { setNarrative(""); return; }
+    let cancelled = false;
+    setNarrativeLoading(true);
+    supabase.functions.invoke("tourism-narrate", {
+      body: { lagMonths: lag, metric, locale },
+    }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { setNarrative(t("insights.tourism.narrativeError")); }
+      else      { setNarrative((data as { narrative?: string })?.narrative ?? ""); }
+    }).finally(() => { if (!cancelled) setNarrativeLoading(false); });
+    return () => { cancelled = true; };
+  }, [correlations, lag, metric, locale, t]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    setErr(null);
+    const { error } = await supabase.functions.invoke("tourism-ingest", { body: {} });
+    setRefreshing(false);
+    if (error) { setErr(error.message); return; }
+    await load();
+  };
+
+  const selected = useMemo(
+    () => correlations?.find(c => c.province === selectedProvince) ?? null,
+    [correlations, selectedProvince],
+  );
+  const noData = correlations !== null && correlations.length === 0;
+  const tourismLabel = t("insights.tourism.tourism") + " (" +
+    (metric === "arrivals" ? t("insights.tourism.metric.arrivals") : t("insights.tourism.metric.presences")) + ")";
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <p className="text-sm text-muted-foreground max-w-2xl">{t("insights.tourism.subtitle")}</p>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col text-[11px] text-muted-foreground">
+            {t("insights.tourism.metric")}
+            <select className={selectCls + " mt-1"} value={metric} onChange={e => setMetric(e.target.value as TourismMetric)}>
+              <option value="presences">{t("insights.tourism.metric.presences")}</option>
+              <option value="arrivals">{t("insights.tourism.metric.arrivals")}</option>
+            </select>
+          </label>
+          <label className="flex flex-col text-[11px] text-muted-foreground">
+            {t("insights.tourism.lag")}
+            <select className={selectCls + " mt-1"} value={lag} onChange={e => setLag(Number(e.target.value))}>
+              {[-3, -2, -1, 0, 1, 2, 3, 6, 12].map(n => <option key={n} value={n}>{n > 0 ? `+${n}` : n}</option>)}
+            </select>
+          </label>
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="px-4 py-2 text-sm rounded-lg border border-primary bg-primary text-primary-foreground font-medium shadow-sm hover:opacity-90 transition disabled:opacity-50"
+          >
+            {refreshing ? t("insights.tourism.refreshing") : t("insights.tourism.refresh")}
+          </button>
+        </div>
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        {t("insights.tourism.lag.help")} · {t("insights.tourism.lastUpdate")}:{" "}
+        <span className="tabular-nums">{lastScrape ? new Date(lastScrape).toLocaleString(locale === "it" ? "it-IT" : "en-GB") : t("insights.tourism.never")}</span>
+      </p>
+
+      {err && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">{err}</div>
+      )}
+
+      {noData && (
+        <div className="rounded-xl border border-border bg-card p-8 text-center">
+          <p className="text-sm text-muted-foreground">
+            {lastScrape ? t("insights.tourism.noCorrelations") : t("insights.tourism.noData")}
+          </p>
+        </div>
+      )}
+
+      {correlations && correlations.length > 0 && (
+        <>
+          <ChartCard title={t("insights.tourism.narrative")}>
+            {narrativeLoading
+              ? <div className="h-12 rounded bg-muted/40 animate-pulse" />
+              : <p className="text-sm leading-relaxed text-foreground whitespace-pre-line">{narrative}</p>}
+          </ChartCard>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <ChartCard title={t("insights.tourism.topCorrelations")}>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                    <tr className="border-b border-border">
+                      <th className="text-left py-2 pr-3">{t("insights.tourism.province")}</th>
+                      <th className="text-right py-2 px-3">{t("insights.tourism.pearson")}</th>
+                      <th className="text-right py-2 px-3">{t("insights.tourism.spearman")}</th>
+                      <th className="text-right py-2 px-3">{t("insights.tourism.n")}</th>
+                      <th className="text-right py-2 pl-3">{t("insights.tourism.activations")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {correlations.map(c => {
+                      const isSel = c.province === selectedProvince;
+                      const r = Number(c.pearson ?? 0);
+                      const color = Math.abs(r) >= 0.7 ? GR : Math.abs(r) >= 0.4 ? BL : Math.abs(r) >= 0.2 ? AM : GY;
+                      return (
+                        <tr key={c.province}
+                            onClick={() => setSelectedProvince(c.province)}
+                            className={`cursor-pointer border-b border-border/40 hover:bg-muted/30 ${isSel ? "bg-muted/50" : ""}`}>
+                          <td className="py-2 pr-3 font-medium text-foreground">{c.province}</td>
+                          <td className="py-2 px-3 text-right tabular-nums" style={{ color }}>{c.pearson != null ? Number(c.pearson).toFixed(3) : "—"}</td>
+                          <td className="py-2 px-3 text-right tabular-nums text-muted-foreground">{c.spearman != null ? Number(c.spearman).toFixed(3) : "—"}</td>
+                          <td className="py-2 px-3 text-right tabular-nums text-muted-foreground">{c.n_periods}</td>
+                          <td className="py-2 pl-3 text-right tabular-nums">{c.total_activations}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </ChartCard>
+
+            <ChartCard title={`${t("insights.tourism.timeseries")} — ${selected?.province ?? ""}`}>
+              {selected && selected.series.length > 0 ? (
+                <>
+                  <ColorLegend items={[
+                    { color: BL, label: t("insights.tourism.activations") },
+                    { color: GR, label: tourismLabel },
+                  ]} />
+                  <ResponsiveContainer width="100%" height={260}>
+                    <ComposedChart data={selected.series}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="m" tick={{ fontSize: 11 }} tickFormatter={fmtPeriodLabel} />
+                      <YAxis yAxisId="a" tick={{ fontSize: 11 }} />
+                      <YAxis yAxisId="t" orientation="right" tick={{ fontSize: 11 }} />
+                      <Tooltip content={<CTooltip />} />
+                      <Bar yAxisId="a" dataKey="a" name={t("insights.tourism.activations")} fill={BL} radius={[4, 4, 0, 0]} />
+                      <Line yAxisId="t" type="monotone" dataKey="t" name={tourismLabel} stroke={GR} strokeWidth={2} dot={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </>
+              ) : (
+                <div className="h-56 flex items-center justify-center text-sm text-muted-foreground">—</div>
+              )}
+            </ChartCard>
+          </div>
+        </>
+      )}
+
+      {unmatched.length > 0 && (
+        <details className="rounded-xl border border-border bg-card p-5">
+          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            {t("insights.tourism.unmatched")} ({unmatched.length})
+          </summary>
+          <p className="mt-2 text-xs text-muted-foreground">{t("insights.tourism.unmatchedHint")}</p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                <tr className="border-b border-border">
+                  <th className="text-left py-2 pr-3">city</th>
+                  <th className="text-right py-2 px-3">shops</th>
+                  <th className="text-right py-2 pl-3">policies</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unmatched.map(u => (
+                  <tr key={u.city} className="border-b border-border/40">
+                    <td className="py-1.5 pr-3">{u.city}</td>
+                    <td className="py-1.5 px-3 text-right tabular-nums text-muted-foreground">{u.shop_count}</td>
+                    <td className="py-1.5 pl-3 text-right tabular-nums">{u.policy_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
     </div>
   );
 }
