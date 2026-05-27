@@ -4,7 +4,7 @@ import {
   Shield, Users, FileText, Store, DollarSign, BarChart3,
   Activity, Package, UserCheck, ChevronDown, TrendingUp,
   TrendingDown, Minus, ArrowRight, Percent, Wallet,
-  BadgeCheck, Star,
+  BadgeCheck, BadgePlus, Star,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -58,7 +58,8 @@ interface Statistics {
   aionPremiumFee: number; aionRevenue: number; effectivePremiumPct: number | null;
   effectiveActivationFeePct: number | null; effectiveAionPremiumFeePct: number | null;
   latestActivation: string; claimRate: number | null; registrationRate: number | null;
-  profilationRate: number | null; feedbackRate: number | null;
+  profilationStartedRate: number | null; profilationCompletedRate: number | null;
+  feedbackRate: number | null;
 }
 
 const emptyStats = (): Statistics => ({
@@ -67,7 +68,7 @@ const emptyStats = (): Statistics => ({
   aionActivationFee: 0, aionPremiumFee: 0, aionRevenue: 0,
   effectivePremiumPct: null, effectiveActivationFeePct: null, effectiveAionPremiumFeePct: null,
   latestActivation: "", claimRate: null, registrationRate: null,
-  profilationRate: null, feedbackRate: null,
+  profilationStartedRate: null, profilationCompletedRate: null, feedbackRate: null,
 });
 
 // ─── Sub-components ────────────────────────────────────────────────────────
@@ -246,7 +247,8 @@ export default function AdminDashboard() {
       type AggShape = {
         brands_count: number; shops_count: number; customers_count: number; customers_registered: number;
         customers_profiled: number; customers_with_feedback: number;
-        pool_total?: number; pool_registered?: number; pool_profiled?: number; pool_with_feedback?: number;
+        pool_total?: number; pool_registered?: number;
+        pool_profilation_started?: number; pool_profiled?: number; pool_with_feedback?: number;
         claims_total: number; claims_open: number; claims_closed: number;
         policy_stats: Array<{ brand_id: number; covers: number; total_cogs: number; total_rrp: number; total_selling_price: number; latest_start_date: string | null }>;
       };
@@ -266,7 +268,8 @@ export default function AdminDashboard() {
       let policyStats: AggShape["policy_stats"] = [];
       let brandsCount: number, shopsCount: number, customersCount: number;
       let poolTotal: number | null = null, poolRegistered: number | null = null;
-      let poolProfiled: number | null = null, poolWithFeedback: number | null = null;
+      let poolProfilationStarted: number | null = null, poolProfiled: number | null = null;
+      let poolWithFeedback: number | null = null;
       let claimsCount: number, openClaimsCount: number, closedClaimsCount: number;
 
       if (aggs) {
@@ -275,6 +278,7 @@ export default function AdminDashboard() {
         customersCount = Number(aggs.customers_count) || 0;
         poolTotal = aggs.pool_total != null ? Number(aggs.pool_total) || 0 : null;
         poolRegistered = aggs.pool_registered != null ? Number(aggs.pool_registered) || 0 : null;
+        poolProfilationStarted = aggs.pool_profilation_started != null ? Number(aggs.pool_profilation_started) || 0 : null;
         poolProfiled = aggs.pool_profiled != null ? Number(aggs.pool_profiled) || 0 : null;
         poolWithFeedback = aggs.pool_with_feedback != null ? Number(aggs.pool_with_feedback) || 0 : null;
         claimsCount = Number(aggs.claims_total) || 0;
@@ -360,7 +364,8 @@ export default function AdminDashboard() {
       result.shops = shopsCount;
       result.claimRate = result.covers > 0 ? result.claims / result.covers : null;
       result.registrationRate = poolTotal && poolTotal > 0 && poolRegistered !== null ? poolRegistered / poolTotal : null;
-      result.profilationRate = poolTotal && poolTotal > 0 && poolProfiled !== null ? poolProfiled / poolTotal : null;
+      result.profilationStartedRate = poolTotal && poolTotal > 0 && poolProfilationStarted !== null ? poolProfilationStarted / poolTotal : null;
+      result.profilationCompletedRate = poolTotal && poolTotal > 0 && poolProfiled !== null ? poolProfiled / poolTotal : null;
       result.feedbackRate = poolTotal && poolTotal > 0 && poolWithFeedback !== null ? poolWithFeedback / poolTotal : null;
 
       setStats(result);
@@ -521,18 +526,20 @@ export default function AdminDashboard() {
       {/* ── Row 2: Engagement Rates ── */}
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Engagement</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           {loading ? (
             <>
               <MetricCardSkeleton icon={UserCheck} label="Registration Rate" />
-              <MetricCardSkeleton icon={BadgeCheck} label="Profilation Rate" />
+              <MetricCardSkeleton icon={BadgePlus} label="Profilation Started" />
+              <MetricCardSkeleton icon={BadgeCheck} label="Profilation Completed" />
               <MetricCardSkeleton icon={Star} label="Feedback Rate" />
               <MetricCardSkeleton icon={Percent} label="Claim Rate" />
             </>
           ) : (
             <>
               <MetricCard icon={UserCheck} label="Registration Rate" value={stats.registrationRate != null ? fmtPct(stats.registrationRate) : "—"} sub="Registered / Customers" />
-              <MetricCard icon={BadgeCheck} label="Profilation Rate" value={stats.profilationRate != null ? fmtPct(stats.profilationRate) : "—"} sub="Profiled / Customers" />
+              <MetricCard icon={BadgePlus} label="Profilation Started" value={stats.profilationStartedRate != null ? fmtPct(stats.profilationStartedRate) : "—"} sub="Started / Customers" />
+              <MetricCard icon={BadgeCheck} label="Profilation Completed" value={stats.profilationCompletedRate != null ? fmtPct(stats.profilationCompletedRate) : "—"} sub="Completed / Customers" />
               <MetricCard icon={Star} label="Feedback Rate" value={stats.feedbackRate != null ? fmtPct(stats.feedbackRate) : "—"} sub="With feedback / Customers" />
               <MetricCard icon={Percent} label="Claim Rate" value={stats.claimRate != null ? fmtPct(stats.claimRate) : "—"} sub="Claims / Covers" />
             </>
