@@ -141,7 +141,7 @@ Deno.serve(async (req: Request) => {
     presences: number | null;
   }>();
 
-  const fetchWithRetry = async (url: string, attempts = 2, timeoutMs = 90_000): Promise<string> => {
+  const fetchWithRetry = async (url: string, attempts = 3, timeoutMs = 90_000): Promise<string> => {
     let lastErr: unknown;
     for (let i = 0; i < attempts; i++) {
       const ctrl = new AbortController();
@@ -154,21 +154,19 @@ Deno.serve(async (req: Request) => {
       } catch (e) {
         clearTimeout(timer);
         lastErr = e;
+        if (i < attempts - 1) await new Promise(r => setTimeout(r, 1500 * (i + 1)));
       }
     }
     throw new Error(`ISTAT fetch failed after ${attempts} attempts: ${String((lastErr as Error)?.message ?? lastErr)}`);
   };
 
-  const fetchType = async (dataType: "AR" | "PR") => {
-    const url = istatUrl(dataType, startPeriod, endPeriod);
-    const text = await fetchWithRetry(url);
-    if (text.startsWith("NoRecordsFound")) {
-      return { type: dataType, rows: 0 };
-    }
+  // Parse one CSV chunk into observations. Mutates `observations` and returns
+  // how many rows were absorbed.
+  const ingestCsv = (text: string, dataType: "AR" | "PR"): number => {
+    if (text.startsWith("NoRecordsFound")) return 0;
     const { headers, rows } = parseCsv(text);
     const idx = {
       ref: headers.indexOf("REF_AREA"),
-      dt:  headers.indexOf("DATA_TYPE"),
       tp:  headers.indexOf("TIME_PERIOD"),
       val: headers.indexOf("OBS_VALUE"),
     };
@@ -188,29 +186,50 @@ Deno.serve(async (req: Request) => {
       const { start, end } = periodToDates(period);
       const key = `${code}|${start}`;
       const prev = observations.get(key) ?? {
-        area_code: code,
-        province,
-        period_start: start,
-        period_end: end,
-        arrivals: null,
-        presences: null,
+        area_code: code, province, period_start: start, period_end: end,
+        arrivals: null, presences: null,
       };
       if (dataType === "AR") prev.arrivals = val;
       else                   prev.presences = val;
       observations.set(key, prev);
       count++;
     }
-    return { type: dataType, rows: count };
+    return count;
   };
 
-  let arResult, prResult;
-  try {
-    [arResult, prResult] = await Promise.all([fetchType("AR"), fetchType("PR")]);
-  } catch (e) {
-    return new Response(JSON.stringify({ error: String(e?.message ?? e) }), {
+  // ISTAT 500s on the full 36-month two-metric query — chunk by 12-month
+  // windows and serialise to keep their backend happy.
+  const windows: { start: string; end: string }[] = [];
+  {
+    let cur = startPeriod;
+    while (cur <= endPeriod) {
+      const winEnd = monthShift(cur, 11);
+      windows.push({ start: cur, end: winEnd > endPeriod ? endPeriod : winEnd });
+      cur = monthShift(cur, 12);
+    }
+  }
+
+  const perTypeRowCounts: Record<"AR" | "PR", number> = { AR: 0, PR: 0 };
+  const failures: string[] = [];
+  for (const w of windows) {
+    for (const dataType of ["AR", "PR"] as const) {
+      try {
+        const text = await fetchWithRetry(istatUrl(dataType, w.start, w.end));
+        perTypeRowCounts[dataType] += ingestCsv(text, dataType);
+      } catch (e) {
+        failures.push(`${dataType} ${w.start}..${w.end}: ${String((e as Error)?.message ?? e)}`);
+      }
+    }
+  }
+
+  // If every window failed there's nothing to ingest — surface the first error.
+  if (perTypeRowCounts.AR === 0 && perTypeRowCounts.PR === 0 && failures.length > 0) {
+    return new Response(JSON.stringify({ error: failures[0], failures }), {
       status: 502, headers: { "Content-Type": "application/json", ...CORS },
     });
   }
+  const arResult = { type: "AR" as const, rows: perTypeRowCounts.AR };
+  const prResult = { type: "PR" as const, rows: perTypeRowCounts.PR };
 
   const rowsToUpsert = Array.from(observations.values()).map((o) => ({
     region:       "Veneto",
@@ -229,6 +248,8 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({
       dryRun: true,
       startPeriod, endPeriod,
+      windows: windows.length,
+      failures,
       ar_rows: arResult.rows, pr_rows: prResult.rows,
       sample: rowsToUpsert.slice(0, 5),
       total_rows: rowsToUpsert.length,
@@ -254,6 +275,8 @@ Deno.serve(async (req: Request) => {
   return new Response(JSON.stringify({
     ok: true,
     startPeriod, endPeriod,
+    windows: windows.length,
+    failures,
     ar_rows_parsed: arResult.rows,
     pr_rows_parsed: prResult.rows,
     upserted: inserted,
