@@ -17,6 +17,9 @@ interface Profile {
   postcode: string | null;
   phone_number: string | null;
   address: string | null;
+  province: string | null;
+  nationality: string | null;
+  date_of_birth: string | null;
   is_master: boolean | null;
 }
 
@@ -68,7 +71,7 @@ export const isBrandRole = (role?: string | null) =>
 export const isAdminRole = (role?: string | null) => role === "admin";
 
 const PROFILE_COLS =
-  "id, user_id, brand_id, first_name, last_name, email, role, avatar, city, country, postcode, phone_number, address, is_master";
+  "id, user_id, brand_id, first_name, last_name, email, role, avatar, city, country, postcode, phone_number, address, province, nationality, date_of_birth, is_master";
 const ADMIN_COLS =
   "id, user_id, first_name, last_name, email, role, avatar, phone_number, city, country";
 
