@@ -1,0 +1,3 @@
+# Serverless API moved to AWS — stop Vercel from deploying these
+# functions. Files kept in repo for easy revert if needed.
+api/
