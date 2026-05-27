@@ -23,15 +23,7 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const VENETO_PROVINCES: { code: string; name: string }[] = [
-  { code: "ITD31", name: "Verona" },
-  { code: "ITD32", name: "Vicenza" },
-  { code: "ITD33", name: "Belluno" },
-  { code: "ITD34", name: "Treviso" },
-  { code: "ITD35", name: "Venezia" },
-  { code: "ITD36", name: "Padova" },
-  { code: "ITD37", name: "Rovigo" },
-];
+interface ProvinceRow { code: string; name: string; region: string }
 
 const ISTAT_FLOW = "122_54_DF_DCSC_TUR_3";
 // Dimension order in the dataflow key:
@@ -52,13 +44,18 @@ const DESIRED_FILTER: Record<string, string> = {
   SIZE_BY_NUMBER_ROOMS:     "TOT",
 };
 
+// ISTAT rejects ~50-code REF_AREA lists with HTTP 400 (response-size limit,
+// not URL length — verified empirically). 15 is the sweet spot that still
+// completes quickly.
+const AREAS_PER_CALL = 15;
+
 function istatUrl(
   dataType: "AR" | "NI",
+  areaCodes: string[],
   startPeriod: string,
   endPeriod: string,
 ): string {
-  const areas = VENETO_PROVINCES.map((p) => p.code).join("+");
-  // 11 dim slots; only FREQ(1), REF_AREA(2), DATA_TYPE(3) constrained.
+  const areas = areaCodes.join("+");
   const key = ["M", areas, dataType, "", "", "", "", "", "", "", ""].join(".");
   const u = new URL(`https://esploradati.istat.it/SDMXWS/rest/data/${ISTAT_FLOW}/${key}/`);
   u.searchParams.set("startPeriod", startPeriod);
@@ -140,10 +137,36 @@ Deno.serve(async (req: Request) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  const provinceByCode = new Map(VENETO_PROVINCES.map((p) => [p.code, p.name]));
+  // Only ingest tourism for provinces where shops actually exist. Pulling
+  // all 103 NUTS-3 provinces blindly blows past the 150s Edge Function limit
+  // and wastes most of the data. Body flag `all=true` overrides for backfills.
+  const ingestAll = Boolean(body.all);
+  const cpQuery = ingestAll
+    ? admin.from("comune_province").select("area_code, province, region")
+    : admin.rpc("tourism_used_provinces");
+  const { data: cpRows, error: cpErr } = await cpQuery;
+  if (cpErr || !cpRows) {
+    return new Response(JSON.stringify({ error: `province lookup failed: ${cpErr?.message ?? "no rows"}` }), {
+      status: 500, headers: { "Content-Type": "application/json", ...CORS },
+    });
+  }
+  const byCode = new Map<string, { province: string; region: string }>();
+  for (const r of cpRows as { area_code: string; province: string; region: string }[]) {
+    byCode.set(r.area_code, { province: r.province, region: r.region });
+  }
+  const areaCodes = [...byCode.keys()];
+  if (areaCodes.length === 0) {
+    return new Response(JSON.stringify({
+      error: ingestAll
+        ? "no provinces seeded in comune_province"
+        : "no provinces are matched by any shop; nothing to ingest. Use { all: true } to fetch every province.",
+    }), { status: 500, headers: { "Content-Type": "application/json", ...CORS } });
+  }
+
   const observations = new Map<string, {
     area_code: string;
     province: string;
+    region: string;
     period_start: string;
     period_end: string;
     arrivals: number | null;
@@ -206,8 +229,8 @@ Deno.serve(async (req: Request) => {
       // Skip rows whose breakdown isn't the "totals" combination we want.
       if (filterIdx.some(({ col, want }) => row[col] !== want)) continue;
       const code = row[idx.ref];
-      const province = provinceByCode.get(code);
-      if (!province) continue;
+      const meta = byCode.get(code);
+      if (!meta) continue;
       const period = row[idx.tp];
       if (!/^\d{4}-\d{2}$/.test(period)) continue;
       const raw = row[idx.val];
@@ -216,7 +239,8 @@ Deno.serve(async (req: Request) => {
       const { start, end } = periodToDates(period);
       const key = `${code}|${start}`;
       const prev = observations.get(key) ?? {
-        area_code: code, province, period_start: start, period_end: end,
+        area_code: code, province: meta.province, region: meta.region,
+        period_start: start, period_end: end,
         arrivals: null, presences: null,
       };
       if (dataType === "AR") prev.arrivals = val;
@@ -241,19 +265,27 @@ Deno.serve(async (req: Request) => {
 
   const perTypeRowCounts: Record<"AR" | "NI", number> = { AR: 0, NI: 0 };
   const failures: string[] = [];
+  // Split area_codes into chunks small enough for ISTAT's URL parser.
+  const areaChunks: string[][] = [];
+  for (let i = 0; i < areaCodes.length; i += AREAS_PER_CALL) {
+    areaChunks.push(areaCodes.slice(i, i + AREAS_PER_CALL));
+  }
   for (const w of windows) {
     for (const dataType of ["AR", "NI"] as const) {
-      try {
-        const text = await fetchWithRetry(istatUrl(dataType, w.start, w.end));
-        perTypeRowCounts[dataType] += ingestCsv(text, dataType);
-      } catch (e) {
-        failures.push(`${dataType} ${w.start}..${w.end}: ${String((e as Error)?.message ?? e)}`);
+      for (let ci = 0; ci < areaChunks.length; ci++) {
+        const chunk = areaChunks[ci];
+        try {
+          const text = await fetchWithRetry(istatUrl(dataType, chunk, w.start, w.end));
+          perTypeRowCounts[dataType] += ingestCsv(text, dataType);
+        } catch (e) {
+          failures.push(`${dataType} ${w.start}..${w.end} chunk${ci}: ${String((e as Error)?.message ?? e)}`);
+        }
       }
     }
   }
 
   // If every window failed there's nothing to ingest — surface the first error.
-  if (perTypeRowCounts.AR === 0 && perTypeRowCounts.PR === 0 && failures.length > 0) {
+  if (perTypeRowCounts.AR === 0 && perTypeRowCounts.NI === 0 && failures.length > 0) {
     return new Response(JSON.stringify({ error: failures[0], failures }), {
       status: 502, headers: { "Content-Type": "application/json", ...CORS },
     });
@@ -262,7 +294,7 @@ Deno.serve(async (req: Request) => {
   const prResult = { type: "NI" as const, rows: perTypeRowCounts.NI };
 
   const rowsToUpsert = Array.from(observations.values()).map((o) => ({
-    region:       "Veneto",
+    region:       o.region,
     province:     o.province,
     area_code:    o.area_code,
     granularity:  "province",
