@@ -45,6 +45,9 @@ interface Customer {
   email: string;
   city: string | null;
   country: string | null;
+  province: string | null;
+  nationality: string | null;
+  date_of_birth: string | null;
   phone_number: string | null;
   address: string | null;
   postcode: string | null;
@@ -69,6 +72,7 @@ const PAGE_SIZE = 25;
 
 const empty = (): Partial<Customer> => ({
   first_name: "", last_name: "", email: "", city: "", country: "",
+  province: "", nationality: "", date_of_birth: "",
   phone_number: "", address: "", postcode: "", status: "pending",
   brand_id: null, role: "customer",
 });
@@ -164,6 +168,8 @@ const AdminCustomers = () => {
       const { error } = await supabase.from("profiles").insert({
         first_name: editing.first_name ?? null, last_name: editing.last_name ?? null,
         email: editing.email!, city: editing.city ?? null, country: editing.country ?? null,
+        province: editing.province ?? null, nationality: editing.nationality ?? null,
+        date_of_birth: editing.date_of_birth || null,
         phone_number: editing.phone_number ?? null, address: editing.address ?? null,
         postcode: editing.postcode ?? null, status: "pending",
         brand_id: editing.brand_id ?? null, role: editing.role ?? "customer",
@@ -198,6 +204,8 @@ const AdminCustomers = () => {
       const { error } = await supabase.from("profiles").update({
         first_name: editing.first_name ?? null, last_name: editing.last_name ?? null,
         city: editing.city ?? null, country: editing.country ?? null,
+        province: editing.province ?? null, nationality: editing.nationality ?? null,
+        date_of_birth: editing.date_of_birth || null,
         phone_number: editing.phone_number ?? null, address: editing.address ?? null,
         postcode: editing.postcode ?? null, status: editing.status ?? null,
         brand_id: editing.brand_id ?? null,
@@ -440,6 +448,10 @@ const AdminCustomers = () => {
             <FormField label="First Name"><Input disabled={ro} value={editing.first_name ?? ""} onChange={(e) => set("first_name", e.target.value)} /></FormField>
             <FormField label="Last Name"><Input disabled={ro} value={editing.last_name ?? ""} onChange={(e) => set("last_name", e.target.value)} /></FormField>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="Date of Birth"><Input type="date" disabled={ro} value={editing.date_of_birth ?? ""} onChange={(e) => set("date_of_birth", e.target.value)} /></FormField>
+            <FormField label="Nationality"><Input disabled={ro} value={editing.nationality ?? ""} onChange={(e) => set("nationality", e.target.value)} /></FormField>
+          </div>
           <FormField label="Brand" required={mode === "add"}>
             {ro ? <Input disabled value={(editing as any).brand_name ?? ""} /> : (
               <SearchableSelect
@@ -451,26 +463,27 @@ const AdminCustomers = () => {
               />
             )}
           </FormField>
-          <div className="grid grid-cols-2 gap-4">
-            <FormField label="City"><Input disabled={ro} value={editing.city ?? ""} onChange={(e) => set("city", e.target.value)} /></FormField>
-            <FormField label="Country"><Input disabled={ro} value={editing.country ?? ""} onChange={(e) => set("country", e.target.value)} /></FormField>
-          </div>
-          <FormField label="Phone"><Input disabled={ro} value={editing.phone_number ?? ""} onChange={(e) => set("phone_number", e.target.value)} /></FormField>
           <FormField label="Address"><Input disabled={ro} value={editing.address ?? ""} onChange={(e) => set("address", e.target.value)} /></FormField>
           <div className="grid grid-cols-2 gap-4">
-            <FormField label="Postcode"><Input disabled={ro} value={editing.postcode ?? ""} onChange={(e) => set("postcode", e.target.value)} /></FormField>
-            {mode !== "add" && (
-              <FormField label="Status">
-                {ro ? <Input disabled value={editing.status ?? ""} /> : (
-                  <Select value={editing.status ?? ""} onChange={(e) => set("status", e.target.value)}>
-                    <option value="pending">Pending</option>
-                    <option value="verified">Verified</option>
-                    <option value="blocked">Blocked</option>
-                  </Select>
-                )}
-              </FormField>
-            )}
+            <FormField label="City"><Input disabled={ro} value={editing.city ?? ""} onChange={(e) => set("city", e.target.value)} /></FormField>
+            <FormField label="Province"><Input disabled={ro} value={editing.province ?? ""} onChange={(e) => set("province", e.target.value)} /></FormField>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="Country"><Input disabled={ro} value={editing.country ?? ""} onChange={(e) => set("country", e.target.value)} /></FormField>
+            <FormField label="Postcode"><Input disabled={ro} value={editing.postcode ?? ""} onChange={(e) => set("postcode", e.target.value)} /></FormField>
+          </div>
+          <FormField label="Phone"><Input disabled={ro} value={editing.phone_number ?? ""} onChange={(e) => set("phone_number", e.target.value)} /></FormField>
+          {mode !== "add" && (
+            <FormField label="Status">
+              {ro ? <Input disabled value={editing.status ?? ""} /> : (
+                <Select value={editing.status ?? ""} onChange={(e) => set("status", e.target.value)}>
+                  <option value="pending">Pending</option>
+                  <option value="verified">Verified</option>
+                  <option value="blocked">Blocked</option>
+                </Select>
+              )}
+            </FormField>
+          )}
           {ro && (
             <div className="grid grid-cols-3 gap-4">
               <FormField label="Creation Date"><Input disabled value={fmtDate(editing.created_at)} /></FormField>

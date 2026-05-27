@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { User, Mail, Phone, MapPin, Shield, Camera, Save, CheckCircle } from "lucide-react";
+import { User, Mail, Phone, MapPin, Shield, Camera, Save, CheckCircle, Calendar, Globe } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -21,8 +21,11 @@ const CustomerProfile = () => {
     lastName: "",
     email: "",
     phone: "",
+    dateOfBirth: "",
+    nationality: "",
     address: "",
     city: "",
+    province: "",
     country: "",
     postalCode: "",
   });
@@ -48,8 +51,11 @@ const CustomerProfile = () => {
       lastName: authProfile.last_name || "",
       email: authProfile.email || "",
       phone: authProfile.phone_number || "",
+      dateOfBirth: authProfile.date_of_birth || "",
+      nationality: authProfile.nationality || "",
       address: authProfile.address || "",
       city: authProfile.city || "",
+      province: authProfile.province || "",
       country: authProfile.country || "",
       postalCode: authProfile.postcode || "",
     });
@@ -89,8 +95,11 @@ const CustomerProfile = () => {
         first_name: profile.firstName || null,
         last_name: profile.lastName || null,
         phone_number: profile.phone || null,
+        date_of_birth: profile.dateOfBirth || null,
+        nationality: profile.nationality || null,
         address: profile.address || null,
         city: profile.city || null,
+        province: profile.province || null,
         country: profile.country || null,
         postcode: profile.postalCode || null,
       })
@@ -218,6 +227,20 @@ const CustomerProfile = () => {
                     <Input className="pl-10" value={profile.phone} onChange={(e) => handleProfileChange("phone", e.target.value)} />
                   </div>
                 </div>
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Date of Birth</Label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input type="date" className="pl-10" value={profile.dateOfBirth} onChange={(e) => handleProfileChange("dateOfBirth", e.target.value)} />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Nationality</Label>
+                  <div className="relative">
+                    <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input className="pl-10" value={profile.nationality} onChange={(e) => handleProfileChange("nationality", e.target.value)} />
+                  </div>
+                </div>
               </div>
 
               <Separator />
@@ -234,6 +257,10 @@ const CustomerProfile = () => {
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">City</Label>
                   <Input value={profile.city} onChange={(e) => handleProfileChange("city", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wider text-muted-foreground">Province</Label>
+                  <Input value={profile.province} onChange={(e) => handleProfileChange("province", e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Country</Label>
