@@ -37,20 +37,29 @@ const ISTAT_FLOW = "122_54_DF_DCSC_TUR_3";
 // Dimension order in the dataflow key:
 // FREQ.REF_AREA.DATA_TYPE.ADJUSTMENT.TYPE_ACCOMMODATION.ECON_ACTIVITY_NACE_2007
 // .COUNTRY_RES_GUESTS.LOCALITY_TYPE.URBANIZ_DEGREE.COASTAL_AREA.SIZE_BY_NUMBER_ROOMS
-// We fix:
-//   FREQ = M, DATA_TYPE = AR or PR, ADJUSTMENT = N, TYPE_ACCOMMODATION = ALL,
-//   ECON_ACTIVITY_NACE_2007 = 551_553 (alberghi + altri esercizi),
-//   COUNTRY_RES_GUESTS = WORLD (totale), LOCALITY_TYPE/URBANIZ_DEGREE/COASTAL_AREA = ALL,
-//   SIZE_BY_NUMBER_ROOMS = TOT.
+// We fix only FREQ + REF_AREA + DATA_TYPE. The other 8 dimensions are
+// wildcarded (empty) because ISTAT's SDMX endpoint 500s when given some
+// specific codes ("ALL", "WORLD", etc.) even though those exact strings
+// appear in the response payload. We filter the response client-side to
+// pick the rows that represent the "totals" we want.
+const DESIRED_FILTER: Record<string, string> = {
+  TYPE_ACCOMMODATION:       "ALL",
+  ECON_ACTIVITY_NACE_2007:  "551_553", // alberghi + altri esercizi (combined)
+  COUNTRY_RES_GUESTS:       "WORLD",   // total residents + non-residents
+  LOCALITY_TYPE:            "ALL",
+  URBANIZ_DEGREE:           "ALL",
+  COASTAL_AREA:             "ALL",
+  SIZE_BY_NUMBER_ROOMS:     "TOT",
+};
+
 function istatUrl(
   dataType: "AR" | "PR",
   startPeriod: string,
   endPeriod: string,
 ): string {
   const areas = VENETO_PROVINCES.map((p) => p.code).join("+");
-  const key = [
-    "M", areas, dataType, "N", "ALL", "551_553", "WORLD", "ALL", "ALL", "ALL", "TOT",
-  ].join(".");
+  // 11 dim slots; only FREQ(1), REF_AREA(2), DATA_TYPE(3) constrained.
+  const key = ["M", areas, dataType, "", "", "", "", "", "", "", ""].join(".");
   const u = new URL(`https://esploradati.istat.it/SDMXWS/rest/data/${ISTAT_FLOW}/${key}/`);
   u.searchParams.set("startPeriod", startPeriod);
   u.searchParams.set("endPeriod", endPeriod);
@@ -161,7 +170,9 @@ Deno.serve(async (req: Request) => {
   };
 
   // Parse one CSV chunk into observations. Mutates `observations` and returns
-  // how many rows were absorbed.
+  // how many rows were absorbed. Only keeps rows whose breakdown columns
+  // exactly match DESIRED_FILTER (the "totals" we want); ISTAT returns many
+  // alternative breakdowns when those dims are wildcarded.
   const ingestCsv = (text: string, dataType: "AR" | "PR"): number => {
     if (text.startsWith("NoRecordsFound")) return 0;
     const { headers, rows } = parseCsv(text);
@@ -173,8 +184,15 @@ Deno.serve(async (req: Request) => {
     if (idx.ref < 0 || idx.tp < 0 || idx.val < 0) {
       throw new Error(`ISTAT CSV missing required columns: ${headers.join(",")}`);
     }
+    const filterIdx: { col: number; want: string }[] = [];
+    for (const [dim, want] of Object.entries(DESIRED_FILTER)) {
+      const col = headers.indexOf(dim);
+      if (col >= 0) filterIdx.push({ col, want });
+    }
     let count = 0;
     for (const row of rows) {
+      // Skip rows whose breakdown isn't the "totals" combination we want.
+      if (filterIdx.some(({ col, want }) => row[col] !== want)) continue;
       const code = row[idx.ref];
       const province = provinceByCode.get(code);
       if (!province) continue;
