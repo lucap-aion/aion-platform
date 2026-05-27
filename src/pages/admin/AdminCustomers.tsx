@@ -92,6 +92,16 @@ const isProfilationCompleted = (c: Customer) =>
   c.postcode != null && c.address != null && c.province != null &&
   c.nationality != null && c.phone_number != null;
 
+const PROFILATION_FIELDS: Array<keyof Customer> = [
+  "registered_at", "date_of_birth", "country", "city",
+  "postcode", "address", "province", "nationality", "phone_number",
+];
+
+const profilationPct = (c: Customer) => {
+  const filled = PROFILATION_FIELDS.reduce((n, f) => n + (c[f] != null ? 1 : 0), 0);
+  return Math.round((filled / PROFILATION_FIELDS.length) * 100);
+};
+
 const YesNoCell = ({ yes }: { yes: boolean }) => (
   <span className={yes ? "text-[hsl(var(--success))] font-medium" : "text-muted-foreground"}>
     {yes ? "Yes" : "No"}
@@ -460,6 +470,17 @@ const AdminCustomers = () => {
           {
             key: "profilation_completed", label: "Profilation Completed", sortable: false,
             render: (row) => <YesNoCell yes={isProfilationCompleted(row as unknown as Customer)} />,
+          },
+          {
+            key: "profilation_pct", label: "Profilation %", sortable: false,
+            render: (row) => {
+              const pct = profilationPct(row as unknown as Customer);
+              return (
+                <span className={pct === 100 ? "text-[hsl(var(--success))] font-medium tabular-nums" : "text-foreground tabular-nums"}>
+                  {pct}%
+                </span>
+              );
+            },
           },
           {
             key: "status", label: "Status", sortable: true,
