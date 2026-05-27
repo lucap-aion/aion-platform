@@ -53,7 +53,7 @@ const DESIRED_FILTER: Record<string, string> = {
 };
 
 function istatUrl(
-  dataType: "AR" | "PR",
+  dataType: "AR" | "NI",
   startPeriod: string,
   endPeriod: string,
 ): string {
@@ -185,7 +185,7 @@ Deno.serve(async (req: Request) => {
   // how many rows were absorbed. Only keeps rows whose breakdown columns
   // exactly match DESIRED_FILTER (the "totals" we want); ISTAT returns many
   // alternative breakdowns when those dims are wildcarded.
-  const ingestCsv = (text: string, dataType: "AR" | "PR"): number => {
+  const ingestCsv = (text: string, dataType: "AR" | "NI"): number => {
     if (text.startsWith("NoRecordsFound")) return 0;
     const { headers, rows } = parseCsv(text);
     const idx = {
@@ -239,10 +239,10 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  const perTypeRowCounts: Record<"AR" | "PR", number> = { AR: 0, PR: 0 };
+  const perTypeRowCounts: Record<"AR" | "NI", number> = { AR: 0, NI: 0 };
   const failures: string[] = [];
   for (const w of windows) {
-    for (const dataType of ["AR", "PR"] as const) {
+    for (const dataType of ["AR", "NI"] as const) {
       try {
         const text = await fetchWithRetry(istatUrl(dataType, w.start, w.end));
         perTypeRowCounts[dataType] += ingestCsv(text, dataType);
@@ -259,7 +259,7 @@ Deno.serve(async (req: Request) => {
     });
   }
   const arResult = { type: "AR" as const, rows: perTypeRowCounts.AR };
-  const prResult = { type: "PR" as const, rows: perTypeRowCounts.PR };
+  const prResult = { type: "NI" as const, rows: perTypeRowCounts.NI };
 
   const rowsToUpsert = Array.from(observations.values()).map((o) => ({
     region:       "Veneto",
