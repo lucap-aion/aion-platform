@@ -77,6 +77,27 @@ const empty = (): Partial<Customer> => ({
   brand_id: null, role: "customer",
 });
 
+// Mirror the SQL definitions in admin_dashboard_aggregates (pool_profilation_started
+// and pool_profiled) so the per-row Yes/No matches the Home dashboard tiles.
+const isProfilationStarted = (c: Customer) =>
+  c.registered_at != null && (
+    c.date_of_birth != null || c.country != null || c.city != null ||
+    c.postcode != null || c.address != null || c.province != null ||
+    c.nationality != null || c.phone_number != null
+  );
+
+const isProfilationCompleted = (c: Customer) =>
+  c.registered_at != null &&
+  c.date_of_birth != null && c.country != null && c.city != null &&
+  c.postcode != null && c.address != null && c.province != null &&
+  c.nationality != null && c.phone_number != null;
+
+const YesNoCell = ({ yes }: { yes: boolean }) => (
+  <span className={yes ? "text-[hsl(var(--success))] font-medium" : "text-muted-foreground"}>
+    {yes ? "Yes" : "No"}
+  </span>
+);
+
 const AdminCustomers = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -431,6 +452,14 @@ const AdminCustomers = () => {
           {
             key: "email_confirmed_at", label: "Confirmation Date", sortable: true,
             render: (row) => { const r = row as unknown as Customer; return fmtDate(r.email_confirmed_at); },
+          },
+          {
+            key: "profilation_started", label: "Profilation Started", sortable: false,
+            render: (row) => <YesNoCell yes={isProfilationStarted(row as unknown as Customer)} />,
+          },
+          {
+            key: "profilation_completed", label: "Profilation Completed", sortable: false,
+            render: (row) => <YesNoCell yes={isProfilationCompleted(row as unknown as Customer)} />,
           },
           {
             key: "status", label: "Status", sortable: true,
