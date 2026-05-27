@@ -1611,7 +1611,10 @@ interface UnmatchedShop { city: string; shop_count: number; policy_count: number
 
 function TourismTab({ t, locale }: { t: T; locale: "it" | "en" }) {
   const [metric, setMetric] = useState<TourismMetric>("presences");
-  const [lag, setLag] = useState<number>(0);
+  // ISTAT publishes sub-national tourism with ~12 months of lag, so concurrent
+  // (lag=0) correlation has no overlap yet. Default to 12 to pair current
+  // activations with the latest published tourism period.
+  const [lag, setLag] = useState<number>(12);
   const [correlations, setCorrelations] = useState<TourismCorrelation[] | null>(null);
   const [narrative, setNarrative] = useState<string>("");
   const [narrativeLoading, setNarrativeLoading] = useState(false);

@@ -126,8 +126,8 @@ const translations: Translations = {
   "insights.tourism.metric.presences": { en: "Overnight stays (presenze)", it: "Presenze" },
   "insights.tourism.lag": { en: "Lag (months)", it: "Sfasamento (mesi)" },
   "insights.tourism.lag.help": {
-    en: "Positive = tourism leads activations.",
-    it: "Positivo = il turismo precede le attivazioni.",
+    en: "ISTAT publishes sub-national tourism with ~12-month lag, so lag=12 pairs today's activations with the most recent published months. Positive = tourism leads activations.",
+    it: "ISTAT pubblica il turismo sub-nazionale con ~12 mesi di ritardo: con lag=12 si abbinano le attivazioni recenti agli ultimi mesi pubblicati. Positivo = il turismo precede le attivazioni.",
   },
   "insights.tourism.refresh": { en: "Refresh ISTAT data", it: "Aggiorna dati ISTAT" },
   "insights.tourism.refreshing": { en: "Refreshing…", it: "Aggiornamento…" },
