@@ -156,9 +156,21 @@ Deno.serve(async (req: Request) => {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
-        const r = await fetch(url, { headers: { "Accept": "text/csv" }, signal: ctrl.signal });
+        const r = await fetch(url, {
+          headers: {
+            "Accept":          "text/csv",
+            "Accept-Language": "en",
+            "User-Agent":      "AION-Tourism-Ingest/1.0",
+          },
+          signal: ctrl.signal,
+        });
         clearTimeout(timer);
-        if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+        if (!r.ok) {
+          // Capture ISTAT's body — SDMX often returns a useful diagnostic.
+          const body = await r.text().catch(() => "");
+          const snippet = body.slice(0, 300).replace(/\s+/g, " ").trim();
+          throw new Error(`HTTP ${r.status} ${r.statusText} | url=${url} | body=${snippet}`);
+        }
         return await r.text();
       } catch (e) {
         clearTimeout(timer);
