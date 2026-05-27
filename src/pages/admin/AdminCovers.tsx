@@ -24,6 +24,7 @@ const COVERS_SCHEMA: ExportColumn[] = [
   { key: "quantity",                   label: "Quantity" },
   { key: "start_date",                 label: "Start Date" },
   { key: "expiration_date",            label: "Expiration Date" },
+  { key: "cancelled_at",               label: "Cancellation Date" },
   { key: "created_at",                 label: "Created At" },
   { key: "brand_id",                   label: "Brand ID" },
   { key: "customer_id",                label: "Customer ID" },
@@ -53,6 +54,7 @@ interface Cover {
   customer_id: string | null;
   item_id: number | null;
   created_at?: string | null;
+  cancelled_at?: string | null;
   // Flattened FK fields — {table}_{field}
   brands_name?: string;
   brands_logo_small?: string | null;
@@ -399,6 +401,10 @@ const AdminCovers = () => {
           {
             key: "expiration_date", label: "Expires", sortable: true,
             render: (row) => { const r = row as unknown as Cover; return fmtDate(r.expiration_date); },
+          },
+          {
+            key: "cancelled_at", label: "Cancellation Date", sortable: true,
+            render: (row) => { const r = row as unknown as Cover; return fmtDate(r.cancelled_at); },
           },
           {
             key: "status", label: "Status", sortable: true,
