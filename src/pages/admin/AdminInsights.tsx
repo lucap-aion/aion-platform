@@ -625,7 +625,6 @@ const TAB_KEYS: { id: TabId; key: string }[] = [
   { id: "mo", key: "insights.tab.monthly" },
   { id: "dd", key: "insights.tab.deepDive" },
   { id: "rt", key: "insights.tab.regTime" },
-  { id: "tr", key: "insights.tab.tourism" },
 ];
 
 type T = (key: string) => string;
