@@ -251,9 +251,18 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
     const shopRegCusts: Record<string, typeof custs> = {};
     shops.forEach(s => shopRegCusts[s] = shopCusts[s].filter(c => c.reg));
 
-    // Feedback & profile stats
+    // Feedback & profile stats. Mirrors admin_dashboard_aggregates:
+    //   Started   = registered AND ≥1 of the 8 optional profile fields populated
+    //   Completed = registered AND all 8 fields populated (a subset of Started)
     const profileMap = new Map(profiles.map(p => [p.id, p]));
     const regCustIds = Object.entries(custMap).filter(([, v]) => v.reg).map(([k]) => k);
+    const profilationStartedCustIds = regCustIds.filter(id => {
+      const p = profileMap.get(id);
+      return !!p && !!(
+        p.date_of_birth || p.country || p.city || p.postcode ||
+        p.address || p.province || p.nationality || p.phone_number
+      );
+    });
     const profiledCustIds = regCustIds.filter(id => {
       const p = profileMap.get(id);
       return p && p.date_of_birth && p.country && p.city && p.postcode && p.address && p.province && p.nationality && p.phone_number;
@@ -533,6 +542,7 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
     // denominators (cohort size) live side-by-side so % can be derived at render time without
     // re-sorting policies again.
     const profiledSet = new Set(profiledCustIds);
+    const profStartedSet = new Set(profilationStartedCustIds);
     const feedbackInPolicySet = new Set(scopedFeedback.map(f => f.user_id).filter(id => policyCustIds.has(id)));
     const cohortMonth = (() => {
       const firstSeenByMo: Record<string, { m: string; sh: string }> = {};
@@ -542,19 +552,25 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       });
       const novByMo: Record<string, number> = {};
       const novByShopMo: Record<string, Record<string, number>> = {};
+      const profStartedByMo: Record<string, number> = {};
+      const profStartedByShopMo: Record<string, Record<string, number>> = {};
       const profByMo: Record<string, number> = {};
       const profByShopMo: Record<string, Record<string, number>> = {};
       const fbByMo: Record<string, number> = {};
       const fbByShopMo: Record<string, Record<string, number>> = {};
-      shops.forEach(s => { novByShopMo[s] = {}; profByShopMo[s] = {}; fbByShopMo[s] = {}; });
+      shops.forEach(s => { novByShopMo[s] = {}; profStartedByShopMo[s] = {}; profByShopMo[s] = {}; fbByShopMo[s] = {}; });
       mos.forEach(m => {
-        novByMo[m] = 0; profByMo[m] = 0; fbByMo[m] = 0;
-        shops.forEach(s => { novByShopMo[s][m] = 0; profByShopMo[s][m] = 0; fbByShopMo[s][m] = 0; });
+        novByMo[m] = 0; profStartedByMo[m] = 0; profByMo[m] = 0; fbByMo[m] = 0;
+        shops.forEach(s => { novByShopMo[s][m] = 0; profStartedByShopMo[s][m] = 0; profByShopMo[s][m] = 0; fbByShopMo[s][m] = 0; });
       });
       Object.entries(firstSeenByMo).forEach(([cid, { m, sh }]) => {
         if (!(m in novByMo)) return;
         novByMo[m]++;
         if (novByShopMo[sh]) novByShopMo[sh][m]++;
+        if (profStartedSet.has(cid)) {
+          profStartedByMo[m]++;
+          if (profStartedByShopMo[sh]) profStartedByShopMo[sh][m]++;
+        }
         if (profiledSet.has(cid)) {
           profByMo[m]++;
           if (profByShopMo[sh]) profByShopMo[sh][m]++;
@@ -565,13 +581,14 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
         }
       });
       const pct = (n: number, d: number) => d > 0 ? Math.round(n / d * 100) : 0;
+      const profStartedPctMonthly = mos.map(m => ({ key: m, pct: pct(profStartedByMo[m], novByMo[m]) }));
       const profPctMonthly = mos.map(m => ({ key: m, pct: pct(profByMo[m], novByMo[m]) }));
       const fbPctMonthly = mos.map(m => ({ key: m, pct: pct(fbByMo[m], novByMo[m]) }));
-      return { novByMo, novByShopMo, profByShopMo, fbByShopMo, profPctMonthly, fbPctMonthly };
+      return { novByMo, novByShopMo, profStartedByShopMo, profByShopMo, fbByShopMo, profStartedPctMonthly, profPctMonthly, fbPctMonthly };
     })();
 
     return {
-      custs, regC, nonRegC, uniqueCustomers, regCustIds, profiledCustIds, custsWithFeedback,
+      custs, regC, nonRegC, uniqueCustomers, regCustIds, profilationStartedCustIds, profiledCustIds, custsWithFeedback,
       satisfactionAvg, recommendationAvg, peaceOfMindAvg,
       totalRRP, totalSP, totalCovers,
       shops, shopVolume, shopRRP, shopCusts, shopRegCusts,
@@ -1257,6 +1274,26 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
         </div>
       )}
 
+      <MonthlyPctChart title={t("insights.chart.newProfilationStartedMonthly")} data={d.cohortMonth.profStartedPctMonthly} color={C5} />
+      {d.shops.length >= 2 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {d.shops.map((s, si) => {
+            const data = d.mos.map(m => ({
+              key: m,
+              pct: (d.cohortMonth.novByShopMo[s]?.[m] || 0) > 0
+                ? Math.round((d.cohortMonth.profStartedByShopMo[s]?.[m] || 0) / d.cohortMonth.novByShopMo[s][m] * 100) : 0,
+            }));
+            return (
+              <MonthlyPctChart key={s}
+                title={`${t("insights.chart.newProfilationStartedMonthlyByShopPrefix")}${s}${t("insights.chart.regPctMonthShopSuffix")}`}
+                data={data}
+                color={COLORS[si] || SLATE}
+              />
+            );
+          })}
+        </div>
+      )}
+
       <MonthlyPctChart title={t("insights.chart.newProfiledMonthly")} data={d.cohortMonth.profPctMonthly} color={GR} />
       {d.shops.length >= 2 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1350,7 +1387,8 @@ function DeepDiveTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
   const funnelData = [
     { name: `Clienti unici (${d.uniqueCustomers})`, value: d.uniqueCustomers, fill: PU },
     { name: `Registrati (${d.regCustIds.length})`, value: d.regCustIds.length, fill: GR },
-    { name: `Profilo completo (${d.profiledCustIds.length})`, value: d.profiledCustIds.length, fill: BL },
+    { name: `Profilazione iniziata (${d.profilationStartedCustIds.length})`, value: d.profilationStartedCustIds.length, fill: C5 },
+    { name: `Profilazione completata (${d.profiledCustIds.length})`, value: d.profiledCustIds.length, fill: BL },
     { name: `Con feedback (${d.custsWithFeedback.length})`, value: d.custsWithFeedback.length, fill: AM },
   ];
 
@@ -1358,9 +1396,10 @@ function DeepDiveTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
         <KpiCard label={t("insights.kpi.uniqueClients")} value={d.uniqueCustomers} />
         <KpiCard label={t("insights.kpi.registered")} value={d.regCustIds.length} sub={`${d.regRate}%`} />
+        <KpiCard label={t("insights.kpi.profilationStarted")} value={d.profilationStartedCustIds.length} sub={d.regCustIds.length ? `${Math.round(d.profilationStartedCustIds.length / d.regCustIds.length * 100)}% ${t("insights.kpi.ofReg")}` : "—"} />
         <KpiCard label={t("insights.kpi.fullProfile")} value={d.profiledCustIds.length} sub={d.regCustIds.length ? `${Math.round(d.profiledCustIds.length / d.regCustIds.length * 100)}% ${t("insights.kpi.ofReg")}` : "—"} />
         <KpiCard label={t("insights.kpi.withFeedback")} value={d.custsWithFeedback.length} sub={d.regCustIds.length ? `${Math.round(d.custsWithFeedback.length / d.regCustIds.length * 100)}% ${t("insights.kpi.ofReg")}` : "—"} />
         <KpiCard label={t("insights.kpi.satisfaction")} value={d.satisfactionAvg ?? "—"} />
@@ -1372,7 +1411,7 @@ function DeepDiveTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={funnelData} layout="vertical">
             <XAxis type="number" domain={[0, Math.ceil(d.uniqueCustomers * 1.15)]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
-            <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} width={180} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} width={210} />
             <Tooltip content={<CTooltip />} />
             <Bar dataKey="value" radius={[0, 6, 6, 0]} name={t("insights.label.clients")}>
               {funnelData.map((e, i) => <Cell key={i} fill={e.fill} />)}
