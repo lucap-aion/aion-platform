@@ -1385,11 +1385,11 @@ function DeepDiveTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
   const nonAvgCov = d.nonRegC.length ? +(d.nonRegC.reduce((s, c) => s + c.np, 0) / d.nonRegC.length).toFixed(1) : 0;
 
   const funnelData = [
-    { name: `Clienti unici (${d.uniqueCustomers})`, value: d.uniqueCustomers, fill: PU },
-    { name: `Registrati (${d.regCustIds.length})`, value: d.regCustIds.length, fill: GR },
-    { name: `Profilazione iniziata (${d.profilationStartedCustIds.length})`, value: d.profilationStartedCustIds.length, fill: C5 },
-    { name: `Profilazione completata (${d.profiledCustIds.length})`, value: d.profiledCustIds.length, fill: BL },
-    { name: `Con feedback (${d.custsWithFeedback.length})`, value: d.custsWithFeedback.length, fill: AM },
+    { name: `${t("insights.kpi.uniqueClients")} (${d.uniqueCustomers})`, value: d.uniqueCustomers, fill: PU },
+    { name: `${t("insights.kpi.registered")} (${d.regCustIds.length})`, value: d.regCustIds.length, fill: GR },
+    { name: `${t("insights.kpi.profilationStarted")} (${d.profilationStartedCustIds.length})`, value: d.profilationStartedCustIds.length, fill: C5 },
+    { name: `${t("insights.kpi.fullProfile")} (${d.profiledCustIds.length})`, value: d.profiledCustIds.length, fill: BL },
+    { name: `${t("insights.kpi.withFeedback")} (${d.custsWithFeedback.length})`, value: d.custsWithFeedback.length, fill: AM },
   ];
 
   const PIE_COLORS = COLORS;
