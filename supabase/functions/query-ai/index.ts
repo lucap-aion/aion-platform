@@ -834,6 +834,9 @@ Deno.serve(async (req: Request) => {
   const startedAt = Date.now();
   let adminId: string | null = null;
   let userId: string | null = null;
+  let brandId: number | null = null;
+  let brandName: string | null = null;
+  let mode: "admin" | "brand" = "admin";
   let question = "";
   let lastSql: string | null = null;
   let lastRowCount: number | null = null;
@@ -861,18 +864,34 @@ Deno.serve(async (req: Request) => {
   }
   userId = user.id;
 
+  // Auth resolution: admin first, then brand user. Admin and brand callers
+  // get different schema docs, different tools, and different SQL RPCs.
   const { data: adminRow } = await userClient
     .from("admins")
     .select("id")
     .eq("user_id", user.id)
     .maybeSingle();
-  if (!adminRow) {
-    return new Response(
-      JSON.stringify({ error: "admin role required" }),
-      { status: 403, headers: { "Content-Type": "application/json", ...CORS } },
-    );
+  if (adminRow) {
+    adminId = adminRow.id;
+    mode = "admin";
+  } else {
+    const { data: profileRow } = await userClient
+      .from("profiles")
+      .select("id, brand_id, role, brands(name)")
+      .eq("user_id", user.id)
+      .in("role", ["brand_admin", "brand_user"])
+      .maybeSingle();
+    if (!profileRow || !profileRow.brand_id) {
+      return new Response(
+        JSON.stringify({ error: "admin or brand role required" }),
+        { status: 403, headers: { "Content-Type": "application/json", ...CORS } },
+      );
+    }
+    brandId = profileRow.brand_id as number;
+    const brandRel = (profileRow as any).brands;
+    brandName = (Array.isArray(brandRel) ? brandRel[0]?.name : brandRel?.name) ?? null;
+    mode = "brand";
   }
-  adminId = adminRow.id;
 
   const body = await req.json().catch(() => ({}));
   question = String(body.question ?? "").trim();
@@ -909,6 +928,42 @@ Deno.serve(async (req: Request) => {
             ? "\n\n# Language\nThe user's UI is in Italian. Write your natural-language reply (summary, comments) in Italian. SQL identifiers stay English."
             : "";
 
+        // Brand mode adds a hard-rule preamble that pins every query to the
+        // caller's brand. Defense-in-depth: ai_run_query_user runs SECURITY
+        // INVOKER so RLS already filters cross-brand rows out; the prompt
+        // just keeps the SQL clean and the narrative on-topic.
+        const brandPreamble = mode === "brand"
+          ? `\n\n# Brand scope — HARD RULE\nYou are working for ${
+            brandName ? `the brand "${brandName}" (brand_id = ${brandId})` : `brand_id = ${brandId}`
+          }. EVERY SQL query you generate MUST filter to this brand:\n- On policies, profiles, claims, feedback, support_messages, catalogues, shops, reports, external_requests, manufacturing_costs, returns: add WHERE brand_id = ${brandId} (or, for claims/returns which lack the column directly, join through policies and filter the policies side).\n- NEVER reference the brands table for any brand other than id = ${brandId}.\n- The user can only see their own brand. Cross-brand comparisons, "top brands by X" rankings, or "all brands" aggregates are off-limits — if the user asks for one, answer with their brand's value only and explain you can't compare to other brands.\n- Ignore these tables in this mode: admins, ai_chats, ai_query_log, brand_leads. They are out of scope.\n- The report-generation tools are admin-only and not available to you. If the user asks for a Chubb file or the monthly internal report, explain it's only available to AION admins.`
+          : "";
+
+        const systemBlocks = [
+          {
+            type: "text" as const,
+            text: SCHEMA_DOC,
+            cache_control: { type: "ephemeral" as const },
+          },
+          ...(brandPreamble
+            ? [{ type: "text" as const, text: brandPreamble }]
+            : []),
+          ...(languageInstruction
+            ? [{ type: "text" as const, text: languageInstruction }]
+            : []),
+        ];
+
+        // Brand callers don't have access to admin-only tools (report
+        // generation hits admin-only edge functions and would 403 anyway).
+        const activeTools = mode === "brand"
+          ? TOOLS.filter((t) =>
+            t.name === "run_sql" || t.name === "render_chart"
+          )
+          : TOOLS;
+
+        const sqlRpc = mode === "brand"
+          ? "ai_run_query_user"
+          : "ai_run_query";
+
         for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
           // Tell the client this is a fresh turn — any text streamed for the
           // previous turn (e.g. a failed-SQL recovery preamble) is discarded.
@@ -917,17 +972,8 @@ Deno.serve(async (req: Request) => {
           const llmStream = anthropic.messages.stream({
             model: MODEL,
             max_tokens: MAX_TOKENS,
-            system: [
-              {
-                type: "text",
-                text: SCHEMA_DOC,
-                cache_control: { type: "ephemeral" },
-              },
-              ...(languageInstruction
-                ? [{ type: "text" as const, text: languageInstruction }]
-                : []),
-            ],
-            tools: TOOLS as any,
+            system: systemBlocks,
+            tools: activeTools as any,
             messages,
           });
 
@@ -955,7 +1001,7 @@ Deno.serve(async (req: Request) => {
             if (block.name === "run_sql") {
               const sql = String(block.input?.sql ?? "");
               lastSql = sql;
-              const { data, error } = await userClient.rpc("ai_run_query", {
+              const { data, error } = await userClient.rpc(sqlRpc, {
                 p_sql: sql,
               });
               if (error) {
@@ -1169,6 +1215,9 @@ Deno.serve(async (req: Request) => {
                     "\n\n# Recovery — MANDATORY\nYour prior turns gathered (or tried to gather) data via tools but produced NO summary text. Write the final response NOW, as markdown only. Do NOT request any tools. If a playbook was triggered (Customer 360 / Product analysis), follow its output structure (## headings + inline GFM tables). Write what you CAN from the data you fetched. If a section has no data, say so plainly under its heading. If all data queries failed, still write the brief skeleton and add a clear note at the top: 'Couldn't retrieve full data — try the brief again, or check the customer/product identifier.' Never produce an empty response.",
                   cache_control: { type: "ephemeral" },
                 },
+                ...(brandPreamble
+                  ? [{ type: "text" as const, text: brandPreamble }]
+                  : []),
                 ...(languageInstruction
                   ? [{ type: "text" as const, text: languageInstruction }]
                   : []),

@@ -632,14 +632,25 @@ type T = (key: string) => string;
 // ─── Main Component ──────────────────────────────────────────────────────────
 type DateRange = "all" | "30d" | "90d" | "ytd" | "12m";
 
-export default function AdminInsights() {
+// When `lockedBrandId` is set the page renders in single-brand mode: no brand
+// picker, no "all brands" option, and the brand fetch is skipped. This is how
+// the brand platform reuses the admin Insights surface without duplicating it.
+export type AdminInsightsProps = {
+  lockedBrandId?: number;
+  lockedBrandName?: string;
+};
+
+export default function AdminInsights({ lockedBrandId, lockedBrandName }: AdminInsightsProps = {}) {
   const { t, locale } = useLanguage();
+  const isLocked = lockedBrandId !== undefined;
   const [tab, setTab] = useUrlParam<TabId>("tab", "ov");
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [selectedBrandId, setSelectedBrandId] = useUrlParam<number | "all">("brand", "all", {
+  const [selectedBrandIdRaw, setSelectedBrandIdRaw] = useUrlParam<number | "all">("brand", "all", {
     parse: (raw) => (raw === "all" ? "all" : Number.isFinite(Number(raw)) ? Number(raw) : "all"),
     serialize: (v) => String(v),
   });
+  const selectedBrandId: number | "all" = isLocked ? (lockedBrandId as number) : selectedBrandIdRaw;
+  const setSelectedBrandId = isLocked ? (() => {}) : setSelectedBrandIdRaw;
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -680,9 +691,15 @@ export default function AdminInsights() {
   }, [rawPolicies, dateRange, shopFilter]);
 
   useEffect(() => {
+    if (isLocked) {
+      // Single-brand mode: skip the cross-brand fetch (which would 0-row
+      // anyway under brand-user RLS) and seed `brands` with just this one.
+      setBrands([{ id: lockedBrandId as number, name: lockedBrandName ?? "" }]);
+      return;
+    }
     supabase.from("brands").select("id, name").eq("status", "verified").order("name")
       .then(({ data }) => setBrands((data as Brand[]) ?? []));
-  }, []);
+  }, [isLocked, lockedBrandId, lockedBrandName]);
 
   const loadData = useCallback(async () => {
     if (brands.length === 0) return;
@@ -811,13 +828,15 @@ export default function AdminInsights() {
               <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             </div>
           )}
-          <div className="relative">
-            <select className={selectCls} value={selectedBrandId} onChange={e => setSelectedBrandId(e.target.value === "all" ? "all" : Number(e.target.value))}>
-              <option value="all">{t("insights.allBrands")}</option>
-              {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          </div>
+          {!isLocked && (
+            <div className="relative">
+              <select className={selectCls} value={selectedBrandId} onChange={e => setSelectedBrandId(e.target.value === "all" ? "all" : Number(e.target.value))}>
+                <option value="all">{t("insights.allBrands")}</option>
+                {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            </div>
+          )}
         </div>
       </div>
 

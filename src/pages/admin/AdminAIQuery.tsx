@@ -330,11 +330,24 @@ const formatRelative = (iso: string) => {
   return d.toLocaleDateString();
 };
 
-const AdminAIQuery = () => {
-  const { adminRecord } = useAuth();
+// `mode` toggles owner/storage between the admin chat table (`ai_chats`,
+// keyed on admin_id) and the brand chat table (`ai_chats_brand`, keyed on
+// profile_id). The brand variant also hides the admin-only Reports section
+// from the empty state. Everything else — playbooks, SQL panel, exports —
+// works identically for both.
+export type AIQueryProps = {
+  mode?: "admin" | "brand";
+};
+
+const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
+  const { adminRecord, profile } = useAuth();
   const { t, locale } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlChatId = searchParams.get("chat");
+
+  const chatsTable = mode === "brand" ? "ai_chats_brand" : "ai_chats";
+  const ownerColumn = mode === "brand" ? "profile_id" : "admin_id";
+  const ownerId = mode === "brand" ? profile?.id ?? null : adminRecord?.id ?? null;
 
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [chatId, setChatId] = useState<string | null>(urlChatId);
@@ -352,19 +365,19 @@ const AdminAIQuery = () => {
 
   // ── Load chat list ─────────────────────────────────────────────────────────
   const refreshChatList = useCallback(async () => {
-    if (!adminRecord?.id) return;
+    if (!ownerId) return;
     const { data, error } = await supabase
-      .from("ai_chats")
+      .from(chatsTable as any)
       .select("id, title, updated_at")
-      .eq("admin_id", adminRecord.id)
+      .eq(ownerColumn, ownerId)
       .order("updated_at", { ascending: false })
       .limit(100);
     if (error) {
       console.error("[ai-chats list]", error);
       return;
     }
-    setChats(data ?? []);
-  }, [adminRecord?.id]);
+    setChats((data as ChatSummary[] | null) ?? []);
+  }, [ownerId, chatsTable, ownerColumn]);
 
   useEffect(() => {
     void refreshChatList();
@@ -374,7 +387,7 @@ const AdminAIQuery = () => {
   const loadChat = useCallback(async (id: string) => {
     setChatLoading(true);
     const { data, error } = await supabase
-      .from("ai_chats")
+      .from(chatsTable as any)
       .select("id, messages")
       .eq("id", id)
       .maybeSingle();
@@ -383,17 +396,18 @@ const AdminAIQuery = () => {
       toast.error(t("aiQuery.error.couldntLoad"));
       return;
     }
-    setChatId(data.id);
+    const row = data as { id: string; messages: unknown };
+    setChatId(row.id);
     // Older saved chats may lack the `reports` field on assistant messages;
     // default to an empty array so the new type-shape stays consistent.
-    const raw = (data.messages as any[]) ?? [];
+    const raw = (row.messages as any[]) ?? [];
     const restored: Message[] = raw.map((m) =>
       m?.role === "assistant"
         ? ({ reports: [], sqlSteps: [], ...m } as AssistantMessage)
         : m,
     );
     setMessages(restored);
-  }, [t]);
+  }, [t, chatsTable]);
 
   // React to ?chat= URL changes (deep links, back/forward)
   useEffect(() => {
@@ -411,7 +425,7 @@ const AdminAIQuery = () => {
   // the params so a refresh doesn't replay.
   const playbookFiredRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!adminRecord?.id) return;
+    if (!ownerId) return;
     const pb = searchParams.get("playbook");
     const id = searchParams.get("id");
     const label = searchParams.get("label") ?? undefined;
@@ -436,7 +450,7 @@ const AdminAIQuery = () => {
     setMessages([]);
     setSearchParams({}, { replace: true });
     void send(prompt, display);
-  }, [adminRecord?.id, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ownerId, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-scroll messages ───────────────────────────────────────────────────
   useEffect(() => {
@@ -446,14 +460,14 @@ const AdminAIQuery = () => {
   // ── Persistence helpers ────────────────────────────────────────────────────
   const persistChat = useCallback(
     async (msgs: Message[], existingId: string | null, firstUserMsg: string) => {
-      if (!adminRecord?.id) {
-        console.warn("[ai-chats] no admin record yet — skipping save");
+      if (!ownerId) {
+        console.warn("[ai-chats] no owner record yet — skipping save");
         return existingId;
       }
 
       if (existingId) {
         const { error } = await supabase
-          .from("ai_chats")
+          .from(chatsTable as any)
           .update({ messages: msgs as unknown as any })
           .eq("id", existingId);
         if (error) {
@@ -471,14 +485,15 @@ const AdminAIQuery = () => {
         return null;
       }
 
+      const insertRow: Record<string, unknown> = {
+        [ownerColumn]: ownerId,
+        user_id: user.id,
+        title: titleFromQuestion(firstUserMsg),
+        messages: msgs as unknown as any,
+      };
       const { data, error } = await supabase
-        .from("ai_chats")
-        .insert({
-          admin_id: adminRecord.id,
-          user_id: user.id,
-          title: titleFromQuestion(firstUserMsg),
-          messages: msgs as unknown as any,
-        })
+        .from(chatsTable as any)
+        .insert(insertRow as any)
         .select("id")
         .single();
 
@@ -487,9 +502,9 @@ const AdminAIQuery = () => {
         toast.error(`${t("aiQuery.error.couldntSave")}: ${error?.message ?? t("aiQuery.error.unknown")}`);
         return null;
       }
-      return data.id;
+      return (data as { id: string }).id;
     },
-    [adminRecord?.id, t],
+    [ownerId, chatsTable, ownerColumn, t],
   );
 
   // ── New chat / select chat ─────────────────────────────────────────────────
@@ -506,7 +521,7 @@ const AdminAIQuery = () => {
   };
 
   const deleteChat = async (id: string) => {
-    const { error } = await supabase.from("ai_chats").delete().eq("id", id);
+    const { error } = await supabase.from(chatsTable as any).delete().eq("id", id);
     if (error) {
       toast.error(t("aiQuery.error.couldntDelete"));
       return;
@@ -702,6 +717,7 @@ const AdminAIQuery = () => {
           ) : messages.length === 0 ? (
             <EmptyState
               onPick={(q, display) => send(q, display)}
+              showReports={mode === "admin"}
             />
           ) : (
             <div className="mx-auto flex max-w-4xl flex-col gap-6">
@@ -859,7 +875,13 @@ const ChatRailItem = ({
   );
 };
 
-const EmptyState = ({ onPick }: { onPick: (q: string, display?: string) => void }) => {
+const EmptyState = ({
+  onPick,
+  showReports = true,
+}: {
+  onPick: (q: string, display?: string) => void;
+  showReports?: boolean;
+}) => {
   const { t } = useLanguage();
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
@@ -877,11 +899,13 @@ const EmptyState = ({ onPick }: { onPick: (q: string, display?: string) => void 
         onPick={onPick}
       />
 
-      <EmptySection
-        title={t("aiQuery.section.reports")}
-        items={REPORT_KEYS.map((key) => ({ key, label: t(key), icon: FileSpreadsheet }))}
-        onPick={onPick}
-      />
+      {showReports && (
+        <EmptySection
+          title={t("aiQuery.section.reports")}
+          items={REPORT_KEYS.map((key) => ({ key, label: t(key), icon: FileSpreadsheet }))}
+          onPick={onPick}
+        />
+      )}
     </div>
   );
 };
