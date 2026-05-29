@@ -879,7 +879,7 @@ Deno.serve(async (req: Request) => {
       .from("profiles")
       .select("id, brand_id, role, brands(name)")
       .eq("user_id", user.id)
-      .in("role", ["brand_admin", "brand_user"])
+      .in("role", ["brand", "brand_admin", "brand_user"])
       .maybeSingle();
     if (!profileRow || !profileRow.brand_id) {
       return new Response(
