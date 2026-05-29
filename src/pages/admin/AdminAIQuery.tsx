@@ -150,6 +150,19 @@ const isCurrencyColumn = (col: string) =>
     .test(col);
 const isPercentColumn = (col: string) =>
   /(^|_)pct(_|$)|percent|share_pct|_share$|^share_/i.test(col);
+// Column names that the rich results table should render as image thumbnails
+// instead of plain text. Matched in both directions (e.g. picture, avatar,
+// avatar_url, product_picture). Kept narrow so a "logo_size" or
+// "image_count" doesn't accidentally trigger.
+const isImageColumn = (col: string) =>
+  /(^|_)(picture|avatar|photo|thumbnail)(_url)?$/i.test(col) ||
+  /(^|_)image_url$/i.test(col);
+const looksLikeImageUrl = (v: unknown): v is string =>
+  typeof v === "string" &&
+  /^https?:\/\//i.test(v) &&
+  // Either an image extension OR a known Supabase Storage path — the latter
+  // covers signed URLs without an extension.
+  (/\.(jpe?g|png|gif|webp|avif|svg)(\?|$)/i.test(v) || /\/storage\/v1\/object\//i.test(v));
 
 const formatNumber = (n: number, col: string, bcp: string): string => {
   if (!Number.isFinite(n)) return "—";
@@ -1352,17 +1365,54 @@ const ResultsTable = ({
           <tbody>
             {visible.map((row, i) => (
               <tr key={i} className="border-b border-border/60 last:border-0 hover:bg-muted/20">
-                {columns.map((c) => (
-                  <td key={c} className="px-4 py-2 text-foreground tabular-nums">
-                    {formatCell(row[c], c, locale)}
-                  </td>
-                ))}
+                {columns.map((c) =>
+                  isImageColumn(c) ? (
+                    <td key={c} className="px-4 py-2">
+                      <ImageCell url={row[c]} />
+                    </td>
+                  ) : (
+                    <td key={c} className="px-4 py-2 text-foreground tabular-nums">
+                      {formatCell(row[c], c, locale)}
+                    </td>
+                  ),
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  );
+};
+
+// Render an image-URL column cell. Falls back to a muted placeholder when
+// the value is missing or doesn't look like a URL — keeps row heights
+// consistent even when half the customers don't have an avatar.
+const ImageCell = ({ url }: { url: unknown }) => {
+  const isUrl = looksLikeImageUrl(url);
+  if (!isUrl) {
+    return <div className="h-10 w-10 rounded-md bg-muted/50" />;
+  }
+  return (
+    <a
+      href={url as string}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block h-10 w-10 overflow-hidden rounded-md border border-border bg-muted/40 transition-opacity hover:opacity-80"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <img
+        src={url as string}
+        alt=""
+        loading="lazy"
+        className="h-full w-full object-cover"
+        onError={(e) => {
+          const target = e.currentTarget;
+          target.style.display = "none";
+          target.parentElement?.classList.add("bg-muted/50");
+        }}
+      />
+    </a>
   );
 };
 

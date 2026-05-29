@@ -78,9 +78,10 @@ catalogues(id int PK, brand_id -> brands.id, brand_item_id, name, description,
    -- catalogues rows ARE products / items. catalogues.name = product name.
 
 profiles(id uuid PK, user_id uuid, brand_id -> brands.id, shop_id -> shops.id,
-         first_name, last_name, email, role, status, is_master bool, is_visible bool,
+         first_name, last_name, email, avatar, role, status, is_master bool, is_visible bool,
          date_of_birth date, nationality, address, city, province, postcode, country,
          phone_number, registered_at, email_confirmed_at, created_at)
+   -- profiles.avatar holds the customer's photo URL (Supabase Storage); may be NULL.
    -- profiles holds BOTH customers AND brand-side users in one table.
    --   Customers:    role IS NULL or role = 'customer'.
    --   Brand users:  role IN ('brand', 'brand_admin', 'brand_user').
@@ -357,8 +358,8 @@ profiles.id). The customer is a profiles row with role IS NULL or
 role = 'customer'.
 
 Step 1 — Resolve the customer. ONE run_sql call:
-  SELECT p.id, p.first_name, p.last_name, p.email, p.phone_number, p.city,
-         p.country, p.registered_at, b.id AS brand_id, b.name AS brand,
+  SELECT p.avatar, p.id, p.first_name, p.last_name, p.email, p.phone_number,
+         p.city, p.country, p.registered_at, b.id AS brand_id, b.name AS brand,
          (SELECT COUNT(*) FROM policies pol WHERE pol.customer_id = p.id) AS covers
   FROM profiles p
   LEFT JOIN brands b ON b.id = p.brand_id
@@ -510,8 +511,8 @@ Inputs: a free-text identifier (product name, SKU, brand_item_id, or
 catalogues.id).
 
 Step 1 — Resolve the product. ONE run_sql call:
-  SELECT cat.id, cat.name, cat.sku, cat.brand_item_id, cat.category,
-         b.name AS brand,
+  SELECT cat.picture, cat.id, cat.name, cat.sku, cat.brand_item_id,
+         cat.category, b.name AS brand,
          (SELECT COUNT(*) FROM policies pol WHERE pol.item_id = cat.id) AS covers
   FROM catalogues cat
   LEFT JOIN brands b ON b.id = cat.brand_id
@@ -724,6 +725,17 @@ Required structure (use these exact H2 headings, in this order):
 - If a number is zero, say so plainly; don't speculate.
 - Call render_chart ONLY when it helps (time series, top-N, share-of-total)
   and there are at least 2 rows.
+
+# Visual cues — pictures
+The client renders any image-URL column in the rich results table as a
+thumbnail. When the user asks to "show", "list", or "find" customers or
+products, INCLUDE the image columns in the SELECT so the answer has
+faces / product shots:
+- profiles.avatar    — customer photos. Alias as 'avatar' or 'picture'.
+- catalogues.picture — product images. Keep the name 'picture'.
+Put the image column FIRST in the column list so it lands on the
+left edge of the table. Skip these columns when the user asked a
+pure-aggregate question (counts, sums, rates) — they'd just be noise.
 `.trim();
 
 const TOOLS = [
