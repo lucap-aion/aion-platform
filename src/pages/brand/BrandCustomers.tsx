@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { toast } from "sonner";
 import { parseError } from "@/utils/parseError";
@@ -78,16 +79,17 @@ const inputCls =
 const PAGE_SIZE = 25;
 
 const SegmentBadges = ({ seg }: { seg: SegmentRow | null }) => {
+  const { t } = useLanguage();
   if (!seg) return null;
   const items: { key: string; label: string; cls: string; Icon: any }[] = [];
   if (seg.is_vip)
-    items.push({ key: "vip", label: "VIP", cls: "bg-amber-500/10 text-amber-700 border-amber-500/30", Icon: Crown });
+    items.push({ key: "vip", label: t("brandCustomers.badge.vip"), cls: "bg-amber-500/10 text-amber-700 border-amber-500/30", Icon: Crown });
   if (seg.is_lapsed)
-    items.push({ key: "lapsed", label: "Lapsed", cls: "bg-slate-500/10 text-slate-700 border-slate-500/30", Icon: Clock });
+    items.push({ key: "lapsed", label: t("brandCustomers.badge.lapsed"), cls: "bg-slate-500/10 text-slate-700 border-slate-500/30", Icon: Clock });
   if (seg.is_incomplete)
-    items.push({ key: "incomplete", label: "Incomplete", cls: "bg-rose-500/10 text-rose-700 border-rose-500/30", Icon: AlertTriangle });
+    items.push({ key: "incomplete", label: t("brandCustomers.badge.incomplete"), cls: "bg-rose-500/10 text-rose-700 border-rose-500/30", Icon: AlertTriangle });
   if (seg.is_high_nps_idle)
-    items.push({ key: "nps", label: "Happy/idle", cls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30", Icon: Heart });
+    items.push({ key: "nps", label: t("brandCustomers.badge.happyIdle"), cls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30", Icon: Heart });
   if (items.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1">
@@ -117,6 +119,7 @@ const BrandCustomers = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const { profile, canWrite } = useAuth();
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const slugPrefix = useAuthSlug();
   const navigate = useNavigate();
@@ -465,10 +468,10 @@ const BrandCustomers = () => {
               onChange={(e) => { setSortBy(e.target.value as SortKey); setPage(0); }}
               className="appearance-none rounded-lg border border-input bg-background py-2 pl-3 pr-8 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-              <option value="name">Name A–Z</option>
-              <option value="ltv">Highest LTV</option>
+              <option value="newest">{t("brandCustomers.sort.newest")}</option>
+              <option value="oldest">{t("brandCustomers.sort.oldest")}</option>
+              <option value="name">{t("brandCustomers.sort.name")}</option>
+              <option value="ltv">{t("brandCustomers.sort.ltv")}</option>
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           </div>
@@ -480,13 +483,6 @@ const BrandCustomers = () => {
             const active = segment === s.key;
             const Icon = s.icon;
             const count = segmentCounts[s.key];
-            const labels: Record<SegmentKey, string> = {
-              all: "All",
-              vip: "VIP",
-              lapsed: "Lapsed",
-              incomplete: "Profile incomplete",
-              highNpsIdle: "Happy but idle",
-            };
             return (
               <button
                 key={s.key}
@@ -499,7 +495,7 @@ const BrandCustomers = () => {
                 }`}
               >
                 {Icon && <Icon className="h-3 w-3" />}
-                {labels[s.key]}
+                {t(s.labelKey)}
                 <span className="tabular-nums text-[10px] opacity-70">{count}</span>
               </button>
             );
@@ -526,7 +522,7 @@ const BrandCustomers = () => {
                   Claims
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  LTV
+                  {t("brandCustomers.column.ltv")}
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   <div className="flex items-center gap-1">

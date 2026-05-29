@@ -47,6 +47,64 @@ const translations: Translations = {
   "brandCustomers.segment.lapsed": { en: "Lapsed", it: "Inattivi" },
   "brandCustomers.segment.incomplete": { en: "Profile incomplete", it: "Profilo incompleto" },
   "brandCustomers.segment.highNpsIdle": { en: "Happy but idle", it: "Soddisfatti ma fermi" },
+  // BrandCustomers — sort dropdown
+  "brandCustomers.sort.newest": { en: "Newest first", it: "Più recenti" },
+  "brandCustomers.sort.oldest": { en: "Oldest first", it: "Più vecchi" },
+  "brandCustomers.sort.name": { en: "Name A–Z", it: "Nome A–Z" },
+  "brandCustomers.sort.ltv": { en: "Highest LTV", it: "LTV più alto" },
+  // BrandCustomers — column headers + row badges
+  "brandCustomers.column.ltv": { en: "LTV", it: "LTV" },
+  "brandCustomers.badge.vip": { en: "VIP", it: "VIP" },
+  "brandCustomers.badge.lapsed": { en: "Lapsed", it: "Inattivo" },
+  "brandCustomers.badge.incomplete": { en: "Incomplete", it: "Incompleto" },
+  "brandCustomers.badge.happyIdle": { en: "Happy/idle", it: "Sodd./fermo" },
+
+  // Brand nav — renewals
+  "nav.renewals": { en: "Renewals", it: "Rinnovi" },
+
+  // BrandRenewals page
+  "brandRenewals.title": { en: "Renewals", it: "Rinnovi" },
+  "brandRenewals.subtitle": {
+    en: "Covers expiring in the next 30 days — sorted by urgency so the clienteling team can act before they lapse.",
+    it: "Coperture in scadenza nei prossimi 30 giorni — ordinate per urgenza così il team clienteling può intervenire prima della scadenza.",
+  },
+  "brandRenewals.kpi.totalAtRisk": { en: "Total at risk (30d)", it: "Totale a rischio (30 g)" },
+  "brandRenewals.kpi.sevenDays": { en: "7 days", it: "7 giorni" },
+  "brandRenewals.kpi.twoWeeks": { en: "8–14 days", it: "8–14 giorni" },
+  "brandRenewals.kpi.month": { en: "15–30 days", it: "15–30 giorni" },
+  "brandRenewals.bucket.wk": { en: "Expiring in 7 days", it: "In scadenza tra 7 giorni" },
+  "brandRenewals.bucket.2w": { en: "Expiring in 8–14 days", it: "In scadenza tra 8–14 giorni" },
+  "brandRenewals.bucket.mo": { en: "Expiring in 15–30 days", it: "In scadenza tra 15–30 giorni" },
+  "brandRenewals.atRisk": { en: "at risk", it: "a rischio" },
+  "brandRenewals.empty": {
+    en: "No covers are due to expire in the next 30 days. 🎉",
+    it: "Nessuna copertura in scadenza nei prossimi 30 giorni. 🎉",
+  },
+
+  // BrandClaims — triage view + flags
+  "brandClaims.view.table": { en: "Table", it: "Tabella" },
+  "brandClaims.view.triage": { en: "Triage", it: "Triage" },
+  "brandClaims.view.flagged": { en: "Flagged", it: "Segnalati" },
+  "brandClaims.view.flaggedTitle": {
+    en: "Show only claims with fraud-suspicion flags",
+    it: "Mostra solo richieste con segnalazioni anti-frode",
+  },
+  "brandClaims.triage.empty": { en: "No claims to triage.", it: "Nessuna richiesta da gestire." },
+  "brandClaims.flag.freshCover": { en: "Fresh cover", it: "Copertura recente" },
+  "brandClaims.flag.freshCoverTip": {
+    en: "Claim opened within 30 days of cover start — possible last-minute coverage purchase.",
+    it: "Richiesta aperta entro 30 giorni dall'inizio della copertura — possibile acquisto all'ultimo minuto.",
+  },
+  "brandClaims.flag.frequentClaimer": { en: "Frequent claimer", it: "Cliente ricorrente" },
+  "brandClaims.flag.frequentClaimerTip": {
+    en: "This customer has 3+ claims in the last 12 months.",
+    it: "Questo cliente ha 3+ richieste negli ultimi 12 mesi.",
+  },
+  "brandClaims.flag.repeatCity": { en: "Repeat city", it: "Città ripetuta" },
+  "brandClaims.flag.repeatCityTip": {
+    en: "Same customer has 2+ claims in this same incident city.",
+    it: "Lo stesso cliente ha 2+ richieste nella stessa città dell'incidente.",
+  },
   "nav.menu": { en: "Menu", it: "Menu" },
   "nav.management": { en: "Management", it: "Gestione" },
 
