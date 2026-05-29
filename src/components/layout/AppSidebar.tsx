@@ -57,15 +57,13 @@ const customerPaths = [
   { path: "/claims", icon: FileText, labelKey: "nav.myClaims" },
 ];
 
-// Marquee group — surfaced ahead of the operational management list so the
-// AI/analytics surfaces feel like the main reason to use the platform.
-const brandIntelligencePaths = [
-  { path: "/insights", icon: LineChart, labelKey: "nav.insights" },
-  { path: "/ai-query", icon: Sparkles, labelKey: "nav.aiQuery" },
-];
-
+// Single ordered list. Insights + Ask the data live near the top — right
+// after Dashboard — because they're the marquee features. Position carries
+// the prominence; no separate group, no icon tinting.
 const brandPaths = [
   { path: "/dashboard", icon: BarChart3, labelKey: "nav.dashboard", exact: true },
+  { path: "/insights", icon: LineChart, labelKey: "nav.insights" },
+  { path: "/ai-query", icon: Sparkles, labelKey: "nav.aiQuery" },
   { path: "/customers", icon: Users, labelKey: "nav.customers" },
   { path: "/covers", icon: Shield, labelKey: "nav.covers" },
   { path: "/claims", icon: FileText, labelKey: "nav.claims" },
@@ -111,9 +109,6 @@ const AppSidebar = () => {
   const paths = mode === "customer" ? customerPaths : brandPaths;
   const masterLinks = (mode === "brand" && canWrite)
     ? brandMasterPaths.map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }))
-    : [];
-  const intelligenceLinks = mode === "brand"
-    ? brandIntelligencePaths.map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }))
     : [];
   const links = paths.map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }));
   const profileName = `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() || user?.email || "User";
@@ -185,45 +180,6 @@ const AppSidebar = () => {
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Intelligence — Insights + Ask the data. Brand-only, top of the
-            sidebar so the AI/analytics surfaces feel like first-class
-            features, not buried tools. The icons keep a primary tint even
-            when inactive to give the group a subtle premium hue. */}
-        {intelligenceLinks.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-xs uppercase tracking-widest text-primary/70">
-              {collapsed ? "" : (
-                <span className="inline-flex items-center gap-1.5">
-                  <Sparkles className="h-3 w-3" />
-                  {t("nav.intelligence")}
-                </span>
-              )}
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {intelligenceLinks.map((link) => {
-                  const isActive = location.pathname === link.to || location.pathname.startsWith(link.to + "/");
-                  return (
-                    <SidebarMenuItem key={link.to}>
-                      <SidebarMenuButton asChild isActive={isActive} tooltip={link.label}>
-                        <NavLink
-                          to={link.to}
-                          end
-                          className="gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-foreground/70 transition-all hover:bg-primary/5 hover:text-primary"
-                          activeClassName="bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary"
-                        >
-                          <link.icon className="h-5 w-5 shrink-0 text-primary" />
-                          {!collapsed && <span>{link.label}</span>}
-                        </NavLink>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-
         <SidebarGroup>
           <SidebarGroupLabel className="text-xs uppercase tracking-widest text-muted-foreground">
             {collapsed ? "" : mode === "customer" ? t("nav.menu") : t("nav.management")}
