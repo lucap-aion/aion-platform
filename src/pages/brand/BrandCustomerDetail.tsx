@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin } from "lucide-react";
+import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin, Sparkles } from "lucide-react";
 import { format } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -62,6 +62,25 @@ const BrandCustomerDetail = () => {
       return data || [];
     },
     enabled: !!customerId && !!profile?.brand_id,
+  });
+
+  const { data: crossSell } = useQuery({
+    queryKey: ["brand-customer-cross-sell", customerId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .rpc("brand_customer_cross_sell", { p_customer_id: customerId! });
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        catalogue_id: number;
+        product_name: string | null;
+        category: string | null;
+        sku: string | null;
+        picture: string | null;
+        reason: string;
+      }>;
+    },
+    enabled: !!customerId,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: claims } = useQuery({
@@ -291,6 +310,47 @@ const BrandCustomerDetail = () => {
               </div>
             </div>
           </motion.div>
+
+          {crossSell && crossSell.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+              <div className="glass-card p-6">
+                <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-1">
+                  <Sparkles className="h-4 w-4 text-primary" /> Cross-sell suggestions
+                </h3>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Picked from your catalogue based on this customer's past purchases.
+                </p>
+                <ul className="space-y-2.5">
+                  {crossSell.map((item) => (
+                    <li
+                      key={item.catalogue_id}
+                      className="flex items-center gap-3 rounded-lg border border-border/60 bg-card p-2.5"
+                    >
+                      <div className="h-10 w-10 shrink-0 rounded-md bg-white p-1">
+                        {item.picture ? (
+                          <img
+                            src={item.picture}
+                            alt={item.product_name ?? ""}
+                            className="h-full w-full object-contain mix-blend-multiply"
+                          />
+                        ) : (
+                          <div className="h-full w-full rounded-md bg-muted" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground truncate">
+                          {item.product_name ?? `SKU ${item.sku ?? item.catalogue_id}`}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground line-clamp-1">
+                          {[item.category, item.reason].filter(Boolean).join(" · ")}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </motion.div>
+          )}
         </div>
       </div>
     </div>
