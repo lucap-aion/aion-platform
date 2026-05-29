@@ -112,6 +112,7 @@ const translations: Translations = {
   },
   "nav.menu": { en: "Menu", it: "Menu" },
   "nav.management": { en: "Management", it: "Gestione" },
+  "nav.intelligence": { en: "Intelligence", it: "Intelligence" },
 
   // Help
   "help.title": { en: "Need Help?", it: "Hai bisogno di aiuto?" },
