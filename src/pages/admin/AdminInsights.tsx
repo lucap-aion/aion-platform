@@ -1831,18 +1831,20 @@ function FeedbackThemesTile({
 }
 
 // ─── Profitability tab ───────────────────────────────────────────────────────
-// Separate fetch from the rest of Insights because COGS and manufacturing
-// cost percentages aren't in the shared `useInsightsData` shape. Only runs
-// when the user clicks the Profit tab — saves the heavy join until needed.
+// Gross margin only — we only have COGS, not the brand's full cost stack
+// (operations, marketing, taxes, etc.). Don't call it "net profit": the data
+// can't support that claim. Note: manufacturing_costs.cost_pct is the
+// COGS-to-RRP ratio used to *derive* policies.cogs at sale time (see
+// AdminCovers.tsx), so it's already baked into the cogs column — joining it
+// again here would double-count.
 
-type ProfitPolicy = {
+type GrossMarginPolicy = {
   start_date: string | null;
   cogs: number;
   selling_price: number;
   shop_name: string;
   category: string;
 };
-type ProfitCostRow = { category: string; cost_pct: number };
 
 function ProfitabilityTab({
   t,
@@ -1857,8 +1859,7 @@ function ProfitabilityTab({
   dateRange: DateRange;
   shopFilter: string;
 }) {
-  const [policies, setPolicies] = useState<ProfitPolicy[]>([]);
-  const [costs, setCosts] = useState<ProfitCostRow[]>([]);
+  const [policies, setPolicies] = useState<GrossMarginPolicy[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1867,38 +1868,25 @@ function ProfitabilityTab({
     setLoading(true);
     (async () => {
       try {
-        async function fetchAll() {
-          const all: any[] = [];
-          const PAGE = 1000;
-          let from = 0;
-          while (true) {
-            const { data, error } = await supabase
-              .from("policies")
-              .select("start_date, cogs, selling_price, shops(name), catalogues(category, collection)")
-              .eq("status", "live")
-              .in("brand_id", brandIds)
-              .range(from, from + PAGE - 1);
-            if (error) { console.error("[profit policies]", error); break; }
-            if (!data || data.length === 0) break;
-            all.push(...data);
-            if (data.length < PAGE) break;
-            from += PAGE;
-          }
-          return all;
+        const all: any[] = [];
+        const PAGE = 1000;
+        let from = 0;
+        while (true) {
+          const { data, error } = await supabase
+            .from("policies")
+            .select("start_date, cogs, selling_price, shops(name), catalogues(category, collection)")
+            .eq("status", "live")
+            .in("brand_id", brandIds)
+            .range(from, from + PAGE - 1);
+          if (error) { console.error("[gross margin policies]", error); break; }
+          if (!data || data.length === 0) break;
+          all.push(...data);
+          if (data.length < PAGE) break;
+          from += PAGE;
         }
 
-        const [pols, costRes] = await Promise.all([
-          fetchAll(),
-          supabase
-            .from("manufacturing_costs")
-            .select("category, cost_pct")
-            .in("brand_id", brandIds),
-        ]);
-
         if (cancelled) return;
-        if (costRes.error) console.error("[profit costs]", costRes.error);
-
-        const mapped: ProfitPolicy[] = (pols as any[]).map((p) => ({
+        const mapped: GrossMarginPolicy[] = (all as any[]).map((p) => ({
           start_date: p.start_date,
           cogs: Number(p.cogs) || 0,
           selling_price: Number(p.selling_price) || 0,
@@ -1906,12 +1894,6 @@ function ProfitabilityTab({
           category: normalizeCategory(p.catalogues?.category || p.catalogues?.collection || "—"),
         }));
         setPolicies(mapped);
-        setCosts(
-          (costRes.data as ProfitCostRow[] | null)?.map((r) => ({
-            category: normalizeCategory(r.category),
-            cost_pct: Number(r.cost_pct) || 0,
-          })) ?? [],
-        );
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -1936,75 +1918,67 @@ function ProfitabilityTab({
     });
   }, [policies, dateRange, shopFilter]);
 
-  const costByCat = useMemo(() => {
-    const m = new Map<string, number>();
-    costs.forEach((c) => m.set(c.category, c.cost_pct));
-    return m;
-  }, [costs]);
-
   const enriched = useMemo(
     () =>
       filtered.map((p) => {
-        const pct = costByCat.get(p.category) ?? 1;
-        const trueCost = p.cogs * pct;
-        const profit = p.selling_price - trueCost;
+        const grossMargin = p.selling_price - p.cogs;
         const month = p.start_date?.slice(0, 7) ?? "";
-        return { ...p, trueCost, profit, month };
+        return { ...p, grossMargin, month };
       }),
-    [filtered, costByCat],
+    [filtered],
   );
 
   const totals = useMemo(() => {
     const revenue = enriched.reduce((s, p) => s + p.selling_price, 0);
-    const cost = enriched.reduce((s, p) => s + p.trueCost, 0);
-    const profit = enriched.reduce((s, p) => s + p.profit, 0);
-    const margin = revenue > 0 ? Math.round((profit / revenue) * 1000) / 10 : 0;
-    return { revenue, cost, profit, margin };
+    const cogs = enriched.reduce((s, p) => s + p.cogs, 0);
+    const grossMargin = revenue - cogs;
+    const grossMarginPct = revenue > 0 ? Math.round((grossMargin / revenue) * 1000) / 10 : 0;
+    return { revenue, cogs, grossMargin, grossMarginPct };
   }, [enriched]);
 
   const byCategory = useMemo(() => {
-    const m = new Map<string, { revenue: number; cost: number; profit: number; count: number }>();
+    const m = new Map<string, { revenue: number; cogs: number; grossMargin: number; count: number }>();
     enriched.forEach((p) => {
-      const e = m.get(p.category) ?? { revenue: 0, cost: 0, profit: 0, count: 0 };
-      e.revenue += p.selling_price; e.cost += p.trueCost; e.profit += p.profit; e.count += 1;
+      const e = m.get(p.category) ?? { revenue: 0, cogs: 0, grossMargin: 0, count: 0 };
+      e.revenue += p.selling_price; e.cogs += p.cogs; e.grossMargin += p.grossMargin; e.count += 1;
       m.set(p.category, e);
     });
     return Array.from(m, ([k, v]) => ({
       category: k,
       revenue: Math.round(v.revenue),
-      cost: Math.round(v.cost),
-      profit: Math.round(v.profit),
-      margin: v.revenue > 0 ? Math.round((v.profit / v.revenue) * 100) : 0,
+      cogs: Math.round(v.cogs),
+      grossMargin: Math.round(v.grossMargin),
+      marginPct: v.revenue > 0 ? Math.round((v.grossMargin / v.revenue) * 100) : 0,
       count: v.count,
-    })).sort((a, b) => b.profit - a.profit);
+    })).sort((a, b) => b.grossMargin - a.grossMargin);
   }, [enriched]);
 
   const byShop = useMemo(() => {
-    const m = new Map<string, { revenue: number; profit: number }>();
+    const m = new Map<string, { revenue: number; grossMargin: number }>();
     enriched.forEach((p) => {
-      const e = m.get(p.shop_name) ?? { revenue: 0, profit: 0 };
-      e.revenue += p.selling_price; e.profit += p.profit;
+      const e = m.get(p.shop_name) ?? { revenue: 0, grossMargin: 0 };
+      e.revenue += p.selling_price; e.grossMargin += p.grossMargin;
       m.set(p.shop_name, e);
     });
     return Array.from(m, ([shop, v]) => ({
       shop,
       revenue: Math.round(v.revenue),
-      profit: Math.round(v.profit),
-      margin: v.revenue > 0 ? Math.round((v.profit / v.revenue) * 100) : 0,
-    })).sort((a, b) => b.profit - a.profit).slice(0, 10);
+      grossMargin: Math.round(v.grossMargin),
+      marginPct: v.revenue > 0 ? Math.round((v.grossMargin / v.revenue) * 100) : 0,
+    })).sort((a, b) => b.grossMargin - a.grossMargin).slice(0, 10);
   }, [enriched]);
 
   const byMonth = useMemo(() => {
-    const m = new Map<string, { revenue: number; profit: number }>();
+    const m = new Map<string, { revenue: number; grossMargin: number }>();
     enriched.forEach((p) => {
       if (!p.month) return;
-      const e = m.get(p.month) ?? { revenue: 0, profit: 0 };
-      e.revenue += p.selling_price; e.profit += p.profit;
+      const e = m.get(p.month) ?? { revenue: 0, grossMargin: 0 };
+      e.revenue += p.selling_price; e.grossMargin += p.grossMargin;
       m.set(p.month, e);
     });
     return Array.from(m, ([month, v]) => ({
       month, label: fmtPeriodLabel(month),
-      revenue: Math.round(v.revenue), profit: Math.round(v.profit),
+      revenue: Math.round(v.revenue), grossMargin: Math.round(v.grossMargin),
     })).sort((a, b) => a.month.localeCompare(b.month));
   }, [enriched]);
 
@@ -2024,15 +1998,15 @@ function ProfitabilityTab({
     );
   }
 
-  const hasCosts = costs.length > 0;
-
   return (
     <div className="space-y-5">
+      <p className="text-xs text-muted-foreground">{t("insights.profit.disclaimer")}</p>
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <KpiCard label={t("insights.profit.kpi.revenue")} value={fmtEur(totals.revenue)} />
-        <KpiCard label={t("insights.profit.kpi.cost")} value={fmtEur(totals.cost)} sub={hasCosts ? undefined : t("insights.profit.kpi.costFallback")} />
-        <KpiCard label={t("insights.profit.kpi.profit")} value={fmtEur(totals.profit)} />
-        <KpiCard label={t("insights.profit.kpi.margin")} value={`${totals.margin}%`} />
+        <KpiCard label={t("insights.profit.kpi.cogs")} value={fmtEur(totals.cogs)} />
+        <KpiCard label={t("insights.profit.kpi.grossMargin")} value={fmtEur(totals.grossMargin)} />
+        <KpiCard label={t("insights.profit.kpi.grossMarginPct")} value={`${totals.grossMarginPct}%`} />
       </div>
 
       <ChartCard title={t("insights.profit.chart.byCategory")}>
@@ -2044,7 +2018,7 @@ function ProfitabilityTab({
             <Tooltip formatter={(v: any, n: any) => [fmtEur(Number(v)), String(n)]} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <Bar dataKey="revenue" name={t("insights.profit.legend.revenue")} fill={C3} radius={[0, 4, 4, 0]} />
-            <Bar dataKey="profit" name={t("insights.profit.legend.profit")} fill={C2} radius={[0, 4, 4, 0]} />
+            <Bar dataKey="grossMargin" name={t("insights.profit.legend.grossMargin")} fill={C2} radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
@@ -2057,7 +2031,7 @@ function ProfitabilityTab({
               <XAxis type="number" fontSize={11} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => fmtEur(v as number)} />
               <YAxis dataKey="shop" type="category" fontSize={11} stroke="hsl(var(--muted-foreground))" width={100} />
               <Tooltip formatter={(v: any, n: any) => [fmtEur(Number(v)), String(n)]} />
-              <Bar dataKey="profit" name={t("insights.profit.legend.profit")} fill={C2} radius={[0, 4, 4, 0]} />
+              <Bar dataKey="grossMargin" name={t("insights.profit.legend.grossMargin")} fill={C2} radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -2071,7 +2045,7 @@ function ProfitabilityTab({
               <Tooltip formatter={(v: any, n: any) => [fmtEur(Number(v)), String(n)]} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Bar dataKey="revenue" name={t("insights.profit.legend.revenue")} fill={C3} radius={[4, 4, 0, 0]} />
-              <Line type="monotone" dataKey="profit" name={t("insights.profit.legend.profit")} stroke={C2} strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="grossMargin" name={t("insights.profit.legend.grossMargin")} stroke={C2} strokeWidth={2} dot={false} />
             </ComposedChart>
           </ResponsiveContainer>
         </ChartCard>

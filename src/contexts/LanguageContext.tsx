@@ -21,18 +21,23 @@ const translations: Translations = {
   "nav.shops": { en: "Shops", it: "Boutique" },
   "nav.settings": { en: "Settings", it: "Impostazioni" },
 
-  // Insights — Profitability tab + Feedback themes tile (added with brand wow features)
-  "insights.tab.profit": { en: "Profit", it: "Profitto" },
+  // Insights — Gross-margin tab + Feedback themes tile (added with brand wow features).
+  // The data only supports gross margin (revenue - cogs) — we don't have the
+  // brand's full cost stack, so don't claim "net profit".
+  "insights.tab.profit": { en: "Margin", it: "Margine" },
+  "insights.profit.disclaimer": {
+    en: "Gross margin only — based on COGS. Doesn't include operating, marketing, or other costs.",
+    it: "Solo margine lordo — basato sul COGS. Non include costi operativi, marketing o altri costi.",
+  },
   "insights.profit.kpi.revenue": { en: "Revenue (live)", it: "Ricavi (attivi)" },
-  "insights.profit.kpi.cost": { en: "True cost", it: "Costo reale" },
-  "insights.profit.kpi.costFallback": { en: "no cost % set — defaulting to 100% of COGS", it: "% costo non impostata — si usa il 100% del COGS" },
-  "insights.profit.kpi.profit": { en: "Net profit", it: "Profitto netto" },
-  "insights.profit.kpi.margin": { en: "Net margin", it: "Margine netto" },
-  "insights.profit.chart.byCategory": { en: "Revenue vs profit by category", it: "Ricavi vs profitto per categoria" },
-  "insights.profit.chart.topShops": { en: "Top shops by profit", it: "Boutique per profitto" },
-  "insights.profit.chart.byMonth": { en: "Monthly revenue & profit", it: "Ricavi e profitto mensili" },
+  "insights.profit.kpi.cogs": { en: "COGS", it: "COGS" },
+  "insights.profit.kpi.grossMargin": { en: "Gross margin", it: "Margine lordo" },
+  "insights.profit.kpi.grossMarginPct": { en: "Gross margin %", it: "Margine lordo %" },
+  "insights.profit.chart.byCategory": { en: "Revenue vs gross margin by category", it: "Ricavi vs margine lordo per categoria" },
+  "insights.profit.chart.topShops": { en: "Top shops by gross margin", it: "Boutique per margine lordo" },
+  "insights.profit.chart.byMonth": { en: "Monthly revenue & gross margin", it: "Ricavi e margine lordo mensili" },
   "insights.profit.legend.revenue": { en: "Revenue", it: "Ricavi" },
-  "insights.profit.legend.profit": { en: "Profit", it: "Profitto" },
+  "insights.profit.legend.grossMargin": { en: "Gross margin", it: "Margine lordo" },
   "insights.themes.title": { en: "Customer feedback themes", it: "Temi nel feedback clienti" },
   "insights.themes.commentsLast30": { en: "comments in the last 30 days", it: "commenti negli ultimi 30 giorni" },
   "insights.themes.loading": { en: "Analysing feedback…", it: "Analisi feedback…" },
