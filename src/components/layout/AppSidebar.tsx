@@ -72,6 +72,7 @@ const brandPaths = [
   { path: "/renewals", icon: Calendar, labelKey: "nav.renewals" },
   { path: "/shops", icon: Store, labelKey: "nav.shops" },
   { path: "/campaigns", icon: Megaphone, labelKey: "nav.campaigns" },
+  { path: "/wishlist", icon: Heart, labelKey: "nav.brandWishlist" },
 ];
 
 const brandMasterPaths = [

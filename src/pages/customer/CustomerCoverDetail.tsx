@@ -1,11 +1,12 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
+import { useState } from "react";
 import {
   ArrowLeft, Shield, AlertTriangle, Clock, CheckCircle2, Store,
-  Download, Hash, Package, Calendar,
+  Download, Hash, Package, Calendar, Share2, Copy, X, Eye, Loader2,
 } from "lucide-react";
 import { format } from "date-fns";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -37,6 +38,67 @@ const CustomerCoverDetail = () => {
   const tenant = useTenant();
   const { t, locale } = useLanguage();
   const slugPrefix = useAuthSlug();
+  const queryClient = useQueryClient();
+  const [shareOpen, setShareOpen] = useState(false);
+  const [creatingToken, setCreatingToken] = useState(false);
+
+  // Share tokens for THIS cover. Loaded when the modal opens; React Query
+  // caches it across opens.
+  const { data: shareTokens } = useQuery({
+    queryKey: ["cover-share-tokens", coverId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("cover_share_tokens")
+        .select("token, created_at, view_count, last_viewed_at, revoked")
+        .eq("cover_id", Number(coverId))
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: shareOpen && !!coverId,
+    staleTime: 60 * 1000,
+  });
+
+  const createShareLink = async () => {
+    if (!coverId || !profile?.id) return;
+    setCreatingToken(true);
+    const { error } = await supabase
+      .from("cover_share_tokens")
+      .insert({
+        cover_id: Number(coverId),
+        created_by: profile.id,
+      });
+    setCreatingToken(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: ["cover-share-tokens", coverId] });
+    toast.success(t("coverShare.linkCreated"));
+  };
+
+  const revokeShareLink = async (token: string) => {
+    const { error } = await supabase
+      .from("cover_share_tokens")
+      .update({ revoked: true })
+      .eq("token", token);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: ["cover-share-tokens", coverId] });
+  };
+
+  const shareUrl = (token: string) => `${window.location.origin}/share/cover/${token}`;
+
+  const copyShareLink = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(shareUrl(token));
+      toast.success(t("coverShare.copied"));
+    } catch {
+      toast.error(t("coverShare.copyFailed"));
+    }
+  };
 
   const { data: cover, isLoading } = useQuery({
     queryKey: ["customer-cover-detail", coverId],
@@ -231,14 +293,24 @@ const CustomerCoverDetail = () => {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => void handleDownloadCertificate()}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-foreground px-5 py-3 text-sm font-medium text-background transition-all hover:bg-foreground/90"
-              >
-                <Download className="h-4 w-4" />
-                {t("coverDetail.downloadCertificate")}
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadCertificate()}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-foreground px-4 py-3 text-sm font-medium text-background transition-all hover:bg-foreground/90"
+                >
+                  <Download className="h-4 w-4" />
+                  {t("coverDetail.downloadCertificate")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShareOpen(true)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-foreground/20 bg-background px-4 py-3 text-sm font-medium text-foreground transition-all hover:bg-foreground/5"
+                >
+                  <Share2 className="h-4 w-4" />
+                  {t("coverShare.share")}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -348,6 +420,102 @@ const CustomerCoverDetail = () => {
           </motion.div>
         )}
       </div>
+
+      {/* Share modal */}
+      {shareOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
+          onClick={() => setShareOpen(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="glass-card w-full sm:max-w-md max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border/50">
+              <div className="flex items-center gap-2">
+                <Share2 className="h-4 w-4 text-primary" />
+                <h2 className="font-serif text-lg font-semibold text-foreground">{t("coverShare.title")}</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShareOpen(false)}
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="px-5 py-4 space-y-4">
+              <p className="text-xs text-muted-foreground">{t("coverShare.intro")}</p>
+
+              <button
+                type="button"
+                onClick={() => void createShareLink()}
+                disabled={creatingToken}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              >
+                {creatingToken ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
+                {t("coverShare.createNew")}
+              </button>
+
+              {shareTokens && shareTokens.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                    {t("coverShare.existing")}
+                  </p>
+                  <ul className="space-y-2">
+                    {shareTokens.map((tk: any) => {
+                      const revoked = tk.revoked;
+                      return (
+                        <li
+                          key={tk.token}
+                          className={`rounded-xl border p-3 ${revoked ? "border-border bg-muted/30 opacity-60" : "border-border bg-card"}`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                              <Eye className="h-3 w-3" /> {tk.view_count} {t("coverShare.views")}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground tabular-nums">
+                              {new Date(tk.created_at).toLocaleDateString(locale === "it" ? "it-IT" : "en-GB", {
+                                day: "2-digit", month: "short", year: "numeric",
+                              })}
+                            </span>
+                          </div>
+                          <p className="text-[11px] font-mono break-all text-foreground/80 mb-2 line-clamp-1">
+                            {shareUrl(tk.token)}
+                          </p>
+                          {!revoked ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void copyShareLink(tk.token)}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs text-foreground hover:bg-muted"
+                              >
+                                <Copy className="h-3 w-3" /> {t("coverShare.copy")}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void revokeShareLink(tk.token)}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10"
+                              >
+                                {t("coverShare.revoke")}
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-muted-foreground">{t("coverShare.revoked")}</p>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

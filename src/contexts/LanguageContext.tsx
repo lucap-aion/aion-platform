@@ -21,7 +21,30 @@ const translations: Translations = {
   "nav.shops": { en: "Shops", it: "Boutique" },
   "nav.faq": { en: "FAQ", it: "FAQ" },
   "nav.campaigns": { en: "Campaigns", it: "Campagne" },
+  "nav.brandWishlist": { en: "Demand", it: "Richieste" },
   "nav.settings": { en: "Settings", it: "Impostazioni" },
+
+  // BrandWishlist heatmap page
+  "brandWishlist.title": { en: "Customer demand", it: "Richieste dei clienti" },
+  "brandWishlist.subtitle": {
+    en: "What your customers are favouriting on Discover — straight from their wishlist.",
+    it: "Cosa stanno salvando i tuoi clienti su Scopri — direttamente dalle wishlist.",
+  },
+  "brandWishlist.totalWishes": { en: "Total wishes", it: "Richieste totali" },
+  "brandWishlist.itemsWished": { en: "Items wished", it: "Articoli richiesti" },
+  "brandWishlist.topItem": { en: "Top item", it: "In testa" },
+  "brandWishlist.searchPlaceholder": {
+    en: "Search by name, SKU or category…",
+    it: "Cerca per nome, SKU o categoria…",
+  },
+  "brandWishlist.wished": { en: "wishes", it: "richieste" },
+  "brandWishlist.empty": {
+    en: "No customers have wishlisted anything yet.",
+    it: "Nessun cliente ha ancora aggiunto nulla alla wishlist.",
+  },
+  "brandWishlist.whoWished": { en: "Who wishlisted this", it: "Chi l'ha richiesto" },
+  "brandWishlist.loading": { en: "Loading…", it: "Caricamento…" },
+  "brandWishlist.emailCustomer": { en: "Email customer", it: "Email cliente" },
 
   // BrandCampaigns page
   "campaigns.title": { en: "Campaigns", it: "Campagne" },
@@ -94,6 +117,16 @@ const translations: Translations = {
   "brandFaq.delete": { en: "Delete", it: "Elimina" },
   "brandFaq.moveUp": { en: "Move up", it: "Sposta su" },
   "brandFaq.moveDown": { en: "Move down", it: "Sposta giù" },
+  "brandFaq.polish": { en: "Polish with AI", it: "Migliora con l'AI" },
+  "brandFaq.polished": { en: "Polished.", it: "Migliorato." },
+  "brandFaq.polishEmpty": {
+    en: "Add some text first.",
+    it: "Aggiungi prima del testo.",
+  },
+  "brandFaq.polishFailed": {
+    en: "Couldn't polish that entry.",
+    it: "Impossibile migliorare la voce.",
+  },
   "brandFaq.emptyForLang": {
     en: "No {lang} questions yet — add the first one below.",
     it: "Ancora nessuna domanda in {lang} — aggiungi la prima qui sotto.",
@@ -298,6 +331,23 @@ const translations: Translations = {
   "coverDetail.status.pending": { en: "Pending", it: "In attesa" },
   "coverDetail.claimStatus.open": { en: "Open", it: "Aperta" },
   "coverDetail.claimStatus.closed": { en: "Closed", it: "Chiusa" },
+
+  // Cover share link
+  "coverShare.share": { en: "Share", it: "Condividi" },
+  "coverShare.title": { en: "Share this cover", it: "Condividi questa copertura" },
+  "coverShare.intro": {
+    en: "Generate a private link to show this cover to a buyer, insurer, or family member. The link omits claim history and you can revoke it at any time.",
+    it: "Genera un link privato per mostrare questa copertura a un compratore, assicuratore o familiare. Il link esclude lo storico richieste e puoi revocarlo in qualsiasi momento.",
+  },
+  "coverShare.createNew": { en: "Create new link", it: "Crea nuovo link" },
+  "coverShare.linkCreated": { en: "Link created.", it: "Link creato." },
+  "coverShare.existing": { en: "Existing links", it: "Link esistenti" },
+  "coverShare.copy": { en: "Copy", it: "Copia" },
+  "coverShare.copied": { en: "Link copied.", it: "Link copiato." },
+  "coverShare.copyFailed": { en: "Couldn't copy.", it: "Impossibile copiare." },
+  "coverShare.revoke": { en: "Revoke", it: "Revoca" },
+  "coverShare.revoked": { en: "Revoked.", it: "Revocato." },
+  "coverShare.views": { en: "views", it: "visualizzazioni" },
 
   // Certificate PDF labels
   "certificate.title": { en: "Certificate of Coverage", it: "Certificato di Copertura" },

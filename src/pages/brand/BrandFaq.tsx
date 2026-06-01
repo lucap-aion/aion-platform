@@ -12,11 +12,15 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Plus, Trash2, ChevronUp, ChevronDown, Save, BookOpen, MessageSquare, AlertCircle,
+  Wand2, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
 type FaqItem = { id: string; title: string; answer: string };
 type StoredFaq = Array<{
@@ -73,6 +77,63 @@ const BrandFaq = () => {
   const [saving, setSaving] = useState(false);
   const [serverEnRaw, setServerEnRaw] = useState<unknown>(null);
   const [serverItRaw, setServerItRaw] = useState<unknown>(null);
+  const [polishingId, setPolishingId] = useState<string | null>(null);
+
+  // Build a voice-sample blob for the AI polish step: the OTHER Q&A pairs
+  // in the same language, capped, so the model imitates the brand's tone
+  // without copying the entry being polished.
+  const voiceSample = (currentItems: FaqItem[], excludeId: string): string => {
+    return currentItems
+      .filter((i) => i.id !== excludeId && (i.title.trim() || i.answer.trim()))
+      .slice(0, 6)
+      .map((i) => `Q: ${i.title.trim()}\nA: ${i.answer.trim()}`)
+      .join("\n\n");
+  };
+
+  const polishItem = async (id: string) => {
+    const list = lang === "en" ? enItems : itItems;
+    const item = list.find((i) => i.id === id);
+    if (!item) return;
+    if (!item.title.trim() && !item.answer.trim()) {
+      toast.error(t("brandFaq.polishEmpty"));
+      return;
+    }
+    setPolishingId(id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Sign in required");
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/faq-polish`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "apikey": SUPABASE_ANON_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          question: item.title,
+          answer: item.answer,
+          locale: lang,
+          voice_sample: voiceSample(list, id),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+      const setter = lang === "en" ? setEnItems : setItItems;
+      setter((prev) =>
+        prev.map((it) =>
+          it.id === id
+            ? { ...it, title: String(body.question ?? it.title), answer: String(body.answer ?? it.answer) }
+            : it,
+        ),
+      );
+      toast.success(t("brandFaq.polished"));
+    } catch (e: any) {
+      toast.error(e?.message ?? t("brandFaq.polishFailed"));
+    } finally {
+      setPolishingId(null);
+    }
+  };
 
   // Load the current brand row's FAQ once.
   useEffect(() => {
@@ -289,14 +350,25 @@ const BrandFaq = () => {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => removeItem(item.id)}
-                  className="shrink-0 rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  title={t("brandFaq.delete")}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <div className="shrink-0 flex flex-col gap-1">
+                  <button
+                    type="button"
+                    onClick={() => void polishItem(item.id)}
+                    disabled={polishingId === item.id}
+                    className="rounded-md p-2 text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+                    title={t("brandFaq.polish")}
+                  >
+                    {polishingId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeItem(item.id)}
+                    className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    title={t("brandFaq.delete")}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </motion.div>
           ))

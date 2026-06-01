@@ -40,8 +40,10 @@ import BrandShopDetail from "./pages/brand/BrandShopDetail";
 import BrandRenewals from "./pages/brand/BrandRenewals";
 import BrandFaq from "./pages/brand/BrandFaq";
 import BrandCampaigns from "./pages/brand/BrandCampaigns";
+import BrandWishlist from "./pages/brand/BrandWishlist";
 import CustomerConcierge from "./pages/customer/CustomerConcierge";
 import CustomerDiscover from "./pages/customer/CustomerDiscover";
+import PublicCoverShare from "./pages/PublicCoverShare";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminBrands from "./pages/admin/AdminBrands";
 import AdminCustomers from "./pages/admin/AdminCustomers";
@@ -184,6 +186,9 @@ const App = () => (
             {/* Landing page bypass — view brand selector without auto-redirect to /rc */}
             <Route path="/all" element={<LandingPage />} />
 
+            {/* Public share — no auth required, no brand guard */}
+            <Route path="/share/cover/:token" element={<PublicCoverShare />} />
+
             {/* Admin login */}
             <Route path="/admin/login" element={<AuthRoute><AdminLogin /></AuthRoute>} />
             <Route path="/admin/forgot-password" element={<AdminForgotPassword />} />
@@ -238,6 +243,7 @@ const App = () => (
               <Route path="/:slug/renewals" element={<ProtectedRoute mode="brand"><BrandRenewals /></ProtectedRoute>} />
               <Route path="/:slug/faq" element={<ProtectedRoute mode="brand"><BrandFaq /></ProtectedRoute>} />
               <Route path="/:slug/campaigns" element={<ProtectedRoute mode="brand"><BrandCampaigns /></ProtectedRoute>} />
+              <Route path="/:slug/wishlist" element={<ProtectedRoute mode="brand"><BrandWishlist /></ProtectedRoute>} />
               <Route path="/:slug/claims/:claimId" element={<ProtectedRoute mode="brand"><BrandClaimDetail /></ProtectedRoute>} />
               <Route path="/:slug/customers/:customerId" element={<ProtectedRoute mode="brand"><BrandCustomerDetail /></ProtectedRoute>} />
               <Route path="/:slug/covers/:coverId" element={<ProtectedRoute mode="brand"><BrandCoverDetail /></ProtectedRoute>} />
