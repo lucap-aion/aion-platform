@@ -58,6 +58,10 @@ interface Customer {
   brand_id: number | null;
   shop_id: number | null;
   role: string | null;
+  // Business info synced from eplay (B2B records). Present on company profiles only.
+  vat?: string | null;
+  entity_name?: string | null;
+  business_address?: string | null;
   brand_name?: string;
   brand_logo?: string | null;
   shop_name?: string | null;
@@ -77,28 +81,41 @@ const empty = (): Partial<Customer> => ({
   brand_id: null, role: "customer",
 });
 
+// A profile is a B2B/eplay record when it carries any business info. For these,
+// the `address` column holds the company address (synced from eplay), so it must
+// not count as consumer profilation. vat/entity_name/business_address are never
+// profilation fields themselves.
+const isBusinessEntity = (c: Customer) =>
+  (c.vat != null && c.vat !== "") ||
+  (c.entity_name != null && c.entity_name !== "") ||
+  (c.business_address != null && c.business_address !== "");
+
+// A profilation field counts only when it holds a real, consumer-provided value:
+// empty strings don't count, and `address` is ignored on business records.
+const fieldFilled = (c: Customer, f: keyof Customer): boolean => {
+  const v = c[f];
+  if (v == null || v === "") return false;
+  if (f === "address" && isBusinessEntity(c)) return false;
+  return true;
+};
+
+// The 8 optional profile fields (registered_at is the 9th, tracked separately).
+const PROFILATION_OPTIONAL: Array<keyof Customer> = [
+  "date_of_birth", "country", "city", "postcode",
+  "address", "province", "nationality", "phone_number",
+];
+const PROFILATION_FIELDS: Array<keyof Customer> = ["registered_at", ...PROFILATION_OPTIONAL];
+
 // Mirror the SQL definitions in admin_dashboard_aggregates (pool_profilation_started
 // and pool_profiled) so the per-row Yes/No matches the Home dashboard tiles.
 const isProfilationStarted = (c: Customer) =>
-  c.registered_at != null && (
-    c.date_of_birth != null || c.country != null || c.city != null ||
-    c.postcode != null || c.address != null || c.province != null ||
-    c.nationality != null || c.phone_number != null
-  );
+  c.registered_at != null && PROFILATION_OPTIONAL.some((f) => fieldFilled(c, f));
 
 const isProfilationCompleted = (c: Customer) =>
-  c.registered_at != null &&
-  c.date_of_birth != null && c.country != null && c.city != null &&
-  c.postcode != null && c.address != null && c.province != null &&
-  c.nationality != null && c.phone_number != null;
-
-const PROFILATION_FIELDS: Array<keyof Customer> = [
-  "registered_at", "date_of_birth", "country", "city",
-  "postcode", "address", "province", "nationality", "phone_number",
-];
+  c.registered_at != null && PROFILATION_OPTIONAL.every((f) => fieldFilled(c, f));
 
 const profilationPct = (c: Customer) => {
-  const filled = PROFILATION_FIELDS.reduce((n, f) => n + (c[f] != null ? 1 : 0), 0);
+  const filled = PROFILATION_FIELDS.reduce((n, f) => n + (fieldFilled(c, f) ? 1 : 0), 0);
   return Math.round((filled / PROFILATION_FIELDS.length) * 100);
 };
 

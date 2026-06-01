@@ -232,7 +232,13 @@ and the pool denominator is INDEPENDENT of the "Customers" count above.
                         / COUNT(DISTINCT id)
 - profilation_rate  = same numerator FILTER, plus ALL of:
                         date_of_birth, country, city, postcode, address,
-                        province, nationality, phone_number IS NOT NULL.
+                        province, nationality, phone_number populated
+                        (text fields must be NOT NULL AND <> '').
+                        Business info (vat, entity_name, business_address)
+                        is synced from eplay for B2B records and is NEVER a
+                        profilation field. On a profile that carries any of
+                        those, the `address` column holds the COMPANY address,
+                        so it does NOT count toward profilation.
 - feedback_rate     = COUNT(DISTINCT p.id) WHERE EXISTS(
                         SELECT 1 FROM feedback fb
                         WHERE fb.user_id=p.id AND fb.brand_id=p.brand_id)

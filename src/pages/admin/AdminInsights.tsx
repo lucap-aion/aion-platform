@@ -194,8 +194,16 @@ interface ProfileRow {
   province: string | null;
   nationality: string | null;
   phone_number: string | null;
+  vat: string | null;
+  entity_name: string | null;
+  business_address: string | null;
   created_at: string;
 }
+
+// B2B/eplay records carry business info; their `address` holds the company
+// address (synced from eplay) and must not count as consumer profilation.
+const isBusinessEntity = (p: ProfileRow) => !!(p.vat || p.entity_name || p.business_address);
+const addrFilled = (p: ProfileRow) => !!p.address && !isBusinessEntity(p);
 
 interface FeedbackRow {
   user_id: string;
@@ -260,12 +268,12 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       const p = profileMap.get(id);
       return !!p && !!(
         p.date_of_birth || p.country || p.city || p.postcode ||
-        p.address || p.province || p.nationality || p.phone_number
+        addrFilled(p) || p.province || p.nationality || p.phone_number
       );
     });
     const profiledCustIds = regCustIds.filter(id => {
       const p = profileMap.get(id);
-      return p && p.date_of_birth && p.country && p.city && p.postcode && p.address && p.province && p.nationality && p.phone_number;
+      return p && p.date_of_birth && p.country && p.city && p.postcode && addrFilled(p) && p.province && p.nationality && p.phone_number;
     });
     // Restrict feedback to customers present in the (filtered) policy set so KPIs respond to date/shop filters
     const policyCustIds = new Set(Object.keys(custMap));
@@ -739,7 +747,7 @@ export default function AdminInsights({ lockedBrandId, lockedBrandName }: AdminI
         while (true) {
           const q = supabase
             .from("profiles")
-            .select("id, registered_at, first_name, last_name, date_of_birth, country, city, postcode, address, province, nationality, phone_number, created_at")
+            .select("id, registered_at, first_name, last_name, date_of_birth, country, city, postcode, address, province, nationality, phone_number, vat, entity_name, business_address, created_at")
             .eq("role", "customer")
             .in("brand_id", brandFilterIds)
             .range(from, from + PAGE - 1);
