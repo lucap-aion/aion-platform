@@ -30,6 +30,11 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
 const RECENT_CHATS_LIMIT = 10;
+// Cheap client-side throttle to keep an over-eager (or scripted) customer
+// from hammering the Anthropic-backed endpoint between turns. The edge
+// function already costs money per request — at minimum, wait a beat after
+// the previous answer completed before we accept the next one.
+const COOLDOWN_MS = 1500;
 
 type Message =
   | { role: "user"; content: string }
@@ -95,6 +100,10 @@ const CustomerConcierge = () => {
   // state even when invoked from inside the streaming finally block.
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
+
+  // Throttle: timestamp the previous turn completed at. send() refuses if
+  // less than COOLDOWN_MS has passed since.
+  const lastSendAt = useRef<number>(0);
 
   const brandFaq = useMemo(
     () => flattenFaq(locale === "it" ? tenant.faqIt : tenant.faqEn),
@@ -230,6 +239,12 @@ const CustomerConcierge = () => {
   const send = async (text: string) => {
     const question = text.trim();
     if (!question || loading) return;
+    const now = Date.now();
+    const wait = lastSendAt.current + COOLDOWN_MS - now;
+    if (wait > 0) {
+      toast.info(t("concierge.tooFast"));
+      return;
+    }
     setInput("");
 
     const history = messages.map((m) =>
@@ -312,6 +327,9 @@ const CustomerConcierge = () => {
     } finally {
       patchLast((m) => ({ ...m, streaming: false }));
       setLoading(false);
+      // Stamp completion time, so the cooldown starts when the answer
+      // finishes streaming, not when the send button was pressed.
+      lastSendAt.current = Date.now();
       inputRef.current?.focus();
 
       // Persist the completed turn. The first send of a fresh chat creates

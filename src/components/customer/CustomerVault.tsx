@@ -1,8 +1,8 @@
-import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRight, Sparkles, Shield } from "lucide-react";
-import { useCustomerPolicies } from "@/hooks/use-policies";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenant } from "@/contexts/TenantContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -28,37 +28,54 @@ const monthYear = (iso: string | null, locale: "en" | "it") => {
 // strip underneath, soft soft details below. Same data the customer already
 // has in /covers, just framed as a collection rather than a list.
 
+type VaultSummary = {
+  live_count: number;
+  all_count: number;
+  protected_value: number | string;
+  earliest_start: string | null;
+  categories: string[];
+  gallery: Array<{ id: number; status: string | null; picture: string | null; name: string | null }>;
+};
+
+const GALLERY_LIMIT = 6;
+
 const CustomerVault = () => {
   const { profile } = useAuth();
   const tenant = useTenant();
   const { t, locale } = useLanguage();
   const slugPrefix = useAuthSlug();
-  const { data: policies, isLoading } = useCustomerPolicies();
 
-  const stats = useMemo(() => {
-    const all = (policies ?? []) as Array<{
-      id: number;
-      status: string | null;
-      start_date: string | null;
-      selling_price: number | null;
-      catalogues: { name?: string | null; picture?: string | null; category?: string | null; collection?: string | null } | null;
-    }>;
-    const live = all.filter((p) => p.status === "live");
-    const protectedValue = live.reduce((s, p) => s + (Number(p.selling_price) || 0), 0);
-    const categories = Array.from(
-      new Set(
-        live
-          .map((p) => p.catalogues?.category || p.catalogues?.collection || null)
-          .filter((c): c is string => !!c)
-          .map((c) => c.trim()),
-      ),
-    );
-    const earliestStart = all
-      .map((p) => p.start_date)
-      .filter((d): d is string => !!d)
-      .sort()[0];
-    return { all, live, protectedValue, categories, earliestStart };
-  }, [policies]);
+  // Lightweight server-side aggregate (customer_vault_summary RPC). Returns
+  // the four hero numbers and a 6-thumbnail gallery in a single round trip
+  // instead of pulling every policy + its joins. Scales fine for collectors
+  // with hundreds of pieces.
+  const { data: summary, isLoading } = useQuery({
+    queryKey: ["customer-vault-summary", profile?.id, GALLERY_LIMIT],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .rpc("customer_vault_summary", { p_gallery_limit: GALLERY_LIMIT });
+      if (error) throw error;
+      return (data ?? {
+        live_count: 0,
+        all_count: 0,
+        protected_value: 0,
+        earliest_start: null,
+        categories: [],
+        gallery: [],
+      }) as VaultSummary;
+    },
+    enabled: !!profile?.id,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const stats = {
+    liveCount: summary?.live_count ?? 0,
+    allCount: summary?.all_count ?? 0,
+    protectedValue: Number(summary?.protected_value ?? 0),
+    categories: summary?.categories ?? [],
+    earliestStart: summary?.earliest_start ?? null,
+    gallery: summary?.gallery ?? [],
+  };
 
   if (isLoading) {
     return (
@@ -81,7 +98,7 @@ const CustomerVault = () => {
 
   // Empty state — customer has no covers yet. Still hero-worthy: invites them
   // to register their first piece without feeling like a 404.
-  if (stats.all.length === 0) {
+  if (stats.allCount === 0) {
     return (
       <motion.div
         initial={{ opacity: 0, y: 12 }}
@@ -101,12 +118,9 @@ const CustomerVault = () => {
     );
   }
 
-  // Pick up to 6 covers for the gallery — live first (most relevant), then
-  // any others. Limits keep the hero compact on mobile.
-  const gallery = [
-    ...stats.live,
-    ...stats.all.filter((p) => p.status !== "live"),
-  ].slice(0, 6);
+  // Gallery already pre-sorted (live first, newest first) and capped by the
+  // RPC, so no client-side trimming is needed.
+  const gallery = stats.gallery;
 
   const memberSince = monthYear(stats.earliestStart ?? null, locale);
   const firstName = profile?.first_name?.trim() || "";
@@ -141,7 +155,7 @@ const CustomerVault = () => {
             {fmtEur(stats.protectedValue, locale)}
           </p>
           <p className="text-sm text-muted-foreground mt-1">
-            {t("vault.protectedAcross").replace("{n}", String(stats.live.length))}
+            {t("vault.protectedAcross").replace("{n}", String(stats.liveCount))}
           </p>
         </div>
 
@@ -150,8 +164,8 @@ const CustomerVault = () => {
           <div className="mb-6">
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5">
               {gallery.map((p) => {
-                const pic = p.catalogues?.picture;
-                const name = p.catalogues?.name ?? "";
+                const pic = p.picture;
+                const name = p.name ?? "";
                 const isLive = p.status === "live";
                 return (
                   <Link

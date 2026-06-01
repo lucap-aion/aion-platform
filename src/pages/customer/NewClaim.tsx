@@ -99,6 +99,10 @@ const NewClaim = () => {
   const [openClaimWarning, setOpenClaimWarning] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // What the AI filled in most recently — used so "Run again" can selectively
+  // clear values that the customer never touched, without nuking edits.
+  const lastAiFillRef = useRef<{ claimType: string; description: string } | null>(null);
+
   // AI photo wizard state. The customer can opt out at any time — the form
   // is fully usable without ever running the analyser.
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
@@ -142,12 +146,17 @@ const NewClaim = () => {
       setAiSuggestion(suggestion);
 
       // Only prefill fields the customer hasn't already touched. Respect
-      // their work — we're assisting, not steamrolling.
+      // their work — we're assisting, not steamrolling. We also remember
+      // exactly what we filled so "Run again" can roll those values back
+      // (and only those) for the next pass.
+      const aiType = suggestion.suggested_type ?? "";
+      const aiDesc = suggestion.description ?? "";
       setForm((prev) => ({
         ...prev,
-        claimType: prev.claimType || (suggestion.suggested_type ?? ""),
-        description: prev.description || (suggestion.description ?? ""),
+        claimType: prev.claimType || aiType,
+        description: prev.description || aiDesc,
       }));
+      lastAiFillRef.current = { claimType: aiType, description: aiDesc };
     } catch (e: any) {
       setAiError(e?.message ?? t("newClaim.ai.failed"));
     } finally {
@@ -517,7 +526,23 @@ const NewClaim = () => {
                       </div>
                       <button
                         type="button"
-                        onClick={() => { setAiSuggestion(null); setAiError(null); }}
+                        onClick={() => {
+                          // If the form still holds the exact strings AI
+                          // filled, clear them so the next analysis can
+                          // overwrite. If the customer edited them, keep
+                          // their version.
+                          const last = lastAiFillRef.current;
+                          if (last) {
+                            setForm((prev) => ({
+                              ...prev,
+                              claimType: prev.claimType === last.claimType ? "" : prev.claimType,
+                              description: prev.description === last.description ? "" : prev.description,
+                            }));
+                          }
+                          lastAiFillRef.current = null;
+                          setAiSuggestion(null);
+                          setAiError(null);
+                        }}
                         className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
                       >
                         {t("newClaim.ai.redo")}

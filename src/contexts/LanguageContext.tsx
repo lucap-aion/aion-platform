@@ -199,6 +199,10 @@ const translations: Translations = {
     en: "Couldn't load that chat.",
     it: "Impossibile caricare la chat.",
   },
+  "concierge.tooFast": {
+    en: "One moment — let me finish the previous answer.",
+    it: "Un attimo — fammi finire la risposta precedente.",
+  },
   "concierge.error.generic": {
     en: "Something went wrong. Please try again.",
     it: "Qualcosa è andato storto. Riprova.",
