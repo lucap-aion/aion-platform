@@ -1,16 +1,37 @@
 import { useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Info, Upload, X, FileText, Loader2 } from "lucide-react";
+import { ArrowLeft, Info, Upload, X, FileText, Loader2, Sparkles, Wand2 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { useCustomerPolicies } from "@/hooks/use-policies";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { sendEmail } from "@/utils/sendEmail";
 import SearchableSelect from "@/components/SearchableSelect";
 import { CLAIM_TYPES, COUNTRIES } from "@/utils/countries";
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+
+type AiSuggestion = {
+  suggested_type: string | null;
+  confidence: "high" | "medium" | "low" | null;
+  severity: "minor" | "major" | "critical" | null;
+  description: string | null;
+  observations: string[] | null;
+};
+
+// Convert a File to the data:image/...;base64,... form Anthropic accepts.
+const fileToDataUrl = (f: File) =>
+  new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = () => reject(r.error);
+    r.onload = () => resolve(String(r.result ?? ""));
+    r.readAsDataURL(f);
+  });
 
 const getImage = (policy: any) => policy?.catalogues?.picture || "/placeholder.svg";
 const getProduct = (policy: any) => policy?.catalogues?.name || "Unknown Product";
@@ -44,6 +65,8 @@ const NewClaim = () => {
     }
   };
 
+  const { t, locale } = useLanguage();
+
   const [form, setForm] = useState({
     claimType: "",
     incidentDate: new Date().toISOString().split("T")[0],
@@ -56,6 +79,62 @@ const NewClaim = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [openClaimWarning, setOpenClaimWarning] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // AI photo wizard state. The customer can opt out at any time — the form
+  // is fully usable without ever running the analyser.
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  // Run the photo prefill against the first 1–2 image files. Called manually
+  // from a button so the customer is in control. Falls back gracefully on
+  // any failure — never blocks the form.
+  const runAiAnalysis = async () => {
+    const imageFiles = files.filter((f) => f.type.startsWith("image/")).slice(0, 2);
+    if (imageFiles.length === 0) {
+      setAiError(t("newClaim.ai.needImage"));
+      return;
+    }
+    setAiAnalyzing(true);
+    setAiError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("Not signed in");
+
+      const photos = await Promise.all(imageFiles.map(fileToDataUrl));
+      const productHint = selectedPolicy
+        ? `${getProduct(selectedPolicy)} by ${getBrand(selectedPolicy)}`
+        : "";
+
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/claim-photo-prefill`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "apikey": SUPABASE_ANON_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ photos, product_hint: productHint, locale }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+
+      const suggestion = body as AiSuggestion;
+      setAiSuggestion(suggestion);
+
+      // Only prefill fields the customer hasn't already touched. Respect
+      // their work — we're assisting, not steamrolling.
+      setForm((prev) => ({
+        ...prev,
+        claimType: prev.claimType || (suggestion.suggested_type ?? ""),
+        description: prev.description || (suggestion.description ?? ""),
+      }));
+    } catch (e: any) {
+      setAiError(e?.message ?? t("newClaim.ai.failed"));
+    } finally {
+      setAiAnalyzing(false);
+    }
+  };
 
   const addFiles = (incoming: FileList | null) => {
     if (!incoming) return;
@@ -354,6 +433,91 @@ const NewClaim = () => {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* AI assist panel — appears once at least one image is attached.
+                Customer can choose to run it or skip; suggestion only
+                prefills fields they haven't filled themselves. */}
+            {files.some((f) => f.type.startsWith("image/")) && (
+              <div className="mt-4 rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
+                {!aiSuggestion ? (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{t("newClaim.ai.title")}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("newClaim.ai.subtitle")}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void runAiAnalysis()}
+                      disabled={aiAnalyzing}
+                      className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+                    >
+                      {aiAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                      {aiAnalyzing ? t("newClaim.ai.analyzing") : t("newClaim.ai.analyze")}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                          <Sparkles className="h-4 w-4 text-primary" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{t("newClaim.ai.resultTitle")}</p>
+                          {aiSuggestion.confidence && (
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              {t("newClaim.ai.confidence")}: <span className="font-medium">{aiSuggestion.confidence}</span>
+                              {aiSuggestion.severity ? <> · {t("newClaim.ai.severity")}: <span className="font-medium">{aiSuggestion.severity}</span></> : null}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setAiSuggestion(null); setAiError(null); }}
+                        className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                      >
+                        {t("newClaim.ai.redo")}
+                      </button>
+                    </div>
+
+                    {aiSuggestion.suggested_type && (
+                      <p className="text-xs text-foreground/80">
+                        <span className="text-muted-foreground">{t("newClaim.ai.suggestedType")}:</span>{" "}
+                        <span className="font-medium">{aiSuggestion.suggested_type}</span>
+                      </p>
+                    )}
+
+                    {aiSuggestion.description && (
+                      <div className="rounded-lg bg-card border border-border/60 p-3 text-xs text-foreground leading-relaxed">
+                        {aiSuggestion.description}
+                      </div>
+                    )}
+
+                    {aiSuggestion.observations && aiSuggestion.observations.length > 0 && (
+                      <ul className="text-[11px] text-muted-foreground space-y-1 pl-1">
+                        {aiSuggestion.observations.slice(0, 5).map((o, i) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <span className="text-primary/60 shrink-0">•</span>
+                            <span>{o}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <p className="text-[11px] text-muted-foreground/80 italic">{t("newClaim.ai.reviewNote")}</p>
+                  </div>
+                )}
+                {aiError && (
+                  <p className="text-xs text-destructive mt-2">{aiError}</p>
+                )}
               </div>
             )}
           </div>

@@ -46,6 +46,57 @@ const translations: Translations = {
   "insights.themes.refreshing": { en: "Refreshing…", it: "Aggiornamento…" },
   "insights.themes.empty": { en: "No customer comments yet in this window.", it: "Nessun commento dei clienti in questo periodo." },
 
+  // Customer Vault hero (replaces the marketing banner at /home)
+  "vault.label": { en: "Your Vault", it: "La Tua Cassaforte" },
+  "vault.title": { en: "Welcome back.", it: "Bentornato." },
+  "vault.greeting": { en: "Welcome back, {name}.", it: "Bentornato, {name}." },
+  "vault.protectedAcross": {
+    en: "protected across {n} pieces",
+    it: "protetti su {n} pezzi",
+  },
+  "vault.memberSince": {
+    en: "With AION since {date}",
+    it: "Con AION da {date}",
+  },
+  "vault.viewAll": { en: "View your collection", it: "Vedi la collezione" },
+  "vault.empty.title": {
+    en: "Your Vault is ready",
+    it: "La Tua Cassaforte è pronta",
+  },
+  "vault.empty.subtitle": {
+    en: "Register your first {brand} piece to start your collection here.",
+    it: "Registra il tuo primo gioiello {brand} per iniziare la tua collezione qui.",
+  },
+
+  // NewClaim — AI photo assist panel
+  "newClaim.ai.title": { en: "Smart claim assist", it: "Assistente intelligente" },
+  "newClaim.ai.subtitle": {
+    en: "Let AI look at your photo and draft the claim — you'll review before sending.",
+    it: "Lascia che l'AI guardi la tua foto e prepari la richiesta — la rivedi prima di inviare.",
+  },
+  "newClaim.ai.analyze": { en: "Analyse with AI", it: "Analizza con l'AI" },
+  "newClaim.ai.analyzing": { en: "Analysing…", it: "Analisi…" },
+  "newClaim.ai.resultTitle": {
+    en: "Suggested draft",
+    it: "Bozza suggerita",
+  },
+  "newClaim.ai.suggestedType": { en: "Suggested type", it: "Tipo suggerito" },
+  "newClaim.ai.confidence": { en: "Confidence", it: "Affidabilità" },
+  "newClaim.ai.severity": { en: "Severity", it: "Gravità" },
+  "newClaim.ai.redo": { en: "Run again", it: "Rianalizza" },
+  "newClaim.ai.reviewNote": {
+    en: "Review and edit the fields below before submitting.",
+    it: "Controlla e modifica i campi qui sotto prima di inviare.",
+  },
+  "newClaim.ai.needImage": {
+    en: "Attach at least one photo to use the assistant.",
+    it: "Allega almeno una foto per usare l'assistente.",
+  },
+  "newClaim.ai.failed": {
+    en: "Couldn't analyse the photo. Please fill the form manually.",
+    it: "Impossibile analizzare la foto. Compila il modulo manualmente.",
+  },
+
   // BrandCustomers — segment chips
   "brandCustomers.segment.all": { en: "All", it: "Tutti" },
   "brandCustomers.segment.vip": { en: "VIP", it: "VIP" },

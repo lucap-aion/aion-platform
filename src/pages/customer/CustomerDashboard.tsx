@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, Star, ChevronRight } from "lucide-react";
+import { Star, ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import ProgressRing from "@/components/ui/progress-ring";
 import { useTenant } from "@/contexts/TenantContext";
@@ -11,6 +11,7 @@ import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { sendEmail } from "@/utils/sendEmail";
+import CustomerVault from "@/components/customer/CustomerVault";
 import {
   Accordion,
   AccordionContent,
@@ -21,7 +22,6 @@ import sectionTheft from "@/assets/section-theft.jpg";
 import sectionDamage from "@/assets/section-damage.jpg";
 import sectionFaq from "@/assets/section-faq.jpg";
 import sectionFeedback from "@/assets/section-feedback.jpg";
-import sectionHowItWorks from "@/assets/section-how-it-works.jpg";
 
 const FALLBACK_FAQ = [
   {
@@ -106,7 +106,6 @@ const CustomerDashboard = () => {
   const completionPct = Math.round((filledCount / profileFields.length) * 100);
 
   // Images: use brand images from DB, fall back to static assets
-  const imgHero = tenant.topBannerImage || sectionHowItWorks;
   const imgTheft = tenant.theftImage || sectionTheft;
   const imgDamage = tenant.damageImage || sectionDamage;
   const imgFaq = tenant.faqImage || sectionFaq;
@@ -214,32 +213,8 @@ const CustomerDashboard = () => {
         </motion.div>
       )}
 
-      {/* Hero Banner */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.1 }}
-        className="relative rounded-xl overflow-hidden"
-      >
-        <img src={imgHero} alt="" className="w-full h-56 md:h-72 object-cover object-[50%_70%]" />
-        <div className="absolute inset-0 bg-black/75" />
-        <div className="absolute inset-0 flex flex-col justify-center p-8 md:p-12">
-          <h2 className="font-serif text-2xl md:text-4xl font-bold text-white mb-3">
-            {tenant.name} {locale === "en" ? "Prestige Service" : "Servizio Prestige"}
-          </h2>
-          <p className="max-w-md text-sm text-white/80 mb-6 leading-relaxed">
-            {locale === "en"
-              ? `Inspired by its passion for customer excellence, ${tenant.name} is pleased to introduce an exclusive cover service.`
-              : `Ispirato dalla passione per l'esperienza del cliente, ${tenant.name} è lieto di presentare un servizio di copertura esclusivo.`}
-          </p>
-          <Link
-            to={`${slugPrefix}/covers`}
-            className="inline-flex w-fit items-center gap-2 rounded-lg border border-white/40 px-5 py-2.5 text-sm font-medium text-white transition-all hover:bg-white/10"
-          >
-            {locale === "en" ? "See All Products" : "Vedi tutti i prodotti"}
-          </Link>
-        </div>
-      </motion.div>
+      {/* Vault hero — collection-first welcome. */}
+      <CustomerVault />
 
       {/* How it works */}
       <motion.div
