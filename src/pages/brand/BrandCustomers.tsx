@@ -1,15 +1,38 @@
 import { motion } from "framer-motion";
-import { Search, ChevronDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, ArrowUpDown } from "lucide-react";
+import { Search, ChevronDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, ArrowUpDown, Crown, Clock, AlertTriangle, Heart } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { toast } from "sonner";
 import { parseError } from "@/utils/parseError";
 
-type SortKey = "newest" | "oldest" | "name";
+type SortKey = "newest" | "oldest" | "name" | "ltv";
+type SegmentKey = "all" | "vip" | "lapsed" | "incomplete" | "highNpsIdle";
+
+type SegmentRow = {
+  customer_id: string;
+  ltv: number | string | null;
+  protected_value: number | string | null;
+  covers_live: number | null;
+  last_purchase_at: string | null;
+  latest_satisfaction: number | null;
+  is_vip: boolean;
+  is_lapsed: boolean;
+  is_incomplete: boolean;
+  is_high_nps_idle: boolean;
+};
+
+const SEGMENTS: { key: SegmentKey; labelKey: string; icon: any; flag?: keyof SegmentRow }[] = [
+  { key: "all", labelKey: "brandCustomers.segment.all", icon: null as any },
+  { key: "vip", labelKey: "brandCustomers.segment.vip", icon: Crown, flag: "is_vip" },
+  { key: "lapsed", labelKey: "brandCustomers.segment.lapsed", icon: Clock, flag: "is_lapsed" },
+  { key: "incomplete", labelKey: "brandCustomers.segment.incomplete", icon: AlertTriangle, flag: "is_incomplete" },
+  { key: "highNpsIdle", labelKey: "brandCustomers.segment.highNpsIdle", icon: Heart, flag: "is_high_nps_idle" },
+];
 
 type CustomerForm = {
   firstName: string;
@@ -55,10 +78,40 @@ const inputCls =
 
 const PAGE_SIZE = 25;
 
+const SegmentBadges = ({ seg }: { seg: SegmentRow | null }) => {
+  const { t } = useLanguage();
+  if (!seg) return null;
+  const items: { key: string; label: string; cls: string; Icon: any }[] = [];
+  if (seg.is_vip)
+    items.push({ key: "vip", label: t("brandCustomers.badge.vip"), cls: "bg-amber-500/10 text-amber-700 border-amber-500/30", Icon: Crown });
+  if (seg.is_lapsed)
+    items.push({ key: "lapsed", label: t("brandCustomers.badge.lapsed"), cls: "bg-slate-500/10 text-slate-700 border-slate-500/30", Icon: Clock });
+  if (seg.is_incomplete)
+    items.push({ key: "incomplete", label: t("brandCustomers.badge.incomplete"), cls: "bg-rose-500/10 text-rose-700 border-rose-500/30", Icon: AlertTriangle });
+  if (seg.is_high_nps_idle)
+    items.push({ key: "nps", label: t("brandCustomers.badge.happyIdle"), cls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30", Icon: Heart });
+  if (items.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map(({ key, label, cls, Icon }) => (
+        <span
+          key={key}
+          className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
+          title={label}
+        >
+          <Icon className="h-2.5 w-2.5" />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+};
+
 const BrandCustomers = () => {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("newest");
+  const [segment, setSegment] = useState<SegmentKey>("all");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CustomerForm>(EMPTY_FORM);
@@ -66,6 +119,7 @@ const BrandCustomers = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const { profile, canWrite } = useAuth();
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const slugPrefix = useAuthSlug();
   const navigate = useNavigate();
@@ -76,18 +130,73 @@ const BrandCustomers = () => {
     return () => clearTimeout(t);
   }, [search]);
 
-  const sortMap: Record<SortKey, { col: string; asc: boolean }> = {
+  // Reset page when segment or sort changes
+  useEffect(() => { setPage(0); }, [segment, sortBy]);
+
+  // Segments are fetched once per brand and shared by both the listing query
+  // and the segment-filter logic. Cached separately so the filter chips, LTV,
+  // and badges all reuse the same payload without re-fetching.
+  const { data: segmentsData } = useQuery({
+    queryKey: ["brand-customer-segments", profile?.brand_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .rpc("brand_customer_segments", { p_brand_id: profile!.brand_id });
+      if (error) throw error;
+      const map = new Map<string, SegmentRow>();
+      for (const row of (data ?? []) as SegmentRow[]) {
+        map.set(row.customer_id, row);
+      }
+      return { rows: (data ?? []) as SegmentRow[], byId: map };
+    },
+    enabled: !!profile?.brand_id,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const segmentCounts: Record<SegmentKey, number> = {
+    all: segmentsData?.rows.length ?? 0,
+    vip: segmentsData?.rows.filter((r) => r.is_vip).length ?? 0,
+    lapsed: segmentsData?.rows.filter((r) => r.is_lapsed).length ?? 0,
+    incomplete: segmentsData?.rows.filter((r) => r.is_incomplete).length ?? 0,
+    highNpsIdle: segmentsData?.rows.filter((r) => r.is_high_nps_idle).length ?? 0,
+  };
+
+  const sortMap: Record<SortKey, { col: string; asc: boolean } | null> = {
     newest: { col: "created_at", asc: false },
     oldest: { col: "created_at", asc: true },
     name: { col: "first_name", asc: true },
+    ltv: null, // sorted client-side via the segments map
   };
 
-  const queryKey = ["brand-customers", profile?.brand_id, page, sortBy, debouncedSearch];
+  const queryKey = [
+    "brand-customers",
+    profile?.brand_id,
+    page,
+    sortBy,
+    debouncedSearch,
+    segment,
+    segmentsData?.rows.length ?? 0,
+  ];
 
   const { data: queryData, isFetching } = useQuery({
     queryKey,
     queryFn: async () => {
-      const { col, asc } = sortMap[sortBy];
+      // Compute the eligible-ID set when a segment filter is active or when
+      // sorting by LTV (PostgREST can't order by a derived column). For "all"
+      // + non-LTV sorts we keep the original lean pagination path.
+      const segmentFlag = SEGMENTS.find((s) => s.key === segment)?.flag;
+      const needsIdGate = !!segmentFlag || sortBy === "ltv";
+
+      let eligibleIds: string[] | null = null;
+      if (needsIdGate && segmentsData) {
+        let rows = segmentsData.rows;
+        if (segmentFlag) rows = rows.filter((r) => r[segmentFlag] === true);
+        if (sortBy === "ltv") {
+          rows = [...rows].sort((a, b) => Number(b.ltv ?? 0) - Number(a.ltv ?? 0));
+        }
+        eligibleIds = rows.map((r) => r.customer_id);
+      }
+
+      const sortCfg = sortMap[sortBy];
 
       let query = supabase
         .from("profiles")
@@ -96,18 +205,35 @@ const BrandCustomers = () => {
           { count: "exact" }
         )
         .eq("role", "customer")
-        .eq("brand_id", profile!.brand_id)
-        .order(col, { ascending: asc })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+        .eq("brand_id", profile!.brand_id);
 
       if (debouncedSearch.trim()) {
         const s = `%${debouncedSearch.trim()}%`;
         query = query.or(`first_name.ilike.${s},last_name.ilike.${s},email.ilike.${s}`);
       }
 
+      if (eligibleIds !== null) {
+        if (eligibleIds.length === 0) {
+          return { customers: [], total: 0 };
+        }
+        // Slice to the current page BEFORE hitting the network — Supabase
+        // .in() has practical limits and we only need this page's rows.
+        const pageIds = eligibleIds.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+        query = query.in("id", pageIds);
+        if (sortCfg) {
+          query = query.order(sortCfg.col, { ascending: sortCfg.asc });
+        }
+      } else if (sortCfg) {
+        query = query
+          .order(sortCfg.col, { ascending: sortCfg.asc })
+          .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      }
+
       const { data, count, error } = await query;
       if (error) throw error;
 
+      // The aggregates RPC still drives the Covers/Claims columns — the
+      // segments RPC carries LTV but not claim counts.
       const customerIds = (data || []).map((c) => c.id);
       const aggMap = new Map<string, { covers: number; claims: number; value: number }>();
 
@@ -129,14 +255,34 @@ const BrandCustomers = () => {
         }
       }
 
-      const enriched = (data || []).map((c) => {
+      let enriched = (data || []).map((c) => {
         const a = aggMap.get(c.id) ?? { covers: 0, claims: 0, value: 0 };
-        return { ...c, ...a };
+        const seg = segmentsData?.byId.get(c.id);
+        return {
+          ...c,
+          ...a,
+          ltv: Number(seg?.ltv ?? 0),
+          segments: seg ?? null,
+        };
       });
 
-      return { customers: enriched, total: count ?? 0 };
+      // Re-apply the segment-derived order when we paginated via .in() — the
+      // returned rows arrive in PostgREST default order, not our LTV order.
+      if (eligibleIds !== null) {
+        const pageIdSet = eligibleIds.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+        const pos = new Map(pageIdSet.map((id, i) => [id, i]));
+        enriched = enriched
+          .filter((c) => pos.has(c.id))
+          .sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
+      }
+
+      const totalRows = eligibleIds !== null
+        ? eligibleIds.length
+        : count ?? 0;
+
+      return { customers: enriched, total: totalRows };
     },
-    enabled: !!profile?.brand_id,
+    enabled: !!profile?.brand_id && (segment === "all" && sortBy !== "ltv" ? true : !!segmentsData),
     staleTime: 5 * 60 * 1000,
     placeholderData: (prev) => prev,
   });
@@ -322,12 +468,38 @@ const BrandCustomers = () => {
               onChange={(e) => { setSortBy(e.target.value as SortKey); setPage(0); }}
               className="appearance-none rounded-lg border border-input bg-background py-2 pl-3 pr-8 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-              <option value="name">Name A–Z</option>
+              <option value="newest">{t("brandCustomers.sort.newest")}</option>
+              <option value="oldest">{t("brandCustomers.sort.oldest")}</option>
+              <option value="name">{t("brandCustomers.sort.name")}</option>
+              <option value="ltv">{t("brandCustomers.sort.ltv")}</option>
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           </div>
+        </div>
+
+        {/* Segment chips */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {SEGMENTS.map((s) => {
+            const active = segment === s.key;
+            const Icon = s.icon;
+            const count = segmentCounts[s.key];
+            return (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => setSegment(s.key)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                  active
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-card text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {Icon && <Icon className="h-3 w-3" />}
+                {t(s.labelKey)}
+                <span className="tabular-nums text-[10px] opacity-70">{count}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -350,7 +522,7 @@ const BrandCustomers = () => {
                   Claims
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Protected Value
+                  {t("brandCustomers.column.ltv")}
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   <div className="flex items-center gap-1">
@@ -388,9 +560,12 @@ const BrandCustomers = () => {
                             : <>{c.first_name?.[0] || ""}{c.last_name?.[0] || ""}</>}
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-foreground">
-                            {c.first_name} {c.last_name}
-                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-medium text-foreground">
+                              {c.first_name} {c.last_name}
+                            </p>
+                            <SegmentBadges seg={c.segments} />
+                          </div>
                           <p className="text-xs text-muted-foreground">
                             {c.email}
                           </p>
@@ -404,7 +579,7 @@ const BrandCustomers = () => {
                       {c.claims}
                     </td>
                     <td className="px-6 py-4 text-sm font-medium text-foreground">
-                      €{c.value.toLocaleString()}
+                      €{c.ltv.toLocaleString()}
                     </td>
                     <td className="px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
                       {c.created_at

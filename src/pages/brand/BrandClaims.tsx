@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { Search, XCircle, ChevronDown, Trash2, Plus, Pencil, X, ChevronLeft, ChevronRight, ArrowUpDown, FileText, Upload } from "lucide-react";
+import { Search, XCircle, ChevronDown, Trash2, Plus, Pencil, X, ChevronLeft, ChevronRight, ArrowUpDown, FileText, Upload, LayoutGrid, List, AlertTriangle, ImageIcon, ShieldAlert, Repeat, MapPin } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { toast } from "sonner";
 import { parseError } from "@/utils/parseError";
 import SearchableSelect from "@/components/SearchableSelect";
@@ -69,19 +70,70 @@ const Field = ({
 );
 
 type SortKey = "id" | "created_at" | "type" | "status";
+type ViewMode = "table" | "triage";
+type ClaimFlag = "fresh_cover" | "frequent_claimer" | "repeat_incident_city";
+
 const PAGE_SIZE = 25;
+
+const FLAG_META: Record<ClaimFlag, { labelKey: string; tone: string; Icon: any; tipKey: string }> = {
+  fresh_cover: {
+    labelKey: "brandClaims.flag.freshCover",
+    tone: "bg-rose-500/10 text-rose-700 border-rose-500/30",
+    Icon: ShieldAlert,
+    tipKey: "brandClaims.flag.freshCoverTip",
+  },
+  frequent_claimer: {
+    labelKey: "brandClaims.flag.frequentClaimer",
+    tone: "bg-amber-500/10 text-amber-700 border-amber-500/30",
+    Icon: Repeat,
+    tipKey: "brandClaims.flag.frequentClaimerTip",
+  },
+  repeat_incident_city: {
+    labelKey: "brandClaims.flag.repeatCity",
+    tone: "bg-amber-500/10 text-amber-700 border-amber-500/30",
+    Icon: MapPin,
+    tipKey: "brandClaims.flag.repeatCityTip",
+  },
+};
+
+const FlagBadges = ({ flags }: { flags: ClaimFlag[] }) => {
+  const { t } = useLanguage();
+  if (!flags?.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {flags.map((f) => {
+        const m = FLAG_META[f];
+        if (!m) return null;
+        const { Icon } = m;
+        return (
+          <span
+            key={f}
+            title={t(m.tipKey)}
+            className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${m.tone}`}
+          >
+            <Icon className="h-2.5 w-2.5" />
+            {t(m.labelKey)}
+          </span>
+        );
+      })}
+    </div>
+  );
+};
 
 const BrandClaims = () => {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | "open" | "closed">("");
   const [typeFilter, setTypeFilter] = useState("");
+  const [view, setView] = useState<ViewMode>("table");
+  const [onlyFlagged, setOnlyFlagged] = useState(false);
   const [page, setPage] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const slugPrefix = useAuthSlug();
   const navigate = useNavigate();
   const { profile, canWrite } = useAuth();
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
 
   // Debounce search → reset page and trigger server refetch
@@ -139,9 +191,41 @@ const BrandClaims = () => {
     placeholderData: (prev) => prev,
   });
 
-  const claims = queryData?.claims ?? [];
+  // Per-brand fraud-suspicion flags — fetched once per brand and re-used by
+  // every claim row. The RPC only returns claims that actually have flags,
+  // so the map is small.
+  const { data: flagsData } = useQuery({
+    queryKey: ["brand-claim-flags", profile?.brand_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .rpc("brand_claim_flags", { p_brand_id: profile!.brand_id });
+      if (error) throw error;
+      const m = new Map<number, ClaimFlag[]>();
+      for (const row of (data ?? []) as Array<{ claim_id: number; flags: string[] }>) {
+        m.set(row.claim_id, (row.flags ?? []) as ClaimFlag[]);
+      }
+      return m;
+    },
+    enabled: !!profile?.brand_id,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const flagsByClaimId = flagsData ?? new Map<number, ClaimFlag[]>();
+
+  // Apply the "only flagged" filter client-side so it doesn't break server
+  // pagination — the chip is a quick triage tool, not a primary query.
+  const rawClaims = queryData?.claims ?? [];
+  const claims = onlyFlagged
+    ? rawClaims.filter((c: any) => (flagsByClaimId.get(c.id) ?? []).length > 0)
+    : rawClaims;
   const total = queryData?.total ?? 0;
   const isLoading = isFetching && !queryData;
+  const flaggedTotal = onlyFlagged
+    ? claims.length
+    : rawClaims.reduce(
+        (n: number, c: any) => n + ((flagsByClaimId.get(c.id) ?? []).length > 0 ? 1 : 0),
+        0,
+      );
 
   // Lazy-load covers (policies) for the claim form
   const { data: policies } = useQuery({
@@ -415,14 +499,61 @@ const BrandClaims = () => {
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           </div>
+
+          {/* Flagged toggle + view switch */}
+          <button
+            type="button"
+            onClick={() => setOnlyFlagged((f) => !f)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors ${
+              onlyFlagged
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-700"
+                : "border-input bg-background text-muted-foreground hover:text-foreground"
+            }`}
+            title={t("brandClaims.view.flaggedTitle")}
+          >
+            <AlertTriangle className="h-4 w-4" />
+            {t("brandClaims.view.flagged")}
+            <span className="text-xs tabular-nums opacity-70">{flaggedTotal}</span>
+          </button>
+
+          <div className="ml-auto inline-flex rounded-lg border border-input bg-background p-0.5">
+            <button
+              type="button"
+              onClick={() => setView("table")}
+              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                view === "table" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+              title={t("brandClaims.view.table")}
+            >
+              <List className="h-3.5 w-3.5" /> {t("brandClaims.view.table")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("triage")}
+              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                view === "triage" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+              title={t("brandClaims.view.triage")}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" /> {t("brandClaims.view.triage")}
+            </button>
+          </div>
         </div>
       </div>
 
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="glass-card overflow-hidden"
+        className={view === "table" ? "glass-card overflow-hidden" : ""}
       >
+        {view === "triage" ? (
+          <TriageGrid
+            claims={claims as any[]}
+            flagsByClaimId={flagsByClaimId}
+            slugPrefix={slugPrefix}
+            onNavigate={(id) => navigate(`${slugPrefix}/claims/${id}`)}
+          />
+        ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px]">
             <thead>
@@ -492,7 +623,21 @@ const BrandClaims = () => {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
-                        {toLabel(claim.type)}
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span>{toLabel(claim.type)}</span>
+                            {Array.isArray(claim.media) && claim.media.length > 0 && (
+                              <span
+                                className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                title={`${claim.media.length} attached file${claim.media.length === 1 ? "" : "s"}`}
+                              >
+                                <ImageIcon className="h-2.5 w-2.5" />
+                                {claim.media.length}
+                              </span>
+                            )}
+                          </div>
+                          <FlagBadges flags={flagsByClaimId.get(claim.id) ?? []} />
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
                         {claim.created_at ? format(new Date(claim.created_at), "MMM dd, yyyy") : "—"}
@@ -540,9 +685,10 @@ const BrandClaims = () => {
             </tbody>
           </table>
         </div>
+        )}
 
         {/* Pagination */}
-        {totalPages > 1 && (
+        {view === "table" && totalPages > 1 && (
           <div className="flex items-center justify-between border-t border-border px-6 py-3">
             <p className="text-xs text-muted-foreground">
               {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
@@ -868,6 +1014,97 @@ const BrandClaims = () => {
           </motion.div>
         </div>
       )}
+    </div>
+  );
+};
+
+// ─── Triage grid view ───────────────────────────────────────────────────────
+// Card grid optimised for claim teams who triage by glancing at photo
+// evidence + flags first, then drilling into the detail page.
+
+const TriageGrid = ({
+  claims,
+  flagsByClaimId,
+  onNavigate,
+}: {
+  claims: any[];
+  flagsByClaimId: Map<number, ClaimFlag[]>;
+  slugPrefix: string;
+  onNavigate: (id: number) => void;
+}) => {
+  const { t } = useLanguage();
+  if (!claims.length) {
+    return (
+      <div className="glass-card p-10 text-center text-sm text-muted-foreground">
+        {t("brandClaims.triage.empty")}
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+      {claims.map((claim) => {
+        const key = getStatus(claim.status);
+        const state = statusMap[key];
+        const media: string[] = Array.isArray(claim.media) ? claim.media : [];
+        const cover = media[0];
+        const isImage = !!cover && /\.(jpe?g|png|gif|webp|avif|svg)(\?|$)/i.test(cover);
+        const flags = flagsByClaimId.get(claim.id) ?? [];
+        const customerName =
+          `${claim.policies?.profiles?.first_name ?? ""} ${claim.policies?.profiles?.last_name ?? ""}`.trim() ||
+          claim.policies?.profiles?.email ||
+          "—";
+        const product = claim.policies?.catalogues?.name ?? "—";
+        return (
+          <motion.div
+            key={claim.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            onClick={() => onNavigate(claim.id)}
+            className="glass-card cursor-pointer overflow-hidden transition-colors hover:border-primary/40"
+          >
+            <div className="relative aspect-[16/10] w-full bg-muted/60">
+              {isImage ? (
+                <img src={cover} alt="" className="h-full w-full object-cover" />
+              ) : claim.policies?.catalogues?.picture ? (
+                <img
+                  src={claim.policies.catalogues.picture}
+                  alt={product}
+                  className="h-full w-full object-contain p-6 mix-blend-multiply"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <FileText className="h-10 w-10 text-muted-foreground/50" />
+                </div>
+              )}
+              <span className={`absolute top-2 left-2 rounded-full px-2 py-0.5 text-[10px] font-medium ${state.color}`}>
+                {state.label}
+              </span>
+              {media.length > 1 && (
+                <span className="absolute top-2 right-2 inline-flex items-center gap-0.5 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur">
+                  <ImageIcon className="h-2.5 w-2.5" />
+                  +{media.length - 1}
+                </span>
+              )}
+            </div>
+            <div className="p-4">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">#{claim.id} · {toLabel(claim.type)}</p>
+                  <p className="truncate text-sm font-semibold text-foreground">{product}</p>
+                </div>
+                <p className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                  {claim.created_at ? format(new Date(claim.created_at), "MMM dd") : ""}
+                </p>
+              </div>
+              <p className="truncate text-xs text-muted-foreground mb-2">
+                {customerName}
+                {claim.incident_city ? ` · ${claim.incident_city}` : ""}
+              </p>
+              <FlagBadges flags={flags} />
+            </div>
+          </motion.div>
+        );
+      })}
     </div>
   );
 };

@@ -194,8 +194,16 @@ interface ProfileRow {
   province: string | null;
   nationality: string | null;
   phone_number: string | null;
+  vat: string | null;
+  entity_name: string | null;
+  business_address: string | null;
   created_at: string;
 }
+
+// B2B/eplay records carry business info; their `address` holds the company
+// address (synced from eplay) and must not count as consumer profilation.
+const isBusinessEntity = (p: ProfileRow) => !!(p.vat || p.entity_name || p.business_address);
+const addrFilled = (p: ProfileRow) => !!p.address && !isBusinessEntity(p);
 
 interface FeedbackRow {
   user_id: string;
@@ -260,12 +268,12 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       const p = profileMap.get(id);
       return !!p && !!(
         p.date_of_birth || p.country || p.city || p.postcode ||
-        p.address || p.province || p.nationality || p.phone_number
+        addrFilled(p) || p.province || p.nationality || p.phone_number
       );
     });
     const profiledCustIds = regCustIds.filter(id => {
       const p = profileMap.get(id);
-      return p && p.date_of_birth && p.country && p.city && p.postcode && p.address && p.province && p.nationality && p.phone_number;
+      return p && p.date_of_birth && p.country && p.city && p.postcode && addrFilled(p) && p.province && p.nationality && p.phone_number;
     });
     // Restrict feedback to customers present in the (filtered) policy set so KPIs respond to date/shop filters
     const policyCustIds = new Set(Object.keys(custMap));
@@ -618,13 +626,14 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
 }
 
 // ─── Tab definitions ─────────────────────────────────────────────────────────
-type TabId = "ov" | "wk" | "mo" | "dd" | "rt" | "tr";
+type TabId = "ov" | "wk" | "mo" | "dd" | "rt" | "pr" | "tr";
 const TAB_KEYS: { id: TabId; key: string }[] = [
   { id: "ov", key: "insights.tab.overview" },
   { id: "wk", key: "insights.tab.weekly" },
   { id: "mo", key: "insights.tab.monthly" },
   { id: "dd", key: "insights.tab.deepDive" },
   { id: "rt", key: "insights.tab.regTime" },
+  { id: "pr", key: "insights.tab.profit" },
 ];
 
 type T = (key: string) => string;
@@ -632,14 +641,25 @@ type T = (key: string) => string;
 // ─── Main Component ──────────────────────────────────────────────────────────
 type DateRange = "all" | "30d" | "90d" | "ytd" | "12m";
 
-export default function AdminInsights() {
+// When `lockedBrandId` is set the page renders in single-brand mode: no brand
+// picker, no "all brands" option, and the brand fetch is skipped. This is how
+// the brand platform reuses the admin Insights surface without duplicating it.
+export type AdminInsightsProps = {
+  lockedBrandId?: number;
+  lockedBrandName?: string;
+};
+
+export default function AdminInsights({ lockedBrandId, lockedBrandName }: AdminInsightsProps = {}) {
   const { t, locale } = useLanguage();
+  const isLocked = lockedBrandId !== undefined;
   const [tab, setTab] = useUrlParam<TabId>("tab", "ov");
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [selectedBrandId, setSelectedBrandId] = useUrlParam<number | "all">("brand", "all", {
+  const [selectedBrandIdRaw, setSelectedBrandIdRaw] = useUrlParam<number | "all">("brand", "all", {
     parse: (raw) => (raw === "all" ? "all" : Number.isFinite(Number(raw)) ? Number(raw) : "all"),
     serialize: (v) => String(v),
   });
+  const selectedBrandId: number | "all" = isLocked ? (lockedBrandId as number) : selectedBrandIdRaw;
+  const setSelectedBrandId = isLocked ? (() => {}) : setSelectedBrandIdRaw;
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -680,9 +700,15 @@ export default function AdminInsights() {
   }, [rawPolicies, dateRange, shopFilter]);
 
   useEffect(() => {
+    if (isLocked) {
+      // Single-brand mode: skip the cross-brand fetch (which would 0-row
+      // anyway under brand-user RLS) and seed `brands` with just this one.
+      setBrands([{ id: lockedBrandId as number, name: lockedBrandName ?? "" }]);
+      return;
+    }
     supabase.from("brands").select("id, name").eq("status", "verified").order("name")
       .then(({ data }) => setBrands((data as Brand[]) ?? []));
-  }, []);
+  }, [isLocked, lockedBrandId, lockedBrandName]);
 
   const loadData = useCallback(async () => {
     if (brands.length === 0) return;
@@ -721,7 +747,7 @@ export default function AdminInsights() {
         while (true) {
           const q = supabase
             .from("profiles")
-            .select("id, registered_at, first_name, last_name, date_of_birth, country, city, postcode, address, province, nationality, phone_number, created_at")
+            .select("id, registered_at, first_name, last_name, date_of_birth, country, city, postcode, address, province, nationality, phone_number, vat, entity_name, business_address, created_at")
             .eq("role", "customer")
             .in("brand_id", brandFilterIds)
             .range(from, from + PAGE - 1);
@@ -811,13 +837,15 @@ export default function AdminInsights() {
               <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             </div>
           )}
-          <div className="relative">
-            <select className={selectCls} value={selectedBrandId} onChange={e => setSelectedBrandId(e.target.value === "all" ? "all" : Number(e.target.value))}>
-              <option value="all">{t("insights.allBrands")}</option>
-              {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          </div>
+          {!isLocked && (
+            <div className="relative">
+              <select className={selectCls} value={selectedBrandId} onChange={e => setSelectedBrandId(e.target.value === "all" ? "all" : Number(e.target.value))}>
+                <option value="all">{t("insights.allBrands")}</option>
+                {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            </div>
+          )}
         </div>
       </div>
 
@@ -843,11 +871,31 @@ export default function AdminInsights() {
         </div>
       ) : d ? (
         <>
-          {tab === "ov" && <OverviewTab d={d} t={t} />}
+          {tab === "ov" && (
+            <OverviewTab
+              d={d}
+              t={t}
+              brandId={selectedBrandId !== "all" ? (selectedBrandId as number) : null}
+              locale={locale}
+            />
+          )}
           {tab === "wk" && <WeeklyTab d={d} t={t} />}
           {tab === "mo" && <MonthlyTab d={d} t={t} />}
           {tab === "dd" && <DeepDiveTab d={d} t={t} />}
           {tab === "rt" && <RegTimeTab d={d} t={t} />}
+          {tab === "pr" && (
+            <ProfitabilityTab
+              t={t}
+              locale={locale}
+              brandIds={
+                selectedBrandId !== "all"
+                  ? [selectedBrandId as number]
+                  : brands.map((b) => b.id)
+              }
+              dateRange={dateRange}
+              shopFilter={shopFilter}
+            />
+          )}
         </>
       ) : (
         <p className="text-muted-foreground text-sm py-8 text-center">{t("insights.noData")}</p>
@@ -857,7 +905,17 @@ export default function AdminInsights() {
 }
 
 // ─── Overview ────────────────────────────────────────────────────────────────
-function OverviewTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData>>; t: T }) {
+function OverviewTab({
+  d,
+  t,
+  brandId,
+  locale,
+}: {
+  d: NonNullable<ReturnType<typeof useInsightsData>>;
+  t: T;
+  brandId: number | null;
+  locale: "en" | "it";
+}) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
@@ -868,6 +926,8 @@ function OverviewTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsDat
         <KpiCard label={t("insights.kpi.feedback")} value={d.satisfactionAvg ?? "—"} sub={`${d.feedbackCount} ${t("insights.kpi.reviews")}`} />
         <KpiCard label={t("insights.kpi.regRate")} value={`${d.regRate}%`} sub={`${d.regCustIds.length} ${t("insights.kpi.ofTotal")} ${d.uniqueCustomers}`} />
       </div>
+
+      {brandId !== null && <FeedbackThemesTile brandId={brandId} t={t} locale={locale} />}
 
       {d.shops.length >= 2 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1629,6 +1689,375 @@ function RegTimeTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
+    </div>
+  );
+}
+
+// ─── Feedback themes (AI-summarised) ─────────────────────────────────────────
+// Calls the feedback-themes edge function, which itself caches in
+// public.feedback_themes_cache for 6h. The component does its own debounce
+// (skips refetch if data <6h old) so navigating between tabs is cheap.
+
+type FeedbackTheme = {
+  label: string;
+  summary: string;
+  sentiment: "positive" | "negative" | "mixed";
+  count: number;
+  sample: string;
+};
+type FeedbackThemesPayload = {
+  themes: FeedbackTheme[];
+  overall_sentiment: "positive" | "negative" | "mixed";
+  comment_count: number;
+  cached?: boolean;
+  generated_at?: string;
+};
+
+function FeedbackThemesTile({
+  brandId,
+  t,
+  locale,
+}: {
+  brandId: number;
+  t: T;
+  locale: "en" | "it";
+}) {
+  const [data, setData] = useState<FeedbackThemesPayload | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchThemes = useCallback(async (force = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("not signed in");
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/feedback-themes`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          brand_id: brandId,
+          window_days: 30,
+          locale,
+          force_refresh: force,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+      setData(body as FeedbackThemesPayload);
+    } catch (e: any) {
+      setError(e?.message ?? "failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [brandId, locale]);
+
+  useEffect(() => { void fetchThemes(false); }, [fetchThemes]);
+
+  const generated = data?.generated_at
+    ? new Date(data.generated_at).toLocaleString(locale === "it" ? "it-IT" : "en-GB", {
+      day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+    })
+    : null;
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            {t("insights.themes.title")}
+          </p>
+          <p className="text-xs text-muted-foreground/70 mt-0.5">
+            {data?.comment_count != null
+              ? `${data.comment_count} ${t("insights.themes.commentsLast30")}`
+              : t("insights.themes.loading")}
+            {generated && <> · {t("insights.themes.updatedOn")} {generated}</>}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void fetchThemes(true)}
+          disabled={loading}
+          className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-muted disabled:opacity-50"
+        >
+          {loading ? t("insights.themes.refreshing") : t("insights.themes.refresh")}
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-xs text-destructive">{error}</p>
+      )}
+
+      {!error && !loading && data && data.themes.length === 0 && (
+        <p className="text-sm text-muted-foreground">{t("insights.themes.empty")}</p>
+      )}
+
+      {!error && loading && !data && (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-12 rounded-md bg-muted/40 animate-pulse" />
+          ))}
+        </div>
+      )}
+
+      {data && data.themes.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+          {data.themes.map((th, i) => {
+            const tone =
+              th.sentiment === "positive"
+                ? "border-emerald-500/40 bg-emerald-500/5"
+                : th.sentiment === "negative"
+                  ? "border-rose-500/40 bg-rose-500/5"
+                  : "border-amber-500/40 bg-amber-500/5";
+            return (
+              <div key={i} className={`rounded-lg border ${tone} p-3`}>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <p className="text-sm font-semibold text-foreground line-clamp-1">{th.label}</p>
+                  <span className="shrink-0 text-[11px] font-medium text-muted-foreground tabular-nums">
+                    {th.count}×
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed mb-1.5">{th.summary}</p>
+                {th.sample && (
+                  <p className="text-[11px] italic text-muted-foreground/80 line-clamp-2">
+                    “{th.sample}”
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Profitability tab ───────────────────────────────────────────────────────
+// Gross margin only — we only have COGS, not the brand's full cost stack
+// (operations, marketing, taxes, etc.). Don't call it "net profit": the data
+// can't support that claim. Note: manufacturing_costs.cost_pct is the
+// COGS-to-RRP ratio used to *derive* policies.cogs at sale time (see
+// AdminCovers.tsx), so it's already baked into the cogs column — joining it
+// again here would double-count.
+
+type GrossMarginPolicy = {
+  start_date: string | null;
+  cogs: number;
+  selling_price: number;
+  shop_name: string;
+  category: string;
+};
+
+function ProfitabilityTab({
+  t,
+  locale,
+  brandIds,
+  dateRange,
+  shopFilter,
+}: {
+  t: T;
+  locale: "en" | "it";
+  brandIds: number[];
+  dateRange: DateRange;
+  shopFilter: string;
+}) {
+  const [policies, setPolicies] = useState<GrossMarginPolicy[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (brandIds.length === 0) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const all: any[] = [];
+        const PAGE = 1000;
+        let from = 0;
+        while (true) {
+          const { data, error } = await supabase
+            .from("policies")
+            .select("start_date, cogs, selling_price, shops(name), catalogues(category, collection)")
+            .eq("status", "live")
+            .in("brand_id", brandIds)
+            .range(from, from + PAGE - 1);
+          if (error) { console.error("[gross margin policies]", error); break; }
+          if (!data || data.length === 0) break;
+          all.push(...data);
+          if (data.length < PAGE) break;
+          from += PAGE;
+        }
+
+        if (cancelled) return;
+        const mapped: GrossMarginPolicy[] = (all as any[]).map((p) => ({
+          start_date: p.start_date,
+          cogs: Number(p.cogs) || 0,
+          selling_price: Number(p.selling_price) || 0,
+          shop_name: p.shops?.name || "—",
+          category: normalizeCategory(p.catalogues?.category || p.catalogues?.collection || "—"),
+        }));
+        setPolicies(mapped);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [brandIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filtered = useMemo(() => {
+    let cutoff: number | null = null;
+    const now = new Date();
+    if (dateRange === "30d") cutoff = now.getTime() - 30 * 86400000;
+    else if (dateRange === "90d") cutoff = now.getTime() - 90 * 86400000;
+    else if (dateRange === "ytd") cutoff = new Date(now.getFullYear(), 0, 1).getTime();
+    else if (dateRange === "12m") {
+      const c = new Date(now); c.setFullYear(c.getFullYear() - 1); cutoff = c.getTime();
+    }
+    return policies.filter((p) => {
+      if (!p.start_date) return false;
+      if (cutoff !== null && new Date(p.start_date).getTime() < cutoff) return false;
+      if (shopFilter !== "all" && p.shop_name !== shopFilter) return false;
+      return true;
+    });
+  }, [policies, dateRange, shopFilter]);
+
+  const enriched = useMemo(
+    () =>
+      filtered.map((p) => {
+        const grossMargin = p.selling_price - p.cogs;
+        const month = p.start_date?.slice(0, 7) ?? "";
+        return { ...p, grossMargin, month };
+      }),
+    [filtered],
+  );
+
+  const totals = useMemo(() => {
+    const revenue = enriched.reduce((s, p) => s + p.selling_price, 0);
+    const cogs = enriched.reduce((s, p) => s + p.cogs, 0);
+    const grossMargin = revenue - cogs;
+    const grossMarginPct = revenue > 0 ? Math.round((grossMargin / revenue) * 1000) / 10 : 0;
+    return { revenue, cogs, grossMargin, grossMarginPct };
+  }, [enriched]);
+
+  const byCategory = useMemo(() => {
+    const m = new Map<string, { revenue: number; cogs: number; grossMargin: number; count: number }>();
+    enriched.forEach((p) => {
+      const e = m.get(p.category) ?? { revenue: 0, cogs: 0, grossMargin: 0, count: 0 };
+      e.revenue += p.selling_price; e.cogs += p.cogs; e.grossMargin += p.grossMargin; e.count += 1;
+      m.set(p.category, e);
+    });
+    return Array.from(m, ([k, v]) => ({
+      category: k,
+      revenue: Math.round(v.revenue),
+      cogs: Math.round(v.cogs),
+      grossMargin: Math.round(v.grossMargin),
+      marginPct: v.revenue > 0 ? Math.round((v.grossMargin / v.revenue) * 100) : 0,
+      count: v.count,
+    })).sort((a, b) => b.grossMargin - a.grossMargin);
+  }, [enriched]);
+
+  const byShop = useMemo(() => {
+    const m = new Map<string, { revenue: number; grossMargin: number }>();
+    enriched.forEach((p) => {
+      const e = m.get(p.shop_name) ?? { revenue: 0, grossMargin: 0 };
+      e.revenue += p.selling_price; e.grossMargin += p.grossMargin;
+      m.set(p.shop_name, e);
+    });
+    return Array.from(m, ([shop, v]) => ({
+      shop,
+      revenue: Math.round(v.revenue),
+      grossMargin: Math.round(v.grossMargin),
+      marginPct: v.revenue > 0 ? Math.round((v.grossMargin / v.revenue) * 100) : 0,
+    })).sort((a, b) => b.grossMargin - a.grossMargin).slice(0, 10);
+  }, [enriched]);
+
+  const byMonth = useMemo(() => {
+    const m = new Map<string, { revenue: number; grossMargin: number }>();
+    enriched.forEach((p) => {
+      if (!p.month) return;
+      const e = m.get(p.month) ?? { revenue: 0, grossMargin: 0 };
+      e.revenue += p.selling_price; e.grossMargin += p.grossMargin;
+      m.set(p.month, e);
+    });
+    return Array.from(m, ([month, v]) => ({
+      month, label: fmtPeriodLabel(month),
+      revenue: Math.round(v.revenue), grossMargin: Math.round(v.grossMargin),
+    })).sort((a, b) => a.month.localeCompare(b.month));
+  }, [enriched]);
+
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          {[0, 1, 2, 3].map((i) => <KpiSkeleton key={i} />)}
+        </div>
+        <ChartSkeleton /><ChartSkeleton />
+      </div>
+    );
+  }
+  if (enriched.length === 0) {
+    return (
+      <p className="text-muted-foreground text-sm py-8 text-center">{t("insights.noData")}</p>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <p className="text-xs text-muted-foreground">{t("insights.profit.disclaimer")}</p>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        <KpiCard label={t("insights.profit.kpi.revenue")} value={fmtEur(totals.revenue)} />
+        <KpiCard label={t("insights.profit.kpi.cogs")} value={fmtEur(totals.cogs)} />
+        <KpiCard label={t("insights.profit.kpi.grossMargin")} value={fmtEur(totals.grossMargin)} />
+        <KpiCard label={t("insights.profit.kpi.grossMarginPct")} value={`${totals.grossMarginPct}%`} />
+      </div>
+
+      <ChartCard title={t("insights.profit.chart.byCategory")}>
+        <ResponsiveContainer width="100%" height={Math.max(220, byCategory.length * 30)}>
+          <BarChart data={byCategory} layout="vertical" margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+            <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+            <XAxis type="number" fontSize={11} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => fmtEur(v as number)} />
+            <YAxis dataKey="category" type="category" fontSize={11} stroke="hsl(var(--muted-foreground))" width={100} />
+            <Tooltip formatter={(v: any, n: any) => [fmtEur(Number(v)), String(n)]} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar dataKey="revenue" name={t("insights.profit.legend.revenue")} fill={C3} radius={[0, 4, 4, 0]} />
+            <Bar dataKey="grossMargin" name={t("insights.profit.legend.grossMargin")} fill={C2} radius={[0, 4, 4, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ChartCard title={t("insights.profit.chart.topShops")}>
+          <ResponsiveContainer width="100%" height={Math.max(220, byShop.length * 28)}>
+            <BarChart data={byShop} layout="vertical" margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+              <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+              <XAxis type="number" fontSize={11} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => fmtEur(v as number)} />
+              <YAxis dataKey="shop" type="category" fontSize={11} stroke="hsl(var(--muted-foreground))" width={100} />
+              <Tooltip formatter={(v: any, n: any) => [fmtEur(Number(v)), String(n)]} />
+              <Bar dataKey="grossMargin" name={t("insights.profit.legend.grossMargin")} fill={C2} radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title={t("insights.profit.chart.byMonth")}>
+          <ResponsiveContainer width="100%" height={240}>
+            <ComposedChart data={byMonth} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+              <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="label" fontSize={11} stroke="hsl(var(--muted-foreground))" />
+              <YAxis fontSize={11} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => fmtEur(v as number)} />
+              <Tooltip formatter={(v: any, n: any) => [fmtEur(Number(v)), String(n)]} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="revenue" name={t("insights.profit.legend.revenue")} fill={C3} radius={[4, 4, 0, 0]} />
+              <Line type="monotone" dataKey="grossMargin" name={t("insights.profit.legend.grossMargin")} stroke={C2} strokeWidth={2} dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
     </div>
   );
 }
