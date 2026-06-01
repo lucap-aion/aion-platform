@@ -98,6 +98,10 @@ const translations: Translations = {
     en: "Couldn't analyse the photo. Please fill the form manually.",
     it: "Impossibile analizzare la foto. Compila il modulo manualmente.",
   },
+  "newClaim.heicFailed": {
+    en: "Couldn't read that iPhone photo — please try another or convert to JPEG.",
+    it: "Impossibile leggere quella foto iPhone — prova un'altra o convertila in JPEG.",
+  },
 
   // BrandCustomers — segment chips
   "brandCustomers.segment.all": { en: "All", it: "Tutti" },
@@ -187,7 +191,14 @@ const translations: Translations = {
     en: "Replies are AI-generated. For binding answers, contact your boutique.",
     it: "Le risposte sono generate dall'AI. Per risposte vincolanti, contatta la tua boutique.",
   },
+  "concierge.recent": { en: "Recent", it: "Recenti" },
+  "concierge.newChat": { en: "New chat", it: "Nuova chat" },
+  "concierge.loadingChat": { en: "Loading chat…", it: "Caricamento chat…" },
   "concierge.error.signin": { en: "Please sign in again.", it: "Accedi di nuovo." },
+  "concierge.error.couldntLoad": {
+    en: "Couldn't load that chat.",
+    it: "Impossibile caricare la chat.",
+  },
   "concierge.error.generic": {
     en: "Something went wrong. Please try again.",
     it: "Qualcosa è andato storto. Riprova.",

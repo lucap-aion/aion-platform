@@ -25,13 +25,32 @@ type AiSuggestion = {
 };
 
 // Convert a File to the data:image/...;base64,... form Anthropic accepts.
-const fileToDataUrl = (f: File) =>
-  new Promise<string>((resolve, reject) => {
+// HEIC (iPhone default since iOS 11) needs a client-side step into JPEG
+// first — Anthropic vision rejects HEIC, and Supabase Storage serves it
+// raw so the brand team would get an image they couldn't open either.
+// heic2any is lazy-loaded so non-iPhone users don't pay the bundle.
+const isHeic = (f: File): boolean =>
+  /image\/hei[cf]/i.test(f.type) || /\.hei[cf]$/i.test(f.name);
+
+const convertHeicToJpeg = async (f: File): Promise<File> => {
+  const heic2any = (await import("heic2any")).default;
+  const blob = await heic2any({ blob: f, toType: "image/jpeg", quality: 0.85 });
+  const jpegBlob = Array.isArray(blob) ? blob[0] : blob;
+  return new File([jpegBlob], f.name.replace(/\.hei[cf]$/i, ".jpg"), {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
+};
+
+const fileToDataUrl = async (f: File) => {
+  const normalised = isHeic(f) ? await convertHeicToJpeg(f) : f;
+  return new Promise<string>((resolve, reject) => {
     const r = new FileReader();
     r.onerror = () => reject(r.error);
     r.onload = () => resolve(String(r.result ?? ""));
-    r.readAsDataURL(f);
+    r.readAsDataURL(normalised);
   });
+};
 
 const getImage = (policy: any) => policy?.catalogues?.picture || "/placeholder.svg";
 const getProduct = (policy: any) => policy?.catalogues?.name || "Unknown Product";
@@ -136,13 +155,28 @@ const NewClaim = () => {
     }
   };
 
-  const addFiles = (incoming: FileList | null) => {
+  const addFiles = async (incoming: FileList | null) => {
     if (!incoming) return;
-    const next = [...files];
-    Array.from(incoming).forEach((f) => {
-      if (!next.find((x) => x.name === f.name && x.size === f.size)) next.push(f);
+    // Normalise HEIC inputs to JPEG before they enter the queue so every
+    // downstream consumer (preview, AI prefill, storage upload) sees a
+    // single, broadly-supported format.
+    const list = Array.from(incoming);
+    const normalised: File[] = [];
+    for (const f of list) {
+      try {
+        normalised.push(isHeic(f) ? await convertHeicToJpeg(f) : f);
+      } catch (err) {
+        console.error("[HEIC convert]", err);
+        toast.error(t("newClaim.heicFailed"));
+      }
+    }
+    setFiles((prev) => {
+      const next = [...prev];
+      for (const f of normalised) {
+        if (!next.find((x) => x.name === f.name && x.size === f.size)) next.push(f);
+      }
+      return next;
     });
-    setFiles(next);
     setFileError(false);
   };
 
@@ -392,7 +426,7 @@ const NewClaim = () => {
               ref={fileInputRef}
               type="file"
               multiple
-              accept="image/*,application/pdf"
+              accept="image/*,.heic,.heif,application/pdf"
               className="hidden"
               onChange={(e) => addFiles(e.target.files)}
             />
