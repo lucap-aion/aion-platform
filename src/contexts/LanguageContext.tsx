@@ -81,6 +81,8 @@ const translations: Translations = {
     it: "Bozza suggerita",
   },
   "newClaim.ai.suggestedType": { en: "Suggested type", it: "Tipo suggerito" },
+  "newClaim.ai.descriptionLabel": { en: "Suggested description", it: "Descrizione suggerita" },
+  "newClaim.ai.whatAiSaw": { en: "What AI saw", it: "Cosa ha visto l'AI" },
   "newClaim.ai.confidence": { en: "Confidence", it: "Affidabilità" },
   "newClaim.ai.severity": { en: "Severity", it: "Gravità" },
   "newClaim.ai.redo": { en: "Run again", it: "Rianalizza" },

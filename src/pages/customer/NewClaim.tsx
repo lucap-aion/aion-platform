@@ -310,20 +310,22 @@ const NewClaim = () => {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <div>
-              <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
-                Claim Type <Info className="h-3.5 w-3.5 text-muted-foreground" />
-              </label>
-              <select
-                value={form.claimType}
-                onChange={(e) => setForm({ ...form, claimType: e.target.value })}
-                className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                required
-              >
-                <option value="">Select Type</option>
-                {CLAIM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
+            {!aiSuggestion && (
+              <div>
+                <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
+                  Claim Type <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                </label>
+                <select
+                  value={form.claimType}
+                  onChange={(e) => setForm({ ...form, claimType: e.target.value })}
+                  className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  required
+                >
+                  <option value="">Select Type</option>
+                  {CLAIM_TYPES.map((tp) => <option key={tp} value={tp}>{tp}</option>)}
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
@@ -367,7 +369,7 @@ const NewClaim = () => {
             </div>
           </div>
 
-          <div>
+          <div className={aiSuggestion ? "hidden" : undefined}>
             <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
               Claim Description <Info className="h-3.5 w-3.5 text-muted-foreground" />
             </label>
@@ -463,7 +465,7 @@ const NewClaim = () => {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
@@ -488,28 +490,51 @@ const NewClaim = () => {
                       </button>
                     </div>
 
-                    {aiSuggestion.suggested_type && (
-                      <p className="text-xs text-foreground/80">
-                        <span className="text-muted-foreground">{t("newClaim.ai.suggestedType")}:</span>{" "}
-                        <span className="font-medium">{aiSuggestion.suggested_type}</span>
-                      </p>
-                    )}
+                    {/* The claim Type and Description fields live here once AI
+                        has run — direct edit, no duplicate copy in the form
+                        below. Same form state, same validation. */}
+                    <div>
+                      <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
+                        {t("newClaim.ai.suggestedType")}
+                      </label>
+                      <select
+                        value={form.claimType}
+                        onChange={(e) => setForm({ ...form, claimType: e.target.value })}
+                        className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                        required
+                      >
+                        <option value="">Select Type</option>
+                        {CLAIM_TYPES.map((tp) => <option key={tp} value={tp}>{tp}</option>)}
+                      </select>
+                    </div>
 
-                    {aiSuggestion.description && (
-                      <div className="rounded-lg bg-card border border-border/60 p-3 text-xs text-foreground leading-relaxed">
-                        {aiSuggestion.description}
-                      </div>
-                    )}
+                    <div>
+                      <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
+                        {t("newClaim.ai.descriptionLabel")}
+                      </label>
+                      <textarea
+                        value={form.description}
+                        onChange={(e) => setForm({ ...form, description: e.target.value })}
+                        maxLength={600}
+                        rows={4}
+                        className="w-full rounded-lg border border-input bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                      />
+                    </div>
 
                     {aiSuggestion.observations && aiSuggestion.observations.length > 0 && (
-                      <ul className="text-[11px] text-muted-foreground space-y-1 pl-1">
-                        {aiSuggestion.observations.slice(0, 5).map((o, i) => (
-                          <li key={i} className="flex items-start gap-1.5">
-                            <span className="text-primary/60 shrink-0">•</span>
-                            <span>{o}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <div>
+                        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5">
+                          {t("newClaim.ai.whatAiSaw")}
+                        </p>
+                        <ul className="text-[11px] text-muted-foreground space-y-1 pl-1">
+                          {aiSuggestion.observations.slice(0, 5).map((o, i) => (
+                            <li key={i} className="flex items-start gap-1.5">
+                              <span className="text-primary/60 shrink-0">•</span>
+                              <span>{o}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     )}
 
                     <p className="text-[11px] text-muted-foreground/80 italic">{t("newClaim.ai.reviewNote")}</p>
