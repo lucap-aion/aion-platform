@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { sendEmail } from "@/utils/sendEmail";
 import CustomerVault from "@/components/customer/CustomerVault";
+import CustomerRenewalCard from "@/components/customer/CustomerRenewalCard";
 import {
   Accordion,
   AccordionContent,
@@ -215,6 +216,9 @@ const CustomerDashboard = () => {
 
       {/* Vault hero — collection-first welcome. */}
       <CustomerVault />
+
+      {/* Renewal nudge — only renders when a cover expires inside 30 days. */}
+      <CustomerRenewalCard />
 
       {/* How it works */}
       <motion.div

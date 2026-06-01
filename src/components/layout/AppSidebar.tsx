@@ -55,6 +55,7 @@ const customerPaths = [
   { path: "/home", icon: Home, labelKey: "nav.home" },
   { path: "/covers", icon: Shield, labelKey: "nav.myCovers" },
   { path: "/claims", icon: FileText, labelKey: "nav.myClaims" },
+  { path: "/concierge", icon: Sparkles, labelKey: "nav.concierge" },
 ];
 
 // Single ordered list. Insights + Ask the data live near the top — right

@@ -38,6 +38,7 @@ import BrandAIQuery from "./pages/brand/BrandAIQuery";
 import BrandShops from "./pages/brand/BrandShops";
 import BrandShopDetail from "./pages/brand/BrandShopDetail";
 import BrandRenewals from "./pages/brand/BrandRenewals";
+import CustomerConcierge from "./pages/customer/CustomerConcierge";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminBrands from "./pages/admin/AdminBrands";
 import AdminCustomers from "./pages/admin/AdminCustomers";
@@ -220,6 +221,7 @@ const App = () => (
               <Route path="/:slug/claims/new" element={<ProtectedRoute mode="customer"><NewClaim /></ProtectedRoute>} />
               <Route path="/:slug/claims/:claimId/view" element={<ProtectedRoute mode="customer"><CustomerClaimDetail /></ProtectedRoute>} />
               <Route path="/:slug/covers/:coverId/view" element={<ProtectedRoute mode="customer"><CustomerCoverDetail /></ProtectedRoute>} />
+              <Route path="/:slug/concierge" element={<ProtectedRoute mode="customer"><CustomerConcierge /></ProtectedRoute>} />
 
               {/* Brand-only pages */}
               <Route path="/:slug/dashboard" element={<ProtectedRoute mode="brand"><BrandDashboard /></ProtectedRoute>} />

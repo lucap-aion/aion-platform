@@ -120,6 +120,114 @@ const translations: Translations = {
   // Brand nav — renewals
   "nav.renewals": { en: "Renewals", it: "Rinnovi" },
 
+  // Customer nav — concierge
+  "nav.concierge": { en: "Concierge", it: "Concierge" },
+
+  // Cover Passport / Cover Detail
+  "coverDetail.back": { en: "Back to My Covers", it: "Torna alle Mie Coperture" },
+  "coverDetail.notFound": { en: "Cover not found.", it: "Copertura non trovata." },
+  "coverDetail.unknownProduct": { en: "Unknown Product", it: "Prodotto sconosciuto" },
+  "coverDetail.downloadCertificate": { en: "Download certificate", it: "Scarica certificato" },
+  "coverDetail.certificateDownloaded": { en: "Certificate downloaded.", it: "Certificato scaricato." },
+  "coverDetail.certificateFailed": { en: "Couldn't generate the certificate.", it: "Impossibile generare il certificato." },
+  "coverDetail.provenance": { en: "Provenance", it: "Provenienza" },
+  "coverDetail.certifiedBy": { en: "Certified by", it: "Certificato da" },
+  "coverDetail.claimHistory": { en: "Claim history", it: "Storico richieste" },
+  "coverDetail.claimGeneral": { en: "General", it: "Generale" },
+  "coverDetail.row.sku": { en: "SKU", it: "SKU" },
+  "coverDetail.row.category": { en: "Category", it: "Categoria" },
+  "coverDetail.row.composition": { en: "Composition", it: "Composizione" },
+  "coverDetail.row.boutique": { en: "Boutique", it: "Boutique" },
+  "coverDetail.row.registered": { en: "Registered", it: "Registrato" },
+  "coverDetail.kpi.startDate": { en: "Start date", it: "Data inizio" },
+  "coverDetail.kpi.expiration": { en: "Expiration", it: "Scadenza" },
+  "coverDetail.kpi.protectedValue": { en: "Protected value", it: "Valore protetto" },
+  "coverDetail.kpi.registeredAt": { en: "Registered at", it: "Registrato presso" },
+  "coverDetail.status.live": { en: "Active", it: "Attiva" },
+  "coverDetail.status.active": { en: "Active", it: "Attiva" },
+  "coverDetail.status.cancelled": { en: "Cancelled", it: "Annullata" },
+  "coverDetail.status.expired": { en: "Expired", it: "Scaduta" },
+  "coverDetail.status.pending": { en: "Pending", it: "In attesa" },
+  "coverDetail.claimStatus.open": { en: "Open", it: "Aperta" },
+  "coverDetail.claimStatus.closed": { en: "Closed", it: "Chiusa" },
+
+  // Certificate PDF labels
+  "certificate.title": { en: "Certificate of Coverage", it: "Certificato di Copertura" },
+  "certificate.subtitle": { en: "Prestige Service", it: "Servizio Prestige" },
+  "certificate.certId": { en: "Certificate ID", it: "ID Certificato" },
+  "certificate.issuedTo": { en: "Issued to", it: "Intestato a" },
+  "certificate.piece": { en: "Piece", it: "Pezzo" },
+  "certificate.sku": { en: "SKU", it: "SKU" },
+  "certificate.composition": { en: "Composition", it: "Composizione" },
+  "certificate.category": { en: "Category", it: "Categoria" },
+  "certificate.coverPeriod": { en: "Cover period", it: "Periodo di copertura" },
+  "certificate.protectedValue": { en: "Protected value", it: "Valore protetto" },
+  "certificate.registeredAt": { en: "Registered at", it: "Registrato presso" },
+  "certificate.footer": {
+    en: "This certificate confirms the cover registered with the AION Prestige Service.",
+    it: "Questo certificato conferma la copertura registrata presso il Servizio Prestige AION.",
+  },
+
+  // Customer Concierge
+  "concierge.title": { en: "Your {brand} concierge", it: "Il tuo concierge {brand}" },
+  "concierge.subtitle": {
+    en: "Ask about your covers, claims, or how the service works.",
+    it: "Chiedi delle tue coperture, richieste o come funziona il servizio.",
+  },
+  "concierge.greeting": { en: "How can I help?", it: "Come posso aiutarti?" },
+  "concierge.greetingNamed": { en: "Hi {name}. How can I help?", it: "Ciao {name}. Come posso aiutarti?" },
+  "concierge.welcome": {
+    en: "Personal answers about your {brand} pieces and the Prestige Service. Your data stays private.",
+    it: "Risposte personali sui tuoi pezzi {brand} e sul Servizio Prestige. I tuoi dati restano privati.",
+  },
+  "concierge.placeholder": { en: "Ask the concierge…", it: "Chiedi al concierge…" },
+  "concierge.send": { en: "Send", it: "Invia" },
+  "concierge.thinking": { en: "Thinking…", it: "Sto pensando…" },
+  "concierge.disclaimer": {
+    en: "Replies are AI-generated. For binding answers, contact your boutique.",
+    it: "Le risposte sono generate dall'AI. Per risposte vincolanti, contatta la tua boutique.",
+  },
+  "concierge.error.signin": { en: "Please sign in again.", it: "Accedi di nuovo." },
+  "concierge.error.generic": {
+    en: "Something went wrong. Please try again.",
+    it: "Qualcosa è andato storto. Riprova.",
+  },
+  "concierge.suggest.expiry": {
+    en: "When does my cover expire?",
+    it: "Quando scade la mia copertura?",
+  },
+  "concierge.suggest.total": {
+    en: "What's my total protected value?",
+    it: "Qual è il mio valore totale protetto?",
+  },
+  "concierge.suggest.claimsHelp": {
+    en: "How do I open a claim?",
+    it: "Come apro una richiesta?",
+  },
+  "concierge.suggest.howClean": {
+    en: "How do I clean and care for my piece?",
+    it: "Come pulisco e curo il mio pezzo?",
+  },
+
+  // Renewal card on /home
+  "renewalCard.label": { en: "Renewal", it: "Rinnovo" },
+  "renewalCard.single": {
+    en: "Your cover expires in {n} days.",
+    it: "La tua copertura scade tra {n} giorni.",
+  },
+  "renewalCard.multi": {
+    en: "{n} covers expire soon — the next in {soonest} days.",
+    it: "{n} coperture scadono presto — la prossima tra {soonest} giorni.",
+  },
+  "renewalCard.expiresOn": {
+    en: "Expires on {date}",
+    it: "Scade il {date}",
+  },
+  "renewalCard.viewAll": {
+    en: "+{n} more — view all",
+    it: "+{n} altre — vedi tutte",
+  },
+
   // BrandRenewals page
   "brandRenewals.title": { en: "Renewals", it: "Rinnovi" },
   "brandRenewals.subtitle": {
