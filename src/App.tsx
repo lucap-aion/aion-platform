@@ -44,8 +44,6 @@ import BrandWishlist from "./pages/brand/BrandWishlist";
 import CustomerConcierge from "./pages/customer/CustomerConcierge";
 import CustomerDiscover from "./pages/customer/CustomerDiscover";
 import PublicCoverShare from "./pages/PublicCoverShare";
-import CustomerTravel from "./pages/customer/CustomerTravel";
-import CustomerInbox from "./pages/customer/CustomerInbox";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminBrands from "./pages/admin/AdminBrands";
 import AdminCustomers from "./pages/admin/AdminCustomers";
@@ -233,8 +231,6 @@ const App = () => (
               <Route path="/:slug/covers/:coverId/view" element={<ProtectedRoute mode="customer"><CustomerCoverDetail /></ProtectedRoute>} />
               <Route path="/:slug/concierge" element={<ProtectedRoute mode="customer"><CustomerConcierge /></ProtectedRoute>} />
               <Route path="/:slug/discover" element={<ProtectedRoute mode="customer"><CustomerDiscover /></ProtectedRoute>} />
-              <Route path="/:slug/travel" element={<ProtectedRoute mode="customer"><CustomerTravel /></ProtectedRoute>} />
-              <Route path="/:slug/inbox" element={<ProtectedRoute mode="customer"><CustomerInbox /></ProtectedRoute>} />
 
               {/* Brand-only pages */}
               <Route path="/:slug/dashboard" element={<ProtectedRoute mode="brand"><BrandDashboard /></ProtectedRoute>} />

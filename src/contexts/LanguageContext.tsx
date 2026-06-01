@@ -45,22 +45,6 @@ const translations: Translations = {
   "brandWishlist.whoWished": { en: "Who wishlisted this", it: "Chi l'ha richiesto" },
   "brandWishlist.loading": { en: "Loading…", it: "Caricamento…" },
   "brandWishlist.emailCustomer": { en: "Email customer", it: "Email cliente" },
-  "brandWishlist.notifyButton": { en: "Notify wishlisters", it: "Avvisa chi l'ha richiesto" },
-  "brandWishlist.drafting": { en: "Drafting…", it: "In scrittura…" },
-  "brandWishlist.regenerate": { en: "Regenerate", it: "Rigenera" },
-  "brandWishlist.draftReady": { en: "Draft ready — review and save as a campaign", it: "Bozza pronta — rivedi e salva come campagna" },
-  "brandWishlist.placeholderHint": {
-    en: "{first_name} is replaced per recipient when you mail-merge.",
-    it: "{first_name} viene sostituito per ogni destinatario nel mail-merge.",
-  },
-  "brandWishlist.copyBcc": { en: "Copy BCC", it: "Copia BCC" },
-  "brandWishlist.bccCopied": { en: "Email addresses copied.", it: "Indirizzi email copiati." },
-  "brandWishlist.saveAsCampaign": { en: "Save as campaign", it: "Salva come campagna" },
-  "brandWishlist.notifySaved": { en: "Saved as a campaign.", it: "Salvato come campagna." },
-  "brandWishlist.notifyFailed": { en: "Couldn't draft a notification.", it: "Impossibile creare la bozza." },
-  "brandWishlist.copyFailed": { en: "Couldn't copy.", it: "Impossibile copiare." },
-  "brandWishlist.noEmails": { en: "No email addresses available.", it: "Nessuna email disponibile." },
-  "brandWishlist.wishlistedSegment": { en: "Wishlisters", it: "Chi ha richiesto" },
 
   // BrandCampaigns page
   "campaigns.title": { en: "Campaigns", it: "Campagne" },
@@ -296,71 +280,6 @@ const translations: Translations = {
   // Customer nav — concierge
   "nav.concierge": { en: "Concierge", it: "Concierge" },
   "nav.discover": { en: "Discover", it: "Scopri" },
-  "nav.travel": { en: "Travel", it: "Viaggi" },
-  "nav.inbox": { en: "Inbox", it: "In arrivo" },
-
-  // CustomerInbox feed
-  "inbox.title": { en: "Inbox", it: "In arrivo" },
-  "inbox.subtitle": {
-    en: "Renewals, claims, trips and pieces you've favourited — what needs your eyes.",
-    it: "Rinnovi, richieste, viaggi e pezzi che hai salvato — tutto ciò che richiede la tua attenzione.",
-  },
-  "inbox.empty": {
-    en: "All quiet — nothing needs your attention right now.",
-    it: "Tutto calmo — nulla richiede la tua attenzione al momento.",
-  },
-  "inbox.renewalTitle": { en: "{piece} cover expiring soon", it: "La copertura {piece} scade presto" },
-  "inbox.renewalSub": { en: "In {n} days", it: "Tra {n} giorni" },
-  "inbox.claimOpen": { en: "Claim {id} is open", it: "Richiesta {id} aperta" },
-  "inbox.claimClosed": { en: "Claim {id} closed", it: "Richiesta {id} chiusa" },
-  "inbox.tripTitle": { en: "Trip to {dest}", it: "Viaggio a {dest}" },
-  "inbox.tripSub": { en: "Starts {date}", it: "Parte il {date}" },
-  "inbox.wishTitle": { en: "You favourited {piece}", it: "Hai salvato {piece}" },
-  "inbox.wishSub": { en: "Saved to your wishlist", it: "Salvato nella tua wishlist" },
-
-  // CustomerTravel + brand-side trips card
-  "travel.title": { en: "Travel", it: "Viaggi" },
-  "travel.subtitle": {
-    en: "Let your boutique know when you'll be travelling with your pieces.",
-    it: "Avvisa la tua boutique quando viaggi con i tuoi pezzi.",
-  },
-  "travel.add": { en: "Add a trip", it: "Aggiungi un viaggio" },
-  "travel.newTrip": { en: "New trip", it: "Nuovo viaggio" },
-  "travel.country": { en: "Destination country", it: "Paese di destinazione" },
-  "travel.countryPlaceholder": { en: "Choose a country…", it: "Scegli un paese…" },
-  "travel.searchCountries": { en: "Search countries…", it: "Cerca paesi…" },
-  "travel.city": { en: "City (optional)", it: "Città (facoltativo)" },
-  "travel.cityPlaceholder": { en: "e.g. Milan", it: "Es. Milano" },
-  "travel.start": { en: "Start date", it: "Data inizio" },
-  "travel.end": { en: "End date (optional)", it: "Data fine (facoltativo)" },
-  "travel.notes": { en: "Notes (optional)", it: "Note (facoltativo)" },
-  "travel.notesPlaceholder": {
-    en: "Anything your boutique should know.",
-    it: "Cosa dovrebbe sapere la tua boutique.",
-  },
-  "travel.save": { en: "Save trip", it: "Salva viaggio" },
-  "travel.cancel": { en: "Cancel", it: "Annulla" },
-  "travel.delete": { en: "Delete", it: "Elimina" },
-  "travel.requiredFields": { en: "Country and start date are required.", it: "Paese e data di inizio obbligatori." },
-  "travel.endBeforeStart": { en: "End date can't be before start date.", it: "La data di fine non può precedere la data di inizio." },
-  "travel.tripAdded": { en: "Trip added.", it: "Viaggio aggiunto." },
-  "travel.empty": {
-    en: "No trips declared yet — add your first to keep your brand in the loop.",
-    it: "Nessun viaggio dichiarato — aggiungi il primo per tenere informata la tua boutique.",
-  },
-  "travel.upcoming": { en: "Upcoming", it: "In programma" },
-  "travel.past": { en: "Past", it: "Passati" },
-  "travel.privacyNote": {
-    en: "Only your brand's clienteling team can see your trips. AION does not share them externally.",
-    it: "Solo il team clienteling della tua boutique vede i tuoi viaggi. AION non li condivide all'esterno.",
-  },
-
-  // BrandCustomerDetail trips card
-  "brandCustomer.travelTitle": { en: "Upcoming travel", it: "Viaggi in programma" },
-  "brandCustomer.travelSubtitle": {
-    en: "Trips the customer has declared via the customer app.",
-    it: "Viaggi dichiarati dal cliente nell'app cliente.",
-  },
 
   // CustomerDiscover page
   "discover.title": { en: "Discover {brand}", it: "Scopri {brand}" },
