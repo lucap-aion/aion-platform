@@ -19,7 +19,85 @@ const translations: Translations = {
   "nav.insights": { en: "Insights", it: "Insights" },
   "nav.aiQuery": { en: "Ask the data", it: "Chiedi ai dati" },
   "nav.shops": { en: "Shops", it: "Boutique" },
+  "nav.faq": { en: "FAQ", it: "FAQ" },
+  "nav.campaigns": { en: "Campaigns", it: "Campagne" },
   "nav.settings": { en: "Settings", it: "Impostazioni" },
+
+  // BrandCampaigns page
+  "campaigns.title": { en: "Campaigns", it: "Campagne" },
+  "campaigns.subtitle": {
+    en: "Pick a segment, draft a template, export to your email tool.",
+    it: "Scegli un segmento, crea un template, esporta nel tuo tool email.",
+  },
+  "campaigns.audience": { en: "Audience", it: "Pubblico" },
+  "campaigns.intent": { en: "Intent", it: "Obiettivo" },
+  "campaigns.recipientsCount": { en: "{n} recipients", it: "{n} destinatari" },
+  "campaigns.segment.vip": { en: "VIP", it: "VIP" },
+  "campaigns.segment.lapsed": { en: "Lapsed", it: "Inattivi" },
+  "campaigns.segment.incomplete": { en: "Profile incomplete", it: "Profilo incompleto" },
+  "campaigns.segment.highNpsIdle": { en: "Happy but idle", it: "Soddisfatti ma fermi" },
+  "campaigns.generate": { en: "Generate template", it: "Genera template" },
+  "campaigns.regenerate": { en: "Regenerate", it: "Rigenera" },
+  "campaigns.generating": { en: "Drafting…", it: "In scrittura…" },
+  "campaigns.draftReady": { en: "Draft ready", it: "Bozza pronta" },
+  "campaigns.placeholderHint": {
+    en: "{first_name} is replaced per recipient when you mail-merge.",
+    it: "{first_name} viene sostituito per ogni destinatario nel mail-merge.",
+  },
+  "campaigns.copyDraft": { en: "Copy text", it: "Copia testo" },
+  "campaigns.draftCopied": { en: "Draft copied.", it: "Bozza copiata." },
+  "campaigns.copyBcc": { en: "Copy BCC", it: "Copia BCC" },
+  "campaigns.bccCopied": { en: "Email addresses copied.", it: "Indirizzi email copiati." },
+  "campaigns.downloadCsv": { en: "Download CSV", it: "Scarica CSV" },
+  "campaigns.save": { en: "Save campaign", it: "Salva campagna" },
+  "campaigns.saved": { en: "Campaign saved.", it: "Campagna salvata." },
+  "campaigns.copyFailed": { en: "Couldn't copy.", it: "Impossibile copiare." },
+  "campaigns.noRecipients": {
+    en: "No customers in this segment yet.",
+    it: "Nessun cliente in questo segmento.",
+  },
+  "campaigns.noEmails": { en: "No email addresses available.", it: "Nessuna email disponibile." },
+  "campaigns.history": { en: "Recent campaigns", it: "Campagne recenti" },
+  "campaigns.historyEmpty": { en: "No campaigns yet.", it: "Ancora nessuna campagna." },
+  "campaigns.delete": { en: "Delete", it: "Elimina" },
+
+  // BrandFaq editor
+  "brandFaq.title": { en: "Customer FAQ", it: "FAQ Cliente" },
+  "brandFaq.subtitle": {
+    en: "These answers feed your customer Concierge — keep them accurate.",
+    it: "Queste risposte alimentano il Concierge dei clienti — tienile accurate.",
+  },
+  "brandFaq.save": { en: "Save", it: "Salva" },
+  "brandFaq.saving": { en: "Saving…", it: "Salvataggio…" },
+  "brandFaq.saved": { en: "FAQ saved.", it: "FAQ salvate." },
+  "brandFaq.unsaved": { en: "Unsaved changes.", it: "Modifiche non salvate." },
+  "brandFaq.loadFailed": { en: "Couldn't load the FAQ.", it: "Impossibile caricare le FAQ." },
+  "brandFaq.masterOnly": {
+    en: "Editing the FAQ requires master access.",
+    it: "La modifica delle FAQ richiede l'accesso master.",
+  },
+  "brandFaq.question": { en: "Question", it: "Domanda" },
+  "brandFaq.answer": { en: "Answer", it: "Risposta" },
+  "brandFaq.questionPlaceholder": {
+    en: "e.g. What does the Prestige Service cover?",
+    it: "Es. Cosa copre il Servizio Prestige?",
+  },
+  "brandFaq.answerPlaceholder": {
+    en: "Write the customer-facing answer here.",
+    it: "Scrivi qui la risposta per il cliente.",
+  },
+  "brandFaq.paragraphHint": {
+    en: "Leave a blank line between paragraphs.",
+    it: "Lascia una riga vuota tra i paragrafi.",
+  },
+  "brandFaq.addQuestion": { en: "Add a question", it: "Aggiungi una domanda" },
+  "brandFaq.delete": { en: "Delete", it: "Elimina" },
+  "brandFaq.moveUp": { en: "Move up", it: "Sposta su" },
+  "brandFaq.moveDown": { en: "Move down", it: "Sposta giù" },
+  "brandFaq.emptyForLang": {
+    en: "No {lang} questions yet — add the first one below.",
+    it: "Ancora nessuna domanda in {lang} — aggiungi la prima qui sotto.",
+  },
 
   // Insights — Gross-margin tab + Feedback themes tile (added with brand wow features).
   // The data only supports gross margin (revenue - cogs) — we don't have the
@@ -108,6 +186,43 @@ const translations: Translations = {
     it: "Impossibile leggere quella foto iPhone — prova un'altra o convertila in JPEG.",
   },
 
+  // BrandCustomerDetail — Draft outreach modal
+  "brandCustomer.draftOutreach": { en: "Draft outreach", it: "Bozza outreach" },
+  "brandCustomer.intent": { en: "Intent", it: "Obiettivo" },
+  "brandCustomer.intent.cross_sell": { en: "Cross-sell", it: "Cross-sell" },
+  "brandCustomer.intent.cross_sell.sub": {
+    en: "Suggest a complementary piece",
+    it: "Suggerisci un pezzo complementare",
+  },
+  "brandCustomer.intent.renewal_nudge": { en: "Renewal nudge", it: "Promemoria rinnovo" },
+  "brandCustomer.intent.renewal_nudge.sub": {
+    en: "Cover approaching expiry",
+    it: "Copertura in scadenza",
+  },
+  "brandCustomer.intent.win_back": { en: "Win back", it: "Riconquista" },
+  "brandCustomer.intent.win_back.sub": {
+    en: "Lapsed — reconnect warmly",
+    it: "Inattivo — riconnetti",
+  },
+  "brandCustomer.intent.check_in": { en: "Check in", it: "Controllo" },
+  "brandCustomer.intent.check_in.sub": {
+    en: "Brief, warm hello",
+    it: "Saluto breve e caloroso",
+  },
+  "brandCustomer.generate": { en: "Generate draft", it: "Genera bozza" },
+  "brandCustomer.regenerate": { en: "Regenerate", it: "Rigenera" },
+  "brandCustomer.drafting": { en: "Drafting…", it: "In scrittura…" },
+  "brandCustomer.subject": { en: "Subject", it: "Oggetto" },
+  "brandCustomer.body": { en: "Body", it: "Corpo" },
+  "brandCustomer.followup": {
+    en: "Suggested follow-up in {n} days.",
+    it: "Follow-up suggerito tra {n} giorni.",
+  },
+  "brandCustomer.copy": { en: "Copy", it: "Copia" },
+  "brandCustomer.copied": { en: "Copied to clipboard.", it: "Copiato negli appunti." },
+  "brandCustomer.copyFailed": { en: "Couldn't copy.", it: "Impossibile copiare." },
+  "brandCustomer.openInMail": { en: "Open in Mail", it: "Apri in Mail" },
+
   // BrandCustomers — segment chips
   "brandCustomers.segment.all": { en: "All", it: "Tutti" },
   "brandCustomers.segment.vip": { en: "VIP", it: "VIP" },
@@ -131,6 +246,30 @@ const translations: Translations = {
 
   // Customer nav — concierge
   "nav.concierge": { en: "Concierge", it: "Concierge" },
+  "nav.discover": { en: "Discover", it: "Scopri" },
+
+  // CustomerDiscover page
+  "discover.title": { en: "Discover {brand}", it: "Scopri {brand}" },
+  "discover.subtitle": {
+    en: "Browse the latest collection and save pieces you love.",
+    it: "Sfoglia la collezione e salva i pezzi che ami.",
+  },
+  "discover.searchPlaceholder": { en: "Search by name or SKU…", it: "Cerca per nome o SKU…" },
+  "discover.all": { en: "All", it: "Tutti" },
+  "discover.wishlist": { en: "Wishlist", it: "Wishlist" },
+  "discover.category": { en: "Category", it: "Categoria" },
+  "discover.allCategories": { en: "All", it: "Tutte" },
+  "discover.empty": { en: "No pieces match those filters.", it: "Nessun pezzo corrisponde ai filtri." },
+  "discover.wishlistEmpty": {
+    en: "Your wishlist is empty — tap the heart on any piece to save it.",
+    it: "La tua wishlist è vuota — tocca il cuore su un pezzo per salvarlo.",
+  },
+  "discover.add": { en: "Add to wishlist", it: "Aggiungi alla wishlist" },
+  "discover.addAria": { en: "Add to wishlist", it: "Aggiungi alla wishlist" },
+  "discover.remove": { en: "Remove from wishlist", it: "Rimuovi dalla wishlist" },
+  "discover.removeAria": { en: "Remove from wishlist", it: "Rimuovi dalla wishlist" },
+  "discover.addFailed": { en: "Couldn't add to wishlist.", it: "Impossibile aggiungere alla wishlist." },
+  "discover.removeFailed": { en: "Couldn't remove.", it: "Impossibile rimuovere." },
 
   // Cover Passport / Cover Detail
   "coverDetail.back": { en: "Back to My Covers", it: "Torna alle Mie Coperture" },
@@ -207,6 +346,13 @@ const translations: Translations = {
   "concierge.tooFast": {
     en: "One moment — let me finish the previous answer.",
     it: "Un attimo — fammi finire la risposta precedente.",
+  },
+  "concierge.startListening": { en: "Voice input", it: "Input vocale" },
+  "concierge.stopListening": { en: "Stop listening", it: "Ferma ascolto" },
+  "concierge.listening": { en: "Listening… speak now", it: "Ascolto… parla pure" },
+  "concierge.voiceError": {
+    en: "Voice input failed. Please type instead.",
+    it: "Input vocale non riuscito. Scrivi invece.",
   },
   "concierge.error.generic": {
     en: "Something went wrong. Please try again.",

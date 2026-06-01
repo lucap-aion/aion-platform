@@ -10,7 +10,7 @@ import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   ArrowUp, Loader2, Sparkles, Shield, Calendar, FileText,
-  MessageSquarePlus, History,
+  MessageSquarePlus, History, Mic, MicOff,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -104,6 +104,71 @@ const CustomerConcierge = () => {
   // Throttle: timestamp the previous turn completed at. send() refuses if
   // less than COOLDOWN_MS has passed since.
   const lastSendAt = useRef<number>(0);
+
+  // Voice input — Web Speech API. Browser-only (Safari / Chrome / Edge);
+  // detect once, hide the mic button on unsupported runtimes. Transcribed
+  // speech appends to the current input so the customer can mix typing
+  // and dictating.
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const speechSupported = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  }, []);
+
+  const stopListening = () => {
+    try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+  };
+
+  const toggleListening = () => {
+    if (!speechSupported) return;
+    if (listening) {
+      stopListening();
+      return;
+    }
+    const Ctor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const r = new Ctor();
+    r.lang = locale === "it" ? "it-IT" : "en-US";
+    r.continuous = false;
+    r.interimResults = true;
+    let finalText = "";
+    r.onstart = () => setListening(true);
+    r.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+    r.onerror = (e: any) => {
+      console.warn("[concierge speech]", e?.error ?? e);
+      setListening(false);
+      recognitionRef.current = null;
+      toast.error(t("concierge.voiceError"));
+    };
+    r.onresult = (e: any) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const chunk = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += chunk;
+        else interim += chunk;
+      }
+      const combined = (finalText + interim).trim();
+      // Replace from the listening-start anchor so successive interim results
+      // don't keep stacking. We stash the pre-listen value on start.
+      const baseline = (r as any).__baselineInput ?? "";
+      const next = baseline ? `${baseline} ${combined}`.trim() : combined;
+      setInput(next);
+    };
+    (r as any).__baselineInput = input;
+    recognitionRef.current = r;
+    try {
+      r.start();
+    } catch (err) {
+      console.warn("[concierge speech start]", err);
+      setListening(false);
+    }
+  };
+
+  // Stop the recogniser if the page unmounts mid-listen.
+  useEffect(() => () => stopListening(), []);
 
   const brandFaq = useMemo(
     () => flattenFaq(locale === "it" ? tenant.faqIt : tenant.faqEn),
@@ -449,12 +514,28 @@ const CustomerConcierge = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKey}
-            placeholder={t("concierge.placeholder")}
+            placeholder={listening ? t("concierge.listening") : t("concierge.placeholder")}
             rows={1}
             disabled={loading}
             className="flex-1 resize-none overflow-y-auto rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
             style={{ maxHeight: 160 }}
           />
+          {speechSupported && (
+            <button
+              type="button"
+              onClick={toggleListening}
+              disabled={loading}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${
+                listening
+                  ? "border-rose-500/40 bg-rose-500/10 text-rose-600 animate-pulse"
+                  : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+              aria-label={listening ? t("concierge.stopListening") : t("concierge.startListening")}
+              title={listening ? t("concierge.stopListening") : t("concierge.startListening")}
+            >
+              {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void send(input)}
