@@ -45,6 +45,11 @@ const INTENT_BRIEFS: Record<string, { goal: string; cta: string; tone: string }>
     cta: "Optional: invite them to share thoughts or visit when convenient.",
     tone: "personal, light, never pushy",
   },
+  wishlist_match: {
+    goal: "Let the customer know a piece they previously favourited (use the wishlist piece context if provided) is now featured / available / being highlighted. Acknowledge their interest specifically.",
+    cta: "Invite them to visit the boutique, reserve, or reply for more info.",
+    tone: "personal, delighted, never pushy",
+  },
 };
 
 const SYSTEM = `
@@ -116,6 +121,7 @@ Deno.serve(async (req: Request) => {
   const bulkMode = Boolean(body.bulk) || !customerId;
   const segmentLabel = typeof body.segment_label === "string" ? body.segment_label.slice(0, 80) : "";
   const recipientCount = Number.isFinite(body.recipient_count as number) ? Number(body.recipient_count) : 0;
+  const wishlistPiece = typeof body.wishlist_piece === "string" ? body.wishlist_piece.slice(0, 200) : "";
   if (!INTENT_BRIEFS[intent]) return jsonError("unknown intent", 400);
   if (!bulkMode && !customerId) return jsonError("customer_id required for per-customer drafts", 400);
 
@@ -173,7 +179,7 @@ Deno.serve(async (req: Request) => {
   const brief = INTENT_BRIEFS[intent];
 
   const customerCtx = bulkMode
-    ? `(Bulk template for the "${segmentLabel || "selected"}" segment — ${recipientCount} recipients. Address with a {first_name} placeholder, no specific piece references.)`
+    ? `(Bulk template for the "${segmentLabel || "selected"}" segment — ${recipientCount} recipients. Address with a {first_name} placeholder${wishlistPiece ? `. The piece they all favourited: "${wishlistPiece}" — reference it explicitly.` : ", no specific piece references."})`
     : [
         `Customer: ${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim(),
         customer.email ? `Email: ${customer.email}` : null,

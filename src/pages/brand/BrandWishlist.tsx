@@ -6,11 +6,33 @@
 
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Heart, Search, Package, Users, ArrowUpDown, Mail, X } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Heart, Search, Package, Users, Mail, X, Wand2, Loader2, Sparkles, Save, Copy } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTenant } from "@/contexts/TenantContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+
+const flattenFaq = (source: unknown): string => {
+  if (!Array.isArray(source)) return "";
+  return (source as any[])
+    .map((item) => {
+      const q = (item?.title ?? item?.question ?? "").toString().trim();
+      const a = item?.content?.blocks
+        ? (item.content.blocks as any[]).filter((b: any) => b?.text).map((b: any) => String(b.text)).join(" ").trim()
+        : (item?.answer ?? "").toString().trim();
+      if (!q && !a) return "";
+      return `Q: ${q}\nA: ${a}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+};
+
+type Draft = { subject: string; body: string; suggested_followup_days?: number };
 
 type WishlistDemand = {
   catalogue_id: number;
@@ -35,9 +57,24 @@ type CustomerRow = {
 
 const BrandWishlist = () => {
   const { profile } = useAuth();
+  const tenant = useTenant();
   const { t, locale } = useLanguage();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  // Draft state for the "Notify wishlisters" flow.
+  const [notifyDraft, setNotifyDraft] = useState<Draft | null>(null);
+  const [drafting, setDrafting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  // Reset notify state whenever the drawer changes.
+  const closeDrawer = () => {
+    setSelectedId(null);
+    setNotifyDraft(null);
+    setDraftError(null);
+  };
 
   // Aggregate wishlist demand for the brand's catalogue. We rely on the
   // brand-select RLS policy on wishlist_items to scope rows to the caller's
@@ -113,6 +150,82 @@ const BrandWishlist = () => {
   );
 
   const totalWishes = (demand ?? []).reduce((s, d) => s + d.count, 0);
+
+  const generateNotifyDraft = async () => {
+    if (!selected) return;
+    setDrafting(true);
+    setDraftError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("Sign in required");
+      const brandFaq = flattenFaq(locale === "it" ? tenant.faqIt : tenant.faqEn);
+      const piece = selected.catalogues?.name ?? `#${selected.catalogue_id}`;
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/customer-outreach-draft`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "apikey": SUPABASE_ANON_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          bulk: true,
+          intent: "wishlist_match",
+          locale,
+          brand_faq: brandFaq,
+          segment_label: t("brandWishlist.wishlistedSegment"),
+          recipient_count: selected.count,
+          wishlist_piece: piece,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+      setNotifyDraft(body as Draft);
+    } catch (e: any) {
+      setDraftError(e?.message ?? t("brandWishlist.notifyFailed"));
+    } finally {
+      setDrafting(false);
+    }
+  };
+
+  const saveAsCampaign = async () => {
+    if (!notifyDraft || !selected || !profile?.brand_id) return;
+    setSaving(true);
+    const recipientIds = (customers ?? []).map((c) => c.id).filter(Boolean) as string[];
+    const { error } = await supabase
+      .from("brand_campaigns")
+      .insert({
+        brand_id: profile.brand_id,
+        segment_key: `wishlist:${selected.catalogue_id}`,
+        intent: "wishlist_match",
+        subject: notifyDraft.subject,
+        body: notifyDraft.body,
+        recipient_count: recipientIds.length,
+        recipient_ids: recipientIds as any,
+        created_by: profile.id,
+      });
+    setSaving(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success(t("brandWishlist.notifySaved"));
+    void queryClient.invalidateQueries({ queryKey: ["brand-campaigns-history", profile.brand_id] });
+  };
+
+  const copyBcc = async () => {
+    const emails = (customers ?? []).map((c) => c.email).filter(Boolean).join(", ");
+    if (!emails) {
+      toast.error(t("brandWishlist.noEmails"));
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(emails);
+      toast.success(t("brandWishlist.bccCopied"));
+    } catch {
+      toast.error(t("brandWishlist.copyFailed"));
+    }
+  };
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
@@ -226,7 +339,7 @@ const BrandWishlist = () => {
       {selected && (
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
-          onClick={() => setSelectedId(null)}
+          onClick={closeDrawer}
         >
           <motion.div
             initial={{ opacity: 0, y: 40 }}
@@ -254,15 +367,71 @@ const BrandWishlist = () => {
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedId(null)}
+                onClick={closeDrawer}
                 className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="px-5 py-4">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+            <div className="px-5 py-4 space-y-4">
+              {/* Notify CTA */}
+              <button
+                type="button"
+                onClick={() => void generateNotifyDraft()}
+                disabled={drafting || !customers || customers.length === 0}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              >
+                {drafting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                {drafting
+                  ? t("brandWishlist.drafting")
+                  : notifyDraft
+                    ? t("brandWishlist.regenerate")
+                    : t("brandWishlist.notifyButton")}
+              </button>
+              {draftError && <p className="text-xs text-destructive">{draftError}</p>}
+
+              {notifyDraft && (
+                <div className="rounded-xl border border-border bg-card/60 p-3 space-y-2.5">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                    <Sparkles className="h-3 w-3 text-primary" /> {t("brandWishlist.draftReady")}
+                  </p>
+                  <input
+                    type="text"
+                    value={notifyDraft.subject}
+                    onChange={(e) => setNotifyDraft({ ...notifyDraft, subject: e.target.value })}
+                    placeholder={t("brandCustomer.subject")}
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <textarea
+                    value={notifyDraft.body}
+                    onChange={(e) => setNotifyDraft({ ...notifyDraft, body: e.target.value })}
+                    rows={8}
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-y"
+                  />
+                  <p className="text-[10px] text-muted-foreground/70">{t("brandWishlist.placeholderHint")}</p>
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/40">
+                    <button
+                      type="button"
+                      onClick={() => void copyBcc()}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs text-foreground hover:bg-muted"
+                    >
+                      <Copy className="h-3 w-3" /> {t("brandWishlist.copyBcc")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveAsCampaign()}
+                      disabled={saving}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                      {t("brandWishlist.saveAsCampaign")}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <Users className="h-3 w-3" /> {t("brandWishlist.whoWished")}
               </p>
               {!customers || customers.length === 0 ? (

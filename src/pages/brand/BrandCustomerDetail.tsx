@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin, Sparkles, Wand2, Copy, X, Loader2, Send } from "lucide-react";
+import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin, Sparkles, Wand2, Copy, X, Loader2, Send, Plane, Calendar } from "lucide-react";
 import { format } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -134,6 +134,42 @@ const BrandCustomerDetail = () => {
       return data || [];
     },
     enabled: !!customerId && !!profile?.brand_id,
+  });
+
+  const { data: trips } = useQuery({
+    queryKey: ["brand-customer-trips", customerId],
+    queryFn: async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data, error } = await supabase
+        .from("customer_trips")
+        .select("id, destination_country, destination_city, start_date, end_date, notes")
+        .eq("customer_id", customerId!)
+        .gte("end_date", today)
+        .order("start_date", { ascending: true });
+      // Defensive fallback for trips with no end_date — try a second query for those.
+      if (error) {
+        // Trip rows with end_date is null get excluded by .gte; fetch them too.
+        return [];
+      }
+      // Also pull start-dated future trips with end_date null.
+      const { data: openEnded } = await supabase
+        .from("customer_trips")
+        .select("id, destination_country, destination_city, start_date, end_date, notes")
+        .eq("customer_id", customerId!)
+        .is("end_date", null)
+        .gte("start_date", today)
+        .order("start_date", { ascending: true });
+      return [...(data ?? []), ...(openEnded ?? [])] as Array<{
+        id: number;
+        destination_country: string;
+        destination_city: string | null;
+        start_date: string;
+        end_date: string | null;
+        notes: string | null;
+      }>;
+    },
+    enabled: !!customerId,
+    staleTime: 60 * 1000,
   });
 
   const { data: crossSell } = useQuery({
@@ -392,6 +428,41 @@ const BrandCustomerDetail = () => {
               </div>
             </div>
           </motion.div>
+
+          {trips && trips.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
+              <div className="glass-card p-6">
+                <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-1">
+                  <Plane className="h-4 w-4 text-primary" /> {t("brandCustomer.travelTitle")}
+                </h3>
+                <p className="text-xs text-muted-foreground mb-3">
+                  {t("brandCustomer.travelSubtitle")}
+                </p>
+                <ul className="space-y-2">
+                  {trips.map((tr) => (
+                    <li key={tr.id} className="rounded-lg border border-border/60 bg-card p-3 flex items-start gap-2.5">
+                      <MapPin className="h-3.5 w-3.5 text-primary mt-0.5 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">
+                          {[tr.destination_city, tr.destination_country].filter(Boolean).join(", ") || tr.destination_country}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          {new Date(tr.start_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                          {tr.end_date && (
+                            <> → {new Date(tr.end_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</>
+                          )}
+                        </p>
+                        {tr.notes && (
+                          <p className="text-[11px] text-muted-foreground/80 mt-1 line-clamp-2">{tr.notes}</p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </motion.div>
+          )}
 
           {crossSell && crossSell.length > 0 && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>

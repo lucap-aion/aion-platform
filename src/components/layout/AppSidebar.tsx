@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Sparkles, Store, Calendar, MessageSquare, Megaphone, Heart } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Sparkles, Store, Calendar, MessageSquare, Megaphone, Heart, Plane, Inbox } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useTenant } from "@/contexts/TenantContext";
@@ -53,8 +53,10 @@ import { toast } from "sonner";
 
 const customerPaths = [
   { path: "/home", icon: Home, labelKey: "nav.home" },
+  { path: "/inbox", icon: Inbox, labelKey: "nav.inbox" },
   { path: "/covers", icon: Shield, labelKey: "nav.myCovers" },
   { path: "/discover", icon: Heart, labelKey: "nav.discover" },
+  { path: "/travel", icon: Plane, labelKey: "nav.travel" },
   { path: "/claims", icon: FileText, labelKey: "nav.myClaims" },
   { path: "/concierge", icon: Sparkles, labelKey: "nav.concierge" },
 ];
