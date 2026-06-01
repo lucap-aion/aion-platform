@@ -99,9 +99,20 @@ const NewClaim = () => {
   const [openClaimWarning, setOpenClaimWarning] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // What the AI filled in most recently — used so "Run again" can selectively
-  // clear values that the customer never touched, without nuking edits.
-  const lastAiFillRef = useRef<{ claimType: string; description: string } | null>(null);
+  // "Did the customer touch this field since the last AI fill?" tracking.
+  // Reset to false when AI prefills, flipped to true the moment the customer
+  // edits the corresponding field. "Run again" clears any field where dirty
+  // is still false — that's strictly more correct than string-comparing
+  // against the prior suggestion (which fails if the customer happens to
+  // type the same words).
+  const aiDirtyRef = useRef({ claimType: false, description: false });
+
+  // Wrapper around setForm for the two AI-managed fields — keeps the dirty
+  // flag in sync with every keystroke.
+  const updateAiField = (key: "claimType" | "description", value: string) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    aiDirtyRef.current[key] = true;
+  };
 
   // AI photo wizard state. The customer can opt out at any time — the form
   // is fully usable without ever running the analyser.
@@ -146,9 +157,9 @@ const NewClaim = () => {
       setAiSuggestion(suggestion);
 
       // Only prefill fields the customer hasn't already touched. Respect
-      // their work — we're assisting, not steamrolling. We also remember
-      // exactly what we filled so "Run again" can roll those values back
-      // (and only those) for the next pass.
+      // their work — we're assisting, not steamrolling. Reset the dirty
+      // flags so a subsequent edit is tracked from this baseline; "Run
+      // again" uses these flags to decide what to roll back.
       const aiType = suggestion.suggested_type ?? "";
       const aiDesc = suggestion.description ?? "";
       setForm((prev) => ({
@@ -156,7 +167,7 @@ const NewClaim = () => {
         claimType: prev.claimType || aiType,
         description: prev.description || aiDesc,
       }));
-      lastAiFillRef.current = { claimType: aiType, description: aiDesc };
+      aiDirtyRef.current = { claimType: false, description: false };
     } catch (e: any) {
       setAiError(e?.message ?? t("newClaim.ai.failed"));
     } finally {
@@ -360,7 +371,7 @@ const NewClaim = () => {
                 </label>
                 <select
                   value={form.claimType}
-                  onChange={(e) => setForm({ ...form, claimType: e.target.value })}
+                  onChange={(e) => updateAiField("claimType", e.target.value)}
                   className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   required
                 >
@@ -421,7 +432,7 @@ const NewClaim = () => {
               maxLength={600}
               rows={5}
               value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              onChange={(e) => updateAiField("description", e.target.value)}
               className="w-full rounded-lg border border-input bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
               required
             />
@@ -527,19 +538,16 @@ const NewClaim = () => {
                       <button
                         type="button"
                         onClick={() => {
-                          // If the form still holds the exact strings AI
-                          // filled, clear them so the next analysis can
-                          // overwrite. If the customer edited them, keep
-                          // their version.
-                          const last = lastAiFillRef.current;
-                          if (last) {
-                            setForm((prev) => ({
-                              ...prev,
-                              claimType: prev.claimType === last.claimType ? "" : prev.claimType,
-                              description: prev.description === last.description ? "" : prev.description,
-                            }));
-                          }
-                          lastAiFillRef.current = null;
+                          // Clear fields the customer hasn't edited since
+                          // the last AI fill — preserves their work,
+                          // releases AI-untouched fields for a fresh pass.
+                          const dirty = aiDirtyRef.current;
+                          setForm((prev) => ({
+                            ...prev,
+                            claimType: dirty.claimType ? prev.claimType : "",
+                            description: dirty.description ? prev.description : "",
+                          }));
+                          aiDirtyRef.current = { claimType: false, description: false };
                           setAiSuggestion(null);
                           setAiError(null);
                         }}
@@ -558,7 +566,7 @@ const NewClaim = () => {
                       </label>
                       <select
                         value={form.claimType}
-                        onChange={(e) => setForm({ ...form, claimType: e.target.value })}
+                        onChange={(e) => updateAiField("claimType", e.target.value)}
                         className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                         required
                       >
@@ -573,7 +581,7 @@ const NewClaim = () => {
                       </label>
                       <textarea
                         value={form.description}
-                        onChange={(e) => setForm({ ...form, description: e.target.value })}
+                        onChange={(e) => updateAiField("description", e.target.value)}
                         maxLength={600}
                         rows={4}
                         className="w-full rounded-lg border border-input bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"

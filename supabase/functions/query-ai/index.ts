@@ -23,6 +23,14 @@ const MAX_TOOL_TURNS = 16;
 // 4000 leaves enough room for a full markdown brief with inline tables.
 const MAX_TOKENS = 4000;
 
+// Per-user rate limit. The check counts ai_query_log rows over the window
+// before invoking Anthropic — defence against rapid-fire abuse from one
+// account. Edge function instances aren't shared so a perfectly-timed
+// burst across instances could slip a few extra past, but the threshold
+// is loose enough that legitimate use won't notice.
+const RATE_LIMIT_WINDOW_SECONDS = 60;
+const RATE_LIMIT_MAX_REQUESTS = 20;
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -931,6 +939,38 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({ error: "question is required" }),
       { status: 400, headers: { "Content-Type": "application/json", ...CORS } },
     );
+  }
+
+  // Per-user rate limit before we pay for an Anthropic call. Falls through
+  // (and lets the request proceed) if the count query errors — we'd rather
+  // serve a real customer than 500 them on a logging glitch.
+  try {
+    const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const sinceIso = new Date(
+      Date.now() - RATE_LIMIT_WINDOW_SECONDS * 1000,
+    ).toISOString();
+    const { count, error: countErr } = await adminClient
+      .from("ai_query_log")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .gte("created_at", sinceIso);
+    if (!countErr && count !== null && count >= RATE_LIMIT_MAX_REQUESTS) {
+      return new Response(
+        JSON.stringify({
+          error: `Too many requests — please wait a moment.`,
+        }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(RATE_LIMIT_WINDOW_SECONDS),
+            ...CORS,
+          },
+        },
+      );
+    }
+  } catch (e) {
+    console.warn("[query-ai rate-limit]", e);
   }
 
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });

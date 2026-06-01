@@ -33,6 +33,7 @@ type VaultSummary = {
   all_count: number;
   protected_value: number | string;
   earliest_start: string | null;
+  open_claims: number;
   categories: string[];
   gallery: Array<{ id: number; status: string | null; picture: string | null; name: string | null }>;
 };
@@ -60,6 +61,7 @@ const CustomerVault = () => {
         all_count: 0,
         protected_value: 0,
         earliest_start: null,
+        open_claims: 0,
         categories: [],
         gallery: [],
       }) as VaultSummary;
@@ -74,6 +76,7 @@ const CustomerVault = () => {
     protectedValue: Number(summary?.protected_value ?? 0),
     categories: summary?.categories ?? [],
     earliestStart: summary?.earliest_start ?? null,
+    openClaims: summary?.open_claims ?? 0,
     gallery: summary?.gallery ?? [],
   };
 
@@ -208,9 +211,22 @@ const CustomerVault = () => {
                 </span>
               </p>
             )}
-            <p className="text-xs text-muted-foreground">
-              {t("vault.memberSince").replace("{date}", memberSince)}
-            </p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+              <span>{t("vault.memberSince").replace("{date}", memberSince)}</span>
+              {stats.openClaims > 0 && (
+                <>
+                  <span aria-hidden>·</span>
+                  <Link
+                    to={`${slugPrefix}/claims`}
+                    className="inline-flex items-center gap-1 font-medium text-amber-700 hover:underline"
+                  >
+                    {stats.openClaims === 1
+                      ? t("vault.openClaimsOne")
+                      : t("vault.openClaimsMany").replace("{n}", String(stats.openClaims))}
+                  </Link>
+                </>
+              )}
+            </div>
           </div>
 
           <Link

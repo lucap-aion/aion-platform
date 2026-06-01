@@ -59,6 +59,11 @@ const translations: Translations = {
     it: "Con AION da {date}",
   },
   "vault.viewAll": { en: "View your collection", it: "Vedi la collezione" },
+  "vault.openClaimsOne": { en: "1 open claim", it: "1 richiesta aperta" },
+  "vault.openClaimsMany": {
+    en: "{n} open claims",
+    it: "{n} richieste aperte",
+  },
   "vault.empty.title": {
     en: "Your Vault is ready",
     it: "La Tua Cassaforte è pronta",
