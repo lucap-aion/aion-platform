@@ -467,21 +467,21 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       return periods.map(k => ({ key: k, pct: tot[k] > 0 ? Math.round(reg[k] / tot[k] * 100) : 0 }));
     }
 
-    // Registration % per month per shop
-    function regPctByMonthShop() {
-      const firstSeenByMo: Record<string, { m: string; sh: string }> = {};
+    // Registration % per period (week/month) per shop
+    function regPctByPeriodShop(periods: string[], getKey: (d: string) => string) {
+      const firstSeen: Record<string, { k: string; sh: string }> = {};
       const sorted = [...policies].sort((a, b) => a.date < b.date ? -1 : 1);
-      sorted.forEach(p => { const cid = p.customerId, m = getMonth(p.date); if (!firstSeenByMo[cid]) firstSeenByMo[cid] = { m, sh: p.shop }; });
+      sorted.forEach(p => { const cid = p.customerId, k = getKey(p.date); if (!firstSeen[cid]) firstSeen[cid] = { k, sh: p.shop }; });
       const regCids = new Set(policies.filter(p => p.regDate).map(p => p.customerId));
       const novByShop: Record<string, Record<string, number>> = {};
       const regNovByShop: Record<string, Record<string, number>> = {};
-      shops.forEach(s => { novByShop[s] = {}; regNovByShop[s] = {}; mos.forEach(m => { novByShop[s][m] = 0; regNovByShop[s][m] = 0; }); });
-      Object.entries(firstSeenByMo).forEach(([cid, { m, sh }]) => {
-        if (!novByShop[sh]?.[m] && novByShop[sh]?.[m] !== 0) return;
-        novByShop[sh][m]++;
-        if (regCids.has(cid)) regNovByShop[sh][m]++;
+      shops.forEach(s => { novByShop[s] = {}; regNovByShop[s] = {}; periods.forEach(k => { novByShop[s][k] = 0; regNovByShop[s][k] = 0; }); });
+      Object.entries(firstSeen).forEach(([cid, { k, sh }]) => {
+        if (!novByShop[sh]?.[k] && novByShop[sh]?.[k] !== 0) return;
+        novByShop[sh][k]++;
+        if (regCids.has(cid)) regNovByShop[sh][k]++;
       });
-      return { mos, shops, novByShop, regNovByShop };
+      return { periods, shops, novByShop, regNovByShop };
     }
 
     // Ticket bands
@@ -543,7 +543,8 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
     // Registration rate denominator: unique customers
     const regRate = uniqueCustomers > 0 ? +((regCustIds.length / uniqueCustomers) * 100).toFixed(1) : 0;
 
-    const regPctMoShop = regPctByMonthShop();
+    const regPctMoShop = regPctByPeriodShop(mos, getMonth);
+    const regPctWkShop = regPctByPeriodShop(wks, getWeek);
 
     // Monthly cohort tallies: each customer is assigned to the month/shop of their first policy.
     // For each cohort we track how many later became profiled / left feedback. Numerators and
@@ -609,6 +610,7 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       regPctWeekly: regPctByPeriod(wks, getWeek),
       regPctMonthly: regPctByPeriod(mos, getMonth),
       regPctMoShop,
+      regPctWkShop,
       ticketsAll: ticketBands(custs),
       ticketsByShop: Object.fromEntries(shops.map(s => [s, ticketBands(shopCusts[s])])),
       regTime: regTimeData(),
@@ -1181,6 +1183,33 @@ function WeeklyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData>
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
+
+      {d.shops.length >= 2 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {d.shops.map((s, si) => {
+            const data = d.regPctWkShop.periods.map(w => ({
+              key: w,
+              pct: (d.regPctWkShop.novByShop[s]?.[w] || 0) > 0
+                ? Math.round((d.regPctWkShop.regNovByShop[s]?.[w] || 0) / d.regPctWkShop.novByShop[s][w] * 100) : 0,
+            }));
+            return (
+              <ChartCard key={s} title={`${t("insights.chart.regPctWeekShop")}${s}${t("insights.chart.regPctMonthShopSuffix")}`}>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={data}>
+                    <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} tickFormatter={fmtPeriodLabel} /><YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={v => `${v}%`} /><Tooltip content={<CTooltip />} />
+                    <Bar dataKey="pct" fill={COLORS[si] || SLATE} radius={[6, 6, 0, 0]} name={`% ${s}`}>
+                      <LabelList dataKey="pct" content={({ x, y, width, height, value }: any) => {
+                        if (!value) return null; const inside = height > 20;
+                        return <text x={x + width / 2} y={inside ? y + height / 2 : y - 6} textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"} fill={inside ? "#fff" : "#333"} fontSize={11} fontWeight={600}>{value}%</text>;
+                      }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1309,7 +1338,7 @@ function MonthlyTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
       {d.shops.length >= 2 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {d.shops.map((s, si) => {
-            const data = d.regPctMoShop.mos.map(m => ({
+            const data = d.regPctMoShop.periods.map(m => ({
               key: m,
               pct: (d.regPctMoShop.novByShop[s]?.[m] || 0) > 0
                 ? Math.round((d.regPctMoShop.regNovByShop[s]?.[m] || 0) / d.regPctMoShop.novByShop[s][m] * 100) : 0,
