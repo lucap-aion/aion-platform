@@ -3,7 +3,13 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { ThemeProvider } from "next-themes";
 import { LanguageProvider } from "./contexts/LanguageContext";
 import App from "./App.tsx";
+import { captureUtm } from "./utils/utm";
 import "./index.css";
+
+// Snapshot UTM params from the entry URL before React/Router mounts, so attribution
+// works on any URL (e.g. `/`, `/all`, `/rc`) and survives the immediate `/` -> `/rc`
+// redirect. Route-independent and timing-independent.
+captureUtm(window.location.search);
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null };
