@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Sparkles, Store, Calendar } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Sparkles, Store } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useTenant } from "@/contexts/TenantContext";
@@ -67,7 +67,6 @@ const brandPaths = [
   { path: "/customers", icon: Users, labelKey: "nav.customers" },
   { path: "/covers", icon: Shield, labelKey: "nav.covers" },
   { path: "/claims", icon: FileText, labelKey: "nav.claims" },
-  { path: "/renewals", icon: Calendar, labelKey: "nav.renewals" },
   { path: "/shops", icon: Store, labelKey: "nav.shops" },
 ];
 

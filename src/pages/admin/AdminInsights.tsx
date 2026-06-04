@@ -849,9 +849,9 @@ export default function AdminInsights({ lockedBrandId, lockedBrandName }: AdminI
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs — brand users (single-brand lock) don't see the Margin/profit tab. */}
       <div className="flex flex-wrap gap-1.5">
-        {TAB_KEYS.map(tk => (
+        {TAB_KEYS.filter(tk => !(isLocked && tk.id === "pr")).map(tk => (
           <button key={tk.id} onClick={() => setTab(tk.id)}
             className={`px-4 py-2 text-sm rounded-lg border transition-all ${tab === tk.id ? "bg-primary text-primary-foreground font-medium border-primary shadow-sm" : "bg-card text-muted-foreground border-border hover:border-primary/30 hover:text-foreground"}`}>
             {t(tk.key)}
