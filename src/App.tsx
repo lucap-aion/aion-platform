@@ -41,6 +41,7 @@ import BrandRenewals from "./pages/brand/BrandRenewals";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminBrands from "./pages/admin/AdminBrands";
 import AdminCustomers from "./pages/admin/AdminCustomers";
+import AdminCustomerDetail from "./pages/admin/AdminCustomerDetail";
 import AdminCovers from "./pages/admin/AdminCovers";
 import AdminClaims from "./pages/admin/AdminClaims";
 import AdminShops from "./pages/admin/AdminShops";
@@ -190,6 +191,7 @@ const App = () => (
               <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/admin/brands" element={<AdminBrands />} />
               <Route path="/admin/customers" element={<AdminCustomers />} />
+              <Route path="/admin/customers/:customerId" element={<AdminCustomerDetail />} />
               <Route path="/admin/covers" element={<AdminCovers />} />
               <Route path="/admin/claims" element={<AdminClaims />} />
               <Route path="/admin/stores" element={<AdminShops />} />
