@@ -78,6 +78,16 @@ const SUGGESTION_KEYS = [
   "aiQuery.suggestion.5",
 ];
 
+// Brand users only see their own brand, so they get brand-scoped suggestions
+// (no cross-brand "by brand" / "per brand" framing).
+const BRAND_SUGGESTION_KEYS = [
+  "aiQuery.suggestion.brand.1",
+  "aiQuery.suggestion.brand.2",
+  "aiQuery.suggestion.brand.3",
+  "aiQuery.suggestion.brand.4",
+  "aiQuery.suggestion.brand.5",
+];
+
 const REPORT_KEYS = [
   "aiQuery.report.monthlyInternal",
   "aiQuery.report.monthlyInternalPrevious",
@@ -731,6 +741,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
             <EmptyState
               onPick={(q, display) => send(q, display)}
               showReports={mode === "admin"}
+              suggestionKeys={mode === "brand" ? BRAND_SUGGESTION_KEYS : SUGGESTION_KEYS}
             />
           ) : (
             <div className="mx-auto flex max-w-4xl flex-col gap-6">
@@ -891,9 +902,11 @@ const ChatRailItem = ({
 const EmptyState = ({
   onPick,
   showReports = true,
+  suggestionKeys = SUGGESTION_KEYS,
 }: {
   onPick: (q: string, display?: string) => void;
   showReports?: boolean;
+  suggestionKeys?: string[];
 }) => {
   const { t } = useLanguage();
   return (
@@ -908,7 +921,7 @@ const EmptyState = ({
 
       <EmptySection
         title={t("aiQuery.section.suggestions")}
-        items={SUGGESTION_KEYS.map((key) => ({ key, label: t(key), icon: Sparkles }))}
+        items={suggestionKeys.map((key) => ({ key, label: t(key), icon: Sparkles }))}
         onPick={onPick}
       />
 

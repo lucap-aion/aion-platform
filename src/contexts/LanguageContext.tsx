@@ -773,6 +773,13 @@ const translations: Translations = {
   "aiQuery.suggestion.3": { en: "Open claims grouped by brand and claim type.", it: "Reclami aperti raggruppati per brand e tipo." },
   "aiQuery.suggestion.4": { en: "Monthly new policies for the last 12 months.", it: "Nuove polizze mensili negli ultimi 12 mesi." },
   "aiQuery.suggestion.5": { en: "Average satisfaction rate per brand from feedback.", it: "Soddisfazione media per brand dai feedback." },
+  // Brand-scoped variants — a brand user only sees their own brand, so the
+  // cross-brand framing ("by brand", "per brand") is dropped.
+  "aiQuery.suggestion.brand.1": { en: "How many customers signed up in the last 30 days?", it: "Quanti clienti si sono registrati negli ultimi 30 giorni?" },
+  "aiQuery.suggestion.brand.2": { en: "Top 10 products by number of active covers.", it: "Top 10 prodotti per numero di coperture attive." },
+  "aiQuery.suggestion.brand.3": { en: "Open claims grouped by claim type.", it: "Reclami aperti raggruppati per tipo." },
+  "aiQuery.suggestion.brand.4": { en: "Monthly new policies for the last 12 months.", it: "Nuove polizze mensili negli ultimi 12 mesi." },
+  "aiQuery.suggestion.brand.5": { en: "Average satisfaction rate from feedback.", it: "Soddisfazione media dai feedback." },
   "aiQuery.section.suggestions": { en: "Suggestions", it: "Suggerimenti" },
   "aiQuery.section.reports": { en: "Reports", it: "Report" },
   "aiQuery.section.playbooks": { en: "Playbooks", it: "Playbook" },
