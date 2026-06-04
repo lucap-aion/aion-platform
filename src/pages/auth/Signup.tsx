@@ -11,6 +11,7 @@ import SmartLogo from "@/components/SmartLogo";
 import AuthPanel from "@/components/AuthPanel";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { siteUrl } from "@/utils/siteUrl";
+import { getStoredUtm } from "@/utils/utm";
 
 const Signup = () => {
   const [searchParams] = useSearchParams();
@@ -74,6 +75,11 @@ const Signup = () => {
       return;
     }
 
+    // Attribution: where this customer came from (RC program page, RC email, website).
+    // Captured from the entry URL on first load; synced to the profile by the
+    // sync_user_metadata_to_profile trigger.
+    const utm = getStoredUtm();
+
     // After email verification, Supabase redirects to /{slug}
     // TenantSlugEntry routes the user to /home or /dashboard based on their role
     const { error } = await supabase.auth.signUp({
@@ -87,6 +93,9 @@ const Signup = () => {
           brand_slug: tenant.slug,
           brand_name: tenant.name,
           brand_logo_url: tenant.logoUrl ?? null,
+          utm_source: utm.utm_source ?? null,
+          utm_medium: utm.utm_medium ?? null,
+          utm_campaign: utm.utm_campaign ?? null,
         },
       },
     });

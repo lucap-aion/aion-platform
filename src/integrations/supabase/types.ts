@@ -728,6 +728,9 @@ export type Database = {
           status: string | null
           updated_at: string | null
           user_id: string | null
+          utm_campaign: string | null
+          utm_medium: string | null
+          utm_source: string | null
           vat: string | null
         }
         Insert: {
@@ -758,6 +761,9 @@ export type Database = {
           status?: string | null
           updated_at?: string | null
           user_id?: string | null
+          utm_campaign?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
           vat?: string | null
         }
         Update: {
@@ -788,6 +794,9 @@ export type Database = {
           status?: string | null
           updated_at?: string | null
           user_id?: string | null
+          utm_campaign?: string | null
+          utm_medium?: string | null
+          utm_source?: string | null
           vat?: string | null
         }
         Relationships: [
