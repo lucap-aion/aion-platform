@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { getStoredUtm } from "@/utils/utm";
 
 const CLARITY_PROJECT_ID = "uybcsprpva";
 const PROD_HOST = "app.aioncover.com";
@@ -59,6 +60,16 @@ export default function Clarity() {
     if (email.endsWith("@aioncover.com")) return;
 
     loadClarity(CLARITY_PROJECT_ID);
+
+    // Tag the session with its traffic source so it can be filtered in Clarity.
+    // Covers every visitor, including those who bounce before signing up.
+    const utm = getStoredUtm();
+    const clarity = (window as any).clarity;
+    if (clarity) {
+      if (utm.utm_source) clarity("set", "utm_source", utm.utm_source);
+      if (utm.utm_medium) clarity("set", "utm_medium", utm.utm_medium);
+      if (utm.utm_campaign) clarity("set", "utm_campaign", utm.utm_campaign);
+    }
   }, [loading, user, profile, adminRecord, noClarityParam]);
 
   return null;
