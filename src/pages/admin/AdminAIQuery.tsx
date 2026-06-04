@@ -363,7 +363,7 @@ export type AIQueryProps = {
 };
 
 const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
-  const { adminRecord, profile } = useAuth();
+  const { adminRecord, profile, isImpersonating } = useAuth();
   const { t, locale } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlChatId = searchParams.get("chat");
@@ -483,6 +483,10 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
   // ── Persistence helpers ────────────────────────────────────────────────────
   const persistChat = useCallback(
     async (msgs: Message[], existingId: string | null, firstUserMsg: string) => {
+      // While an admin is viewing-as a user, don't save chats: the session is the
+      // admin's JWT but the row would be owned by the target (RLS rejects it), and
+      // saving would pollute the target's chat history. The admin sees it live only.
+      if (isImpersonating) return existingId;
       if (!ownerId) {
         console.warn("[ai-chats] no owner record yet — skipping save");
         return existingId;
@@ -527,7 +531,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
       }
       return (data as { id: string }).id;
     },
-    [ownerId, chatsTable, ownerColumn, t],
+    [ownerId, chatsTable, ownerColumn, t, isImpersonating],
   );
 
   // ── New chat / select chat ─────────────────────────────────────────────────
@@ -611,7 +615,13 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
           "Content-Type": "application/json",
           "Accept": "text/event-stream",
         },
-        body: JSON.stringify({ question: text, history: priorHistory, locale }),
+        body: JSON.stringify({
+          question: text,
+          history: priorHistory,
+          locale,
+          // When viewing-as, scope the answer to the target (effective profile).
+          impersonate_profile_id: isImpersonating ? profile?.id : undefined,
+        }),
       });
 
       if (!res.ok || !res.body) {

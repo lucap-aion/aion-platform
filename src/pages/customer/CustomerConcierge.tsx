@@ -250,6 +250,10 @@ const CustomerConcierge = () => {
 
   const persistChat = useCallback(
     async (msgs: Message[], existingId: string | null, firstUserMsg: string) => {
+      // While an admin is viewing-as, don't save chats: the session is the admin's
+      // JWT but the row is owned by the target (RLS rejects it), and saving would
+      // pollute the target's history. The admin sees the conversation live only.
+      if (readImpersonation()) return existingId;
       if (!profile?.id) return existingId;
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return existingId;
