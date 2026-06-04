@@ -110,6 +110,7 @@ Deno.serve(async (req: Request) => {
       .select("payload, generated_at")
       .eq("brand_id", brandId)
       .eq("window_days", windowDays)
+      .eq("locale", locale)
       .maybeSingle();
     if (cached?.generated_at) {
       const ageHours =
@@ -153,7 +154,7 @@ Deno.serve(async (req: Request) => {
       overall_sentiment: "mixed" as const,
       comment_count: 0,
     };
-    await writeCache(brandId, windowDays, payload);
+    await writeCache(brandId, windowDays, locale, payload);
     return jsonOk({ ...payload, cached: false, generated_at: new Date().toISOString() });
   }
 
@@ -200,7 +201,7 @@ Deno.serve(async (req: Request) => {
     return jsonError(`analysis failed: ${message}`, 500);
   }
 
-  await writeCache(brandId, windowDays, payload);
+  await writeCache(brandId, windowDays, locale, payload);
 
   return jsonOk({
     ...(payload as Record<string, unknown>),
@@ -209,14 +210,14 @@ Deno.serve(async (req: Request) => {
   });
 
   // ── helpers
-  async function writeCache(b: number, w: number, p: unknown) {
+  async function writeCache(b: number, w: number, loc: string, p: unknown) {
     try {
       const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
       await admin
         .from("feedback_themes_cache")
         .upsert(
-          { brand_id: b, window_days: w, payload: p, generated_at: new Date().toISOString() },
-          { onConflict: "brand_id,window_days" },
+          { brand_id: b, window_days: w, locale: loc, payload: p, generated_at: new Date().toISOString() },
+          { onConflict: "brand_id,window_days,locale" },
         );
     } catch (e) {
       console.error("[feedback-themes cache write]", e);

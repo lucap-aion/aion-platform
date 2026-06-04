@@ -572,7 +572,7 @@ function AdminTable<T extends Record<string, unknown>>({
   const pageCount = Math.ceil(total / pageSize);
   const from = total === 0 ? 0 : page * pageSize + 1;
   const to = Math.min((page + 1) * pageSize, total);
-  const ACTIONS_W = 100;
+  const ACTIONS_W = 190; // fits up to 5 row-action icons (view-as, invite, view, edit, delete)
   const totalMinWidth =
     visibleColumns.reduce((s, c) => s + (settings.widths[c.key] ?? defaultColWidth(c.key)), 0) +
     (hasRowActions ? ACTIONS_W : 0);
@@ -941,7 +941,7 @@ function AdminTable<T extends Record<string, unknown>>({
                     })}
                     {hasRowActions && (
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5 pl-6 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                           {extraRowAction && extraRowAction(row)}
                           {onView && (
                             <Tooltip>
