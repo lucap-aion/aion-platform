@@ -14,6 +14,58 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_impersonation_log: {
+        Row: {
+          admin_id: string
+          brand_id: number | null
+          ended_at: string | null
+          id: number
+          started_at: string
+          target_profile_id: string
+          target_role: string | null
+        }
+        Insert: {
+          admin_id: string
+          brand_id?: number | null
+          ended_at?: string | null
+          id?: number
+          started_at?: string
+          target_profile_id: string
+          target_role?: string | null
+        }
+        Update: {
+          admin_id?: string
+          brand_id?: number | null
+          ended_at?: string | null
+          id?: number
+          started_at?: string
+          target_profile_id?: string
+          target_role?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "admin_impersonation_log_admin_id_fkey"
+            columns: ["admin_id"]
+            isOneToOne: false
+            referencedRelation: "admins"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "admin_impersonation_log_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "admin_impersonation_log_target_profile_id_fkey"
+            columns: ["target_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       admins: {
         Row: {
           address: string | null
@@ -1062,6 +1114,13 @@ export type Database = {
         }[]
       }
       ai_run_query: { Args: { p_sql: string }; Returns: Json }
+      brand_claim_flags: {
+        Args: { p_brand_id: number }
+        Returns: {
+          claim_id: number
+          flags: string[]
+        }[]
+      }
       brand_customer_aggregates: {
         Args: { p_customer_ids: string[] }
         Returns: {
@@ -1071,6 +1130,32 @@ export type Database = {
           total_value: number
         }[]
       }
+      brand_customer_cross_sell: {
+        Args: { p_customer_id: string }
+        Returns: {
+          catalogue_id: number
+          category: string
+          picture: string
+          product_name: string
+          reason: string
+          sku: string
+        }[]
+      }
+      brand_customer_segments: {
+        Args: { p_brand_id: number }
+        Returns: {
+          covers_live: number
+          customer_id: string
+          is_high_nps_idle: boolean
+          is_incomplete: boolean
+          is_lapsed: boolean
+          is_vip: boolean
+          last_purchase_at: string
+          latest_satisfaction: number
+          ltv: number
+          protected_value: number
+        }[]
+      }
       brand_dashboard_metrics: {
         Args: { p_brand_id: number }
         Returns: {
@@ -1078,6 +1163,26 @@ export type Database = {
           customers: number
           open_claims: number
           protected_value: number
+        }[]
+      }
+      brand_shop_aggregates: {
+        Args: { p_brand_id: number }
+        Returns: {
+          avg_peace_of_mind: number
+          avg_recommendation: number
+          avg_satisfaction: number
+          covers_live: number
+          customers_live: number
+          feedback_count: number
+          fully_profiled: number
+          open_claims: number
+          protected_value: number
+          registered_profiles: number
+          shop_city: string
+          shop_country: string
+          shop_id: number
+          shop_name: string
+          total_profiles: number
         }[]
       }
       check_admin_eligibility: { Args: { p_email: string }; Returns: string }

@@ -399,7 +399,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
       console.error("[ai-chats list]", error);
       return;
     }
-    setChats((data as ChatSummary[] | null) ?? []);
+    setChats((data as unknown as ChatSummary[] | null) ?? []);
   }, [ownerId, chatsTable, ownerColumn]);
 
   useEffect(() => {
@@ -419,7 +419,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
       toast.error(t("aiQuery.error.couldntLoad"));
       return;
     }
-    const row = data as { id: string; messages: unknown };
+    const row = data as unknown as { id: string; messages: unknown };
     setChatId(row.id);
     // Older saved chats may lack the `reports` field on assistant messages;
     // default to an empty array so the new type-shape stays consistent.
@@ -529,7 +529,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
         toast.error(`${t("aiQuery.error.couldntSave")}: ${error?.message ?? t("aiQuery.error.unknown")}`);
         return null;
       }
-      return (data as { id: string }).id;
+      return (data as unknown as { id: string }).id;
     },
     [ownerId, chatsTable, ownerColumn, t, isImpersonating],
   );
