@@ -12,20 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 const CustomerProfile = () => {
   const { toast } = useToast();
-  const { profile: authProfile, refreshProfile, isImpersonating } = useAuth();
-
-  // While viewing-as, the underlying session is the admin's: profile/avatar writes
-  // would distort profilation analytics and a password change would hit the admin's
-  // own account. Block these mutations and tell the admin. (Admins can edit any
-  // profile from the admin console instead.)
-  const blockWhenImpersonating = (): boolean => {
-    if (!isImpersonating) return false;
-    toast({
-      title: "Read-only while viewing-as",
-      description: "Editing this user's profile is disabled during impersonation. Use the admin console to make changes.",
-    });
-    return true;
-  };
+  const { profile: authProfile, refreshProfile } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -77,7 +64,6 @@ const CustomerProfile = () => {
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !authProfile?.id) return;
-    if (blockWhenImpersonating()) return;
     setUploadingAvatar(true);
     const ext = file.name.split(".").pop();
     const path = `${authProfile.id}/avatar.${ext}`;
@@ -102,7 +88,6 @@ const CustomerProfile = () => {
 
   const handleSaveProfile = async () => {
     if (!authProfile?.id) return;
-    if (blockWhenImpersonating()) return;
     setSavingProfile(true);
     const { error } = await supabase
       .from("profiles")
@@ -136,7 +121,6 @@ const CustomerProfile = () => {
   };
 
   const handleSavePassword = async () => {
-    if (blockWhenImpersonating()) return;
     if (!newPassword || newPassword.length < 8) {
       toast({ title: "Password is too short", description: "Use at least 8 characters." });
       return;

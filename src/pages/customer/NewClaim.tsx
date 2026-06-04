@@ -1,57 +1,16 @@
 import { useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Info, Upload, X, FileText, Loader2, Sparkles, Wand2 } from "lucide-react";
+import { ArrowLeft, Info, Upload, X, FileText, Loader2 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLanguage } from "@/contexts/LanguageContext";
 import { useCustomerPolicies } from "@/hooks/use-policies";
 import { supabase } from "@/integrations/supabase/client";
-import { stampImpersonation, isImpersonatingNow } from "@/integrations/supabase/impersonation";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { sendEmail } from "@/utils/sendEmail";
 import SearchableSelect from "@/components/SearchableSelect";
 import { CLAIM_TYPES, COUNTRIES } from "@/utils/countries";
-
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-
-type AiSuggestion = {
-  suggested_type: string | null;
-  confidence: "high" | "medium" | "low" | null;
-  severity: "minor" | "major" | "critical" | null;
-  description: string | null;
-  observations: string[] | null;
-};
-
-// Convert a File to the data:image/...;base64,... form Anthropic accepts.
-// HEIC (iPhone default since iOS 11) needs a client-side step into JPEG
-// first — Anthropic vision rejects HEIC, and Supabase Storage serves it
-// raw so the brand team would get an image they couldn't open either.
-// heic2any is lazy-loaded so non-iPhone users don't pay the bundle.
-const isHeic = (f: File): boolean =>
-  /image\/hei[cf]/i.test(f.type) || /\.hei[cf]$/i.test(f.name);
-
-const convertHeicToJpeg = async (f: File): Promise<File> => {
-  const heic2any = (await import("heic2any")).default;
-  const blob = await heic2any({ blob: f, toType: "image/jpeg", quality: 0.85 });
-  const jpegBlob = Array.isArray(blob) ? blob[0] : blob;
-  return new File([jpegBlob], f.name.replace(/\.hei[cf]$/i, ".jpg"), {
-    type: "image/jpeg",
-    lastModified: Date.now(),
-  });
-};
-
-const fileToDataUrl = async (f: File) => {
-  const normalised = isHeic(f) ? await convertHeicToJpeg(f) : f;
-  return new Promise<string>((resolve, reject) => {
-    const r = new FileReader();
-    r.onerror = () => reject(r.error);
-    r.onload = () => resolve(String(r.result ?? ""));
-    r.readAsDataURL(normalised);
-  });
-};
 
 const getImage = (policy: any) => policy?.catalogues?.picture || "/placeholder.svg";
 const getProduct = (policy: any) => policy?.catalogues?.name || "Unknown Product";
@@ -85,8 +44,6 @@ const NewClaim = () => {
     }
   };
 
-  const { t, locale } = useLanguage();
-
   const [form, setForm] = useState({
     claimType: "",
     incidentDate: new Date().toISOString().split("T")[0],
@@ -100,104 +57,13 @@ const NewClaim = () => {
   const [openClaimWarning, setOpenClaimWarning] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // "Did the customer touch this field since the last AI fill?" tracking.
-  // Reset to false when AI prefills, flipped to true the moment the customer
-  // edits the corresponding field. "Run again" clears any field where dirty
-  // is still false — that's strictly more correct than string-comparing
-  // against the prior suggestion (which fails if the customer happens to
-  // type the same words).
-  const aiDirtyRef = useRef({ claimType: false, description: false });
-
-  // Wrapper around setForm for the two AI-managed fields — keeps the dirty
-  // flag in sync with every keystroke.
-  const updateAiField = (key: "claimType" | "description", value: string) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-    aiDirtyRef.current[key] = true;
-  };
-
-  // AI photo wizard state. The customer can opt out at any time — the form
-  // is fully usable without ever running the analyser.
-  const [aiAnalyzing, setAiAnalyzing] = useState(false);
-  const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
-
-  // Run the photo prefill against the first 1–2 image files. Called manually
-  // from a button so the customer is in control. Falls back gracefully on
-  // any failure — never blocks the form.
-  const runAiAnalysis = async () => {
-    const imageFiles = files.filter((f) => f.type.startsWith("image/")).slice(0, 2);
-    if (imageFiles.length === 0) {
-      setAiError(t("newClaim.ai.needImage"));
-      return;
-    }
-    setAiAnalyzing(true);
-    setAiError(null);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const accessToken = session?.access_token;
-      if (!accessToken) throw new Error("Not signed in");
-
-      const photos = await Promise.all(imageFiles.map(fileToDataUrl));
-      const productHint = selectedPolicy
-        ? `${getProduct(selectedPolicy)} by ${getBrand(selectedPolicy)}`
-        : "";
-
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/claim-photo-prefill`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${accessToken}`,
-          "apikey": SUPABASE_ANON_KEY,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ photos, product_hint: productHint, locale }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
-
-      const suggestion = body as AiSuggestion;
-      setAiSuggestion(suggestion);
-
-      // Only prefill fields the customer hasn't already touched. Respect
-      // their work — we're assisting, not steamrolling. Reset the dirty
-      // flags so a subsequent edit is tracked from this baseline; "Run
-      // again" uses these flags to decide what to roll back.
-      const aiType = suggestion.suggested_type ?? "";
-      const aiDesc = suggestion.description ?? "";
-      setForm((prev) => ({
-        ...prev,
-        claimType: prev.claimType || aiType,
-        description: prev.description || aiDesc,
-      }));
-      aiDirtyRef.current = { claimType: false, description: false };
-    } catch (e: any) {
-      setAiError(e?.message ?? t("newClaim.ai.failed"));
-    } finally {
-      setAiAnalyzing(false);
-    }
-  };
-
-  const addFiles = async (incoming: FileList | null) => {
+  const addFiles = (incoming: FileList | null) => {
     if (!incoming) return;
-    // Normalise HEIC inputs to JPEG before they enter the queue so every
-    // downstream consumer (preview, AI prefill, storage upload) sees a
-    // single, broadly-supported format.
-    const list = Array.from(incoming);
-    const normalised: File[] = [];
-    for (const f of list) {
-      try {
-        normalised.push(isHeic(f) ? await convertHeicToJpeg(f) : f);
-      } catch (err) {
-        console.error("[HEIC convert]", err);
-        toast.error(t("newClaim.heicFailed"));
-      }
-    }
-    setFiles((prev) => {
-      const next = [...prev];
-      for (const f of normalised) {
-        if (!next.find((x) => x.name === f.name && x.size === f.size)) next.push(f);
-      }
-      return next;
+    const next = [...files];
+    Array.from(incoming).forEach((f) => {
+      if (!next.find((x) => x.name === f.name && x.size === f.size)) next.push(f);
     });
+    setFiles(next);
     setFileError(false);
   };
 
@@ -245,7 +111,7 @@ const NewClaim = () => {
       mediaUrls.push(publicUrl);
     }
 
-    const { error } = await supabase.from("claims").insert(stampImpersonation({
+    const { error } = await supabase.from("claims").insert({
       policy_id: selectedPolicy.id,
       type: form.claimType,
       incident_date: form.incidentDate,
@@ -254,7 +120,7 @@ const NewClaim = () => {
       description: form.description,
       status: "open",
       media: mediaUrls,
-    }));
+    });
 
     if (error) {
       toast.error(error.message);
@@ -262,8 +128,7 @@ const NewClaim = () => {
       return;
     }
 
-    // Don't fire the customer-facing notification email when an admin is viewing-as.
-    if (!isImpersonatingNow()) sendEmail("claim_submitted", {
+    sendEmail("claim_submitted", {
       claim: {
         type: form.claimType,
         incident_date: form.incidentDate,
@@ -366,22 +231,20 @@ const NewClaim = () => {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {!aiSuggestion && (
-              <div>
-                <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
-                  Claim Type <Info className="h-3.5 w-3.5 text-muted-foreground" />
-                </label>
-                <select
-                  value={form.claimType}
-                  onChange={(e) => updateAiField("claimType", e.target.value)}
-                  className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                  required
-                >
-                  <option value="">Select Type</option>
-                  {CLAIM_TYPES.map((tp) => <option key={tp} value={tp}>{tp}</option>)}
-                </select>
-              </div>
-            )}
+            <div>
+              <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
+                Claim Type <Info className="h-3.5 w-3.5 text-muted-foreground" />
+              </label>
+              <select
+                value={form.claimType}
+                onChange={(e) => setForm({ ...form, claimType: e.target.value })}
+                className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                required
+              >
+                <option value="">Select Type</option>
+                {CLAIM_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
 
             <div>
               <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
@@ -425,7 +288,7 @@ const NewClaim = () => {
             </div>
           </div>
 
-          <div className={aiSuggestion ? "hidden" : undefined}>
+          <div>
             <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
               Claim Description <Info className="h-3.5 w-3.5 text-muted-foreground" />
             </label>
@@ -434,7 +297,7 @@ const NewClaim = () => {
               maxLength={600}
               rows={5}
               value={form.description}
-              onChange={(e) => updateAiField("description", e.target.value)}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
               className="w-full rounded-lg border border-input bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
               required
             />
@@ -448,7 +311,7 @@ const NewClaim = () => {
               ref={fileInputRef}
               type="file"
               multiple
-              accept="image/*,.heic,.heif,application/pdf"
+              accept="image/*,application/pdf"
               className="hidden"
               onChange={(e) => addFiles(e.target.files)}
             />
@@ -491,127 +354,6 @@ const NewClaim = () => {
                     </div>
                   );
                 })}
-              </div>
-            )}
-
-            {/* AI assist panel — appears once at least one image is attached.
-                Customer can choose to run it or skip; suggestion only
-                prefills fields they haven't filled themselves. */}
-            {files.some((f) => f.type.startsWith("image/")) && (
-              <div className="mt-4 rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
-                {!aiSuggestion ? (
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                        <Sparkles className="h-4 w-4 text-primary" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{t("newClaim.ai.title")}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t("newClaim.ai.subtitle")}</p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void runAiAnalysis()}
-                      disabled={aiAnalyzing}
-                      className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
-                    >
-                      {aiAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                      {aiAnalyzing ? t("newClaim.ai.analyzing") : t("newClaim.ai.analyze")}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                          <Sparkles className="h-4 w-4 text-primary" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">{t("newClaim.ai.resultTitle")}</p>
-                          {aiSuggestion.confidence && (
-                            <p className="text-[11px] text-muted-foreground mt-0.5">
-                              {t("newClaim.ai.confidence")}: <span className="font-medium">{aiSuggestion.confidence}</span>
-                              {aiSuggestion.severity ? <> · {t("newClaim.ai.severity")}: <span className="font-medium">{aiSuggestion.severity}</span></> : null}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // Clear fields the customer hasn't edited since
-                          // the last AI fill — preserves their work,
-                          // releases AI-untouched fields for a fresh pass.
-                          const dirty = aiDirtyRef.current;
-                          setForm((prev) => ({
-                            ...prev,
-                            claimType: dirty.claimType ? prev.claimType : "",
-                            description: dirty.description ? prev.description : "",
-                          }));
-                          aiDirtyRef.current = { claimType: false, description: false };
-                          setAiSuggestion(null);
-                          setAiError(null);
-                        }}
-                        className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
-                      >
-                        {t("newClaim.ai.redo")}
-                      </button>
-                    </div>
-
-                    {/* The claim Type and Description fields live here once AI
-                        has run — direct edit, no duplicate copy in the form
-                        below. Same form state, same validation. */}
-                    <div>
-                      <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
-                        {t("newClaim.ai.suggestedType")}
-                      </label>
-                      <select
-                        value={form.claimType}
-                        onChange={(e) => updateAiField("claimType", e.target.value)}
-                        className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                        required
-                      >
-                        <option value="">Select Type</option>
-                        {CLAIM_TYPES.map((tp) => <option key={tp} value={tp}>{tp}</option>)}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
-                        {t("newClaim.ai.descriptionLabel")}
-                      </label>
-                      <textarea
-                        value={form.description}
-                        onChange={(e) => updateAiField("description", e.target.value)}
-                        maxLength={600}
-                        rows={4}
-                        className="w-full rounded-lg border border-input bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                      />
-                    </div>
-
-                    {aiSuggestion.observations && aiSuggestion.observations.length > 0 && (
-                      <div>
-                        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground mb-1.5">
-                          {t("newClaim.ai.whatAiSaw")}
-                        </p>
-                        <ul className="text-[11px] text-muted-foreground space-y-1 pl-1">
-                          {aiSuggestion.observations.slice(0, 5).map((o, i) => (
-                            <li key={i} className="flex items-start gap-1.5">
-                              <span className="text-primary/60 shrink-0">•</span>
-                              <span>{o}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    <p className="text-[11px] text-muted-foreground/80 italic">{t("newClaim.ai.reviewNote")}</p>
-                  </div>
-                )}
-                {aiError && (
-                  <p className="text-xs text-destructive mt-2">{aiError}</p>
-                )}
               </div>
             )}
           </div>

@@ -4,35 +4,29 @@ import AppSidebar from "./AppSidebar";
 import HeaderControls from "./HeaderControls";
 import { useTenant } from "@/contexts/TenantContext";
 import SmartLogo from "@/components/SmartLogo";
-import ImpersonationBanner from "@/components/ImpersonationBanner";
 
 const AppLayout = () => {
   const tenant = useTenant();
 
   return (
     <SidebarProvider>
-      <div className="h-screen flex w-full bg-background overflow-hidden">
+      <div className="min-h-screen flex w-full bg-background">
         <AppSidebar />
-        <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          {/* Banner + header stick together as one group so the view-as bar stays
-              visible while scrolling without overlapping the header. */}
-          <div className="sticky top-0 z-30">
-            <ImpersonationBanner />
-            <header className="flex h-14 items-center justify-between border-b border-border bg-background/80 backdrop-blur-sm px-4 md:px-6">
-              <div className="flex items-center gap-3">
-                <SidebarTrigger />
-                <div className="md:hidden">
-                  {tenant.logoUrl ? (
-                    <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-7 max-w-[120px] object-contain" />
-                  ) : (
-                    <span className="font-serif text-sm font-semibold text-foreground">{tenant.name}</span>
-                  )}
-                </div>
+        <div className="flex-1 flex flex-col min-w-0">
+          <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/80 backdrop-blur-sm px-4 md:px-6">
+            <div className="flex items-center gap-3">
+              <SidebarTrigger />
+              <div className="md:hidden">
+                {tenant.logoUrl ? (
+                  <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-7 max-w-[120px] object-contain" />
+                ) : (
+                  <span className="font-serif text-sm font-semibold text-foreground">{tenant.name}</span>
+                )}
               </div>
-              <HeaderControls />
-            </header>
-          </div>
-          <main className="flex-1 overflow-y-auto min-h-0">
+            </div>
+            <HeaderControls />
+          </header>
+          <main className="flex-1">
             <Outlet />
           </main>
         </div>

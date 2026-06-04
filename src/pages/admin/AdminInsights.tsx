@@ -762,7 +762,7 @@ export default function AdminInsights({ lockedBrandId, lockedBrandName }: AdminI
       }
 
       // Fetch feedback (typically small, but paginate anyway)
-      const fbQ = supabase.from("feedback").select("user_id, satisfaction_rate, peace_of_mind_rate, recommendation_rate").in("brand_id", brandFilterIds).is("impersonated_by", null);
+      const fbQ = supabase.from("feedback").select("user_id, satisfaction_rate, peace_of_mind_rate, recommendation_rate").in("brand_id", brandFilterIds);
 
       const [polData, profData, { data: fbData, error: fbErr }] = await Promise.all([
         fetchAllPolicies(), fetchAllProfiles(), fbQ,

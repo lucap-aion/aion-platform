@@ -342,7 +342,6 @@ export type Database = {
           created_at: string
           description: string | null
           id: number
-          impersonated_by: string | null
           incident_city: string | null
           incident_country: string | null
           incident_date: string | null
@@ -358,7 +357,6 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: number
-          impersonated_by?: string | null
           incident_city?: string | null
           incident_country?: string | null
           incident_date?: string | null
@@ -374,7 +372,6 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: number
-          impersonated_by?: string | null
           incident_city?: string | null
           incident_country?: string | null
           incident_date?: string | null
@@ -489,7 +486,6 @@ export type Database = {
           comment: string | null
           created_at: string
           id: number
-          impersonated_by: string | null
           peace_of_mind_rate: number | null
           recommendation_rate: number | null
           satisfaction_rate: number | null
@@ -500,7 +496,6 @@ export type Database = {
           comment?: string | null
           created_at?: string
           id?: number
-          impersonated_by?: string | null
           peace_of_mind_rate?: number | null
           recommendation_rate?: number | null
           satisfaction_rate?: number | null
@@ -511,7 +506,6 @@ export type Database = {
           comment?: string | null
           created_at?: string
           id?: number
-          impersonated_by?: string | null
           peace_of_mind_rate?: number | null
           recommendation_rate?: number | null
           satisfaction_rate?: number | null

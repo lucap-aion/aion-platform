@@ -1,36 +1,12 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin, Sparkles, Wand2, Copy, X, Loader2, Send } from "lucide-react";
+import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin, Sparkles } from "lucide-react";
 import { format } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTenant } from "@/contexts/TenantContext";
-import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
-
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-
-const flattenFaq = (source: unknown): string => {
-  if (!Array.isArray(source)) return "";
-  return (source as any[])
-    .map((item) => {
-      const q = (item?.title ?? item?.question ?? "").toString().trim();
-      const a = item?.content?.blocks
-        ? (item.content.blocks as any[]).filter((b: any) => b?.text).map((b: any) => String(b.text)).join(" ").trim()
-        : (item?.answer ?? "").toString().trim();
-      if (!q && !a) return "";
-      return `Q: ${q}\nA: ${a}`;
-    })
-    .filter(Boolean)
-    .join("\n\n");
-};
-
-type DraftIntent = "cross_sell" | "renewal_nudge" | "win_back" | "check_in";
-type Draft = { subject: string; body: string; suggested_followup_days?: number };
 
 const statusColors: Record<string, string> = {
   live: "bg-emerald-50 text-emerald-700",
@@ -53,55 +29,7 @@ const BrandCustomerDetail = () => {
   const { customerId } = useParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const tenant = useTenant();
-  const { t, locale } = useLanguage();
   const slugPrefix = useAuthSlug();
-  const [draftOpen, setDraftOpen] = useState(false);
-  const [draftIntent, setDraftIntent] = useState<DraftIntent>("cross_sell");
-  const [draftLoading, setDraftLoading] = useState(false);
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [draftError, setDraftError] = useState<string | null>(null);
-
-  const generateDraft = async (intent: DraftIntent) => {
-    if (!customerId) return;
-    setDraftLoading(true);
-    setDraftError(null);
-    setDraft(null);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) throw new Error("Sign in required");
-      const brandFaq = flattenFaq(locale === "it" ? tenant.faqIt : tenant.faqEn);
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/customer-outreach-draft`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "apikey": SUPABASE_ANON_KEY,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          customer_id: customerId,
-          intent,
-          locale,
-          brand_faq: brandFaq,
-        }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
-      setDraft(body as Draft);
-    } catch (e: any) {
-      setDraftError(e?.message ?? "Draft failed");
-    } finally {
-      setDraftLoading(false);
-    }
-  };
-
-  const openDraftModal = () => {
-    setDraftOpen(true);
-    setDraft(null);
-    setDraftError(null);
-    setDraftIntent("cross_sell");
-  };
 
   const { data: customer, isLoading } = useQuery({
     queryKey: ["brand-customer-detail", customerId],
@@ -226,28 +154,18 @@ const BrandCustomerDetail = () => {
         <Link to={`${slugPrefix}/customers`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4">
           <ArrowLeft className="h-4 w-4" /> Back to Customers
         </Link>
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-lg font-semibold text-primary shrink-0 overflow-hidden">
-              {customer.avatar
-                ? <img src={customer.avatar} alt="" className="h-full w-full object-cover" />
-                : initials}
-            </div>
-            <div>
-              <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">{fullName}</h1>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                Customer since {customer.created_at ? format(new Date(customer.created_at), "MMMM yyyy") : "—"}
-              </p>
-            </div>
+        <div className="flex items-center gap-4">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-lg font-semibold text-primary shrink-0 overflow-hidden">
+            {customer.avatar
+              ? <img src={customer.avatar} alt="" className="h-full w-full object-cover" />
+              : initials}
           </div>
-          <button
-            type="button"
-            onClick={openDraftModal}
-            className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            <Wand2 className="h-4 w-4" />
-            {t("brandCustomer.draftOutreach")}
-          </button>
+          <div>
+            <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">{fullName}</h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Customer since {customer.created_at ? format(new Date(customer.created_at), "MMMM yyyy") : "—"}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -435,138 +353,6 @@ const BrandCustomerDetail = () => {
           )}
         </div>
       </div>
-
-      {/* Draft outreach modal */}
-      {draftOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setDraftOpen(false)}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.97 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="glass-card w-full max-w-xl max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border/50">
-              <div className="flex items-center gap-2">
-                <Wand2 className="h-5 w-5 text-primary" />
-                <h2 className="font-serif text-lg font-semibold text-foreground">
-                  {t("brandCustomer.draftOutreach")}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setDraftOpen(false)}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="px-6 py-5 space-y-5">
-              {/* Intent picker */}
-              <div>
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">
-                  {t("brandCustomer.intent")}
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(["cross_sell", "renewal_nudge", "win_back", "check_in"] as DraftIntent[]).map((it) => (
-                    <button
-                      key={it}
-                      type="button"
-                      onClick={() => setDraftIntent(it)}
-                      className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
-                        draftIntent === it
-                          ? "border-primary bg-primary/5 text-foreground"
-                          : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                      }`}
-                    >
-                      <p className="font-medium">{t(`brandCustomer.intent.${it}`)}</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">{t(`brandCustomer.intent.${it}.sub`)}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => void generateDraft(draftIntent)}
-                disabled={draftLoading}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-foreground px-5 py-2.5 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50"
-              >
-                {draftLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                {draftLoading
-                  ? t("brandCustomer.drafting")
-                  : draft
-                    ? t("brandCustomer.regenerate")
-                    : t("brandCustomer.generate")}
-              </button>
-
-              {draftError && (
-                <p className="text-xs text-destructive">{draftError}</p>
-              )}
-
-              {draft && (
-                <div className="space-y-3 rounded-xl border border-border bg-card/60 p-4">
-                  <div>
-                    <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 block">
-                      {t("brandCustomer.subject")}
-                    </label>
-                    <input
-                      type="text"
-                      value={draft.subject}
-                      onChange={(e) => setDraft({ ...draft, subject: e.target.value })}
-                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 block">
-                      {t("brandCustomer.body")}
-                    </label>
-                    <textarea
-                      value={draft.body}
-                      onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-                      rows={12}
-                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-y"
-                    />
-                  </div>
-                  {draft.suggested_followup_days != null && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {t("brandCustomer.followup").replace("{n}", String(draft.suggested_followup_days))}
-                    </p>
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/40">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`);
-                          toast.success(t("brandCustomer.copied"));
-                        } catch {
-                          toast.error(t("brandCustomer.copyFailed"));
-                        }
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
-                    >
-                      <Copy className="h-3.5 w-3.5" /> {t("brandCustomer.copy")}
-                    </button>
-                    {customer.email && (
-                      <a
-                        href={`mailto:${encodeURIComponent(customer.email)}?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body)}`}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                      >
-                        <Send className="h-3.5 w-3.5" /> {t("brandCustomer.openInMail")}
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        </div>
-      )}
     </div>
   );
 };
