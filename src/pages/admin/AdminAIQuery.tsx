@@ -670,7 +670,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0 overflow-hidden">
       {/* Left rail */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card/40 md:flex">
         <div className="border-b border-border p-3">
@@ -706,7 +706,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
       </aside>
 
       {/* Main chat area */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 min-h-0 flex-1 flex-col">
         <div className="border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
@@ -721,7 +721,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
           </div>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-6">
           {chatLoading ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

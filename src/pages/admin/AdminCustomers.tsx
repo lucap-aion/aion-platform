@@ -34,7 +34,7 @@ import { SearchableSelect } from "./_components/SearchableSelect";
 import { fmtDate } from "./_components/fmtDate";
 import { sendEmail } from "@/utils/sendEmail";
 import { siteUrl } from "@/utils/siteUrl";
-import { WandSparkles, Mail, MailCheck, Loader2, Eye } from "lucide-react";
+import { WandSparkles, Mail, MailCheck, Loader2, Eye, VenetianMask } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth, isBrandRole } from "@/contexts/AuthContext";
@@ -421,11 +421,10 @@ const AdminCustomers = () => {
         onFilterChange={setFilter}
         extraRowAction={(row) => {
           const r = row as unknown as Customer;
-          if (r.status !== "pending") return null;
           const invitePending = pendingAction === `${r.id}:invite`;
           const confirmPending = pendingAction === `${r.id}:confirm`;
           const hasRegistered = !!r.registered_at;
-          return hasRegistered ? (
+          const inviteAction = r.status !== "pending" ? null : hasRegistered ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -451,6 +450,23 @@ const AdminCustomers = () => {
               </TooltipTrigger>
               <TooltipContent>Resend invite email</TooltipContent>
             </Tooltip>
+          );
+          return (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => handleImpersonate(r)}
+                    disabled={impersonating}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {impersonating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <VenetianMask className="h-3.5 w-3.5" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>View as</TooltipContent>
+              </Tooltip>
+              {inviteAction}
+            </>
           );
         }}
         columns={[
