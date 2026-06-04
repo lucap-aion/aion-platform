@@ -301,6 +301,7 @@ const translations: Translations = {
   "insights.chart.clientsMonth": { en: "Clients per month — new vs returning", it: "Clienti per mese — nuovi vs che tornano" },
   "insights.chart.clientsMonthShop": { en: "Clients per month —", it: "Clienti per mese —" },
   "insights.chart.regPctMonthly": { en: "New registered clients per month (% of new clients)", it: "Nuovi clienti registrati per mese (% su nuovi clienti del mese)" },
+  "insights.chart.regPctWeekShop": { en: "Registered per week — ", it: "Registrati per settimana — " },
   "insights.chart.regPctMonthShop": { en: "Registered per month — ", it: "Registrati per mese — " },
   "insights.chart.regPctMonthShopSuffix": { en: " (%)", it: " (%)" },
   "insights.chart.funnel": { en: "Client engagement funnel", it: "Funnel coinvolgimento clienti" },
