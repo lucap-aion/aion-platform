@@ -9,6 +9,7 @@ import { format } from "date-fns";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { stampImpersonation } from "@/integrations/supabase/impersonation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenant } from "@/contexts/TenantContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -64,10 +65,10 @@ const CustomerCoverDetail = () => {
     setCreatingToken(true);
     const { error } = await supabase
       .from("cover_share_tokens")
-      .insert({
+      .insert(stampImpersonation({
         cover_id: Number(coverId),
         created_by: profile.id,
-      });
+      }));
     setCreatingToken(false);
     if (error) {
       toast.error(error.message);

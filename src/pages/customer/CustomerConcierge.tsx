@@ -19,6 +19,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useTenant } from "@/contexts/TenantContext";
 import { supabase } from "@/integrations/supabase/client";
+import { stampImpersonation, readImpersonation } from "@/integrations/supabase/impersonation";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -272,12 +273,12 @@ const CustomerConcierge = () => {
 
       const { data, error } = await supabase
         .from("ai_chats_brand")
-        .insert({
+        .insert(stampImpersonation({
           profile_id: profile.id,
           user_id: user.id,
           title: titleFromQuestion(firstUserMsg),
           messages: serialised as any,
-        })
+        }))
         .select("id")
         .single();
       if (error || !data) {
@@ -353,6 +354,10 @@ const CustomerConcierge = () => {
           history,
           locale,
           brand_faq: brandFaq,
+          // When an admin is viewing-as, tell query-ai to scope to the target user
+          // (the bearer is the admin's; the edge fn only trusts this from admins and
+          // re-derives the brand from the target profile server-side).
+          impersonate_profile_id: readImpersonation()?.profile.id,
         }),
       });
       if (!res.ok || !res.body) {

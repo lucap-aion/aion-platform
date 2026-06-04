@@ -9,6 +9,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { supabase } from "@/integrations/supabase/client";
+import { stampImpersonation, isImpersonatingNow } from "@/integrations/supabase/impersonation";
 import { toast } from "sonner";
 import { sendEmail } from "@/utils/sendEmail";
 import CustomerVault from "@/components/customer/CustomerVault";
@@ -150,14 +151,14 @@ const CustomerDashboard = () => {
     }
 
     setIsSubmittingFeedback(true);
-    const { error } = await supabase.from("feedback").insert({
+    const { error } = await supabase.from("feedback").insert(stampImpersonation({
       brand_id: profile.brand_id,
       user_id: profile.id,
       comment: comment.trim() || null,
       satisfaction_rate: satisfactionRate || null,
       peace_of_mind_rate: peaceOfMindRate || null,
       recommendation_rate: recommendationRate || null,
-    });
+    }));
     setIsSubmittingFeedback(false);
 
     if (error) {
@@ -165,7 +166,8 @@ const CustomerDashboard = () => {
       return;
     }
 
-    sendEmail("feedback_submitted", {
+    // Don't fire the customer-facing notification email when an admin is viewing-as.
+    if (!isImpersonatingNow()) sendEmail("feedback_submitted", {
       feedback: {
         customer: {
           first_name: profile.first_name ?? null,

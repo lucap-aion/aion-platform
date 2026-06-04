@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useCustomerPolicies } from "@/hooks/use-policies";
 import { supabase } from "@/integrations/supabase/client";
+import { stampImpersonation, isImpersonatingNow } from "@/integrations/supabase/impersonation";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import { sendEmail } from "@/utils/sendEmail";
 import SearchableSelect from "@/components/SearchableSelect";
@@ -244,7 +245,7 @@ const NewClaim = () => {
       mediaUrls.push(publicUrl);
     }
 
-    const { error } = await supabase.from("claims").insert({
+    const { error } = await supabase.from("claims").insert(stampImpersonation({
       policy_id: selectedPolicy.id,
       type: form.claimType,
       incident_date: form.incidentDate,
@@ -253,7 +254,7 @@ const NewClaim = () => {
       description: form.description,
       status: "open",
       media: mediaUrls,
-    });
+    }));
 
     if (error) {
       toast.error(error.message);
@@ -261,7 +262,8 @@ const NewClaim = () => {
       return;
     }
 
-    sendEmail("claim_submitted", {
+    // Don't fire the customer-facing notification email when an admin is viewing-as.
+    if (!isImpersonatingNow()) sendEmail("claim_submitted", {
       claim: {
         type: form.claimType,
         incident_date: form.incidentDate,

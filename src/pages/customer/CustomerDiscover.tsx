@@ -12,6 +12,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { stampImpersonation } from "@/integrations/supabase/impersonation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTenant } from "@/contexts/TenantContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -81,7 +82,7 @@ const CustomerDiscover = () => {
     mutationFn: async (catalogueId: number) => {
       const { error } = await supabase
         .from("wishlist_items")
-        .insert({ customer_id: profile!.id, catalogue_id: catalogueId });
+        .insert(stampImpersonation({ customer_id: profile!.id, catalogue_id: catalogueId }));
       if (error) throw error;
     },
     onMutate: async (catalogueId) => {

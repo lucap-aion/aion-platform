@@ -53,7 +53,8 @@ const BrandWishlist = () => {
           catalogue_id,
           catalogues!inner ( id, name, picture, category, collection, sku, brand_id )
         `)
-        .eq("catalogues.brand_id", profile!.brand_id);
+        .eq("catalogues.brand_id", profile!.brand_id)
+        .is("impersonated_by", null);
       if (error) throw error;
       const m = new Map<number, WishlistDemand>();
       for (const row of (data ?? []) as any[]) {
@@ -82,7 +83,8 @@ const BrandWishlist = () => {
           created_at,
           profiles!wishlist_items_customer_id_fkey ( id, first_name, last_name, email )
         `)
-        .eq("catalogue_id", selectedId);
+        .eq("catalogue_id", selectedId)
+        .is("impersonated_by", null);
       if (error) throw error;
       return (data ?? []).map((r: any) => ({
         id: r.profiles?.id,

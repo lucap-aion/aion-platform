@@ -137,6 +137,7 @@ Deno.serve(async (req: Request) => {
     .eq("brand_id", brandId)
     .gte("created_at", sinceIso)
     .not("comment", "is", null)
+    .is("impersonated_by", null)
     .order("created_at", { ascending: false })
     .limit(MAX_COMMENTS);
 

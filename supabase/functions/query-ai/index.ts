@@ -864,6 +864,7 @@ Deno.serve(async (req: Request) => {
   let brandName: string | null = null;
   let customerProfileId: string | null = null;
   let customerFirstName: string | null = null;
+  let impersonatedProfileId: string | null = null;
   let mode: "admin" | "brand" | "customer" = "admin";
   let question = "";
   let lastSql: string | null = null;
@@ -941,6 +942,33 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  // Admin "view-as": a verified admin caller may scope this run to a target user
+  // so the concierge answers exactly as that customer/brand user would see it.
+  // Honoured ONLY for admin callers — the params are ignored for anyone else, so
+  // a customer cannot scope to another customer. (An admin already has full DB
+  // access in admin mode, so this is a fidelity feature, not an escalation.)
+  if (adminRow && body.impersonate_profile_id) {
+    const { data: target } = await userClient
+      .from("profiles")
+      .select("id, first_name, brand_id, role, brands(name)")
+      .eq("id", String(body.impersonate_profile_id))
+      .maybeSingle();
+    if (target && target.brand_id) {
+      impersonatedProfileId = target.id as string;
+      brandId = target.brand_id as number;
+      const rel = (target as any).brands;
+      brandName = (Array.isArray(rel) ? rel[0]?.name : rel?.name) ?? null;
+      const role = (target.role ?? "customer") as string;
+      if (role === "brand" || role === "brand_admin" || role === "brand_user") {
+        mode = "brand";
+      } else {
+        mode = "customer";
+        customerProfileId = target.id as string;
+        customerFirstName = (target.first_name as string | null) ?? null;
+      }
+    }
+  }
+
   // Per-user rate limit before we pay for an Anthropic call. Falls through
   // (and lets the request proceed) if the count query errors — we'd rather
   // serve a real customer than 500 them on a logging glitch.
@@ -1004,7 +1032,11 @@ Deno.serve(async (req: Request) => {
         const brandPreamble = mode === "brand"
           ? `\n\n# Brand scope — HARD RULE\nYou are working for ${
             brandName ? `the brand "${brandName}" (brand_id = ${brandId})` : `brand_id = ${brandId}`
-          }. EVERY SQL query you generate MUST filter to this brand:\n- On policies, profiles, claims, feedback, support_messages, catalogues, shops, reports, external_requests, manufacturing_costs, returns: add WHERE brand_id = ${brandId} (or, for claims/returns which lack the column directly, join through policies and filter the policies side).\n- NEVER reference the brands table for any brand other than id = ${brandId}.\n- The user can only see their own brand. Cross-brand comparisons, "top brands by X" rankings, or "all brands" aggregates are off-limits — if the user asks for one, answer with their brand's value only and explain you can't compare to other brands.\n- Ignore these tables in this mode: admins, ai_chats, ai_query_log, brand_leads. They are out of scope.\n- The report-generation tools are admin-only and not available to you. If the user asks for a Chubb file or the monthly internal report, explain it's only available to AION admins.`
+          }. EVERY SQL query you generate MUST filter to this brand:\n- On policies, profiles, claims, feedback, support_messages, catalogues, shops, reports, external_requests, manufacturing_costs, returns: add WHERE brand_id = ${brandId} (or, for claims/returns which lack the column directly, join through policies and filter the policies side).\n- NEVER reference the brands table for any brand other than id = ${brandId}.\n- The user can only see their own brand. Cross-brand comparisons, "top brands by X" rankings, or "all brands" aggregates are off-limits — if the user asks for one, answer with their brand's value only and explain you can't compare to other brands.\n- Ignore these tables in this mode: admins, ai_chats, ai_query_log, brand_leads. They are out of scope.\n- The report-generation tools are admin-only and not available to you. If the user asks for a Chubb file or the monthly internal report, explain it's only available to AION admins.${
+            impersonatedProfileId
+              ? `\n- CRITICAL (admin view-as): server-side RLS is NOT filtering in this session, so the WHERE brand_id = ${brandId} rule above is the ONLY barrier. Apply it to EVERY query without exception and never return another brand's rows.`
+              : ""
+          }`
           : "";
 
         // Customer mode replaces the heavy schema/playbook system text with a
@@ -1019,6 +1051,7 @@ Deno.serve(async (req: Request) => {
               customerProfileId,
               customerFirstName,
               brandFaq: typeof body.brand_faq === "string" ? body.brand_faq : "",
+              explicitCustomerFilter: !!impersonatedProfileId,
             })
           : "";
 
@@ -1057,7 +1090,10 @@ Deno.serve(async (req: Request) => {
           ? TOOLS
           : TOOLS.filter((t) => t.name === "run_sql" || t.name === "render_chart");
 
-        const sqlRpc = mode === "admin"
+        // Impersonation runs as the admin's JWT, so ai_run_query_user (SECURITY
+        // INVOKER) would see the admin and NOT scope to the target. Use the
+        // DEFINER rpc and rely on the explicit-filter preamble below for scoping.
+        const sqlRpc = (mode === "admin" || impersonatedProfileId)
           ? "ai_run_query"
           : "ai_run_query_user";
 
@@ -1382,6 +1418,7 @@ Deno.serve(async (req: Request) => {
             row_count: lastRowCount,
             duration_ms: Date.now() - startedAt,
             error: runtimeError,
+            impersonated_profile_id: impersonatedProfileId,
           });
         } catch { /* ignore */ }
         controller.close();
@@ -1410,6 +1447,7 @@ function buildCustomerPreamble(opts: {
   customerProfileId: string | null;
   customerFirstName: string | null;
   brandFaq: string;
+  explicitCustomerFilter?: boolean;
 }): string {
   const brand = opts.brandName ?? "your brand";
   const greetingName = opts.customerFirstName ? ` (${opts.customerFirstName})` : "";
@@ -1417,7 +1455,13 @@ function buildCustomerPreamble(opts: {
     ? `\n\n# Brand FAQ — authoritative knowledge\nUse this when answering questions about coverage, eligibility, claims process, returns, or service. Quote it in your own voice; never invent rules that aren't here.\n\n${opts.brandFaq.trim()}`
     : "\n\n# Brand FAQ\n(No FAQ provided — when the customer asks a process question you don't know, suggest they contact the boutique.)";
 
-  return `
+  // Admin view-as runs under the admin JWT, so server-side RLS does NOT auto-scope
+  // to this customer. The model MUST filter every query explicitly instead.
+  const scopeBlock = opts.explicitCustomerFilter && opts.customerProfileId
+    ? `\n\n# SCOPE — HARD RULE (admin view-as session)\nRLS is NOT auto-scoping in this session. You MUST restrict EVERY query to this one customer (profile id '${opts.customerProfileId}'):\n- profiles: WHERE id = '${opts.customerProfileId}'\n- policies: WHERE customer_id = '${opts.customerProfileId}'\n- claims: WHERE policy_id IN (SELECT id FROM policies WHERE customer_id = '${opts.customerProfileId}')\n- NEVER return another customer's rows under any circumstances.`
+    : "";
+
+  return scopeBlock + `
 You are the personal concierge for a ${brand} customer${greetingName}. The
 customer can ask you anything about their covers, claims, or how the
 ${brand} Prestige Service works. Be warm, concise, and use second-person
@@ -1425,8 +1469,9 @@ ${brand} Prestige Service works. Be warm, concise, and use second-person
 "the user".
 
 # Hard rules
-- All your SQL queries automatically return ONLY this customer's own data
-  (RLS is enforced server-side). You don't need to filter by customer_id.
+${opts.explicitCustomerFilter
+  ? "- Follow the SCOPE hard rule above: filter EVERY query to this customer explicitly."
+  : "- All your SQL queries automatically return ONLY this customer's own data\n  (RLS is enforced server-side). You don't need to filter by customer_id."}
 - Use the run_sql tool when the answer needs the customer's actual data
   (when does my cover expire, what have I claimed, how many pieces do I
   own, total protected value). Brand process questions go to the FAQ.
