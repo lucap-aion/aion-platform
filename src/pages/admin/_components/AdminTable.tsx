@@ -940,8 +940,8 @@ function AdminTable<T extends Record<string, unknown>>({
                       );
                     })}
                     {hasRowActions && (
-                      <td className="px-3 py-3">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1.5 pl-6 opacity-0 group-hover:opacity-100 transition-opacity">
                           {extraRowAction && extraRowAction(row)}
                           {onView && (
                             <Tooltip>

@@ -35,7 +35,7 @@ function loadClarity(projectId: string) {
 
 export default function Clarity() {
   const [searchParams] = useSearchParams();
-  const { user, profile, adminRecord, loading } = useAuth();
+  const { user, adminRecord, loading, isImpersonating } = useAuth();
 
   const noClarityParam = searchParams.get(COOKIE_NAME);
 
@@ -51,12 +51,17 @@ export default function Clarity() {
   useEffect(() => {
     if (loading) return;
 
+    // Never track admin "view-as" sessions — keep impersonation out of analytics.
+    if (isImpersonating) return;
+
     const isProd = window.location.hostname === PROD_HOST;
     if (!isProd) return;
 
     if (noClarityParam === "1" || hasNoClarityCookie()) return;
 
-    const email = (user?.email ?? profile?.email ?? adminRecord?.email ?? "").toLowerCase();
+    // Resolve from the real identity only (during impersonation `profile` is the
+    // target's, which must not drive tracking — handled by the bail above too).
+    const email = (user?.email ?? adminRecord?.email ?? "").toLowerCase();
     if (email.endsWith("@aioncover.com")) return;
 
     loadClarity(CLARITY_PROJECT_ID);
@@ -70,7 +75,7 @@ export default function Clarity() {
       if (utm.utm_medium) clarity("set", "utm_medium", utm.utm_medium);
       if (utm.utm_campaign) clarity("set", "utm_campaign", utm.utm_campaign);
     }
-  }, [loading, user, profile, adminRecord, noClarityParam]);
+  }, [loading, user, adminRecord, noClarityParam, isImpersonating]);
 
   return null;
 }
