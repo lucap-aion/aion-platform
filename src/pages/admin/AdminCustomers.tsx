@@ -34,9 +34,11 @@ import { SearchableSelect } from "./_components/SearchableSelect";
 import { fmtDate } from "./_components/fmtDate";
 import { sendEmail } from "@/utils/sendEmail";
 import { siteUrl } from "@/utils/siteUrl";
-import { WandSparkles, Mail, MailCheck, Loader2 } from "lucide-react";
+import { WandSparkles, Mail, MailCheck, Loader2, Eye, VenetianMask } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAuth, isBrandRole } from "@/contexts/AuthContext";
+import type { ImpersonatedProfile } from "@/integrations/supabase/impersonation";
 
 interface Customer {
   id: string;
@@ -125,9 +127,32 @@ const YesNoCell = ({ yes }: { yes: boolean }) => (
   </span>
 );
 
+// Map an admin-console customer row to the effective profile AuthContext consumes.
+const toImpersonated = (r: Partial<Customer>): ImpersonatedProfile => ({
+  id: String(r.id),
+  user_id: null,
+  brand_id: r.brand_id ?? 0,
+  first_name: r.first_name ?? null,
+  last_name: r.last_name ?? null,
+  email: r.email ?? "",
+  role: r.role ?? "customer",
+  avatar: r.avatar ?? null,
+  city: r.city ?? null,
+  country: r.country ?? null,
+  postcode: r.postcode ?? null,
+  phone_number: r.phone_number ?? null,
+  address: r.address ?? null,
+  province: r.province ?? null,
+  nationality: r.nationality ?? null,
+  date_of_birth: r.date_of_birth ?? null,
+  is_master: null,
+});
+
 const AdminCustomers = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { startImpersonation } = useAuth();
+  const [impersonating, setImpersonating] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [total, setTotal] = useState(0);
@@ -346,6 +371,26 @@ const AdminCustomers = () => {
     return rows as Record<string, unknown>[];
   };
 
+  // View-as: enter the customer/brand portal rendered as this user.
+  const handleImpersonate = async (r: Partial<Customer>) => {
+    if (!r.id) return;
+    if (!r.brand_id) {
+      toast({ title: "No brand assigned", description: "Cannot view-as a user without a brand portal.", variant: "destructive" });
+      return;
+    }
+    setImpersonating(true);
+    const { data: brandData } = await supabase.from("brands").select("slug").eq("id", r.brand_id).single();
+    const slug = brandData?.slug ?? null;
+    if (!slug) {
+      setImpersonating(false);
+      toast({ title: "Brand has no portal", description: "This brand has no slug to route to.", variant: "destructive" });
+      return;
+    }
+    await startImpersonation(toImpersonated(r), slug);
+    sessionStorage.setItem("aion_tenant_slug", slug);
+    navigate(isBrandRole(r.role) ? `/${slug}/dashboard` : `/${slug}/home`);
+  };
+
   const set = (k: keyof Customer, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
   const ro = mode === "view";
   const drawerTitle = mode === "add" ? "New Customer" : mode === "edit" ? "Edit Customer" : "View Customer";
@@ -376,11 +421,10 @@ const AdminCustomers = () => {
         onFilterChange={setFilter}
         extraRowAction={(row) => {
           const r = row as unknown as Customer;
-          if (r.status !== "pending") return null;
           const invitePending = pendingAction === `${r.id}:invite`;
           const confirmPending = pendingAction === `${r.id}:confirm`;
           const hasRegistered = !!r.registered_at;
-          return hasRegistered ? (
+          const inviteAction = r.status !== "pending" ? null : hasRegistered ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -406,6 +450,23 @@ const AdminCustomers = () => {
               </TooltipTrigger>
               <TooltipContent>Resend invite email</TooltipContent>
             </Tooltip>
+          );
+          return (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => handleImpersonate(r)}
+                    disabled={impersonating}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {impersonating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <VenetianMask className="h-3.5 w-3.5" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>View as</TooltipContent>
+              </Tooltip>
+              {inviteAction}
+            </>
           );
         }}
         columns={[
@@ -562,6 +623,17 @@ const AdminCustomers = () => {
             <div className="flex justify-between gap-2 pt-4 border-t border-border mt-4">
               <button type="button" onClick={() => setDrawerOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">Close</button>
               <div className="flex gap-2">
+                {editing.id && (
+                  <button
+                    type="button"
+                    onClick={() => handleImpersonate(editing)}
+                    disabled={impersonating}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:border-primary/40 hover:bg-muted transition-colors disabled:opacity-60"
+                  >
+                    {impersonating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4 text-primary" />}
+                    View as
+                  </button>
+                )}
                 {editing.id && (
                   <button
                     type="button"

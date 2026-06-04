@@ -23,6 +23,14 @@ const MAX_TOOL_TURNS = 16;
 // 4000 leaves enough room for a full markdown brief with inline tables.
 const MAX_TOKENS = 4000;
 
+// Per-user rate limit. The check counts ai_query_log rows over the window
+// before invoking Anthropic — defence against rapid-fire abuse from one
+// account. Edge function instances aren't shared so a perfectly-timed
+// burst across instances could slip a few extra past, but the threshold
+// is loose enough that legitimate use won't notice.
+const RATE_LIMIT_WINDOW_SECONDS = 60;
+const RATE_LIMIT_MAX_REQUESTS = 20;
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -237,7 +245,7 @@ and the pool denominator is INDEPENDENT of the "Customers" count above.
                         Business info (vat, entity_name, business_address)
                         is synced from eplay for B2B records and is NEVER a
                         profilation field. On a profile that carries any of
-                        those, the `address` column holds the COMPANY address,
+                        those, the 'address' column holds the COMPANY address,
                         so it does NOT count toward profilation.
 - feedback_rate     = COUNT(DISTINCT p.id) WHERE EXISTS(
                         SELECT 1 FROM feedback fb
@@ -854,7 +862,10 @@ Deno.serve(async (req: Request) => {
   let userId: string | null = null;
   let brandId: number | null = null;
   let brandName: string | null = null;
-  let mode: "admin" | "brand" = "admin";
+  let customerProfileId: string | null = null;
+  let customerFirstName: string | null = null;
+  let impersonatedProfileId: string | null = null;
+  let mode: "admin" | "brand" | "customer" = "admin";
   let question = "";
   let lastSql: string | null = null;
   let lastRowCount: number | null = null;
@@ -893,22 +904,31 @@ Deno.serve(async (req: Request) => {
     adminId = adminRow.id;
     mode = "admin";
   } else {
+    // Brand users come first — explicit role match — then any other profile
+    // is treated as a customer (role is null or 'customer'). RLS gates what
+    // they can see regardless.
     const { data: profileRow } = await userClient
       .from("profiles")
-      .select("id, brand_id, role, brands(name)")
+      .select("id, first_name, brand_id, role, brands(name)")
       .eq("user_id", user.id)
-      .in("role", ["brand", "brand_admin", "brand_user"])
       .maybeSingle();
     if (!profileRow || !profileRow.brand_id) {
       return new Response(
-        JSON.stringify({ error: "admin or brand role required" }),
+        JSON.stringify({ error: "admin, brand or customer role required" }),
         { status: 403, headers: { "Content-Type": "application/json", ...CORS } },
       );
     }
     brandId = profileRow.brand_id as number;
     const brandRel = (profileRow as any).brands;
     brandName = (Array.isArray(brandRel) ? brandRel[0]?.name : brandRel?.name) ?? null;
-    mode = "brand";
+    const role = (profileRow.role ?? "customer") as string;
+    if (role === "brand" || role === "brand_admin" || role === "brand_user") {
+      mode = "brand";
+    } else {
+      mode = "customer";
+      customerProfileId = profileRow.id as string;
+      customerFirstName = (profileRow.first_name as string | null) ?? null;
+    }
   }
 
   const body = await req.json().catch(() => ({}));
@@ -920,6 +940,65 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({ error: "question is required" }),
       { status: 400, headers: { "Content-Type": "application/json", ...CORS } },
     );
+  }
+
+  // Admin "view-as": a verified admin caller may scope this run to a target user
+  // so the concierge answers exactly as that customer/brand user would see it.
+  // Honoured ONLY for admin callers — the params are ignored for anyone else, so
+  // a customer cannot scope to another customer. (An admin already has full DB
+  // access in admin mode, so this is a fidelity feature, not an escalation.)
+  if (adminRow && body.impersonate_profile_id) {
+    const { data: target } = await userClient
+      .from("profiles")
+      .select("id, first_name, brand_id, role, brands(name)")
+      .eq("id", String(body.impersonate_profile_id))
+      .maybeSingle();
+    if (target && target.brand_id) {
+      impersonatedProfileId = target.id as string;
+      brandId = target.brand_id as number;
+      const rel = (target as any).brands;
+      brandName = (Array.isArray(rel) ? rel[0]?.name : rel?.name) ?? null;
+      const role = (target.role ?? "customer") as string;
+      if (role === "brand" || role === "brand_admin" || role === "brand_user") {
+        mode = "brand";
+      } else {
+        mode = "customer";
+        customerProfileId = target.id as string;
+        customerFirstName = (target.first_name as string | null) ?? null;
+      }
+    }
+  }
+
+  // Per-user rate limit before we pay for an Anthropic call. Falls through
+  // (and lets the request proceed) if the count query errors — we'd rather
+  // serve a real customer than 500 them on a logging glitch.
+  try {
+    const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const sinceIso = new Date(
+      Date.now() - RATE_LIMIT_WINDOW_SECONDS * 1000,
+    ).toISOString();
+    const { count, error: countErr } = await adminClient
+      .from("ai_query_log")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .gte("created_at", sinceIso);
+    if (!countErr && count !== null && count >= RATE_LIMIT_MAX_REQUESTS) {
+      return new Response(
+        JSON.stringify({
+          error: `Too many requests — please wait a moment.`,
+        }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(RATE_LIMIT_WINDOW_SECONDS),
+            ...CORS,
+          },
+        },
+      );
+    }
+  } catch (e) {
+    console.warn("[query-ai rate-limit]", e);
   }
 
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
@@ -953,34 +1032,70 @@ Deno.serve(async (req: Request) => {
         const brandPreamble = mode === "brand"
           ? `\n\n# Brand scope — HARD RULE\nYou are working for ${
             brandName ? `the brand "${brandName}" (brand_id = ${brandId})` : `brand_id = ${brandId}`
-          }. EVERY SQL query you generate MUST filter to this brand:\n- On policies, profiles, claims, feedback, support_messages, catalogues, shops, reports, external_requests, manufacturing_costs, returns: add WHERE brand_id = ${brandId} (or, for claims/returns which lack the column directly, join through policies and filter the policies side).\n- NEVER reference the brands table for any brand other than id = ${brandId}.\n- The user can only see their own brand. Cross-brand comparisons, "top brands by X" rankings, or "all brands" aggregates are off-limits — if the user asks for one, answer with their brand's value only and explain you can't compare to other brands.\n- Ignore these tables in this mode: admins, ai_chats, ai_query_log, brand_leads. They are out of scope.\n- The report-generation tools are admin-only and not available to you. If the user asks for a Chubb file or the monthly internal report, explain it's only available to AION admins.`
+          }. EVERY SQL query you generate MUST filter to this brand:\n- On policies, profiles, claims, feedback, support_messages, catalogues, shops, reports, external_requests, manufacturing_costs, returns: add WHERE brand_id = ${brandId} (or, for claims/returns which lack the column directly, join through policies and filter the policies side).\n- NEVER reference the brands table for any brand other than id = ${brandId}.\n- The user can only see their own brand. Cross-brand comparisons, "top brands by X" rankings, or "all brands" aggregates are off-limits — if the user asks for one, answer with their brand's value only and explain you can't compare to other brands.\n- Ignore these tables in this mode: admins, ai_chats, ai_query_log, brand_leads. They are out of scope.\n- The report-generation tools are admin-only and not available to you. If the user asks for a Chubb file or the monthly internal report, explain it's only available to AION admins.${
+            impersonatedProfileId
+              ? `\n- CRITICAL (admin view-as): server-side RLS is NOT filtering in this session, so the WHERE brand_id = ${brandId} rule above is the ONLY barrier. Apply it to EVERY query without exception and never return another brand's rows.`
+              : ""
+          }`
           : "";
 
-        const systemBlocks = [
-          {
-            type: "text" as const,
-            text: SCHEMA_DOC,
-            cache_control: { type: "ephemeral" as const },
-          },
-          ...(brandPreamble
-            ? [{ type: "text" as const, text: brandPreamble }]
-            : []),
-          ...(languageInstruction
-            ? [{ type: "text" as const, text: languageInstruction }]
-            : []),
-        ];
+        // Customer mode replaces the heavy schema/playbook system text with a
+        // warm concierge persona. The customer's data is RLS-scoped to their
+        // own profile_id, so any SELECT they trigger only returns their rows.
+        // The brand's FAQ is passed in by the client (tenant.faqEn/faqIt) and
+        // becomes the canonical knowledge for non-data questions.
+        const conciergePreamble = mode === "customer"
+          ? buildCustomerPreamble({
+              brandName,
+              brandId,
+              customerProfileId,
+              customerFirstName,
+              brandFaq: typeof body.brand_faq === "string" ? body.brand_faq : "",
+              explicitCustomerFilter: !!impersonatedProfileId,
+            })
+          : "";
 
-        // Brand callers don't have access to admin-only tools (report
-        // generation hits admin-only edge functions and would 403 anyway).
-        const activeTools = mode === "brand"
-          ? TOOLS.filter((t) =>
-            t.name === "run_sql" || t.name === "render_chart"
-          )
-          : TOOLS;
+        // Customer mode swaps the deep schema doc + playbooks for a much
+        // tighter concierge persona — the heavy doc is overkill (and the
+        // playbook templates leak language they shouldn't see). Brand/admin
+        // get the full schema as before.
+        const systemBlocks = mode === "customer"
+          ? [
+              {
+                type: "text" as const,
+                text: conciergePreamble,
+                cache_control: { type: "ephemeral" as const },
+              },
+              ...(languageInstruction
+                ? [{ type: "text" as const, text: languageInstruction }]
+                : []),
+            ]
+          : [
+              {
+                type: "text" as const,
+                text: SCHEMA_DOC,
+                cache_control: { type: "ephemeral" as const },
+              },
+              ...(brandPreamble
+                ? [{ type: "text" as const, text: brandPreamble }]
+                : []),
+              ...(languageInstruction
+                ? [{ type: "text" as const, text: languageInstruction }]
+                : []),
+            ];
 
-        const sqlRpc = mode === "brand"
-          ? "ai_run_query_user"
-          : "ai_run_query";
+        // Non-admin callers only get the data-fetch tools — no report
+        // generation (those edge functions are admin-only and would 403).
+        const activeTools = mode === "admin"
+          ? TOOLS
+          : TOOLS.filter((t) => t.name === "run_sql" || t.name === "render_chart");
+
+        // Impersonation runs as the admin's JWT, so ai_run_query_user (SECURITY
+        // INVOKER) would see the admin and NOT scope to the target. Use the
+        // DEFINER rpc and rely on the explicit-filter preamble below for scoping.
+        const sqlRpc = (mode === "admin" || impersonatedProfileId)
+          ? "ai_run_query"
+          : "ai_run_query_user";
 
         for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
           // Tell the client this is a fresh turn — any text streamed for the
@@ -1222,24 +1337,38 @@ Deno.serve(async (req: Request) => {
           emit("turn_start", { turn: -1 });
           let recoveryProducedText = false;
           try {
+            const recoverySystem = mode === "customer"
+              ? [
+                  {
+                    type: "text" as const,
+                    text:
+                      conciergePreamble +
+                      "\n\n# Recovery — MANDATORY\nFinish with a warm, brief reply now. No tools. If a SQL query failed, apologise and suggest the customer try a different phrasing or reach the boutique directly.",
+                    cache_control: { type: "ephemeral" as const },
+                  },
+                  ...(languageInstruction
+                    ? [{ type: "text" as const, text: languageInstruction }]
+                    : []),
+                ]
+              : [
+                  {
+                    type: "text" as const,
+                    text:
+                      SCHEMA_DOC +
+                      "\n\n# Recovery — MANDATORY\nYour prior turns gathered (or tried to gather) data via tools but produced NO summary text. Write the final response NOW, as markdown only. Do NOT request any tools. If a playbook was triggered (Customer 360 / Product analysis), follow its output structure (## headings + inline GFM tables). Write what you CAN from the data you fetched. If a section has no data, say so plainly under its heading. If all data queries failed, still write the brief skeleton and add a clear note at the top: 'Couldn't retrieve full data — try the brief again, or check the customer/product identifier.' Never produce an empty response.",
+                    cache_control: { type: "ephemeral" as const },
+                  },
+                  ...(brandPreamble
+                    ? [{ type: "text" as const, text: brandPreamble }]
+                    : []),
+                  ...(languageInstruction
+                    ? [{ type: "text" as const, text: languageInstruction }]
+                    : []),
+                ];
             const recoveryStream = anthropic.messages.stream({
               model: MODEL,
               max_tokens: MAX_TOKENS,
-              system: [
-                {
-                  type: "text",
-                  text:
-                    SCHEMA_DOC +
-                    "\n\n# Recovery — MANDATORY\nYour prior turns gathered (or tried to gather) data via tools but produced NO summary text. Write the final response NOW, as markdown only. Do NOT request any tools. If a playbook was triggered (Customer 360 / Product analysis), follow its output structure (## headings + inline GFM tables). Write what you CAN from the data you fetched. If a section has no data, say so plainly under its heading. If all data queries failed, still write the brief skeleton and add a clear note at the top: 'Couldn't retrieve full data — try the brief again, or check the customer/product identifier.' Never produce an empty response.",
-                  cache_control: { type: "ephemeral" },
-                },
-                ...(brandPreamble
-                  ? [{ type: "text" as const, text: brandPreamble }]
-                  : []),
-                ...(languageInstruction
-                  ? [{ type: "text" as const, text: languageInstruction }]
-                  : []),
-              ],
+              system: recoverySystem,
               // No tools — forces text-only output.
               messages,
             });
@@ -1289,6 +1418,7 @@ Deno.serve(async (req: Request) => {
             row_count: lastRowCount,
             duration_ms: Date.now() - startedAt,
             error: runtimeError,
+            impersonated_profile_id: impersonatedProfileId,
           });
         } catch { /* ignore */ }
         controller.close();
@@ -1305,3 +1435,69 @@ Deno.serve(async (req: Request) => {
     },
   });
 });
+
+// ─── Customer concierge persona ─────────────────────────────────────────────
+// Replaces the deep schema doc and playbooks with a brand-flavoured concierge
+// brief. The customer's data is RLS-scoped at the SQL layer regardless, but
+// we keep the SQL surface area small and the tone warm.
+
+function buildCustomerPreamble(opts: {
+  brandName: string | null;
+  brandId: number | null;
+  customerProfileId: string | null;
+  customerFirstName: string | null;
+  brandFaq: string;
+  explicitCustomerFilter?: boolean;
+}): string {
+  const brand = opts.brandName ?? "your brand";
+  const greetingName = opts.customerFirstName ? ` (${opts.customerFirstName})` : "";
+  const faqBlock = opts.brandFaq.trim()
+    ? `\n\n# Brand FAQ — authoritative knowledge\nUse this when answering questions about coverage, eligibility, claims process, returns, or service. Quote it in your own voice; never invent rules that aren't here.\n\n${opts.brandFaq.trim()}`
+    : "\n\n# Brand FAQ\n(No FAQ provided — when the customer asks a process question you don't know, suggest they contact the boutique.)";
+
+  // Admin view-as runs under the admin JWT, so server-side RLS does NOT auto-scope
+  // to this customer. The model MUST filter every query explicitly instead.
+  const scopeBlock = opts.explicitCustomerFilter && opts.customerProfileId
+    ? `\n\n# SCOPE — HARD RULE (admin view-as session)\nRLS is NOT auto-scoping in this session. You MUST restrict EVERY query to this one customer (profile id '${opts.customerProfileId}'):\n- profiles: WHERE id = '${opts.customerProfileId}'\n- policies: WHERE customer_id = '${opts.customerProfileId}'\n- claims: WHERE policy_id IN (SELECT id FROM policies WHERE customer_id = '${opts.customerProfileId}')\n- NEVER return another customer's rows under any circumstances.`
+    : "";
+
+  return scopeBlock + `
+You are the personal concierge for a ${brand} customer${greetingName}. The
+customer can ask you anything about their covers, claims, or how the
+${brand} Prestige Service works. Be warm, concise, and use second-person
+("your bracelet", "your cover") — never refer to "the customer" or
+"the user".
+
+# Hard rules
+${opts.explicitCustomerFilter
+  ? "- Follow the SCOPE hard rule above: filter EVERY query to this customer explicitly."
+  : "- All your SQL queries automatically return ONLY this customer's own data\n  (RLS is enforced server-side). You don't need to filter by customer_id."}
+- Use the run_sql tool when the answer needs the customer's actual data
+  (when does my cover expire, what have I claimed, how many pieces do I
+  own, total protected value). Brand process questions go to the FAQ.
+- If the data shows 0 rows, say so plainly — never invent numbers.
+- Never reveal another customer's data. Never reference admin-only
+  tables (admins, ai_chats, ai_query_log, manufacturing_costs, reports).
+- Never speculate on what the brand "might" cover beyond the FAQ. When
+  unsure, point them to the boutique.
+- Keep replies short. 2–4 sentences for FAQ questions, a sentence + a
+  small table for data questions. No long preambles.
+
+# Tables you can SELECT from (RLS-scoped to the customer)
+- profiles    — their own profile row only
+- policies    — their own covers (status, start_date, expiration_date,
+                selling_price, brand_id)
+- claims      — their own claims (type, status, created_at, description)
+- catalogues  — products in their brand's catalogue (name, picture,
+                category, composition, sku)
+- brands      — their own brand row only
+${faqBlock}
+
+# Style
+- Markdown is fine, tables are fine, no headings deeper than ##.
+- Currency: always EUR with the customer's locale.
+- Don't say "I'm an AI" unless asked.
+- Don't apologise gratuitously.
+`.trim();
+}
+
