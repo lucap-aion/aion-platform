@@ -78,6 +78,16 @@ const SUGGESTION_KEYS = [
   "aiQuery.suggestion.5",
 ];
 
+// Brand users only see their own brand, so they get brand-scoped suggestions
+// (no cross-brand "by brand" / "per brand" framing).
+const BRAND_SUGGESTION_KEYS = [
+  "aiQuery.suggestion.brand.1",
+  "aiQuery.suggestion.brand.2",
+  "aiQuery.suggestion.brand.3",
+  "aiQuery.suggestion.brand.4",
+  "aiQuery.suggestion.brand.5",
+];
+
 const REPORT_KEYS = [
   "aiQuery.report.monthlyInternal",
   "aiQuery.report.monthlyInternalPrevious",
@@ -353,7 +363,7 @@ export type AIQueryProps = {
 };
 
 const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
-  const { adminRecord, profile } = useAuth();
+  const { adminRecord, profile, isImpersonating } = useAuth();
   const { t, locale } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlChatId = searchParams.get("chat");
@@ -473,6 +483,10 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
   // ── Persistence helpers ────────────────────────────────────────────────────
   const persistChat = useCallback(
     async (msgs: Message[], existingId: string | null, firstUserMsg: string) => {
+      // While an admin is viewing-as a user, don't save chats: the session is the
+      // admin's JWT but the row would be owned by the target (RLS rejects it), and
+      // saving would pollute the target's chat history. The admin sees it live only.
+      if (isImpersonating) return existingId;
       if (!ownerId) {
         console.warn("[ai-chats] no owner record yet — skipping save");
         return existingId;
@@ -517,7 +531,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
       }
       return (data as { id: string }).id;
     },
-    [ownerId, chatsTable, ownerColumn, t],
+    [ownerId, chatsTable, ownerColumn, t, isImpersonating],
   );
 
   // ── New chat / select chat ─────────────────────────────────────────────────
@@ -601,7 +615,13 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
           "Content-Type": "application/json",
           "Accept": "text/event-stream",
         },
-        body: JSON.stringify({ question: text, history: priorHistory, locale }),
+        body: JSON.stringify({
+          question: text,
+          history: priorHistory,
+          locale,
+          // When viewing-as, scope the answer to the target (effective profile).
+          impersonate_profile_id: isImpersonating ? profile?.id : undefined,
+        }),
       });
 
       if (!res.ok || !res.body) {
@@ -670,7 +690,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0 overflow-hidden">
       {/* Left rail */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card/40 md:flex">
         <div className="border-b border-border p-3">
@@ -706,7 +726,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
       </aside>
 
       {/* Main chat area */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 min-h-0 flex-1 flex-col">
         <div className="border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
@@ -721,7 +741,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
           </div>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-6">
           {chatLoading ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -731,6 +751,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
             <EmptyState
               onPick={(q, display) => send(q, display)}
               showReports={mode === "admin"}
+              suggestionKeys={mode === "brand" ? BRAND_SUGGESTION_KEYS : SUGGESTION_KEYS}
             />
           ) : (
             <div className="mx-auto flex max-w-4xl flex-col gap-6">
@@ -891,9 +912,11 @@ const ChatRailItem = ({
 const EmptyState = ({
   onPick,
   showReports = true,
+  suggestionKeys = SUGGESTION_KEYS,
 }: {
   onPick: (q: string, display?: string) => void;
   showReports?: boolean;
+  suggestionKeys?: string[];
 }) => {
   const { t } = useLanguage();
   return (
@@ -908,7 +931,7 @@ const EmptyState = ({
 
       <EmptySection
         title={t("aiQuery.section.suggestions")}
-        items={SUGGESTION_KEYS.map((key) => ({ key, label: t(key), icon: Sparkles }))}
+        items={suggestionKeys.map((key) => ({ key, label: t(key), icon: Sparkles }))}
         onPick={onPick}
       />
 

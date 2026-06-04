@@ -2,6 +2,14 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 import { useTenant } from "@/contexts/TenantContext";
+import {
+  clearImpersonation,
+  logImpersonationEnd,
+  logImpersonationStart,
+  readImpersonation,
+  writeImpersonation,
+  type ImpersonatedProfile,
+} from "@/integrations/supabase/impersonation";
 
 interface Profile {
   id: string;
@@ -49,6 +57,14 @@ interface AuthContextType {
   isAdmin: boolean;
   /** Brand admin, or brand_user with is_master = true */
   canWrite: boolean;
+  /** True while an admin is viewing-as a customer/brand user. */
+  isImpersonating: boolean;
+  /** True when the underlying session is a real AION admin (regardless of impersonation). */
+  isRealAdmin: boolean;
+  /** Start viewing-as the given profile. Admin-only; no-op otherwise. */
+  startImpersonation: (target: ImpersonatedProfile, slug: string | null) => Promise<void>;
+  /** Stop viewing-as and return to the admin identity. */
+  stopImpersonation: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -63,6 +79,10 @@ const AuthContext = createContext<AuthContextType>({
   isBrandUser: false,
   isAdmin: false,
   canWrite: false,
+  isImpersonating: false,
+  isRealAdmin: false,
+  startImpersonation: async () => {},
+  stopImpersonation: () => {},
 });
 
 export const isCustomerRole = (role?: string | null) => !role || role === "customer";
@@ -83,6 +103,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [adminRecord, setAdminRecord] = useState<AdminRecord | null>(null);
   const [loading, setLoading] = useState(true);
+  // When an admin is viewing-as a user, this holds the target's profile. The real
+  // user/session/adminRecord stay untouched underneath.
+  const [impersonatedProfile, setImpersonatedProfile] = useState<Profile | null>(null);
 
   const fetchProfile = async (userId: string) => {
     const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -185,42 +208,83 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Re-fetch profile when the active brand changes (multi-brand users navigating between portals)
+  // Re-fetch profile when the active brand changes (multi-brand users navigating between portals).
+  // Skipped while impersonating — the effective profile is the override, and refetching the
+  // admin's real profile here would be wasted work (it never wins over impersonatedProfile).
   useEffect(() => {
-    if (user && tenantBrandId) void fetchProfile(user.id);
+    if (user && tenantBrandId && !readImpersonation()) void fetchProfile(user.id);
   }, [tenantBrandId]);
 
   const refreshProfile = async () => {
     if (user) await fetchProfile(user.id);
   };
 
+  // Rehydrate impersonation after the real identity is known. Gated on adminRecord so
+  // a non-admin who fabricates the sessionStorage key gets nothing (RLS blocks them too).
+  useEffect(() => {
+    if (loading || impersonatedProfile) return;
+    if (!adminRecord) {
+      // Not (or no longer) an admin session — drop any stale impersonation key.
+      if (readImpersonation()) clearImpersonation();
+      return;
+    }
+    const stored = readImpersonation();
+    if (stored) setImpersonatedProfile(stored.profile as Profile);
+  }, [loading, adminRecord, impersonatedProfile]);
+
+  const startImpersonation = async (target: ImpersonatedProfile, slug: string | null) => {
+    if (!adminRecord) return; // admin-only; server RLS also enforces this on writes
+    const auditId = await logImpersonationStart(adminRecord.id, target);
+    writeImpersonation({ profile: target, adminId: adminRecord.id, auditId, slug });
+    setImpersonatedProfile(target as Profile);
+  };
+
+  const stopImpersonation = () => {
+    const stored = readImpersonation();
+    void logImpersonationEnd(stored?.auditId ?? null);
+    clearImpersonation();
+    setImpersonatedProfile(null);
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
+    clearImpersonation();
+    setImpersonatedProfile(null);
     setProfile(null);
     setAdminRecord(null);
     setUser(null);
     setSession(null);
   };
 
-  const isAdmin = adminRecord !== null;
+  const isImpersonating = impersonatedProfile !== null;
+  // What the customer/brand UI consumes. All ~30 consumers read this as `profile`.
+  const effectiveProfile = impersonatedProfile ?? profile;
+  const isRealAdmin = adminRecord !== null;
+  // While impersonating, present as a non-admin so admin route guards don't bounce
+  // the admin back to /admin and the customer/brand routes admit them.
+  const isAdmin = isImpersonating ? false : isRealAdmin;
   const canWrite =
-    profile?.role === "brand_admin" ||
-    (isBrandRole(profile?.role) && profile?.is_master === true);
+    effectiveProfile?.role === "brand_admin" ||
+    (isBrandRole(effectiveProfile?.role) && effectiveProfile?.is_master === true);
 
   return (
     <AuthContext.Provider
       value={{
         user,
         session,
-        profile,
+        profile: effectiveProfile,
         adminRecord,
         loading,
         signOut,
         refreshProfile,
-        isCustomer: isCustomerRole(profile?.role),
-        isBrandUser: isBrandRole(profile?.role),
+        isCustomer: isCustomerRole(effectiveProfile?.role),
+        isBrandUser: isBrandRole(effectiveProfile?.role),
         isAdmin,
         canWrite,
+        isImpersonating,
+        isRealAdmin,
+        startImpersonation,
+        stopImpersonation,
       }}
     >
       {children}
