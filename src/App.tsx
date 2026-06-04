@@ -11,7 +11,6 @@ import { TenantProvider, useTenantStatus } from "@/contexts/TenantContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminRoute from "@/components/AdminRoute";
 import Clarity from "@/components/Clarity";
-import UtmCapture from "@/components/UtmCapture";
 import LandingPage from "./pages/LandingPage";
 import Login from "./pages/auth/Login";
 import Signup from "./pages/auth/Signup";
@@ -179,7 +178,6 @@ const App = () => (
       <BrowserRouter>
         <TenantProvider>
         <AuthProvider>
-          <UtmCapture />
           <Clarity />
           <Routes>
             {/* Root */}
