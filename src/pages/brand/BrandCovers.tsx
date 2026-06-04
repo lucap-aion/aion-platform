@@ -442,10 +442,24 @@ const BrandCovers = () => {
                   <p className="text-sm font-semibold text-foreground truncate">
                     {cover.catalogues?.name || "Unknown"}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    {(cover as any).profiles?.first_name}{" "}
-                    {(cover as any).profiles?.last_name}
-                  </p>
+                  {((cover as any).profiles?.first_name || (cover as any).profiles?.last_name) ? (
+                    cover.customer_id ? (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); navigate(`${slugPrefix}/customers/${cover.customer_id}`); }}
+                        className="text-xs text-muted-foreground hover:text-primary hover:underline text-left"
+                        title="View customer profile"
+                      >
+                        {(cover as any).profiles?.first_name}{" "}
+                        {(cover as any).profiles?.last_name}
+                      </button>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        {(cover as any).profiles?.first_name}{" "}
+                        {(cover as any).profiles?.last_name}
+                      </p>
+                    )
+                  ) : null}
                   {(cover as any).shops?.name && (
                     <p className="text-xs text-muted-foreground mt-0.5">
                       Store: {(cover as any).shops.name}

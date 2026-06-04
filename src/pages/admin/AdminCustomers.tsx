@@ -35,7 +35,7 @@ import { fmtDate } from "./_components/fmtDate";
 import { sendEmail } from "@/utils/sendEmail";
 import { siteUrl } from "@/utils/siteUrl";
 import { WandSparkles, Mail, MailCheck, Loader2, Eye, VenetianMask } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth, isBrandRole } from "@/contexts/AuthContext";
 import type { ImpersonatedProfile } from "@/integrations/supabase/impersonation";
@@ -496,10 +496,12 @@ const AdminCustomers = () => {
                     </TooltipTrigger>
                     <TooltipContent>Customer 360 brief</TooltipContent>
                   </Tooltip>
-                  <div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
-                    {r.avatar ? <img src={r.avatar} alt={name} className="h-full w-full object-cover" /> : initials}
-                  </div>
-                  <div className="min-w-0"><p className="font-medium text-foreground truncate">{name}</p><p className="text-xs text-muted-foreground truncate">{r.email}</p></div>
+                  <Link to={`/admin/customers/${r.id}`} className="group/cust flex items-center gap-2 min-w-0" title="View customer profile">
+                    <div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
+                      {r.avatar ? <img src={r.avatar} alt={name} className="h-full w-full object-cover" /> : initials}
+                    </div>
+                    <div className="min-w-0"><p className="font-medium text-foreground truncate group-hover/cust:text-primary group-hover/cust:underline">{name}</p><p className="text-xs text-muted-foreground truncate">{r.email}</p></div>
+                  </Link>
                 </div>
               );
             },

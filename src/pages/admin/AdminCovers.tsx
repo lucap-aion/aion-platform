@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useListUrlState } from "@/hooks/useListUrlState";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -366,17 +367,22 @@ const AdminCovers = () => {
               const r = row as unknown as Cover;
               const fullName = [r.profiles_first_name, r.profiles_last_name].filter(Boolean).join(" ");
               const initials = `${(r.profiles_first_name?.[0] || r.profiles_email?.[0] || "?").toUpperCase()}${(r.profiles_last_name?.[0] || "").toUpperCase()}`;
-              return (
+              const inner = (
                 <div className="flex items-center gap-2.5">
                   <div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
                     {r.profiles_avatar ? <img src={r.profiles_avatar} alt="" className="h-full w-full object-cover" /> : initials}
                   </div>
-                  <div>
-                    <p className="text-sm text-foreground">{fullName || r.profiles_email}</p>
-                    {fullName && <p className="text-xs text-muted-foreground">{r.profiles_email}</p>}
+                  <div className="min-w-0">
+                    <p className="text-sm text-foreground truncate group-hover/cust:text-primary group-hover/cust:underline">{fullName || r.profiles_email}</p>
+                    {fullName && <p className="text-xs text-muted-foreground truncate">{r.profiles_email}</p>}
                   </div>
                 </div>
               );
+              return r.customer_id ? (
+                <Link to={`/admin/customers/${r.customer_id}`} className="group/cust block" title="View customer profile">
+                  {inner}
+                </Link>
+              ) : inner;
             },
           },
           { key: "profiles_created_at", label: "Customer Created", sortable: true, render: (row) => fmtDate((row as unknown as Cover).profiles_created_at) },
