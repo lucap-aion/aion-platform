@@ -765,7 +765,7 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
                     break;
                   }
                 }
-                return <AssistantBlock key={i} message={m} question={q} />;
+                return <AssistantBlock key={i} message={m} question={q} hideSql={mode === "brand"} />;
               })}
             </div>
           )}
@@ -1216,9 +1216,11 @@ const UserBubble = ({ text }: { text: string }) => (
 const AssistantBlock = ({
   message,
   question,
+  hideSql = false,
 }: {
   message: AssistantMessage;
   question: string;
+  hideSql?: boolean;
 }) => {
   const { t, locale } = useLanguage();
   const { summary, sql, columns, rows, chart, reports, streaming } = message;
@@ -1270,7 +1272,7 @@ const AssistantBlock = ({
         <ResultsTable columns={columns} rows={rows} locale={locale} question={question} />
       )}
 
-      {!streaming && !isPlaybookResponse && sql && <SqlBlock sql={sql} />}
+      {!streaming && !isPlaybookResponse && !hideSql && sql && <SqlBlock sql={sql} />}
     </div>
   );
 };
