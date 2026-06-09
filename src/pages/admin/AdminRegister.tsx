@@ -8,7 +8,7 @@ import { siteUrl } from "@/utils/siteUrl";
 
 const AdminRegister = () => {
   const [searchParams] = useSearchParams();
-  const emailFromInvite = searchParams.get("email") ?? "";
+  const emailFromInvite = (searchParams.get("email") ?? "").trim().toLowerCase();
 
   const [form, setForm] = useState({ firstName: "", lastName: "", password: "", confirmPassword: "" });
   const [showPassword, setShowPassword] = useState(false);

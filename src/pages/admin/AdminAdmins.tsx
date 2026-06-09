@@ -103,7 +103,7 @@ const AdminAdmins = () => {
       country: editing.country ?? null, avatar: editing.avatar ?? null,
     };
     const { error } = mode === "add"
-      ? await supabase.from("admins").insert({ ...payload, email: editing.email! })
+      ? await supabase.from("admins").insert({ ...payload, email: editing.email!.trim().toLowerCase() })
       : await supabase.from("admins").update(payload).eq("id", editing.id!);
     setSaving(false);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }

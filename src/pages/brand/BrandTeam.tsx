@@ -127,7 +127,7 @@ const BrandTeam = () => {
         brand_id: profile.brand_id,
         first_name: form.firstName || null,
         last_name: form.lastName || null,
-        email: form.email,
+        email: form.email.trim().toLowerCase(),
         role: "brand",
         is_master: form.isMaster,
         status: "pending",
