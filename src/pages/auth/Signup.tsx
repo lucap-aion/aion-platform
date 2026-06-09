@@ -50,9 +50,11 @@ const Signup = () => {
 
     setIsLoading(true);
 
+    const email = form.email.trim().toLowerCase();
+
     // Verify a pending profile exists for this email + brand
     const { data: inviteStatus } = await supabase.rpc("check_brand_invitation", {
-      p_email: form.email,
+      p_email: email,
       p_brand_id: tenant.id,
     });
 
@@ -83,7 +85,7 @@ const Signup = () => {
     // After email verification, Supabase redirects to /{slug}
     // TenantSlugEntry routes the user to /home or /dashboard based on their role
     const { error } = await supabase.auth.signUp({
-      email: form.email,
+      email,
       password: form.password,
       options: {
         emailRedirectTo: `${siteUrl()}/${tenant.slug}`,

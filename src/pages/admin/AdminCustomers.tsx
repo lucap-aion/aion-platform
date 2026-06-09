@@ -240,7 +240,7 @@ const AdminCustomers = () => {
     if (mode === "add") {
       const { error } = await supabase.from("profiles").insert({
         first_name: editing.first_name ?? null, last_name: editing.last_name ?? null,
-        email: editing.email!, city: editing.city ?? null, country: editing.country ?? null,
+        email: editing.email!.trim().toLowerCase(), city: editing.city ?? null, country: editing.country ?? null,
         province: editing.province ?? null, nationality: editing.nationality ?? null,
         date_of_birth: editing.date_of_birth || null,
         phone_number: editing.phone_number ?? null, address: editing.address ?? null,

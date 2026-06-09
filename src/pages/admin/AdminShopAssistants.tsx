@@ -163,7 +163,7 @@ const AdminShopAssistants = () => {
     if (mode === "add") {
       const { error } = await supabase.from("profiles").insert({
         first_name: editing.first_name ?? null, last_name: editing.last_name ?? null,
-        email: editing.email!, role: "brand",
+        email: editing.email!.trim().toLowerCase(), role: "brand",
         is_master: editing.is_master ?? false,
         status: "pending", brand_id: editing.brand_id ?? null,
         shop_id: editing.shop_id ?? null,

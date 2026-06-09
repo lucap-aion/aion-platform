@@ -349,7 +349,7 @@ const BrandCustomers = () => {
         brand_id: profile.brand_id,
         first_name: form.firstName || null,
         last_name: form.lastName || null,
-        email: form.email,
+        email: form.email.trim().toLowerCase(),
         phone_number: form.phone || null,
         address: form.address || null,
         city: form.city || null,
