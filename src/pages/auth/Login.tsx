@@ -170,6 +170,11 @@ const Login = () => {
                 {t("auth.signup")}
               </Link>
             </p>
+            <p className="mt-3 text-center text-sm">
+              <Link to={`${slugPrefix}/faq`} className="font-medium text-muted-foreground hover:text-primary hover:underline">
+                {t("faq.title")}
+              </Link>
+            </p>
           </motion.div>
         </div>
       </div>
