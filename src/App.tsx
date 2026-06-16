@@ -16,6 +16,7 @@ import Login from "./pages/auth/Login";
 import Signup from "./pages/auth/Signup";
 import ForgotPassword from "./pages/auth/ForgotPassword";
 import ResetPassword from "./pages/auth/ResetPassword";
+import FAQ from "./pages/FAQ";
 import AppLayout from "./components/layout/AppLayout";
 import AdminLayout from "./components/layout/AdminLayout";
 import CustomerDashboard from "./pages/customer/CustomerDashboard";
@@ -213,6 +214,9 @@ const App = () => (
             <Route path="/:slug/signup" element={<BrandGuard><AuthRoute><Signup /></AuthRoute></BrandGuard>} />
             <Route path="/:slug/forgot-password" element={<BrandGuard><ForgotPassword /></BrandGuard>} />
             <Route path="/:slug/reset-password" element={<BrandGuard><ResetPassword /></BrandGuard>} />
+
+            {/* Public FAQ — no auth required */}
+            <Route path="/:slug/faq" element={<BrandGuard><FAQ /></BrandGuard>} />
 
             {/* Authenticated app — all pages use /:slug/page format */}
             <Route element={<BrandGuard><ProtectedRoute><AppLayout /></ProtectedRoute></BrandGuard>}>

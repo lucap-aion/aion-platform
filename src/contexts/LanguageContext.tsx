@@ -164,6 +164,9 @@ const translations: Translations = {
   // FAQ
   "faq.title": { en: "Frequently Asked Questions", it: "Domande Frequenti" },
   "faq.search": { en: "Search questions...", it: "Cerca domande..." },
+  "faq.subtitle": { en: "Find answers to the most common questions about our service.", it: "Trova le risposte alle domande più frequenti sul nostro servizio." },
+  "faq.empty": { en: "No questions match your search.", it: "Nessuna domanda corrisponde alla tua ricerca." },
+  "faq.backToLogin": { en: "Back to login", it: "Torna al login" },
 
   // Dashboard — Prestige Service
   "dashboard.prestigeService": { en: "Prestige Service", it: "Servizio Prestige" },

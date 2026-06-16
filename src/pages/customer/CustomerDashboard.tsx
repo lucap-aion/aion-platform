@@ -317,7 +317,7 @@ const CustomerDashboard = () => {
             ))}
           </Accordion>
           <Link
-            to="#"
+            to={`${slugPrefix}/faq`}
             className="mt-4 self-end inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
           >
             {locale === "en" ? "View More" : "Vedi Altro"} <ChevronRight className="h-4 w-4" />
