@@ -387,12 +387,19 @@ async function searchKnowledge(
   if (rows.length === 0) return [];
 
   // Rerank for precision (best-effort — fall back to vector order on failure).
+  let reranked = false;
   try {
     const ranked = await voyageRerank(query, rows.map((r) => r.content));
-    if (ranked.length) rows = ranked.map((r) => ({ ...rows[r.index], similarity: r.score }));
+    if (ranked.length) { rows = ranked.map((r) => ({ ...rows[r.index], similarity: r.score })); reranked = true; }
   } catch (e) {
     console.warn("[brand-assistant rerank]", e instanceof Error ? e.message : e);
   }
+
+  // Keep only genuinely-relevant, non-trivial chunks so we don't surface (or
+  // feed the model) weak matches that didn't inform the answer. Rerank scores
+  // and cosine similarities live on different scales, hence two thresholds.
+  const REL_MIN = reranked ? 0.3 : 0.45;
+  rows = rows.filter((r) => (r.similarity ?? 0) >= REL_MIN && (r.content?.trim().length ?? 0) >= 40);
 
   // Diversify: at most 2 chunks per document, top 6 overall.
   const perDoc = new Map<string, number>();
