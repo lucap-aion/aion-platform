@@ -36,6 +36,7 @@ import BrandCoverDetail from "./pages/brand/BrandCoverDetail";
 import BrandTeam from "./pages/brand/BrandTeam";
 import BrandInsights from "./pages/brand/BrandInsights";
 import BrandAIQuery from "./pages/brand/BrandAIQuery";
+import BrandAssistant from "./pages/brand/BrandAssistant";
 import BrandShops from "./pages/brand/BrandShops";
 import BrandShopDetail from "./pages/brand/BrandShopDetail";
 import BrandRenewals from "./pages/brand/BrandRenewals";
@@ -166,6 +167,52 @@ const AdminProtectedLayout = () => (
   </AdminRoute>
 );
 
+// True on chat.aioncover.com / dev.chat.aioncover.com — the dedicated
+// sales-assistant subdomain. The same SPA build serves every host (Vercel's
+// catch-all rewrite), so the chat experience is selected here at runtime.
+const isChatHost = () =>
+  /(^|\.)chat\./i.test(window.location.hostname);
+
+/**
+ * Root `/` entry.
+ * - On the normal app host: keep the historical redirect to /rc.
+ * - On the chat subdomain: send the signed-in brand user straight to their
+ *   brand's assistant; admins to /admin; everyone else to the brand selector.
+ */
+const RootEntry = () => {
+  const { user, profile, isAdmin, loading } = useAuth();
+  const [slug, setSlug] = useState<string | null>(null);
+  const [slugChecked, setSlugChecked] = useState(false);
+
+  const chatHost = isChatHost();
+
+  useEffect(() => {
+    if (!chatHost || !profile?.brand_id) { setSlugChecked(true); return; }
+    let active = true;
+    supabase
+      .from("brands")
+      .select("slug")
+      .eq("id", profile.brand_id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!active) return;
+        setSlug((data?.slug as string | undefined) ?? null);
+        setSlugChecked(true);
+      });
+    return () => { active = false; };
+  }, [chatHost, profile?.brand_id]);
+
+  if (!chatHost) return <Navigate to="/rc" replace />;
+  if (loading) return <Spinner />;
+  if (isAdmin) return <Navigate to="/admin" replace />;
+  // Not signed in (or no brand profile): let them pick a brand, then log in.
+  if (!user) return <LandingPage />;
+  if (!slugChecked) return <Spinner />;
+  if (slug) return <Navigate to={`/${slug}/assistant`} replace />;
+  // Brand unknown — fall back to the selector rather than a dead end.
+  return <LandingPage />;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider delayDuration={150} skipDelayDuration={100}>
@@ -176,8 +223,8 @@ const App = () => (
         <AuthProvider>
           <Clarity />
           <Routes>
-            {/* Root */}
-            <Route path="/" element={<Navigate to="/rc" replace />} />
+            {/* Root — host-aware (chat subdomain → assistant, else /rc) */}
+            <Route path="/" element={<RootEntry />} />
 
             {/* Landing page bypass — view brand selector without auto-redirect to /rc */}
             <Route path="/all" element={<LandingPage />} />
@@ -233,6 +280,7 @@ const App = () => (
               <Route path="/:slug/team" element={<ProtectedRoute mode="brand"><BrandTeam /></ProtectedRoute>} />
               <Route path="/:slug/insights" element={<ProtectedRoute mode="brand"><BrandInsights /></ProtectedRoute>} />
               <Route path="/:slug/ai-query" element={<ProtectedRoute mode="brand"><BrandAIQuery /></ProtectedRoute>} />
+              <Route path="/:slug/assistant" element={<ProtectedRoute mode="brand"><BrandAssistant /></ProtectedRoute>} />
               <Route path="/:slug/shops" element={<ProtectedRoute mode="brand"><BrandShops /></ProtectedRoute>} />
               <Route path="/:slug/shops/:shopId" element={<ProtectedRoute mode="brand"><BrandShopDetail /></ProtectedRoute>} />
               <Route path="/:slug/renewals" element={<ProtectedRoute mode="brand"><BrandRenewals /></ProtectedRoute>} />

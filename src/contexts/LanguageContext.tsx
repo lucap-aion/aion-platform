@@ -18,6 +18,7 @@ const translations: Translations = {
   "nav.team": { en: "Team", it: "Team" },
   "nav.insights": { en: "Insights", it: "Insights" },
   "nav.aiQuery": { en: "Ask the data", it: "Chiedi ai dati" },
+  "nav.assistant": { en: "Assistant", it: "Assistente" },
   "nav.shops": { en: "Shops", it: "Boutique" },
   "nav.settings": { en: "Settings", it: "Impostazioni" },
 
