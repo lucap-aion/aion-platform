@@ -268,7 +268,9 @@ export default function BrandAssistant() {
           "Content-Type": "application/json",
           "Accept": "text/event-stream",
         },
-        body: JSON.stringify({ question: text, history: priorHistory, locale }),
+        // brand_id is used only when the caller is an admin (e.g. viewing-as a
+        // brand user); real brand users are pinned to their own brand server-side.
+        body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id }),
       });
 
       if (!res.ok || !res.body) {

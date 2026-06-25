@@ -95,7 +95,7 @@ export default function BrandKnowledge() {
     setScraping(true);
     const tid = toast.loading(tt(locale, "Scraping your website… this can take a minute.", "Sto leggendo il sito… può richiedere un minuto."));
     try {
-      const r = await callFn("scrape-knowledge", { max_pages: 14 });
+      const r = await callFn("scrape-knowledge", { max_pages: 14, brand_id: brandId });
       toast.success(
         tt(locale,
           `Added ${r.docs_created} pages (${r.chunks_created} chunks).`,
@@ -256,7 +256,7 @@ export default function BrandKnowledge() {
           locale={locale}
           onClose={() => setAddOpen(false)}
           onSubmit={async (title, category, content) => {
-            await callFn("ingest-knowledge", { title, category, content, source_type: "manual" });
+            await callFn("ingest-knowledge", { title, category, content, source_type: "manual", brand_id: brandId });
             setAddOpen(false);
             toast.success(tt(locale, "Document added.", "Documento aggiunto."));
             await refresh();
