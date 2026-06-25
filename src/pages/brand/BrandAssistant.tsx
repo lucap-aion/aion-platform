@@ -93,7 +93,7 @@ const emptyAssistant = (): AssistantMessage => ({
 });
 
 export default function BrandAssistant() {
-  const { profile, isImpersonating } = useAuth();
+  const { profile } = useAuth();
   const { locale } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlChatId = searchParams.get("chat");
@@ -173,9 +173,10 @@ export default function BrandAssistant() {
   // ── Persistence ────────────────────────────────────────────────────────────
   const persistChat = useCallback(
     async (msgs: Message[], existingId: string | null, firstUserMsg: string) => {
-      // Mirror AdminAIQuery: never save while an admin is viewing-as a user —
-      // the row would belong to the target and RLS would reject it.
-      if (isImpersonating || !ownerId) return existingId;
+      // Saves under the effective brand profile. Real brand users own their
+      // rows; admins (incl. while viewing-as) are allowed by the admin-override
+      // RLS policy on ai_chats_brand.
+      if (!ownerId) return existingId;
 
       if (existingId) {
         const { error } = await supabase
@@ -205,7 +206,7 @@ export default function BrandAssistant() {
       }
       return (data as unknown as { id: string }).id;
     },
-    [ownerId, isImpersonating],
+    [ownerId],
   );
 
   // ── New / select / delete ────────────────────────────────────────────────
