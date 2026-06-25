@@ -53,6 +53,13 @@ type Message =
 
 type ChatSummary = { id: string; title: string; updated_at: string };
 
+// Chunks often start mid-sentence; drop a leading partial word and mark it.
+const cleanSnippet = (s: string): string => {
+  const t = (s ?? "").trim();
+  if (!t) return "";
+  return /^[a-zà-ÿ]/.test(t) ? "…" + t.replace(/^\S+\s+/, "") : t;
+};
+
 const humanizeColumn = (col: string): string =>
   col.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -506,10 +513,17 @@ function handleEvent(
     patch((m) => ({ ...m, summary: m.summary + (data?.text ?? "") }));
   } else if (event === "knowledge") {
     const incoming = Array.isArray(data?.sources) ? (data.sources as KnowledgeSource[]) : [];
-    // Merge + dedupe by document title so repeated searches don't pile up.
+    // Collapse to one row per document (the best-scoring chunk) — a single
+    // search often returns several chunks from the same doc.
     patch((m) => {
-      const seen = new Set(m.sources.map((s) => s.doc_title));
-      const merged = [...m.sources, ...incoming.filter((s) => !seen.has(s.doc_title))];
+      const byTitle = new Map<string, KnowledgeSource>();
+      for (const s of [...m.sources, ...incoming]) {
+        const prev = byTitle.get(s.doc_title);
+        if (!prev || (s.similarity ?? 0) > (prev.similarity ?? 0)) byTitle.set(s.doc_title, s);
+      }
+      const merged = [...byTitle.values()]
+        .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
+        .slice(0, 5);
       return { ...m, sources: merged };
     });
   } else if (event === "sql_result") {
@@ -652,7 +666,7 @@ const AssistantBlock = ({ message, locale }: { message: AssistantMessage; locale
                   <div className="min-w-0">
                     <span className="font-medium text-foreground">{s.doc_title}</span>
                     <span className="ml-1 text-muted-foreground">· {Math.round(s.similarity * 100)}%</span>
-                    <p className="truncate text-muted-foreground/80">{s.snippet}</p>
+                    <p className="truncate text-muted-foreground/80">{cleanSnippet(s.snippet)}</p>
                   </div>
                 </div>
               );
