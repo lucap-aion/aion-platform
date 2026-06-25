@@ -32,6 +32,7 @@ const tt = (locale: string, en: string, it: string) => (locale === "it" ? it : e
 
 type KnowledgeSource = {
   doc_title: string;
+  source_url?: string | null;
   category: string;
   similarity: number;
   snippet: string;
@@ -664,7 +665,13 @@ const AssistantBlock = ({ message, locale }: { message: AssistantMessage; locale
                     {tt(locale, cat.en, cat.it)}
                   </span>
                   <div className="min-w-0">
-                    <span className="font-medium text-foreground">{s.doc_title}</span>
+                    {s.source_url ? (
+                      <a href={s.source_url} target="_blank" rel="noreferrer" className="font-medium text-foreground hover:text-primary hover:underline">
+                        {s.doc_title}
+                      </a>
+                    ) : (
+                      <span className="font-medium text-foreground">{s.doc_title}</span>
+                    )}
                     <span className="ml-1 text-muted-foreground">· {Math.round(s.similarity * 100)}%</span>
                     <p className="truncate text-muted-foreground/80">{cleanSnippet(s.snippet)}</p>
                   </div>

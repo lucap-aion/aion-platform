@@ -51,13 +51,20 @@ and company policy — in seconds, in plain language they can use on the floor.
 
 # How you answer
 - Be concise and practical. The associate is mid-conversation with a client;
-  give them something they can say or do, not an essay.
+  give them something they can say or do, not an essay. Prefer 2-5 short
+  sentences or a tight bullet list.
 - Lead with the answer. Add a short "why" only if it helps the pitch.
 - Never invent product facts, prices, policies, or client data. If you don't
-  have it, say so and suggest where it would come from.
+  have it, say so plainly and suggest where it would come from.
 - When you state a brand fact (material, care, story, policy), it must come
   from search_knowledge. When you state anything about a specific client or
   their purchases, it must come from run_sql. Do not blend or guess.
+- Retrieved passages may contain stray website fragments (menus, "Learn more",
+  prices out of context). Ignore the noise and synthesize the substance in your
+  own clean words — never paste raw fragments back to the user.
+- When a product/brand/policy answer rests on the knowledge base, end with a
+  one-line source hint (the document name). Close with a concrete on-floor next
+  step when it's natural (a cross-sell to mention, a care tip, a renewal due).
 
 # Tools
 ## search_knowledge(query)
@@ -295,6 +302,7 @@ Deno.serve(async (req: Request) => {
                   query,
                   sources: matches.map((m) => ({
                     doc_title: m.doc_title,
+                    source_url: m.source_url,
                     category: m.category,
                     similarity: Math.round(m.similarity * 100) / 100,
                     snippet: m.content.slice(0, 200),
@@ -354,50 +362,75 @@ Deno.serve(async (req: Request) => {
   });
 });
 
-// Embed the query with Voyage (input_type 'query') and run the brand-scoped
-// similarity search. RLS on the chunks table is the real brand gate.
+type KMatch = { doc_id: string; doc_title: string; source_url: string | null; category: string; content: string; similarity: number };
+
+// Brand-scoped knowledge retrieval: embed the query, vector-search a broad
+// candidate set, rerank for precision (Voyage rerank), then diversify so the
+// answer draws on several documents rather than many chunks of one.
+// RLS on the chunks table is the real brand gate.
 async function searchKnowledge(
   client: ReturnType<typeof createClient>,
   brandId: number,
   query: string,
-): Promise<
-  { doc_title: string; category: string; content: string; similarity: number }[]
-> {
+): Promise<KMatch[]> {
   if (!query) return [];
-  const res = await fetch("https://api.voyageai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${VOYAGE_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      input: [query],
-      model: EMBED_MODEL,
-      input_type: "query",
-      output_dimension: EMBED_DIMS,
-    }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Voyage embed failed (${res.status}): ${detail.slice(0, 200)}`);
-  }
-  const json = await res.json();
-  const embedding = json?.data?.[0]?.embedding;
-  if (!Array.isArray(embedding)) throw new Error("no embedding returned");
 
+  const embedding = await voyageEmbedQuery(query);
   const { data, error } = await client.rpc("match_brand_knowledge", {
     p_brand_id: brandId,
     p_query_embedding: embedding,
-    p_match_count: 6,
-    p_min_similarity: 0.2,
+    p_match_count: 18,
+    p_min_similarity: 0.12,
   });
   if (error) throw new Error(error.message);
-  return (data ?? []) as {
-    doc_title: string;
-    category: string;
-    content: string;
-    similarity: number;
-  }[];
+  let rows = (data ?? []) as KMatch[];
+  if (rows.length === 0) return [];
+
+  // Rerank for precision (best-effort — fall back to vector order on failure).
+  try {
+    const ranked = await voyageRerank(query, rows.map((r) => r.content));
+    if (ranked.length) rows = ranked.map((r) => ({ ...rows[r.index], similarity: r.score }));
+  } catch (e) {
+    console.warn("[brand-assistant rerank]", e instanceof Error ? e.message : e);
+  }
+
+  // Diversify: at most 2 chunks per document, top 6 overall.
+  const perDoc = new Map<string, number>();
+  const out: KMatch[] = [];
+  for (const r of rows) {
+    const n = perDoc.get(r.doc_id) ?? 0;
+    if (n >= 2) continue;
+    perDoc.set(r.doc_id, n + 1);
+    out.push(r);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
+async function voyageEmbedQuery(query: string): Promise<number[]> {
+  const res = await fetch("https://api.voyageai.com/v1/embeddings", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${VOYAGE_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ input: [query], model: EMBED_MODEL, input_type: "query", output_dimension: EMBED_DIMS }),
+  });
+  if (!res.ok) throw new Error(`Voyage embed failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 200)}`);
+  const embedding = (await res.json())?.data?.[0]?.embedding;
+  if (!Array.isArray(embedding)) throw new Error("no embedding returned");
+  return embedding;
+}
+
+async function voyageRerank(query: string, documents: string[]): Promise<{ index: number; score: number }[]> {
+  const res = await fetch("https://api.voyageai.com/v1/rerank", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${VOYAGE_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ query, documents, model: "rerank-2.5", top_k: 8, truncation: true }),
+  });
+  if (!res.ok) throw new Error(`rerank ${res.status}`);
+  const json = await res.json();
+  const results = json?.data ?? json?.results ?? [];
+  return results
+    .map((r: { index: number; relevance_score: number }) => ({ index: r.index, score: r.relevance_score }))
+    .filter((r: { index: number }) => Number.isInteger(r.index));
 }
 
 function jsonError(message: string, status: number) {

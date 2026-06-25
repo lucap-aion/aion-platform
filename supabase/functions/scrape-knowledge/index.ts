@@ -227,6 +227,18 @@ Deno.serve(async (req: Request) => {
         note: SCRAPE_RENDER_URL ? "Nothing retrievable even with rendering." : "Nothing retrievable — site likely needs JS rendering (set SCRAPE_RENDER_URL)." });
     }
 
+    // 2b) Strip cross-page boilerplate (shared nav/menu/footer) and junk lines
+    // so chunks are prose, not navigation soup. Drop pages left too thin.
+    {
+      const cleaned = stripBoilerplate(pages).filter((p) => p.text.length >= MIN_PAGE_CHARS);
+      pages.length = 0;
+      pages.push(...cleaned);
+    }
+    if (pages.length === 0) {
+      return jsonOk({ brand_id: brandId, base_url: origin.href, pages: report, docs_created: 0, chunks_created: 0,
+        note: "Only navigation/boilerplate found — no substantive content to index." });
+    }
+
     // 3) Chunk everything.
     const flat: { pageIdx: number; content: string }[] = [];
     pages.forEach((p, i) => {
@@ -673,6 +685,41 @@ function safeChar(code: number): string {
 function categorize(haystack: string): string {
   for (const r of CATEGORY_RULES) if (r.re.test(haystack)) return r.category;
   return "other";
+}
+
+// E-commerce / navigation chrome that adds noise to every page.
+const JUNK_LINE =
+  /^(sort by|filter|refine|add to (cart|bag|wishlist)|free (standard )?(shipping|returns?)|complimentary (shipping|returns?)|regular price|unit price|sale price|price|shop now|shop all|discover( more)?|learn more|read more|view (all|more|details)|see (all|more)|book (your )?(a )?(visit|appointment)|search|menu|sign ?in|log ?in|register|create account|my account|newsletter|subscribe|follow us|share|wishlist|quick (view|shop|buy)|select( options?| size)?|home|cart|bag|checkout|contact( us)?|store locator|find a (store|boutique)|back to top|skip to (main )?content|©|copyright|all rights reserved|cookies?|privacy( policy)?|terms|change (country|region|language)|loading)\b/i;
+
+const normLine = (l: string) => l.toLowerCase().replace(/\s+/g, " ").trim();
+
+function isJunkLine(l: string): boolean {
+  const t = l.trim();
+  if (t.length < 2) return true;
+  if (JUNK_LINE.test(t)) return true;
+  // Pure price / currency / number-only lines.
+  if (/^[€$£%+\-\s\d.,:|/]+$/.test(t)) return true;
+  // Bare locale/nav tokens like "EN", "IT", "US".
+  if (/^[a-z]{2,3}([_/-][a-z]{2,3})?$/i.test(t) && !/\s/.test(t)) return true;
+  return false;
+}
+
+// Remove lines that repeat across many pages (shared chrome) plus junk lines.
+function stripBoilerplate<T extends { text: string }>(pages: T[]): T[] {
+  const pageLines = pages.map((p) => p.text.split("\n").map((l) => l.trim()));
+  const freq = new Map<string, number>();
+  if (pages.length >= 3) {
+    for (const lines of pageLines) {
+      for (const key of new Set(lines.map(normLine))) if (key) freq.set(key, (freq.get(key) ?? 0) + 1);
+    }
+  }
+  const threshold = Math.max(3, Math.ceil(pages.length * 0.4));
+  return pages.map((p, i) => {
+    const kept = pageLines[i].filter(
+      (l) => l && !isJunkLine(l) && (freq.get(normLine(l)) ?? 0) < threshold,
+    );
+    return { ...p, text: kept.join("\n") };
+  });
 }
 const stripHash = (u: string) => u.split("#")[0];
 
