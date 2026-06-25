@@ -620,6 +620,7 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
   storytelling: { en: "Story", it: "Storytelling" },
   policy: { en: "Policy", it: "Policy" },
   training: { en: "Training", it: "Formazione" },
+  news: { en: "News", it: "News" },
   other: { en: "Doc", it: "Documento" },
 };
 

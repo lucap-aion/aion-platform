@@ -39,6 +39,7 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
   storytelling: { en: "Story", it: "Storytelling" },
   policy: { en: "Policy", it: "Policy" },
   training: { en: "Training", it: "Formazione" },
+  news: { en: "News", it: "News" },
   other: { en: "Other", it: "Altro" },
 };
 
@@ -50,6 +51,7 @@ export default function BrandKnowledge() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState(false);
+  const [pending, setPending] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
   const [scrapeOpen, setScrapeOpen] = useState(false);
 
@@ -61,7 +63,13 @@ export default function BrandKnowledge() {
       .select("id, title, category, source_type, source_url, status, error, char_count, chunk_count, updated_at")
       .eq("brand_id", brandId)
       .order("updated_at", { ascending: false });
+    const { count } = await supabase
+      .from("knowledge_crawl_queue" as never)
+      .select("id", { count: "exact", head: true })
+      .eq("brand_id", brandId)
+      .eq("status", "pending");
     setLoading(false);
+    setPending(count ?? 0);
     if (error) {
       console.error("[knowledge list]", error);
       toast.error(tt(locale, "Couldn't load the knowledge base.", "Impossibile caricare la knowledge base."));
@@ -71,6 +79,13 @@ export default function BrandKnowledge() {
   }, [brandId, locale]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Poll while a background crawl is draining the queue.
+  useEffect(() => {
+    if (pending <= 0) return;
+    const t = setTimeout(() => void refresh(), 15000);
+    return () => clearTimeout(t);
+  }, [pending, refresh]);
 
   const callFn = async (fn: string, body: Record<string, unknown>) => {
     const { data: s } = await supabase.auth.getSession();
@@ -93,18 +108,18 @@ export default function BrandKnowledge() {
   const handleScrape = async () => {
     setScrapeOpen(false);
     setScraping(true);
-    const tid = toast.loading(tt(locale, "Scraping your website… this can take a minute.", "Sto leggendo il sito… può richiedere un minuto."));
+    const tid = toast.loading(tt(locale, "Starting a full crawl of your website…", "Avvio scansione completa del sito…"));
     try {
-      const r = await callFn("scrape-knowledge", { max_pages: 14, brand_id: brandId });
+      const r = await callFn("seed-crawl", { brand_id: brandId });
       toast.success(
         tt(locale,
-          `Added ${r.docs_created} pages (${r.chunks_created} chunks).`,
-          `Aggiunte ${r.docs_created} pagine (${r.chunks_created} sezioni).`),
+          `Queued ${r.page_urls} pages + ${r.news_items} news articles — indexing in the background.`,
+          `In coda ${r.page_urls} pagine + ${r.news_items} articoli — indicizzazione in background.`),
         { id: tid },
       );
       await refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Scrape failed", { id: tid });
+      toast.error(e instanceof Error ? e.message : "Crawl failed", { id: tid });
     } finally {
       setScraping(false);
     }
@@ -171,6 +186,12 @@ export default function BrandKnowledge() {
       <div className="flex gap-3">
         <Stat label={tt(locale, "Documents", "Documenti")} value={docs.length} />
         <Stat label={tt(locale, "Knowledge chunks", "Sezioni indicizzate")} value={totalChunks} />
+        {pending > 0 && (
+          <div className="flex items-center gap-2 self-center rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {tt(locale, `Indexing… ${pending} pages left`, `Indicizzazione… ${pending} pagine rimaste`)}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => void refresh()}
@@ -267,11 +288,11 @@ export default function BrandKnowledge() {
       {scrapeOpen && (
         <ConfirmModal
           locale={locale}
-          title={tt(locale, "Scrape your website?", "Leggere il tuo sito?")}
+          title={tt(locale, "Crawl your whole website?", "Scansionare tutto il sito?")}
           body={tt(locale,
-            "I'll read your brand's public website (about, products, policies) and add it to the knowledge base. Existing scraped pages are refreshed. This can take up to a minute.",
-            "Leggerò il sito pubblico del brand (chi siamo, prodotti, policy) e lo aggiungerò alla knowledge base. Le pagine già lette vengono aggiornate. Può richiedere fino a un minuto.")}
-          confirmLabel={tt(locale, "Scrape now", "Leggi ora")}
+            "I'll crawl your brand's entire public website (every page) plus recent news, and index it. It runs in the background and refreshes weekly; only changed pages are re-indexed. Pages appear here as they're processed.",
+            "Scansionerò l'intero sito pubblico del brand (tutte le pagine) più le news recenti, e lo indicizzerò. Gira in background e si aggiorna ogni settimana; solo le pagine modificate vengono re-indicizzate. Le pagine compaiono qui man mano.")}
+          confirmLabel={tt(locale, "Start full crawl", "Avvia scansione")}
           onCancel={() => setScrapeOpen(false)}
           onConfirm={handleScrape}
         />
