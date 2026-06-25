@@ -99,6 +99,7 @@ export default function BrandAssistant() {
   const urlChatId = searchParams.get("chat");
 
   const ownerId = profile?.id ?? null;
+  const brandId = profile?.brand_id ?? null;
 
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [chatId, setChatId] = useState<string | null>(urlChatId);
