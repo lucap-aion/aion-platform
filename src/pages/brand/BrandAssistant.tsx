@@ -45,6 +45,8 @@ type AssistantMessage = {
   sql: string | null;
   columns: string[];
   rows: Record<string, unknown>[];
+  activity: string | null;
+  followups: string[];
   streaming: boolean;
 };
 
@@ -75,6 +77,22 @@ const formatCell = (v: unknown): string => {
   return String(v);
 };
 
+const isImageColumn = (col: string) =>
+  /(^|_)(picture|avatar|photo|thumbnail|image)(_url)?$/i.test(col);
+const looksLikeImageUrl = (v: unknown): v is string =>
+  typeof v === "string" && /^https?:\/\//i.test(v) &&
+  (/\.(jpe?g|png|gif|webp|avif|svg)(\?|$)/i.test(v) || /\/storage\/v1\/object\//i.test(v));
+
+const ImageCell = ({ url }: { url: unknown }) => {
+  if (!looksLikeImageUrl(url)) return <div className="h-11 w-11 rounded-md bg-muted/50" />;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="block h-11 w-11 overflow-hidden rounded-md border border-border bg-muted/40 hover:opacity-80" onClick={(e) => e.stopPropagation()}>
+      <img src={url} alt="" loading="lazy" className="h-full w-full object-cover"
+        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+    </a>
+  );
+};
+
 const titleFromQuestion = (q: string) => {
   const t = q.trim().replace(/\s+/g, " ");
   return t.length > 60 ? t.slice(0, 57) + "…" : t || "New chat";
@@ -97,6 +115,8 @@ const emptyAssistant = (): AssistantMessage => ({
   sql: null,
   columns: [],
   rows: [],
+  activity: null,
+  followups: [],
   streaming: true,
 });
 
@@ -188,7 +208,7 @@ export default function BrandAssistant() {
     // Backfill fields that may be missing on older saved assistant turns.
     const restored: Message[] = raw.map((m) =>
       m.role === "assistant"
-        ? { sources: [], columns: [], rows: [], sql: null, ...m, streaming: false }
+        ? { sources: [], columns: [], rows: [], sql: null, activity: null, followups: [], ...m, streaming: false }
         : m,
     );
     setMessages(restored);
@@ -444,7 +464,7 @@ export default function BrandAssistant() {
               {messages.map((m, i) =>
                 m.role === "user"
                   ? <UserBubble key={i} text={m.content} />
-                  : <AssistantBlock key={i} message={m} locale={locale} />,
+                  : <AssistantBlock key={i} message={m} locale={locale} isLast={i === messages.length - 1} onFollowup={(q) => void send(q)} />,
               )}
             </div>
           )}
@@ -510,8 +530,17 @@ function handleEvent(
 ) {
   if (event === "turn_start") {
     patch((m) => ({ ...m, summary: "" }));
+  } else if (event === "tool_start") {
+    const label = data?.tool === "search_knowledge"
+      ? (data?.query
+        ? tt(locale, `Searching: "${data.query}"`, `Cerco: "${data.query}"`)
+        : tt(locale, "Searching the knowledge base…", "Cerco nella knowledge base…"))
+      : tt(locale, "Looking up client data…", "Consulto i dati cliente…");
+    patch((m) => ({ ...m, activity: label }));
   } else if (event === "text_delta") {
-    patch((m) => ({ ...m, summary: m.summary + (data?.text ?? "") }));
+    patch((m) => ({ ...m, summary: m.summary + (data?.text ?? ""), activity: null }));
+  } else if (event === "followups") {
+    patch((m) => ({ ...m, followups: Array.isArray(data?.followups) ? data.followups : m.followups }));
   } else if (event === "knowledge") {
     const incoming = Array.isArray(data?.sources) ? (data.sources as KnowledgeSource[]) : [];
     // Collapse to one row per document (the best-scoring chunk) — a single
@@ -535,7 +564,7 @@ function handleEvent(
       rows: data?.rows ?? [],
     }));
   } else if (event === "done") {
-    patch((m) => ({ ...m, streaming: false }));
+    patch((m) => ({ ...m, streaming: false, activity: null }));
   } else if (event === "error") {
     const msg = data?.message ?? tt(locale, "Something went wrong.", "Si è verificato un errore.");
     toast.error(msg);
@@ -624,15 +653,17 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
   other: { en: "Doc", it: "Documento" },
 };
 
-const AssistantBlock = ({ message, locale }: { message: AssistantMessage; locale: string }) => {
-  const { summary, sources, columns, rows, streaming } = message;
+const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
+  message: AssistantMessage; locale: string; isLast: boolean; onFollowup: (q: string) => void;
+}) => {
+  const { summary, sources, columns, rows, activity, followups, streaming } = message;
   const hasAnything = summary || sources.length > 0 || rows.length > 0;
 
   if (!hasAnything && streaming) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
-        <span>{tt(locale, "Thinking…", "Sto pensando…")}</span>
+        <span>{activity ?? tt(locale, "Thinking…", "Sto pensando…")}</span>
       </div>
     );
   }
@@ -645,6 +676,13 @@ const AssistantBlock = ({ message, locale }: { message: AssistantMessage; locale
           {streaming && !summary && (
             <span className="inline-block h-3 w-1.5 animate-pulse bg-foreground/40 align-middle" />
           )}
+        </div>
+      )}
+
+      {streaming && activity && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span>{activity}</span>
         </div>
       )}
 
@@ -680,6 +718,21 @@ const AssistantBlock = ({ message, locale }: { message: AssistantMessage; locale
               );
             })}
           </div>
+        </div>
+      )}
+
+      {isLast && !streaming && followups.length > 0 && (
+        <div className="flex flex-wrap gap-2 pt-1">
+          {followups.map((f, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => onFollowup(f)}
+              className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
+            >
+              {f}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -724,7 +777,9 @@ const DataTable = ({
             {visible.map((row, i) => (
               <tr key={i} className="border-b border-border/60 last:border-0 hover:bg-muted/20">
                 {columns.map((c) => (
-                  <td key={c} className="px-4 py-2 text-foreground tabular-nums">{formatCell(row[c])}</td>
+                  isImageColumn(c)
+                    ? <td key={c} className="px-4 py-2"><ImageCell url={row[c]} /></td>
+                    : <td key={c} className="px-4 py-2 text-foreground tabular-nums">{formatCell(row[c])}</td>
                 ))}
               </tr>
             ))}

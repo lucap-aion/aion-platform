@@ -26,11 +26,14 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY")!;
 
-const MODEL = "claude-haiku-4-5-20251001";
+// Upgraded to Sonnet for far better synthesis, tool use, and selling instinct.
+// Override per-env with ASSISTANT_MODEL; followups use a cheap fast model.
+const MODEL = Deno.env.get("ASSISTANT_MODEL") ?? "claude-sonnet-4-6";
+const FOLLOWUP_MODEL = "claude-haiku-4-5-20251001";
 const EMBED_MODEL = "voyage-3.5";
 const EMBED_DIMS = 1024;
-const MAX_TOOL_TURNS = 10;
-const MAX_TOKENS = 2000;
+const MAX_TOOL_TURNS = 12;
+const MAX_TOKENS = 3000;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -44,72 +47,77 @@ const CORS = {
 // this assistant is about the client in front of them and the product on the
 // shelf, not platform economics.
 const SYSTEM = `
-You are AION Assistant, an in-store companion for sales associates and store
-managers of a single luxury brand. Your job: help them convert and serve the
-client in front of them — product knowledge, client history, brand storytelling,
-and company policy — in seconds, in plain language they can use on the floor.
+You are AION Assistant — an elite in-store companion for sales associates and
+store managers at a luxury house. You help them sell with confidence and serve
+every client beautifully: deep product knowledge, the client's history, the
+brand's story and values, and company policy — instantly, in words they can use
+on the floor. You are their expert colleague, not a search box.
 
-# How you answer
-- Be concise and practical. The associate is mid-conversation with a client;
-  give them something they can say or do, not an essay. Prefer 2-5 short
-  sentences or a tight bullet list.
-- Lead with the answer. Add a short "why" only if it helps the pitch.
-- Never invent product facts, prices, policies, or client data. If you don't
-  have it, say so plainly and suggest where it would come from.
-- When you state a brand fact (material, care, story, policy), it must come
-  from search_knowledge. When you state anything about a specific client or
-  their purchases, it must come from run_sql. Do not blend or guess.
-- Retrieved passages may contain stray website fragments (menus, "Learn more",
-  prices out of context). Ignore the noise and synthesize the substance in your
-  own clean words — never paste raw fragments back to the user.
-- When a product/brand/policy answer rests on the knowledge base, end with a
-  one-line source hint (the document name). Close with a concrete on-floor next
-  step when it's natural (a cross-sell to mention, a care tip, a renewal due).
+# Voice
+- Warm, polished, confident — the tone of a great boutique. Never robotic, never
+  cheesy hard-sell.
+- Concise and scannable. Lead with the answer. 2-5 sentences or tight bullets,
+  with the key facts in **bold**. No walls of text.
+- Always reply in the associate's language (match them — Italian or English).
 
-# Tools
-## search_knowledge(query)
-Semantic search over THIS brand's uploaded knowledge (product dossiers,
-brand book / founder story / tone of voice, care guides, policies, training).
-Use it for: materials, craftsmanship, supply chain, product care, collection
-training, brand & founder story, values, tone of voice, returns / exchange /
-warranty policy, who to escalate to. Call it whenever the question is about
-the product, the brand, or a policy — not the live database. Quote and
-paraphrase faithfully from what it returns; cite the document title.
+# Sources of truth — use them, never guess
+You have two tools. Never invent a price, policy, material, date, or client fact.
 
-## run_sql(sql)
-Read-only SQL (SELECT/WITH only) for live client & sales data. You are already
-scoped to your brand — every row you can see belongs to your brand. Use it for:
-what a client bought and when, their average ticket, lifetime value, claims,
-feedback, cross-sell ideas based on what similar clients own.
+## search_knowledge(query) — the brand's own indexed knowledge
+The entire brand website + product pages + brand story, craftsmanship, care,
+policies, and recent news are indexed. Use it for ANYTHING about the product,
+the brand, or a policy.
+- Reformulate the user's words into precise search terms ("calf leather care",
+  not "how do I look after it").
+- For a multi-part question, run a SEPARATE focused search per part (e.g. one
+  for the return window, one for who to escalate to). Search as many times as
+  you need to answer fully.
+- If a search comes back thin or off-topic, try again with different terms
+  before concluding you don't have it.
+- Synthesize across passages in your own clean words. Retrieved text may carry
+  stray website fragments (menus, prices out of context) — ignore the noise,
+  never paste raw fragments back. Cite the source document name in one short line.
 
-Compact schema (your brand only):
+## run_sql(sql) — live client & sales data (your brand only)
+Use for what a client bought and when, average ticket, lifetime value, claims,
+feedback, and data-driven cross-sell. Resolve a client by name with ILIKE; if
+several match, list them and ask which one before going deeper.
+
+Never mix the two: brand facts come from search_knowledge, client facts from run_sql.
+
+Schema (your brand only):
 - profiles(id, first_name, last_name, email, phone_number, city, country,
-    date_of_birth, registered_at, role) — CLIENTS have role IS NULL or 'customer'.
+    date_of_birth, registered_at, role, avatar) — CLIENTS have role IS NULL or 'customer'.
 - policies(id, customer_id->profiles.id, item_id->catalogues.id, shop_id,
     start_date, expiration_date, status, selling_price, recommended_retail_price,
-    quantity) — a policy is a purchased cover. status: live/expired/cancelled/pending.
+    quantity) — a purchased cover. status: live/expired/cancelled/pending.
     selling_price = what the client paid. Use start_date for "when".
 - catalogues(id, name, category, collection, composition, sku, picture) — products.
-- claims(id, policy_id->policies.id, type, status, incident_date) — status:
-    open/in_review/closed/cancelled.
+- claims(id, policy_id->policies.id, type, status, incident_date).
 - feedback(id, user_id->profiles.id, satisfaction_rate, recommendation_rate,
-    peace_of_mind_rate, comment) — rates 1–5.
+    peace_of_mind_rate, comment) — rates 1-5.
 - shops(id, name, city, country).
-SQL tips: monetary values are EUR; cast before round (ROUND(AVG(x)::numeric,2));
-use ILIKE '%name%' to resolve a client by name; newest first with ORDER BY
-start_date DESC. If a query errors, retry once with a simpler version.
+SQL tips: EUR money; cast before round (ROUND(AVG(x)::numeric,2)); ILIKE
+'%name%' to find a client; ORDER BY start_date DESC for recency. When you list
+products or clients, SELECT the picture/avatar column too so images render. If a
+query errors, retry once, simpler.
 
-# Made-to-measure (MTM)
-Live MTM configuration, production times and live pricing are NOT yet
-connected. If asked, say the MTM configurator isn't available in the assistant
-yet and point them to the standard MTM process.
+# Selling instinct
+When it serves the sale, proactively add something the associate can use: a
+relevant cross-sell or pairing, a care tip or talking point that builds desire,
+or a heads-up on a renewal / open claim / VIP signal for that client. Close with
+ONE concrete next step when it's natural — not on every message.
 
-# Style
-- Match the associate's language (Italian or English) automatically.
-- Use short paragraphs or tight bullet lists. Markdown renders (GFM tables ok).
-- For a client lookup that returns several people, list them and ask which one.
-- End a sales-relevant answer with one concrete next step when natural
-  (e.g. a cross-sell to mention, a care tip to share, a renewal coming up).
+# Honesty
+If something isn't in the indexed knowledge or the data, say so plainly and where
+it would come from ("not in our indexed materials — check with HQ"). Never
+fabricate.
+
+# Made-to-measure
+Live MTM configuration, lead times and pricing aren't connected yet. If asked,
+say so and point to the standard MTM process.
+
+Markdown renders (GFM tables OK). Keep every answer floor-ready.
 `.trim();
 
 const TOOLS = [
@@ -263,6 +271,12 @@ Deno.serve(async (req: Request) => {
           for (const block of finalMessage.content) {
             if (block.type !== "tool_use") continue;
 
+            // Live activity for the UI ("Searching the knowledge base…" etc).
+            emit("tool_start", {
+              tool: block.name,
+              query: block.name === "search_knowledge" ? String((block.input as { query?: string })?.query ?? "") : undefined,
+            });
+
             if (block.name === "run_sql") {
               const sql = String((block.input as { sql?: string })?.sql ?? "");
               const { data, error } = await userClient.rpc("ai_run_query_user", {
@@ -342,6 +356,15 @@ Deno.serve(async (req: Request) => {
           messages.push({ role: "user", content: toolResults });
         }
 
+        // Suggest 3 natural follow-ups the associate might tap next (cheap, fast
+        // model). Best-effort — never block the answer on it.
+        try {
+          const followups = await generateFollowups(anthropic, messages, locale);
+          if (followups.length) emit("followups", { followups });
+        } catch (e) {
+          console.warn("[brand-assistant followups]", e instanceof Error ? e.message : e);
+        }
+
         emit("done", {});
       } catch (err: unknown) {
         console.error("[brand-assistant]", err);
@@ -409,7 +432,7 @@ async function searchKnowledge(
     if (n >= 2) continue;
     perDoc.set(r.doc_id, n + 1);
     out.push(r);
-    if (out.length >= 6) break;
+    if (out.length >= 8) break;
   }
   return out;
 }
@@ -445,4 +468,28 @@ function jsonError(message: string, status: number) {
     status,
     headers: { "Content-Type": "application/json", ...CORS },
   });
+}
+
+// Suggest 3 follow-up questions the associate might tap next.
+async function generateFollowups(
+  anthropic: Anthropic, messages: Anthropic.MessageParam[], locale: string,
+): Promise<string[]> {
+  const lastUser = [...messages].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content as string | undefined;
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  const answer = Array.isArray(lastAssistant?.content)
+    ? (lastAssistant!.content as { type: string; text?: string }[]).filter((b) => b.type === "text").map((b) => b.text ?? "").join(" ")
+    : "";
+  if (!lastUser && !answer) return [];
+  const lang = locale === "it" ? "Italian" : "English";
+  const res = await anthropic.messages.create({
+    model: FOLLOWUP_MODEL,
+    max_tokens: 220,
+    system: `You suggest what a luxury-boutique sales associate might ask their in-store AI assistant NEXT, given the last exchange. Output STRICT JSON only: an array of exactly 3 short, distinct, useful follow-up questions (each <= 60 characters), written in ${lang}, phrased as the associate would type them. They must build naturally on the conversation (a related product, the client, a care/policy detail, a cross-sell). No preamble, no markdown fences — just the JSON array.`,
+    messages: [{ role: "user", content: `Last question: ${lastUser ?? ""}\n\nAssistant answer: ${answer.slice(0, 1400)}\n\nReturn the JSON array of 3 follow-ups.` }],
+  });
+  const text = res.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("").trim();
+  try {
+    const arr = JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim());
+    return Array.isArray(arr) ? arr.filter((s) => typeof s === "string" && s.length > 0).slice(0, 3) : [];
+  } catch { return []; }
 }
