@@ -106,6 +106,7 @@ export default function BrandAssistant() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>(() => buildSuggestions(locale, null, null, null));
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -131,6 +132,33 @@ export default function BrandAssistant() {
   useEffect(() => {
     void refreshChatList();
   }, [refreshChatList]);
+
+  // Ground the starter prompts in the brand's real data: an actual product /
+  // collection, a real client who has purchased, and the brand name.
+  useEffect(() => {
+    if (!brandId) return;
+    let active = true;
+    (async () => {
+      const [brandRes, catRes, polRes] = await Promise.all([
+        supabase.from("brands").select("name").eq("id", brandId).maybeSingle(),
+        supabase.from("catalogues").select("name, collection").eq("brand_id", brandId).not("name", "is", null).limit(60),
+        supabase.from("policies").select("customer:customer_id(first_name, last_name)").eq("brand_id", brandId).limit(40),
+      ]);
+      if (!active) return;
+      const brandName = (brandRes.data?.name as string | undefined) ?? null;
+      const cats = (catRes.data as { name: string | null; collection: string | null }[] | null) ?? [];
+      const withCollection = cats.find((c) => c.collection && c.collection.trim());
+      const product = (withCollection?.collection ?? cats[0]?.name ?? null)?.trim() || null;
+      let customer: string | null = null;
+      for (const p of (polRes.data as { customer: { first_name: string | null; last_name: string | null } | { first_name: string | null; last_name: string | null }[] | null }[] | null) ?? []) {
+        const c = Array.isArray(p.customer) ? p.customer[0] : p.customer;
+        const name = [c?.first_name, c?.last_name].filter(Boolean).join(" ").trim();
+        if (name) { customer = name; break; }
+      }
+      setSuggestions(buildSuggestions(locale, brandName, product, customer));
+    })();
+    return () => { active = false; };
+  }, [brandId, locale]);
 
   // ── Load a chat ────────────────────────────────────────────────────────────
   const loadChat = useCallback(async (id: string) => {
@@ -401,7 +429,7 @@ export default function BrandAssistant() {
               {tt(locale, "Loading…", "Caricamento…")}
             </div>
           ) : messages.length === 0 ? (
-            <EmptyState locale={locale} onPick={(q) => void send(q)} />
+            <EmptyState locale={locale} prompts={suggestions} onPick={(q) => void send(q)} />
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-6">
               {messages.map((m, i) =>
@@ -500,14 +528,41 @@ function handleEvent(
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
-const QUICK_PROMPTS: { icon: React.ComponentType<{ className?: string }>; en: string; it: string }[] = [
-  { icon: ShoppingBag, en: "What is the leather composition and care for our signature bag?", it: "Qual è la composizione in pelle e la cura della nostra borsa iconica?" },
-  { icon: Users, en: "Show me what Maria Rossi has bought and her average ticket.", it: "Mostrami cosa ha comprato Maria Rossi e il suo scontrino medio." },
-  { icon: BookOpen, en: "Tell me the founder's story and our tone of voice.", it: "Raccontami la storia del fondatore e il nostro tone of voice." },
-  { icon: ScrollText, en: "What's our return and exchange policy, and who do I escalate to?", it: "Qual è la nostra policy di reso e cambio, e a chi mi rivolgo?" },
-];
+type Suggestion = { icon: React.ComponentType<{ className?: string }>; text: string };
 
-const EmptyState = ({ locale, onPick }: { locale: string; onPick: (q: string) => void }) => (
+// Starter prompts grounded in the brand's real data (a real product/collection,
+// a real client who has purchased, the brand name). Falls back to generic
+// phrasing until the data loads or when nothing is available.
+function buildSuggestions(
+  locale: string, brandName: string | null, product: string | null, customer: string | null,
+): Suggestion[] {
+  return [
+    {
+      icon: ShoppingBag,
+      text: product
+        ? tt(locale, `Tell me about ${product} — materials, craftsmanship and care.`, `Parlami di ${product} — materiali, lavorazione e cura.`)
+        : tt(locale, "Tell me about our signature piece — materials, craftsmanship and care.", "Parlami del nostro pezzo iconico — materiali, lavorazione e cura."),
+    },
+    {
+      icon: Users,
+      text: customer
+        ? tt(locale, `What has ${customer} bought, and what's their average ticket?`, `Cosa ha comprato ${customer} e qual è il suo scontrino medio?`)
+        : tt(locale, "Look up a client — what have they bought and their average ticket?", "Cerca un cliente — cosa ha comprato e il suo scontrino medio?"),
+    },
+    {
+      icon: BookOpen,
+      text: brandName
+        ? tt(locale, `Tell me ${brandName}'s story, values and tone of voice.`, `Raccontami la storia di ${brandName}, i valori e il tone of voice.`)
+        : tt(locale, "Tell me our brand story, values and tone of voice.", "Raccontami la storia del brand, i valori e il tone of voice."),
+    },
+    {
+      icon: ScrollText,
+      text: tt(locale, "What's our return and exchange policy, and who do I escalate to?", "Qual è la policy di reso e cambio, e a chi mi rivolgo?"),
+    },
+  ];
+}
+
+const EmptyState = ({ locale, prompts, onPick }: { locale: string; prompts: Suggestion[]; onPick: (q: string) => void }) => (
   <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
     <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
       <Sparkles className="h-6 w-6 text-primary" />
@@ -521,20 +576,17 @@ const EmptyState = ({ locale, onPick }: { locale: string; onPick: (q: string) =>
         "Chiedi di prodotti, clienti, storia del brand o policy aziendali.")}
     </p>
     <div className="mt-8 grid w-full grid-cols-1 gap-2 text-left sm:grid-cols-2">
-      {QUICK_PROMPTS.map(({ icon: Icon, en, it }) => {
-        const label = tt(locale, en, it);
-        return (
-          <button
-            key={en}
-            type="button"
-            onClick={() => onPick(label)}
-            className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
-          >
-            <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-            <span className="flex-1">{label}</span>
-          </button>
-        );
-      })}
+      {prompts.map(({ icon: Icon, text }, i) => (
+        <button
+          key={i}
+          type="button"
+          onClick={() => onPick(text)}
+          className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
+        >
+          <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <span className="flex-1">{text}</span>
+        </button>
+      ))}
     </div>
   </div>
 );
