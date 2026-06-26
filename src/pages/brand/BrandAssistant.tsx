@@ -686,7 +686,9 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
         </div>
       )}
 
-      {!streaming && columns.length > 0 && rows.length > 0 && (
+      {/* Show the table only for real lists — a single scalar/count is already
+          in the prose, so a 1-row, ≤2-column "table" is just noise. */}
+      {!streaming && columns.length > 0 && rows.length > 0 && !(rows.length <= 1 && columns.length <= 2) && (
         <DataTable columns={columns} rows={rows} locale={locale} />
       )}
 
