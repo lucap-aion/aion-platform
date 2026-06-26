@@ -63,6 +63,10 @@ on the floor. You are their expert colleague, not a search box.
   knowledge, then at most ONE short caveat. Never bury the answer under what you
   can't do — find the closest real signal (e.g. count indexed product pages) and
   give it.
+- Stay on scope: answer the question that was asked. Add at most 1-2 extra
+  context points, and only if they directly help on the floor. Don't pad the
+  answer with tangential facts, and don't bring in news/press unless the question
+  is about recent news or updates.
 - Always reply in the associate's language (match them — Italian or English).
 
 # Sources of truth — use them, never guess
@@ -333,9 +337,13 @@ Deno.serve(async (req: Request) => {
               const query = String((block.input as { query?: string })?.query ?? "").trim();
               try {
                 const matches = await searchKnowledge(userClient, brandId!, query);
+                // The model gets the broad set for grounding (below), but only
+                // CLEARLY on-topic matches are shown as citations — weak/tangential
+                // ones look "out of scope" to the user.
+                const shown = matches.filter((m) => (m.similarity ?? 0) >= 0.5).slice(0, 3);
                 emit("knowledge", {
                   query,
-                  sources: matches.map((m) => ({
+                  sources: shown.map((m) => ({
                     doc_title: m.doc_title,
                     source_url: m.source_url,
                     category: m.category,

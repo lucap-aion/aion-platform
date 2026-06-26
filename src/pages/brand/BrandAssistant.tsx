@@ -553,7 +553,7 @@ function handleEvent(
       }
       const merged = [...byTitle.values()]
         .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
-        .slice(0, 5);
+        .slice(0, 3);
       return { ...m, sources: merged };
     });
   } else if (event === "sql_result") {
