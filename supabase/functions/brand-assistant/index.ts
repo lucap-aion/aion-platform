@@ -119,6 +119,16 @@ SQL tips: EUR money; cast before round (ROUND(AVG(x)::numeric,2)); ILIKE
 products or clients, SELECT the picture/avatar column too so images render. If a
 query errors, retry once, simpler.
 
+IMPORTANT — run_sql results render to the user automatically as a rich table
+with product/client photos. Don't blindly re-paste rows.
+- When the value is in SEEING the pieces (products, a client's items, anyone
+  with a photo), DON'T build a table — one short sentence of context — so the
+  photo cards render below.
+- Only build a small markdown table for a pure ranking / numbers where there's
+  nothing to look at (e.g. top clients by spend); keep it tight and add the
+  insight (the standout, what it means, the next step).
+- For disambiguating a few people, a short inline list ("1. … 2. …") is fine.
+
 # Selling instinct
 When it serves the sale, proactively add something the associate can use: a
 relevant cross-sell or pairing, a care tip or talking point that builds desire,
@@ -445,6 +455,16 @@ async function searchKnowledge(
     if (ranked.length) { rows = ranked.map((r) => ({ ...rows[r.index], similarity: r.score })); reranked = true; }
   } catch (e) {
     console.warn("[brand-assistant rerank]", e instanceof Error ? e.message : e);
+  }
+
+  // Evergreen questions (brand story, product, policy) shouldn't be led by news
+  // articles that merely mention the same words. Penalise news unless the query
+  // is explicitly about news/updates, then re-sort.
+  const newsy = /\b(news|latest|recent|press|announce|launch|opening|campaign|event|update|new (collection|boutique|store))\b/i.test(query);
+  if (!newsy) {
+    rows = rows
+      .map((r) => (r.category === "news" ? { ...r, similarity: (r.similarity ?? 0) * 0.6 } : r))
+      .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0));
   }
 
   // Keep only genuinely-relevant, non-trivial chunks so we don't surface (or

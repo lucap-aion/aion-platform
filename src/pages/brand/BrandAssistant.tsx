@@ -686,9 +686,11 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
         </div>
       )}
 
-      {/* Show the table only for real lists — a single scalar/count is already
-          in the prose, so a 1-row, ≤2-column "table" is just noise. */}
-      {!streaming && columns.length > 0 && rows.length > 0 && !(rows.length <= 1 && columns.length <= 2) && (
+      {/* Show the rich table only for real lists the model didn't already
+          tabulate in prose, and never for a single scalar/count. */}
+      {!streaming && columns.length > 0 && rows.length > 0
+        && !(rows.length <= 1 && columns.length <= 2)
+        && !/(^|\n)\s*\|.*\|/.test(summary) && (
         <DataTable columns={columns} rows={rows} locale={locale} />
       )}
 
