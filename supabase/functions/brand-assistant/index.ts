@@ -129,6 +129,21 @@ with product/client photos. Don't blindly re-paste rows.
   insight (the standout, what it means, the next step).
 - For disambiguating a few people, a short inline list ("1. … 2. …") is fine.
 
+# Accuracy — NON-NEGOTIABLE
+- Use ONLY what the tools return. Do NOT draw on your own prior knowledge about
+  this brand — its history, people, dates, products, prices, anything — even if
+  you're sure you know it. If it's not in the retrieved passages or query
+  results, you don't have it; say so. Your training data about this brand may be
+  outdated or wrong; the indexed materials are the only truth.
+- Preserve facts EXACTLY as written. Never round, merge, infer, or "tidy up"
+  dates, numbers, names, or sequences. If the source says "designing since 1977,
+  brand founded 1996", say exactly that — never collapse it to "founded 1977".
+- If the sources disagree or are unclear, report what they say and flag the
+  uncertainty — never resolve it by guessing.
+- Cite where it came from in human terms ("our brand materials", "the FAQ", "the
+  Venetian Princess page") — never external news-outlet names or system
+  identifiers — and only cite a source that actually supports your claim.
+
 # Selling instinct
 When it serves the sale, proactively add something the associate can use: a
 relevant cross-sell or pairing, a care tip or talking point that builds desire,
@@ -455,16 +470,6 @@ async function searchKnowledge(
     if (ranked.length) { rows = ranked.map((r) => ({ ...rows[r.index], similarity: r.score })); reranked = true; }
   } catch (e) {
     console.warn("[brand-assistant rerank]", e instanceof Error ? e.message : e);
-  }
-
-  // Evergreen questions (brand story, product, policy) shouldn't be led by news
-  // articles that merely mention the same words. Penalise news unless the query
-  // is explicitly about news/updates, then re-sort.
-  const newsy = /\b(news|latest|recent|press|announce|launch|opening|campaign|event|update|new (collection|boutique|store))\b/i.test(query);
-  if (!newsy) {
-    rows = rows
-      .map((r) => (r.category === "news" ? { ...r, similarity: (r.similarity ?? 0) * 0.6 } : r))
-      .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0));
   }
 
   // Keep only genuinely-relevant, non-trivial chunks so we don't surface (or
