@@ -79,9 +79,11 @@ const formatCell = (v: unknown): string => {
 
 const isImageColumn = (col: string) =>
   /(^|_)(picture|avatar|photo|thumbnail|image)(_url)?$/i.test(col);
+// Only ever called for a known image column (see DataTable), so accept ANY
+// http(s) URL — product feeds often serve images from extension-less endpoints
+// (e.g. .../Base/Image/154499). Truly broken URLs are hidden via <img onError>.
 const looksLikeImageUrl = (v: unknown): v is string =>
-  typeof v === "string" && /^https?:\/\//i.test(v) &&
-  (/\.(jpe?g|png|gif|webp|avif|svg)(\?|$)/i.test(v) || /\/storage\/v1\/object\//i.test(v));
+  typeof v === "string" && /^https?:\/\/\S+/i.test(v.trim());
 
 const ImageCell = ({ url }: { url: unknown }) => {
   if (!looksLikeImageUrl(url)) return <div className="h-11 w-11 rounded-md bg-muted/50" />;

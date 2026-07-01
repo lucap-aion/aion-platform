@@ -167,12 +167,11 @@ const isPercentColumn = (col: string) =>
 const isImageColumn = (col: string) =>
   /(^|_)(picture|avatar|photo|thumbnail)(_url)?$/i.test(col) ||
   /(^|_)image_url$/i.test(col);
+// Only ever called for a known image column (see DataTable), so accept ANY
+// http(s) URL — product feeds often serve images from extension-less endpoints
+// (e.g. .../Base/Image/154499). Truly broken URLs are hidden via <img onError>.
 const looksLikeImageUrl = (v: unknown): v is string =>
-  typeof v === "string" &&
-  /^https?:\/\//i.test(v) &&
-  // Either an image extension OR a known Supabase Storage path — the latter
-  // covers signed URLs without an extension.
-  (/\.(jpe?g|png|gif|webp|avif|svg)(\?|$)/i.test(v) || /\/storage\/v1\/object\//i.test(v));
+  typeof v === "string" && /^https?:\/\/\S+/i.test(v.trim());
 
 const formatNumber = (n: number, col: string, bcp: string): string => {
   if (!Number.isFinite(n)) return "—";
