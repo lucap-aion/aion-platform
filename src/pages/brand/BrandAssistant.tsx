@@ -15,8 +15,8 @@ import { useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  ArrowUp, BookOpen, Loader2, MessageSquarePlus, ShoppingBag, Sparkles,
-  Trash2, Users, ScrollText,
+  ArrowUp, BookOpen, ImagePlus, Loader2, MessageSquarePlus, ShoppingBag, Sparkles,
+  Trash2, Users, ScrollText, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -51,8 +51,36 @@ type AssistantMessage = {
 };
 
 type Message =
-  | { role: "user"; content: string }
+  | { role: "user"; content: string; image?: string }
   | AssistantMessage;
+
+// Read an image file and downscale to a modest JPEG data URL. Keeps the upload
+// small and stays inside the visual-search embedder's pixel limits (very large
+// photos are otherwise rejected server-side).
+async function fileToScaledDataUrl(file: File, maxDim = 1024, quality = 0.82): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result as string);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error("image load failed"));
+    im.src = dataUrl;
+  });
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale));
+  const h = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return dataUrl;
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", quality);
+}
 
 type ChatSummary = { id: string; title: string; updated_at: string };
 
@@ -135,6 +163,8 @@ export default function BrandAssistant() {
   const [chatId, setChatId] = useState<string | null>(urlChatId);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [image, setImage] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>(() => buildSuggestions(locale, null, null, null));
@@ -288,11 +318,29 @@ export default function BrandAssistant() {
     if (chatId === id) startNewChat();
   };
 
+  // ── Image attach ─────────────────────────────────────────────────────────
+  const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (e.target) e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error(tt(locale, "Please choose an image.", "Scegli un'immagine."));
+      return;
+    }
+    try {
+      setImage(await fileToScaledDataUrl(file));
+    } catch {
+      toast.error(tt(locale, "Couldn't read that image.", "Impossibile leggere l'immagine."));
+    }
+  };
+
   // ── Send ─────────────────────────────────────────────────────────────────
   const send = async (question: string) => {
     const text = question.trim();
-    if (!text || loading) return;
+    const attached = image; // a photo alone is a valid turn (visual search)
+    if ((!text && !attached) || loading) return;
     setInput("");
+    setImage(null);
 
     const priorHistory = messages.map((m) =>
       m.role === "user"
@@ -300,7 +348,7 @@ export default function BrandAssistant() {
         : { role: "assistant", content: m.summary },
     );
 
-    setMessages([...messages, { role: "user", content: text }, emptyAssistant()]);
+    setMessages([...messages, { role: "user", content: text, image: attached ?? undefined }, emptyAssistant()]);
     setLoading(true);
 
     const patch = (fn: (m: AssistantMessage) => AssistantMessage) =>
@@ -330,7 +378,7 @@ export default function BrandAssistant() {
         },
         // brand_id is used only when the caller is an admin (e.g. viewing-as a
         // brand user); real brand users are pinned to their own brand server-side.
-        body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id }),
+        body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id, image: attached ?? undefined }),
       });
 
       if (!res.ok || !res.body) {
@@ -465,7 +513,7 @@ export default function BrandAssistant() {
             <div className="mx-auto flex max-w-3xl flex-col gap-6">
               {messages.map((m, i) =>
                 m.role === "user"
-                  ? <UserBubble key={i} text={m.content} />
+                  ? <UserBubble key={i} text={m.content} image={m.image} />
                   : <AssistantBlock key={i} message={m} locale={locale} isLast={i === messages.length - 1} onFollowup={(q) => void send(q)} />,
               )}
             </div>
@@ -473,28 +521,65 @@ export default function BrandAssistant() {
         </div>
 
         <div className="border-t border-border bg-background px-6 py-4">
-          <div className="mx-auto flex max-w-3xl items-end gap-2">
-            <textarea
-              ref={taRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder={tt(locale, "Ask about a product, client, the brand story, or a policy…",
-                "Chiedi di un prodotto, un cliente, la storia del brand o una policy…")}
-              rows={1}
-              disabled={loading}
-              className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
-              style={{ maxHeight: 160 }}
-            />
-            <button
-              type="button"
-              onClick={() => void send(input)}
-              disabled={loading || !input.trim()}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
-              aria-label={tt(locale, "Send", "Invia")}
-            >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
-            </button>
+          <div className="mx-auto max-w-3xl">
+            {image && (
+              <div className="mb-2 flex items-center gap-2">
+                <div className="relative h-16 w-16 overflow-hidden rounded-lg border border-border">
+                  <img src={image} alt="" className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setImage(null)}
+                    className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-background/90 text-foreground shadow hover:bg-background"
+                    aria-label={tt(locale, "Remove image", "Rimuovi immagine")}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {tt(locale, "Photo attached — I'll identify the piece.", "Foto allegata — identifico il pezzo.")}
+                </span>
+              </div>
+            )}
+            <div className="flex items-end gap-2">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => void onPickImage(e)}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={loading}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                aria-label={tt(locale, "Attach a photo", "Allega una foto")}
+                title={tt(locale, "Attach a photo of a piece", "Allega la foto di un pezzo")}
+              >
+                <ImagePlus className="h-4 w-4" />
+              </button>
+              <textarea
+                ref={taRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder={tt(locale, "Ask, or attach a photo of a piece to identify it…",
+                  "Chiedi, o allega la foto di un pezzo da identificare…")}
+                rows={1}
+                disabled={loading}
+                className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+                style={{ maxHeight: 160 }}
+              />
+              <button
+                type="button"
+                onClick={() => void send(input)}
+                disabled={loading || (!input.trim() && !image)}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+                aria-label={tt(locale, "Send", "Invia")}
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
           <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-muted-foreground/60">
             {tt(locale,
@@ -537,7 +622,9 @@ function handleEvent(
       ? (data?.query
         ? tt(locale, `Searching: "${data.query}"`, `Cerco: "${data.query}"`)
         : tt(locale, "Searching the knowledge base…", "Cerco nella knowledge base…"))
-      : tt(locale, "Looking up client data…", "Consulto i dati cliente…");
+      : data?.tool === "search_by_image"
+        ? tt(locale, "Identifying the piece from the photo…", "Identifico il pezzo dalla foto…")
+        : tt(locale, "Looking up client data…", "Consulto i dati cliente…");
     patch((m) => ({ ...m, activity: label }));
   } else if (event === "text_delta") {
     patch((m) => ({ ...m, summary: m.summary + (data?.text ?? ""), activity: null }));
@@ -638,11 +725,16 @@ const EmptyState = ({ locale, prompts, onPick }: { locale: string; prompts: Sugg
   </div>
 );
 
-const UserBubble = ({ text }: { text: string }) => (
-  <div className="flex justify-end">
-    <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">
-      {text}
-    </div>
+const UserBubble = ({ text, image }: { text: string; image?: string }) => (
+  <div className="flex flex-col items-end gap-1.5">
+    {image && (
+      <img src={image} alt="" className="max-h-56 max-w-[80%] rounded-2xl rounded-tr-md border border-border object-cover" />
+    )}
+    {text && (
+      <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">
+        {text}
+      </div>
+    )}
   </div>
 );
 

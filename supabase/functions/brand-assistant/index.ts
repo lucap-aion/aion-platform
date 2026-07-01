@@ -151,6 +151,22 @@ client. A product answer with no pieces to show is a failed answer.
   say so in one line and show the closest pieces you do have — never reply with
   names only when you could show something.
 
+# Visual search — when the associate sends a photo of a piece
+The associate can photograph a piece a client is wearing or pointing at. When a
+photo is attached you'll receive it AND a ranked list of the closest matches from
+YOUR catalogue (by visual similarity), each with name, collection and a score.
+- Lead with the identification: the most likely piece by **name** and
+  **collection**, in one confident line. Use BOTH your own look at the photo and
+  the ranked matches — if the top match clearly fits what you see, name it.
+- The matching pieces are already shown as photo cards below your text, so keep
+  the prose short: the call, one line on why (materials/collection), and a next
+  step (e.g. show her the piece, or a pairing).
+- Be honest about confidence. If nothing matches well, or the top scores are low
+  and don't look like the photo, say it's not a confident match and show the
+  closest options — never invent a name or SKU.
+- The catalogue is a subset of the full range, so the exact piece may not be in
+  it; if so, say so and offer the closest pieces you do have.
+
 # Accuracy — NON-NEGOTIABLE
 - Use ONLY what the tools return. Do NOT draw on your own prior knowledge about
   this brand — its history, people, dates, products, prices, anything — even if
@@ -280,16 +296,32 @@ Deno.serve(async (req: Request) => {
   const question = String(body.question ?? "").trim();
   const history = Array.isArray(body.history) ? body.history : [];
   const locale = body.locale === "it" ? "it" : "en";
-  if (!question) return jsonError("question is required", 400);
+  // Optional photo for visual product search (data URL: "data:image/…;base64,…").
+  const image = parseDataUrl(body.image);
+  // A photo alone is a valid turn ("what piece is this?"); text is only required
+  // when there's no image.
+  if (!question && !image) return jsonError("question or image is required", 400);
 
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
   const encoder = new TextEncoder();
+
+  // The newest user turn carries the photo (as an image block) when present, so
+  // the model can reason over it directly alongside the catalogue matches.
+  const latestContent: Anthropic.ContentBlockParam[] | string = image
+    ? [
+        { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
+        { type: "text", text: question || (locale === "it"
+          ? "Che pezzo è questo? Identificalo dal nostro catalogo."
+          : "What piece is this? Identify it from our catalogue.") },
+      ] as Anthropic.ContentBlockParam[]
+    : question;
+
   const messages: Anthropic.MessageParam[] = [
     ...history.map((m: { role?: string; content?: string }) => ({
       role: (m.role === "assistant" ? "assistant" : "user") as "assistant" | "user",
       content: String(m.content ?? ""),
     })),
-    { role: "user" as const, content: question },
+    { role: "user" as const, content: latestContent },
   ];
 
   const brandScope = brandName
@@ -314,6 +346,56 @@ Deno.serve(async (req: Request) => {
       };
 
       try {
+        // Visual search: if a photo was attached, match it against the brand's
+        // catalogue-image embeddings, show the pieces as cards, and hand the
+        // model the ranked candidates so it can identify + confirm.
+        if (image) {
+          emit("tool_start", { tool: "search_by_image" });
+          try {
+            const embedding = await voyageEmbedImage(`data:${image.mediaType};base64,${image.data}`);
+            const { data: matchData, error: matchErr } = await userClient.rpc(
+              "match_catalogue_images",
+              { p_brand_id: brandId, p_query_embedding: embedding, p_match_count: 8, p_min_similarity: 0.2 },
+            );
+            if (matchErr) throw new Error(matchErr.message);
+            const matches = (matchData ?? []) as {
+              name: string; collection: string | null; category: string | null;
+              sku: string | null; picture: string | null; similarity: number;
+            }[];
+            if (matches.length) {
+              // Render the pieces as photo cards (same shape as sql_result).
+              emit("sql_result", {
+                sql: null,
+                columns: ["name", "collection", "category", "picture"],
+                rows: matches.map((m) => ({
+                  name: m.name, collection: m.collection, category: m.category, picture: m.picture,
+                })),
+                row_count: matches.length,
+              });
+              // Ground the model with the ranked candidates (incl. score + SKU).
+              const ranked = matches
+                .map((m, i) => `${i + 1}. ${m.name}${m.collection ? ` — ${m.collection}` : ""}`
+                  + `${m.sku ? ` (SKU ${m.sku})` : ""} · visual match ${Math.round(m.similarity * 100)}%`)
+                .join("\n");
+              messages.push({
+                role: "user",
+                content: `[VISUAL SEARCH] Closest pieces in your catalogue to the attached photo, ranked by visual similarity:\n${ranked}\n\nIdentify the piece using both the photo and this list, per the "Visual search" instructions. The pieces above are already shown to the associate as photo cards.`,
+              });
+            } else {
+              messages.push({
+                role: "user",
+                content: `[VISUAL SEARCH] No visually similar pieces were found in your catalogue for the attached photo. Tell the associate you can't confidently match it to a catalogued piece, describe what you see, and suggest how to identify it (e.g. check the piece's hallmark/SKU).`,
+              });
+            }
+          } catch (e) {
+            console.warn("[brand-assistant visual]", e instanceof Error ? e.message : e);
+            messages.push({
+              role: "user",
+              content: `[VISUAL SEARCH] The visual match couldn't run this time. Still help using the photo you can see and ask a clarifying detail if useful.`,
+            });
+          }
+        }
+
         for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
           emit("turn_start", { turn });
 
@@ -523,6 +605,37 @@ async function voyageEmbedQuery(query: string): Promise<number[]> {
   const embedding = (await res.json())?.data?.[0]?.embedding;
   if (!Array.isArray(embedding)) throw new Error("no embedding returned");
   return embedding;
+}
+
+// Embed a photo with Voyage multimodal (same 1024-dim space as the indexed
+// catalogue images). input_type "query" — this is the search side.
+async function voyageEmbedImage(dataUrl: string): Promise<number[]> {
+  const res = await fetch("https://api.voyageai.com/v1/multimodalembeddings", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${VOYAGE_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      inputs: [{ content: [{ type: "image_base64", image_base64: dataUrl }] }],
+      model: "voyage-multimodal-3.5",
+      input_type: "query",
+      output_dimension: EMBED_DIMS,
+    }),
+  });
+  if (!res.ok) throw new Error(`Voyage multimodal ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
+  const embedding = (await res.json())?.data?.[0]?.embedding;
+  if (!Array.isArray(embedding)) throw new Error("no image embedding returned");
+  return embedding;
+}
+
+// Parse and lightly validate a base64 image data URL from the client.
+function parseDataUrl(input: unknown): { mediaType: string; data: string } | null {
+  if (typeof input !== "string") return null;
+  const m = input.match(/^data:(image\/(?:jpeg|jpg|png|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!m) return null;
+  const data = m[2].replace(/\s+/g, "");
+  // Guard against oversized payloads (~8MB of base64 ≈ 6MB image).
+  if (data.length < 32 || data.length > 8_000_000) return null;
+  const mediaType = m[1].toLowerCase() === "image/jpg" ? "image/jpeg" : m[1].toLowerCase();
+  return { mediaType, data };
 }
 
 async function voyageRerank(query: string, documents: string[]): Promise<{ index: number; score: number }[]> {
