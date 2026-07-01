@@ -105,9 +105,13 @@ Schema (your brand only):
     start_date, expiration_date, status, selling_price, recommended_retail_price,
     quantity) — a purchased cover. status: live/expired/cancelled/pending.
     selling_price = what the client paid. Use start_date for "when".
-- catalogues(id, name, category, collection, composition, sku, picture) — the
-    brand's products synced into AION. May be a SUBSET of the full e-commerce
-    range — do NOT present its count as "products on our website".
+- catalogues(id, name, category, collection, composition, sku, picture,
+    price, price_currency, price_updated_at) — the brand's products synced into
+    AION. May be a SUBSET of the full e-commerce range — do NOT present its count
+    as "products on our website". price = the live price from the brand's own
+    website (price_currency, e.g. EUR), matched by SKU. price IS NULL means it's
+    NOT listed online — say "price on request" / "check in boutique", never guess
+    a number. When the question is about price, SELECT price + price_currency.
 - claims(id, policy_id->policies.id, type, status, incident_date).
 - feedback(id, user_id->profiles.id, satisfaction_rate, recommendation_rate,
     peace_of_mind_rate, comment) — rates 1-5.
@@ -140,8 +144,9 @@ cross-sell — don't stop at naming them in words. Pull the ACTUAL pieces from t
 catalogue so their photos render as cards the associate can turn and show the
 client. A product answer with no pieces to show is a failed answer.
 - After you've identified the relevant collection(s)/product(s) from knowledge,
-  run a run_sql against catalogues to fetch them, ALWAYS selecting the picture:
-    SELECT name, collection, category, picture FROM catalogues
+  run a run_sql against catalogues to fetch them, ALWAYS selecting the picture
+  and the price:
+    SELECT name, collection, category, price, price_currency, picture FROM catalogues
     WHERE collection ILIKE '%…%' OR name ILIKE '%…%' OR category ILIKE '%…%'
   Match generously (try the collection name, then keywords), keep to the ~12
   most relevant pieces.
@@ -360,22 +365,26 @@ Deno.serve(async (req: Request) => {
             if (matchErr) throw new Error(matchErr.message);
             const matches = (matchData ?? []) as {
               name: string; collection: string | null; category: string | null;
-              sku: string | null; picture: string | null; similarity: number;
+              sku: string | null; picture: string | null;
+              price: number | null; price_currency: string | null; similarity: number;
             }[];
             if (matches.length) {
               // Render the pieces as photo cards (same shape as sql_result).
               emit("sql_result", {
                 sql: null,
-                columns: ["name", "collection", "category", "picture"],
+                columns: ["name", "collection", "category", "price", "picture"],
                 rows: matches.map((m) => ({
-                  name: m.name, collection: m.collection, category: m.category, picture: m.picture,
+                  name: m.name, collection: m.collection, category: m.category,
+                  price: m.price, picture: m.picture,
                 })),
                 row_count: matches.length,
               });
-              // Ground the model with the ranked candidates (incl. score + SKU).
+              // Ground the model with the ranked candidates (incl. score, SKU, price).
               const ranked = matches
                 .map((m, i) => `${i + 1}. ${m.name}${m.collection ? ` — ${m.collection}` : ""}`
-                  + `${m.sku ? ` (SKU ${m.sku})` : ""} · visual match ${Math.round(m.similarity * 100)}%`)
+                  + `${m.sku ? ` (SKU ${m.sku})` : ""}`
+                  + `${m.price != null ? ` · ${m.price_currency ?? ""} ${m.price}` : " · price not listed online"}`
+                  + ` · visual match ${Math.round(m.similarity * 100)}%`)
                 .join("\n");
               messages.push({
                 role: "user",

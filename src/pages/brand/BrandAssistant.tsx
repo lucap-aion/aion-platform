@@ -94,11 +94,18 @@ const cleanSnippet = (s: string): string => {
 const humanizeColumn = (col: string): string =>
   col.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-const formatCell = (v: unknown): string => {
-  if (v === null || v === undefined || v === "") return "—";
+const isPriceColumn = (col?: string) =>
+  !!col && /(^|_)(price|selling_price|recommended_retail_price|rrp)$/i.test(col);
+
+const formatCell = (v: unknown, col?: string): string => {
+  if (v === null || v === undefined || v === "") return isPriceColumn(col) ? "—" : "—";
   if (typeof v === "boolean") return v ? "Yes" : "No";
   if (Array.isArray(v)) return v.length === 0 ? "—" : v.join(", ");
   if (typeof v === "object") return JSON.stringify(v);
+  // Money columns → grouped with a € symbol (values are EUR in the catalogue).
+  if (isPriceColumn(col) && v !== "" && Number.isFinite(Number(v))) {
+    return `€${Number(v).toLocaleString("it-IT", { maximumFractionDigits: 0 })}`;
+  }
   if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) {
     return v.slice(0, 10);
   }
@@ -877,7 +884,7 @@ const DataTable = ({
                 {columns.map((c) => (
                   isImageColumn(c)
                     ? <td key={c} className="px-4 py-2"><ImageCell url={row[c]} /></td>
-                    : <td key={c} className="px-4 py-2 text-foreground tabular-nums">{formatCell(row[c])}</td>
+                    : <td key={c} className="px-4 py-2 text-foreground tabular-nums">{formatCell(row[c], c)}</td>
                 ))}
               </tr>
             ))}
