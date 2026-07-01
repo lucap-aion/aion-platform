@@ -105,27 +105,32 @@ Schema (your brand only):
     start_date, expiration_date, status, selling_price, recommended_retail_price,
     quantity) — a purchased cover. status: live/expired/cancelled/pending.
     selling_price = what the client paid. Use start_date for "when".
-- catalogues(id, name, category, collection, composition, sku, picture,
-    price, price_currency, price_updated_at) — the brand's products synced into
-    AION. May be a SUBSET of the full e-commerce range — do NOT present its count
-    as "products on our website". price = the live price from the brand's own
-    website (price_currency, e.g. EUR), matched by SKU. price IS NULL means it's
-    NOT listed online — say "price on request" / "check in boutique", never guess
-    a number. When the question is about price, SELECT price + price_currency.
+- storefront_products(id, name, category, collection, description, sku, price,
+    price_currency, compare_at_price, available, image_url, product_url) — THE
+    FULL live catalogue, ingested from the brand's own e-commerce (the complete
+    range, with photos and prices). THIS is your product source: for anything
+    about what the brand sells, a collection, a look, a category, a price, or a
+    cross-sell, query THIS table. price = the online price (EUR); price IS NULL
+    means not listed online → say "price on request" / "check in boutique", never
+    guess. image_url renders as a photo. Use it to count/aggregate the range
+    ("how many pieces", "what's in Venetian Princess").
+- catalogues(id, name, category, collection, composition, sku, picture) — the
+    SUBSET of products synced into AION from sales; join target for policies (what
+    a specific client owns). Use it to resolve a client's purchased items, NOT to
+    browse the range — storefront_products is the full catalogue.
+- policies(...) above link item_id -> catalogues.id.
 - claims(id, policy_id->policies.id, type, status, incident_date).
 - feedback(id, user_id->profiles.id, satisfaction_rate, recommendation_rate,
     peace_of_mind_rate, comment) — rates 1-5.
 - shops(id, name, city, country).
 - brand_knowledge_docs(title, category, source_type, source_url, char_count) —
-    the INDEXED KNOWLEDGE crawled from the brand's OWN WEBSITE + news. category:
-    product/storytelling/policy/news/other; source_type: url/news/manual.
-    COUNT/aggregate this to answer "how many products on our site", "how much do
-    we cover online", "what sections do we have". It's the best signal for the
-    live site's scope (a broad crawl — large but capped, not a live feed).
+    INDEXED KNOWLEDGE crawled from the brand's site + news (product/storytelling/
+    policy/news/other). Use for the brand STORY, care, policy, craftsmanship — not
+    for the product list (storefront_products is the structured product source).
 SQL tips: EUR money; cast before round (ROUND(AVG(x)::numeric,2)); ILIKE
 '%name%' to find a client; ORDER BY start_date DESC for recency. When you list
-products or clients, SELECT the picture/avatar column too so images render. If a
-query errors, retry once, simpler.
+products, SELECT image_url + price so photos and prices render; for clients
+SELECT avatar. If a query errors, retry once, simpler.
 
 IMPORTANT — run_sql results render to the user automatically as a rich table
 with product/client photos. Don't blindly re-paste rows.
@@ -143,11 +148,12 @@ person (e.g. a campaign face or celebrity) wore, a category, a gift idea, or a
 cross-sell — don't stop at naming them in words. Pull the ACTUAL pieces from the
 catalogue so their photos render as cards the associate can turn and show the
 client. A product answer with no pieces to show is a failed answer.
-- After you've identified the relevant collection(s)/product(s) from knowledge,
-  run a run_sql against catalogues to fetch them, ALWAYS selecting the picture
-  and the price:
-    SELECT name, collection, category, price, price_currency, picture FROM catalogues
+- Pull the pieces from storefront_products (the full catalogue), ALWAYS selecting
+  image_url and price:
+    SELECT name, collection, category, price, price_currency, image_url
+    FROM storefront_products
     WHERE collection ILIKE '%…%' OR name ILIKE '%…%' OR category ILIKE '%…%'
+    ORDER BY price DESC NULLS LAST
   Match generously (try the collection name, then keywords), keep to the ~12
   most relevant pieces.
 - Then keep your prose SHORT — a sentence or two of context — and let the photo
@@ -359,23 +365,23 @@ Deno.serve(async (req: Request) => {
           try {
             const embedding = await voyageEmbedImage(`data:${image.mediaType};base64,${image.data}`);
             const { data: matchData, error: matchErr } = await userClient.rpc(
-              "match_catalogue_images",
+              "match_storefront_images",
               { p_brand_id: brandId, p_query_embedding: embedding, p_match_count: 8, p_min_similarity: 0.2 },
             );
             if (matchErr) throw new Error(matchErr.message);
             const matches = (matchData ?? []) as {
               name: string; collection: string | null; category: string | null;
-              sku: string | null; picture: string | null;
+              sku: string | null; image_url: string | null;
               price: number | null; price_currency: string | null; similarity: number;
             }[];
             if (matches.length) {
               // Render the pieces as photo cards (same shape as sql_result).
               emit("sql_result", {
                 sql: null,
-                columns: ["name", "collection", "category", "price", "picture"],
+                columns: ["name", "collection", "category", "price", "image_url"],
                 rows: matches.map((m) => ({
                   name: m.name, collection: m.collection, category: m.category,
-                  price: m.price, picture: m.picture,
+                  price: m.price, image_url: m.image_url,
                 })),
                 row_count: matches.length,
               });
