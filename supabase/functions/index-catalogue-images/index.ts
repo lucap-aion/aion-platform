@@ -18,6 +18,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY")!;
+// Shared secret for cron/batch callers (same one the crawl pipeline uses).
+const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
 
 const EMBED_MODEL = "voyage-multimodal-3.5";
 const EMBED_DIMS = 1024;
@@ -28,7 +30,7 @@ const MAX_PER_RUN = 200;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-batch-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -38,18 +40,20 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST") return jsonError("method not allowed", 405);
 
-  const authHeader = req.headers.get("Authorization") ?? "";
-  if (!authHeader.startsWith("Bearer ")) return jsonError("missing bearer token", 401);
-  const token = authHeader.slice("Bearer ".length);
-
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-  // Authorize: a service-role caller (cron/backfill) bypasses; otherwise the
-  // caller must be an admin. Brand users don't manage the index. We detect the
-  // service role from the JWT's role claim (robust to which key format the
-  // platform injects) and, as a fallback, exact-match the injected env key.
-  const isServiceRole = token === SUPABASE_SERVICE_ROLE_KEY || jwtRole(token) === "service_role";
-  if (!isServiceRole) {
+  // Authorize. A batch caller (cron) presents the shared x-batch-secret; a
+  // service-role caller (backfill) presents the service key; otherwise the
+  // caller must be a signed-in admin. Brand users don't manage the index.
+  const batchSecret = req.headers.get("x-batch-secret") ?? "";
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : "";
+  const isBatch = KNOWLEDGE_BATCH_SECRET.length > 0 && batchSecret === KNOWLEDGE_BATCH_SECRET;
+  // Detect the service role from the JWT role claim (robust to key format) and,
+  // as a fallback, exact-match the injected env key.
+  const isServiceRole = token !== "" && (token === SUPABASE_SERVICE_ROLE_KEY || jwtRole(token) === "service_role");
+  if (!isBatch && !isServiceRole) {
+    if (!token) return jsonError("missing bearer token", 401);
     const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
