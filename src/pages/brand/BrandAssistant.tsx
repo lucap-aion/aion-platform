@@ -15,8 +15,8 @@ import { useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  ArrowUp, BookOpen, ImagePlus, Loader2, MessageSquarePlus, ShoppingBag, Sparkles,
-  Trash2, Users, ScrollText, X,
+  ArrowUp, BookOpen, ExternalLink, ImagePlus, Loader2, MessageSquarePlus, ShoppingBag,
+  Sparkles, Trash2, Users, ScrollText, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -109,6 +109,12 @@ const formatCell = (v: unknown, col?: string): string => {
   if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) {
     return v.slice(0, 10);
   }
+  // Plain large numbers → thousands separators (skip ids/years/codes: only
+  // format genuine numeric values ≥ 1000, never 4-digit year-like integers).
+  if (typeof v === "number" && Number.isFinite(v) && Math.abs(v) >= 1000
+      && !(Number.isInteger(v) && v >= 1900 && v <= 2100)) {
+    return v.toLocaleString("it-IT", { maximumFractionDigits: 2 });
+  }
   return String(v);
 };
 
@@ -126,6 +132,21 @@ const ImageCell = ({ url }: { url: unknown }) => {
     <a href={url} target="_blank" rel="noreferrer" className="block h-11 w-11 overflow-hidden rounded-md border border-border bg-muted/40 hover:opacity-80" onClick={(e) => e.stopPropagation()}>
       <img src={url} alt="" loading="lazy" className="h-full w-full object-cover"
         onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+    </a>
+  );
+};
+
+// A non-image URL column (e.g. product_url) → a compact clickable link instead
+// of a raw address.
+const isLinkColumn = (col: string) =>
+  !isImageColumn(col) && /(^|_)(url|link|page|permalink)$/i.test(col);
+
+const LinkCell = ({ url, locale }: { url: unknown; locale: string }) => {
+  if (typeof url !== "string" || !/^https?:\/\/\S+/i.test(url.trim())) return <span className="text-muted-foreground">—</span>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+      className="inline-flex items-center gap-1 whitespace-nowrap text-primary hover:underline">
+      {tt(locale, "Open", "Apri")}<ExternalLink className="h-3 w-3" />
     </a>
   );
 };
@@ -884,7 +905,9 @@ const DataTable = ({
                 {columns.map((c) => (
                   isImageColumn(c)
                     ? <td key={c} className="px-4 py-2"><ImageCell url={row[c]} /></td>
-                    : <td key={c} className="px-4 py-2 text-foreground tabular-nums">{formatCell(row[c], c)}</td>
+                    : isLinkColumn(c)
+                      ? <td key={c} className="px-4 py-2"><LinkCell url={row[c]} locale={locale} /></td>
+                      : <td key={c} className="px-4 py-2 text-foreground tabular-nums">{formatCell(row[c], c)}</td>
                 ))}
               </tr>
             ))}

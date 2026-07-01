@@ -170,8 +170,13 @@ async function fetchStorefront(base: string): Promise<SProduct[]> {
       const type = (p.product_type ?? "").trim();
       if (SKIP_TYPES.has(type.toLowerCase())) continue;
       const variants = p.variants ?? [];
+      const available = variants.some((v) => v.available);
       const prices = variants.map((v) => Number(v.price)).filter((n) => Number.isFinite(n) && n > 0);
       const comps = variants.map((v) => Number(v.compare_at_price)).filter((n) => Number.isFinite(n) && n > 0);
+      // Mirror the storefront: it hides the price on unavailable items (shows
+      // "price on request"). products.json still carries a price for them, but
+      // quoting it makes the associate look wrong to the client — so only trust
+      // a price when the piece is actually purchasable online.
       out.push({
         handle: p.handle,
         sku: (variants[0]?.sku ?? "").trim() || null,
@@ -179,9 +184,9 @@ async function fetchStorefront(base: string): Promise<SProduct[]> {
         category: type || null,
         collection: deriveCollection(p.tags, type),
         description: stripHtml(p.body_html ?? "").slice(0, 2000) || null,
-        price: prices.length ? Math.min(...prices) : null,
-        compareAt: comps.length ? Math.min(...comps) : null,
-        available: variants.some((v) => v.available),
+        price: available && prices.length ? Math.min(...prices) : null,
+        compareAt: available && comps.length ? Math.min(...comps) : null,
+        available,
         imageUrl: p.images?.[0]?.src ?? null,
       });
     }

@@ -150,7 +150,7 @@ catalogue so their photos render as cards the associate can turn and show the
 client. A product answer with no pieces to show is a failed answer.
 - Pull the pieces from storefront_products (the full catalogue), ALWAYS selecting
   image_url and price:
-    SELECT name, collection, category, price, price_currency, image_url
+    SELECT name, collection, category, price, price_currency, image_url, product_url
     FROM storefront_products
     WHERE collection ILIKE '%…%' OR name ILIKE '%…%' OR category ILIKE '%…%'
     ORDER BY price DESC NULLS LAST
@@ -371,17 +371,17 @@ Deno.serve(async (req: Request) => {
             if (matchErr) throw new Error(matchErr.message);
             const matches = (matchData ?? []) as {
               name: string; collection: string | null; category: string | null;
-              sku: string | null; image_url: string | null;
+              sku: string | null; image_url: string | null; product_url: string | null;
               price: number | null; price_currency: string | null; similarity: number;
             }[];
             if (matches.length) {
               // Render the pieces as photo cards (same shape as sql_result).
               emit("sql_result", {
                 sql: null,
-                columns: ["name", "collection", "category", "price", "image_url"],
+                columns: ["name", "collection", "category", "price", "image_url", "product_url"],
                 rows: matches.map((m) => ({
                   name: m.name, collection: m.collection, category: m.category,
-                  price: m.price, image_url: m.image_url,
+                  price: m.price, image_url: m.image_url, product_url: m.product_url,
                 })),
                 row_count: matches.length,
               });
