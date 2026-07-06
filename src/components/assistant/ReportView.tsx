@@ -80,7 +80,7 @@ function Chart({ s, locale }: { s: Extract<ReportSection, { type: "bar" | "line"
           <Tooltip formatter={(v: number) => (money ? eur(v) : numGrouped(v))} />
           {s.type === "line"
             ? <Line dataKey="value" stroke={PALETTE[0]} strokeWidth={2} dot={false} isAnimationActive={false} />
-            : <Bar dataKey="value" fill={PALETTE[0]} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
+            : <Bar dataKey="value" fill={PALETTE[0]} radius={[4, 4, 0, 0]} maxBarSize={56} isAnimationActive={false} />}
         </Wrap>
       </ResponsiveContainer>
     </div>
