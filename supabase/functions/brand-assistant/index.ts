@@ -191,6 +191,16 @@ YOUR catalogue (by visual similarity), each with name, collection and a score.
 - The catalogue is a subset of the full range, so the exact piece may not be in
   it; if so, say so and offer the closest pieces you do have.
 
+# Reports (downloadable PDF + Excel)
+When the associate asks for a report, a client recap/dossier, or weekly/monthly
+performance, call generate_report — it renders an on-screen report with charts
+and Download PDF / Excel buttons.
+- kind="client": pass the client's name (or id). If several clients match, ask
+  which one first (don't guess).
+- kind="performance": pass period "week" or "month" (default month).
+After the tool runs, give ONE short sentence ("Here's Giulia's report — download
+it as PDF or Excel below.") — never re-list the figures; the report shows them.
+
 # Accuracy — NON-NEGOTIABLE
 - Use ONLY what the tools return. Do NOT draw on your own prior knowledge about
   this brand — its history, people, dates, products, prices, anything — even if
@@ -263,6 +273,25 @@ const TOOLS = [
         sql: { type: "string", description: "A single SELECT or WITH query." },
       },
       required: ["sql"],
+    },
+  },
+  {
+    name: "generate_report",
+    description:
+      "Build a downloadable report (PDF + Excel, with charts) shown to the " +
+      "associate with download buttons. Use when they ask for a report, a " +
+      "recap/summary of a client, or weekly/monthly performance. kind='client' " +
+      "needs the client (name or id); kind='performance' takes a period. The " +
+      "report renders on screen for the user — after calling this, just give ONE " +
+      "short sentence pointing to it, do NOT re-list the data.",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["client", "performance"], description: "Report type." },
+        client: { type: "string", description: "For kind=client: the client's full name or id." },
+        period: { type: "string", enum: ["week", "month"], description: "For kind=performance: bucket size (default month)." },
+      },
+      required: ["kind"],
     },
   },
 ];
@@ -541,6 +570,23 @@ Deno.serve(async (req: Request) => {
                   content: `knowledge search failed: ${e instanceof Error ? e.message : "unknown"}`,
                 });
               }
+            } else if (block.name === "generate_report") {
+              const input = block.input as { kind?: string; client?: string; period?: string };
+              try {
+                const report = await buildReport(userClient, brandId!, brandName, input);
+                if ((report as { error?: string }).error) {
+                  toolResults.push({ type: "tool_result", tool_use_id: block.id, content: (report as { error: string }).error });
+                } else {
+                  emit("report", report);
+                  toolResults.push({
+                    type: "tool_result",
+                    tool_use_id: block.id,
+                    content: "Report ready and shown to the user with PDF/Excel download buttons. Give ONE short sentence pointing to it; do NOT re-list the figures.",
+                  });
+                }
+              } catch (e) {
+                toolResults.push({ type: "tool_result", tool_use_id: block.id, is_error: true, content: `report failed: ${e instanceof Error ? e.message : "unknown"}` });
+              }
             } else {
               toolResults.push({
                 type: "tool_result",
@@ -696,6 +742,145 @@ function jsonError(message: string, status: number) {
     status,
     headers: { "Content-Type": "application/json", ...CORS },
   });
+}
+
+// ─── Reports ─────────────────────────────────────────────────────────────────
+// Assemble a structured report payload from RLS-safe SQL (via ai_run_query_user,
+// so a brand user only ever sees their own brand). The frontend renders it with
+// charts + PDF/Excel download.
+type Row = Record<string, unknown>;
+
+async function runReportSql(client: ReturnType<typeof createClient>, sql: string): Promise<Row[]> {
+  const { data, error } = await client.rpc("ai_run_query_user", { p_sql: sql });
+  if (error) throw new Error(error.message);
+  return ((data as { rows?: Row[] })?.rows) ?? [];
+}
+const q = (s: string) => s.replace(/'/g, "''"); // escape single quotes
+const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+
+async function buildReport(
+  client: ReturnType<typeof createClient>, brandId: number, brandName: string | null,
+  input: { kind?: string; client?: string; period?: string },
+) {
+  const generated_at = new Date().toISOString();
+  if (input.kind === "performance") {
+    return await buildPerformanceReport(client, brandName, input.period === "week" ? "week" : "month", generated_at);
+  }
+  return await buildClientReport(client, brandName, input.client ?? "", generated_at);
+}
+
+async function buildClientReport(
+  client: ReturnType<typeof createClient>, brandName: string | null, who: string, generated_at: string,
+) {
+  who = who.trim();
+  if (!who) return { error: "Ask the associate which client the report is for." };
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(who);
+  const where = isUuid
+    ? `id = '${who}'`
+    : `(role IS NULL OR role = 'customer') AND (coalesce(first_name,'') || ' ' || coalesce(last_name,'')) ILIKE '%${q(who)}%'`;
+  const people = await runReportSql(client,
+    `SELECT id, first_name, last_name, email, phone_number, city, country, date_of_birth, registered_at FROM profiles WHERE ${where} LIMIT 6`);
+  if (people.length === 0) return { error: `No client matches "${who}". Ask the associate to check the name.` };
+  if (people.length > 1) {
+    const names = people.map((p) => `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim()).join(", ");
+    return { error: `Several clients match "${who}": ${names}. Ask which one before generating the report.` };
+  }
+  const c = people[0];
+  const id = String(c.id);
+
+  const purchases = await runReportSql(client, `
+    SELECT c.name, c.collection, COALESCE(s.image_url, c.picture) AS image_url,
+           s.price AS online_price, po.selling_price, po.start_date, po.status
+    FROM policies po JOIN catalogues c ON c.id = po.item_id
+    LEFT JOIN storefront_products s ON s.brand_id = po.brand_id AND s.sku = c.sku
+    WHERE po.customer_id = '${id}' ORDER BY po.start_date DESC`);
+  const claims = await runReportSql(client, `
+    SELECT cl.type, cl.status, cl.incident_date
+    FROM claims cl JOIN policies po ON po.id = cl.policy_id
+    WHERE po.customer_id = '${id}' ORDER BY cl.incident_date DESC NULLS LAST`);
+  const fbRows = await runReportSql(client, `
+    SELECT satisfaction_rate, recommendation_rate, peace_of_mind_rate, comment
+    FROM feedback WHERE user_id = '${id}' ORDER BY id DESC LIMIT 1`);
+
+  const spend = purchases.reduce((s, p) => s + num(p.selling_price), 0);
+  const dates = purchases.map((p) => String(p.start_date ?? "")).filter(Boolean).sort();
+  const openClaims = claims.filter((c) => !/closed|resolved|rejected|settled/i.test(String(c.status ?? ""))).length;
+  const byYear = new Map<string, number>();
+  for (const p of purchases) {
+    const y = String(p.start_date ?? "").slice(0, 4);
+    if (y) byYear.set(y, (byYear.get(y) ?? 0) + num(p.selling_price));
+  }
+
+  return {
+    kind: "client", generated_at, brand: brandName,
+    client: {
+      name: `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "—",
+      email: c.email ?? null, phone: c.phone_number ?? null,
+      city: c.city ?? null, country: c.country ?? null,
+      since: dates[0] ? dates[0].slice(0, 10) : (c.registered_at ? String(c.registered_at).slice(0, 10) : null),
+    },
+    kpis: {
+      total_spend: Math.round(spend), pieces: purchases.length,
+      avg_ticket: purchases.length ? Math.round(spend / purchases.length) : 0,
+      open_claims: openClaims,
+    },
+    purchases: purchases.map((p) => ({
+      name: p.name ?? "—", collection: p.collection ?? null, image_url: p.image_url ?? null,
+      price: num(p.selling_price) || (p.online_price != null ? num(p.online_price) : null),
+      date: p.start_date ? String(p.start_date).slice(0, 10) : null, status: p.status ?? null,
+    })),
+    claims: claims.map((c) => ({ type: c.type ?? "—", status: c.status ?? null, date: c.incident_date ? String(c.incident_date).slice(0, 10) : null })),
+    feedback: fbRows[0]
+      ? { satisfaction: num(fbRows[0].satisfaction_rate), recommendation: num(fbRows[0].recommendation_rate), peace_of_mind: num(fbRows[0].peace_of_mind_rate), comment: fbRows[0].comment ?? null }
+      : null,
+    spend_by_year: [...byYear.entries()].sort().map(([year, value]) => ({ year, value: Math.round(value) })),
+  };
+}
+
+async function buildPerformanceReport(
+  client: ReturnType<typeof createClient>, brandName: string | null, period: "week" | "month", generated_at: string,
+) {
+  const interval = period === "week" ? "84 days" : "365 days";
+  const win = `start_date >= (CURRENT_DATE - interval '${interval}')`;
+
+  const series = await runReportSql(client, `
+    SELECT to_char(date_trunc('${period}', start_date), 'YYYY-MM-DD') AS bucket,
+           count(*) AS covers, COALESCE(SUM(selling_price),0) AS revenue
+    FROM policies WHERE ${win} GROUP BY 1 ORDER BY 1`);
+  const kpiRow = (await runReportSql(client, `
+    SELECT COALESCE(SUM(selling_price),0) AS revenue, count(*) AS covers,
+           count(DISTINCT customer_id) AS customers
+    FROM policies WHERE ${win}`))[0] ?? {};
+  const claimsRow = (await runReportSql(client, `
+    SELECT count(*) AS claims FROM claims cl JOIN policies po ON po.id = cl.policy_id
+    WHERE cl.incident_date >= (CURRENT_DATE - interval '${interval}')`))[0] ?? {};
+  const categoryMix = await runReportSql(client, `
+    SELECT c.category AS label, count(*) AS count, COALESCE(SUM(po.selling_price),0) AS revenue
+    FROM policies po JOIN catalogues c ON c.id = po.item_id
+    WHERE po.${win} GROUP BY 1 ORDER BY revenue DESC LIMIT 8`);
+  const topCollections = await runReportSql(client, `
+    SELECT c.collection AS label, count(*) AS count, COALESCE(SUM(po.selling_price),0) AS revenue
+    FROM policies po JOIN catalogues c ON c.id = po.item_id
+    WHERE po.${win} AND c.collection IS NOT NULL GROUP BY 1 ORDER BY revenue DESC LIMIT 6`);
+  const topClients = await runReportSql(client, `
+    SELECT trim(coalesce(p.first_name,'') || ' ' || coalesce(p.last_name,'')) AS label,
+           count(*) AS count, COALESCE(SUM(po.selling_price),0) AS revenue
+    FROM policies po JOIN profiles p ON p.id = po.customer_id
+    WHERE po.${win} GROUP BY 1 ORDER BY revenue DESC LIMIT 6`);
+
+  const revenue = num(kpiRow.revenue), covers = num(kpiRow.covers);
+  return {
+    kind: "performance", generated_at, brand: brandName, period,
+    kpis: {
+      revenue: Math.round(revenue), covers,
+      avg_ticket: covers ? Math.round(revenue / covers) : 0,
+      customers: num(kpiRow.customers), claims: num(claimsRow.claims),
+    },
+    series: series.map((r) => ({ bucket: String(r.bucket).slice(0, 10), revenue: num(r.revenue), covers: num(r.covers) })),
+    category_mix: categoryMix.map((r) => ({ label: r.label ?? "—", count: num(r.count), revenue: num(r.revenue) })),
+    top_collections: topCollections.map((r) => ({ label: r.label ?? "—", count: num(r.count), revenue: num(r.revenue) })),
+    top_clients: topClients.map((r) => ({ label: (r.label as string)?.trim() || "—", count: num(r.count), revenue: num(r.revenue) })),
+  };
 }
 
 // Suggest 3 follow-up questions the associate might tap next.

@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import ReportView, { type ReportPayload } from "@/components/assistant/ReportView";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
@@ -47,6 +48,7 @@ type AssistantMessage = {
   rows: Record<string, unknown>[];
   activity: string | null;
   followups: string[];
+  report: ReportPayload | null;
   streaming: boolean;
 };
 
@@ -175,6 +177,7 @@ const emptyAssistant = (): AssistantMessage => ({
   rows: [],
   activity: null,
   followups: [],
+  report: null,
   streaming: true,
 });
 
@@ -268,7 +271,7 @@ export default function BrandAssistant() {
     // Backfill fields that may be missing on older saved assistant turns.
     const restored: Message[] = raw.map((m) =>
       m.role === "assistant"
-        ? { sources: [], columns: [], rows: [], sql: null, activity: null, followups: [], ...m, streaming: false }
+        ? { sources: [], columns: [], rows: [], sql: null, activity: null, followups: [], report: null, ...m, streaming: false }
         : m,
     );
     setMessages(restored);
@@ -652,10 +655,14 @@ function handleEvent(
         : tt(locale, "Searching the knowledge base…", "Cerco nella knowledge base…"))
       : data?.tool === "search_by_image"
         ? tt(locale, "Identifying the piece from the photo…", "Identifico il pezzo dalla foto…")
-        : tt(locale, "Looking up client data…", "Consulto i dati cliente…");
+        : data?.tool === "generate_report"
+          ? tt(locale, "Building the report…", "Preparo il report…")
+          : tt(locale, "Looking up client data…", "Consulto i dati cliente…");
     patch((m) => ({ ...m, activity: label }));
   } else if (event === "text_delta") {
     patch((m) => ({ ...m, summary: m.summary + (data?.text ?? ""), activity: null }));
+  } else if (event === "report") {
+    patch((m) => ({ ...m, report: (data ?? null) as ReportPayload | null, activity: null }));
   } else if (event === "followups") {
     patch((m) => ({ ...m, followups: Array.isArray(data?.followups) ? data.followups : m.followups }));
   } else if (event === "knowledge") {
@@ -778,8 +785,8 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
 const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
   message: AssistantMessage; locale: string; isLast: boolean; onFollowup: (q: string) => void;
 }) => {
-  const { summary, sources, columns, rows, activity, followups, streaming } = message;
-  const hasAnything = summary || sources.length > 0 || rows.length > 0;
+  const { summary, sources, columns, rows, activity, followups, report, streaming } = message;
+  const hasAnything = summary || sources.length > 0 || rows.length > 0 || !!report;
 
   if (!hasAnything && streaming) {
     return (
@@ -807,6 +814,8 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
           <span>{activity}</span>
         </div>
       )}
+
+      {report && <ReportView report={report} locale={locale} />}
 
       {/* Product/entity lists (anything with an image) → a big-image card grid;
           pure numeric/ranking data → the compact table. Never for a single
