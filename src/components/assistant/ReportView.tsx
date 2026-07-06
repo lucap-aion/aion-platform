@@ -8,7 +8,8 @@ import {
 } from "recharts";
 import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { downloadPdfFromNode, downloadXlsx, type Sheet } from "@/lib/reportExport";
+import { downloadXlsx, type Sheet } from "@/lib/reportExport";
+import { downloadReportPdf } from "@/lib/reportPdf";
 
 const tt = (locale: string, en: string, it: string) => (locale === "it" ? it : en);
 const eur = (v: number | null | undefined) =>
@@ -153,9 +154,8 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
   const fileBase = (report.title || "report").replace(/\s+/g, "_");
 
   const onPdf = async () => {
-    if (!printRef.current) return;
     setBusy("pdf");
-    try { await downloadPdfFromNode(printRef.current, fileBase, { footer: `${report.brand ?? "AION"} · ${report.title}` }); }
+    try { await downloadReportPdf(report, fileBase); }
     catch (e) { console.error("[report pdf]", e); toast.error(`${tt(locale, "PDF export failed", "Export PDF non riuscito")}: ${e instanceof Error ? e.message : "error"}`); }
     finally { setBusy(null); }
   };
