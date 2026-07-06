@@ -169,18 +169,20 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <div ref={printRef} className="bg-white p-5 text-foreground">
-        <div data-block="" className="flex items-start justify-between gap-3 border-b border-border pb-3">
-          <div className="flex min-w-0 items-center gap-3">
+        <div data-block="" className="border-b border-border pb-3">
+          <div className="flex items-start justify-between gap-3">
             {report.brand_logo
-              ? <img src={report.brand_logo} alt={report.brand ?? ""} className="h-9 w-auto max-w-[150px] shrink-0 object-contain" />
-              : report.brand && <div className="text-[11px] font-semibold uppercase tracking-widest text-primary">{report.brand}</div>}
-            <div className="min-w-0">
-              <h3 className="truncate font-serif text-xl font-semibold">{report.title}</h3>
-              {report.subtitle && <p className="truncate text-xs text-muted-foreground">{report.subtitle}</p>}
+              ? <img src={report.brand_logo} alt={report.brand ?? ""} className="h-8 w-auto max-w-[150px] object-contain" />
+              : report.brand
+                ? <div className="text-[11px] font-semibold uppercase tracking-widest text-primary">{report.brand}</div>
+                : <span />}
+            <div className="shrink-0 text-right text-[11px] text-muted-foreground">
+              {tt(locale, "Generated", "Generato")}<br />{new Date(report.generated_at).toLocaleDateString(locale === "it" ? "it-IT" : "en-GB")}
             </div>
           </div>
-          <div className="shrink-0 text-right text-[11px] text-muted-foreground">
-            {tt(locale, "Generated", "Generato")}<br />{new Date(report.generated_at).toLocaleDateString(locale === "it" ? "it-IT" : "en-GB")}
+          <div className="mt-4">
+            <h3 className="font-serif text-xl font-semibold leading-tight">{report.title}</h3>
+            {report.subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{report.subtitle}</p>}
           </div>
         </div>
 

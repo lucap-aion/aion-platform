@@ -115,7 +115,7 @@ export async function buildReportDoc(report: ReportPayload) {
     const maxW = 55;
     if (lw > maxW) { lw = maxW; lh = (lw * logo.h) / logo.w; }
     doc.addImage(logo.data, "PNG", M, y, lw, lh);
-    y += Math.max(lh, 7) + 5;
+    y += Math.max(lh, 7) + 7;
   } else {
     if (report.brand) { doc.setFont("helvetica", "bold"); doc.setFontSize(11); setColor(GOLD); doc.text(report.brand.toUpperCase(), M, y + 5); }
     y += 12;
