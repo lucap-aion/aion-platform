@@ -71,7 +71,22 @@ export const downloadPdfFromNode = async (node: HTMLElement, filename: string) =
     scale: 2,
     backgroundColor: "#ffffff",
     useCORS: true,
+    allowTaint: false,
+    imageTimeout: 20000,
     logging: false,
+    // Cross-origin images without CORS headers would taint the canvas and make
+    // toDataURL throw. Keep images from CORS-friendly hosts; blank the rest so
+    // the PDF always generates (layout, charts, KPIs stay intact).
+    onclone: (doc) => {
+      const okHost = (h: string) => h === location.hostname || /(^|\.)shopify\.com$/i.test(h) || /(^|\.)supabase\.co$/i.test(h);
+      doc.querySelectorAll("img").forEach((img) => {
+        try {
+          const u = new URL((img as HTMLImageElement).src, location.href);
+          if (!okHost(u.hostname)) { (img as HTMLImageElement).removeAttribute("src"); }
+          else { (img as HTMLImageElement).crossOrigin = "anonymous"; }
+        } catch { (img as HTMLImageElement).removeAttribute("src"); }
+      });
+    },
   });
   const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageW = pdf.internal.pageSize.getWidth();

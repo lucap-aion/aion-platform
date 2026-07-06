@@ -5,6 +5,7 @@ import {
   Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { downloadPdfFromNode, downloadXlsx, type Sheet } from "@/lib/reportExport";
 
 const tt = (locale: string, en: string, it: string) => (locale === "it" ? it : en);
@@ -57,13 +58,21 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
   const onPdf = async () => {
     if (!printRef.current) return;
     setBusy("pdf");
-    try { await downloadPdfFromNode(printRef.current, fileBase); }
-    finally { setBusy(null); }
+    try {
+      await downloadPdfFromNode(printRef.current, fileBase);
+    } catch (e) {
+      console.error("[report pdf]", e);
+      toast.error(`${tt(locale, "PDF export failed", "Export PDF non riuscito")}: ${e instanceof Error ? e.message : "error"}`);
+    } finally { setBusy(null); }
   };
   const onXlsx = async () => {
     setBusy("xlsx");
-    try { await downloadXlsx(report.kind === "client" ? clientSheets(report, locale) : perfSheets(report, locale), fileBase); }
-    finally { setBusy(null); }
+    try {
+      await downloadXlsx(report.kind === "client" ? clientSheets(report, locale) : perfSheets(report, locale), fileBase);
+    } catch (e) {
+      console.error("[report xlsx]", e);
+      toast.error(`${tt(locale, "Excel export failed", "Export Excel non riuscito")}: ${e instanceof Error ? e.message : "error"}`);
+    } finally { setBusy(null); }
   };
 
   return (
