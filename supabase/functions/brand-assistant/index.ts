@@ -848,13 +848,19 @@ async function buildReport(
   input: { kind?: string; client?: string; period?: string; title?: string; subtitle?: string; sections?: unknown },
 ) {
   const generated_at = new Date().toISOString();
-  if (input.kind === "performance") {
-    return await buildPerformanceReport(client, brandId, brandName, input.period === "week" ? "week" : "month", generated_at);
+  const result = input.kind === "performance"
+    ? await buildPerformanceReport(client, brandId, brandName, input.period === "week" ? "week" : "month", generated_at)
+    : (input.kind === "custom" || Array.isArray(input.sections))
+      ? await buildCustomReport(client, brandId, brandName, input, generated_at)
+      : await buildClientReport(client, brandId, brandName, input.client ?? "", generated_at);
+  // Brand the report with the requesting brand's logo (optional).
+  if (!(result as { error?: string }).error) {
+    try {
+      const { data } = await client.from("brands").select("logo_big").eq("id", brandId).maybeSingle();
+      (result as { brand_logo?: string | null }).brand_logo = (data as { logo_big?: string } | null)?.logo_big ?? null;
+    } catch { /* logo is optional */ }
   }
-  if (input.kind === "custom" || Array.isArray(input.sections)) {
-    return await buildCustomReport(client, brandId, brandName, input, generated_at);
-  }
-  return await buildClientReport(client, brandId, brandName, input.client ?? "", generated_at);
+  return result;
 }
 
 // Ad-hoc report: the model supplies a title + sections, each with a SQL query and

@@ -25,7 +25,8 @@ export type ReportSection =
   | { type: "note"; title?: string; body: string };
 
 export type ReportPayload = {
-  title: string; subtitle?: string | null; generated_at: string; brand: string | null; sections: ReportSection[];
+  title: string; subtitle?: string | null; generated_at: string;
+  brand: string | null; brand_logo?: string | null; sections: ReportSection[];
 };
 
 const SectionTitle = ({ children }: { children: React.ReactNode }) =>
@@ -40,16 +41,31 @@ function Chart({ s, locale }: { s: Extract<ReportSection, { type: "bar" | "line"
     return <p className="py-4 text-xs text-muted-foreground">{tt(locale, "No data for this period.", "Nessun dato per questo periodo.")}</p>;
   }
   if (s.type === "pie") {
+    // Inline slice labels overlap on small/adjacent slices — use a clean legend
+    // (swatch · label · value · %) beside the pie instead.
+    const sorted = [...s.data].sort((a, b) => b.value - a.value);
     return (
-      <div className="h-48 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie data={s.data} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={72} label={(e: { label?: string }) => e.label ?? ""}>
-              {s.data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
-            </Pie>
-            <Tooltip formatter={(v: number) => (money ? eur(v) : numGrouped(v))} />
-          </PieChart>
-        </ResponsiveContainer>
+      <div className="flex flex-col items-center gap-4 sm:flex-row">
+        <div className="h-40 w-40 shrink-0">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={sorted} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={68} isAnimationActive={false}>
+                {sorted.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+              </Pie>
+              <Tooltip formatter={(v: number) => (money ? eur(v) : numGrouped(v))} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="grid w-full grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+          {sorted.map((d, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: PALETTE[i % PALETTE.length] }} />
+              <span className="min-w-0 flex-1 truncate">{d.label}</span>
+              <span className="shrink-0 font-medium tabular-nums">{money ? eur(d.value) : numGrouped(d.value)}</span>
+              <span className="w-9 shrink-0 text-right text-muted-foreground tabular-nums">{Math.round((d.value / total) * 100)}%</span>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -62,8 +78,8 @@ function Chart({ s, locale }: { s: Extract<ReportSection, { type: "bar" | "line"
           <YAxis tick={{ fontSize: 11 }} width={48} tickFormatter={money ? axisMoney : (v) => numGrouped(v)} />
           <Tooltip formatter={(v: number) => (money ? eur(v) : numGrouped(v))} />
           {s.type === "line"
-            ? <Line dataKey="value" stroke={PALETTE[0]} strokeWidth={2} dot={false} />
-            : <Bar dataKey="value" fill={PALETTE[0]} radius={[4, 4, 0, 0]} />}
+            ? <Line dataKey="value" stroke={PALETTE[0]} strokeWidth={2} dot={false} isAnimationActive={false} />
+            : <Bar dataKey="value" fill={PALETTE[0]} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
         </Wrap>
       </ResponsiveContainer>
     </div>
@@ -139,7 +155,7 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
   const onPdf = async () => {
     if (!printRef.current) return;
     setBusy("pdf");
-    try { await downloadPdfFromNode(printRef.current, fileBase); }
+    try { await downloadPdfFromNode(printRef.current, fileBase, { footer: `${report.brand ?? "AION"} · ${report.title}` }); }
     catch (e) { console.error("[report pdf]", e); toast.error(`${tt(locale, "PDF export failed", "Export PDF non riuscito")}: ${e instanceof Error ? e.message : "error"}`); }
     finally { setBusy(null); }
   };
@@ -153,11 +169,15 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <div ref={printRef} className="bg-white p-5 text-foreground">
-        <div className="flex items-start justify-between border-b border-border pb-3">
-          <div>
-            {report.brand && <div className="text-[11px] font-semibold uppercase tracking-widest text-primary">{report.brand}</div>}
-            <h3 className="text-lg font-semibold">{report.title}</h3>
-            {report.subtitle && <p className="text-xs text-muted-foreground">{report.subtitle}</p>}
+        <div data-block="" className="flex items-start justify-between gap-3 border-b border-border pb-3">
+          <div className="flex min-w-0 items-center gap-3">
+            {report.brand_logo
+              ? <img src={report.brand_logo} alt={report.brand ?? ""} className="h-9 w-auto max-w-[150px] shrink-0 object-contain" />
+              : report.brand && <div className="text-[11px] font-semibold uppercase tracking-widest text-primary">{report.brand}</div>}
+            <div className="min-w-0">
+              <h3 className="truncate text-lg font-semibold">{report.title}</h3>
+              {report.subtitle && <p className="truncate text-xs text-muted-foreground">{report.subtitle}</p>}
+            </div>
           </div>
           <div className="shrink-0 text-right text-[11px] text-muted-foreground">
             {tt(locale, "Generated", "Generato")}<br />{new Date(report.generated_at).toLocaleDateString(locale === "it" ? "it-IT" : "en-GB")}
@@ -165,7 +185,7 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
         </div>
 
         {report.sections.map((s, i) => (
-          <div key={i}>
+          <div key={i} data-block="" className="pt-1">
             <SectionTitle>{s.title}</SectionTitle>
             {s.type === "kpis" ? <Kpis s={s} />
               : s.type === "table" ? <DataSection s={s} />
