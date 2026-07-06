@@ -31,7 +31,7 @@ export type ReportPayload = {
 };
 
 const SectionTitle = ({ children }: { children: React.ReactNode }) =>
-  children ? <h4 className="mb-2 mt-5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">{children}</h4> : null;
+  children ? <h4 className="mb-2 mt-6 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary">{children}</h4> : null;
 
 const axisMoney = (v: number) => `€${(v / 1000).toFixed(0)}k`;
 
@@ -138,11 +138,11 @@ function Products({ s }: { s: Extract<ReportSection, { type: "products" }> }) {
 }
 
 const Kpis = ({ s }: { s: Extract<ReportSection, { type: "kpis" }> }) => (
-  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+  <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-3 sm:grid-cols-4">
     {s.items.map((it, i) => (
-      <div key={i} className="rounded-lg border border-border bg-muted/20 px-3 py-2">
-        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{it.label}</div>
-        <div className="mt-0.5 text-lg font-semibold text-foreground">{it.value}</div>
+      <div key={i}>
+        <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">{it.label}</div>
+        <div className="mt-1 font-serif text-2xl leading-tight text-foreground">{it.value}</div>
       </div>
     ))}
   </div>
@@ -175,7 +175,7 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
               ? <img src={report.brand_logo} alt={report.brand ?? ""} className="h-9 w-auto max-w-[150px] shrink-0 object-contain" />
               : report.brand && <div className="text-[11px] font-semibold uppercase tracking-widest text-primary">{report.brand}</div>}
             <div className="min-w-0">
-              <h3 className="truncate text-lg font-semibold">{report.title}</h3>
+              <h3 className="truncate font-serif text-xl font-semibold">{report.title}</h3>
               {report.subtitle && <p className="truncate text-xs text-muted-foreground">{report.subtitle}</p>}
             </div>
           </div>

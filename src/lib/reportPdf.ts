@@ -71,6 +71,13 @@ async function trimTransparent(img: Img): Promise<Img> {
 }
 
 export async function downloadReportPdf(report: ReportPayload, filename: string) {
+  const doc = await buildReportDoc(report);
+  doc.save(`${(filename || report.title || "report").replace(/[^a-z0-9-_. ]/gi, "").replace(/\s+/g, "_").slice(0, 80) || "report"}.pdf`);
+}
+
+// Build the jsPDF document (no save) — split out so it can be rendered headless
+// for design iteration.
+export async function buildReportDoc(report: ReportPayload) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, H = 297, M = 16, CW = W - 2 * M;
@@ -123,29 +130,36 @@ export async function downloadReportPdf(report: ReportPayload, filename: string)
   doc.setDrawColor(...GOLD); doc.setLineWidth(0.5); doc.line(M, y, W - M, y); y += 8;
 
   // ── Sections ───────────────────────────────────────────────────────────────
-  const sectionTitle = (t?: string) => {
+  // Keep the title with the start of its content (reserve space) — no orphans.
+  const sectionTitle = (t: string | undefined, reserve: number) => {
     if (!t) return;
-    ensure(9); doc.setFont("helvetica", "bold"); doc.setFontSize(8); setColor(MUTED);
-    doc.text(t.toUpperCase(), M, y); y += 5;
+    ensure(reserve);
+    y += 2;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); setColor(GOLD); doc.setCharSpace(0.6);
+    doc.text(t.toUpperCase(), M, y); doc.setCharSpace(0);
+    y += 5.5;
   };
 
+  // Editorial KPI band: no boxes — small letter-spaced labels, large serif
+  // figures, thin hairline separators.
   const drawKpis = (items: { label: string; value: string }[]) => {
     if (!items.length) return;
-    const n = Math.min(items.length, 5), gap = 3, cw = (CW - gap * (n - 1)) / n, ch = 16;
-    // wrap into rows of up to 5
+    const n = Math.min(items.length, 5), ch = 15;
     for (let r = 0; r < items.length; r += n) {
-      const row = items.slice(r, r + n);
-      ensure(ch + 3);
+      const row = items.slice(r, r + n), colW = CW / row.length;
+      ensure(ch + 6);
+      const y0 = y;
+      doc.setDrawColor(...HAIR); doc.setLineWidth(0.2); doc.line(M, y0, W - M, y0);
       row.forEach((it, i) => {
-        const x = M + i * (cw + gap);
-        doc.setFillColor(...PANEL); doc.setDrawColor(...HAIR); doc.setLineWidth(0.2);
-        doc.roundedRect(x, y, cw, ch, 1.5, 1.5, "FD");
-        doc.setFont("helvetica", "normal"); doc.setFontSize(6.5); setColor(MUTED);
-        doc.text(it.label.toUpperCase(), x + 3, y + 5, { maxWidth: cw - 6 });
-        doc.setFont("helvetica", "bold"); doc.setFontSize(12); setColor(INK);
-        doc.text(String(it.value), x + 3, y + 12, { maxWidth: cw - 6 });
+        const x = M + i * colW, tx = x + (i > 0 ? 5 : 0);
+        if (i > 0) { doc.setDrawColor(...HAIR); doc.line(x, y0 + 2.5, x, y0 + ch - 1); }
+        doc.setFont("helvetica", "normal"); doc.setFontSize(6.3); setColor(MUTED); doc.setCharSpace(0.4);
+        doc.text(it.label.toUpperCase(), tx, y0 + 5, { maxWidth: colW - (i > 0 ? 7 : 2) });
+        doc.setCharSpace(0);
+        doc.setFont("times", "normal"); doc.setFontSize(16); setColor(INK);
+        doc.text(it.value, tx, y0 + 13, { maxWidth: colW - (i > 0 ? 7 : 2) });
       });
-      y += ch + 3;
+      y = y0 + ch + 7;
     }
   };
 
@@ -268,20 +282,22 @@ export async function downloadReportPdf(report: ReportPayload, filename: string)
     y = Math.max(cy + r, ly) + 4;
   };
 
+  const reserveFor = (t: ReportSection["type"]) =>
+    t === "bar" || t === "line" ? 54 : t === "pie" ? 46 : t === "products" ? 62 : t === "kpis" ? 24 : t === "table" ? 20 : 14;
   for (const s of report.sections) {
-    sectionTitle(s.title);
+    sectionTitle(s.title, reserveFor(s.type));
     if (s.type === "kpis") drawKpis(s.items);
     else if (s.type === "table") drawTable(s);
     else if (s.type === "products") drawProducts(s.items);
     else if (s.type === "bar" || s.type === "line") drawBarLine(s);
     else if (s.type === "pie") drawPie(s);
     else if (s.type === "note") {
-      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); setColor(MUTED);
+      doc.setFont("times", "italic"); doc.setFontSize(9.5); setColor(MUTED);
       const lines = doc.splitTextToSize(s.body, CW) as string[];
-      ensure(lines.length * 4 + 2); doc.text(lines, M, y); y += lines.length * 4;
+      ensure(lines.length * 4.5 + 2); doc.text(lines, M, y); y += lines.length * 4.5;
     }
-    y += 5;
+    y += 7;
   }
   footer();
-  doc.save(`${(report.title || "report").replace(/[^a-z0-9-_. ]/gi, "").replace(/\s+/g, "_").slice(0, 80) || "report"}.pdf`);
+  return doc;
 }
