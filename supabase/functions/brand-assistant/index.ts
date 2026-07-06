@@ -119,6 +119,16 @@ Schema (your brand only):
     a specific client owns). Use it to resolve a client's purchased items, NOT to
     browse the range — storefront_products is the full catalogue.
 - policies(...) above link item_id -> catalogues.id.
+  When listing what a CLIENT BOUGHT, ALWAYS show the pieces with photos: join the
+  catalogue AND left-join the storefront for a clean image + current price, e.g.
+    SELECT c.name, c.collection, COALESCE(s.image_url, c.picture) AS image_url,
+           s.price, s.product_url, po.start_date, po.selling_price
+    FROM policies po
+    JOIN catalogues c ON c.id = po.item_id
+    LEFT JOIN storefront_products s ON s.brand_id = po.brand_id AND s.sku = c.sku
+    WHERE po.customer_id = <id> ORDER BY po.start_date DESC
+  Every product list — a client's purchases included — must carry an image column
+  so it renders as cards, never a bare text list.
 - claims(id, policy_id->policies.id, type, status, incident_date).
 - feedback(id, user_id->profiles.id, satisfaction_rate, recommendation_rate,
     peace_of_mind_rate, comment) — rates 1-5.
@@ -158,8 +168,9 @@ client. A product answer with no pieces to show is a failed answer.
   Match generously (try the collection name, then keywords), but return only the
   ~6 BEST pieces — the UI shows big image cards, so it's quality over quantity.
   Don't dump the whole collection; pick the most relevant/iconic to show first.
-- Then keep your prose SHORT — a sentence or two of context — and let the photo
-  cards below carry the pieces. Don't re-list in a table what the cards show.
+- Then keep your prose to ONE short line — a lead-in or the single most useful
+  point — and let the photo cards below carry the pieces (name + price are on the
+  card). Don't describe each piece in text or re-list what the cards already show.
 - The catalogue is a subset of the full range. If a named collection isn't in it,
   say so in one line and show the closest pieces you do have — never reply with
   names only when you could show something.
@@ -343,11 +354,22 @@ Deno.serve(async (req: Request) => {
   const languageNote = locale === "it"
     ? "\n\n# Language\nThe associate's UI is in Italian — reply in Italian by default unless they write in another language. SQL identifiers stay English."
     : "";
+  // The model has no clock — give it today's date so "this month / expiring
+  // soon / recent" reasoning is correct. Boutique-local (Europe/Rome).
+  const todayNote = (() => {
+    const now = new Date();
+    const human = new Intl.DateTimeFormat(locale === "it" ? "it-IT" : "en-GB", {
+      weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "Europe/Rome",
+    }).format(now);
+    const iso = now.toISOString().slice(0, 10);
+    return `\n\n# Today\nToday is ${human} (${iso}). Use this for any "today / this week / this month / recent / expiring soon" reasoning. In SQL prefer CURRENT_DATE / now().`;
+  })();
 
   const systemBlocks = [
     { type: "text" as const, text: SYSTEM, cache_control: { type: "ephemeral" as const } },
     { type: "text" as const, text: brandScope },
     ...(languageNote ? [{ type: "text" as const, text: languageNote }] : []),
+    { type: "text" as const, text: todayNote },
   ];
 
   const stream = new ReadableStream({
