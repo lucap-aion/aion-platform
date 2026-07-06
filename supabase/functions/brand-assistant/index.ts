@@ -210,7 +210,7 @@ and Download PDF / Excel buttons.
 - kind="performance": pass period "week" or "month" (default month).
 - ANY other report the manager asks for (sales by collection, claims this month,
   renewals expiring, a single shop's numbers, a two-period comparison, best
-  sellers, slow movers…) → kind="custom": give a title and a `sections` list,
+  sellers, slow movers…) → kind="custom": give a title and a "sections" list,
   each with a type (kpis / bar / line / pie / table / products / note) and a SQL
   SELECT returning rows shaped for it. Compose a few sections (e.g. a KPI row + a
   chart + a table) for a real report. Use CURRENT_DATE / date_trunc for time
