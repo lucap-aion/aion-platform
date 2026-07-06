@@ -208,8 +208,15 @@ and Download PDF / Excel buttons.
   (that would flash a raw table with a system id at the associate). If the tool
   says several clients match, ask which one; don't guess.
 - kind="performance": pass period "week" or "month" (default month).
-After the tool runs, give ONE short sentence ("Here's Giulia's report — download
-it as PDF or Excel below.") — never re-list the figures; the report shows them.
+- ANY other report the manager asks for (sales by collection, claims this month,
+  renewals expiring, a single shop's numbers, a two-period comparison, best
+  sellers, slow movers…) → kind="custom": give a title and a `sections` list,
+  each with a type (kpis / bar / line / pie / table / products / note) and a SQL
+  SELECT returning rows shaped for it. Compose a few sections (e.g. a KPI row + a
+  chart + a table) for a real report. Use CURRENT_DATE / date_trunc for time
+  windows. Don't select raw id columns.
+After the tool runs, give ONE short sentence ("Here's the report — download it as
+PDF or Excel below.") — never re-list the figures; the report shows them.
 
 # Accuracy — NON-NEGOTIABLE
 - Use ONLY what the tools return. Do NOT draw on your own prior knowledge about
@@ -289,17 +296,43 @@ const TOOLS = [
     name: "generate_report",
     description:
       "Build a downloadable report (PDF + Excel, with charts) shown to the " +
-      "associate with download buttons. Use when they ask for a report, a " +
-      "recap/summary of a client, or weekly/monthly performance. kind='client' " +
-      "needs the client (name or id); kind='performance' takes a period. The " +
-      "report renders on screen for the user — after calling this, just give ONE " +
-      "short sentence pointing to it, do NOT re-list the data.",
+      "associate with download buttons. Two presets: kind='client' (needs the " +
+      "client's name) and kind='performance' (period week|month). For ANYTHING " +
+      "else — sales by collection, claims this month, renewals expiring, a shop's " +
+      "numbers, a period comparison, etc. — use kind='custom' and build it from " +
+      "`sections`. Each section has a `type` and a `sql` SELECT that returns rows " +
+      "shaped for that type:\n" +
+      "  • kpis — one row; each column becomes a KPI card (money columns auto-€).\n" +
+      "  • bar | line | pie — 2 columns: first = label, second = numeric value.\n" +
+      "  • table — any columns; rendered as a small table (money auto-€).\n" +
+      "  • products — columns among name, collection/category, price, image_url, " +
+      "product_url; renders as photo cards.\n" +
+      "  • note — a short text callout (use `body`, no sql).\n" +
+      "The report renders on screen — after calling this, give ONE short sentence " +
+      "pointing to it; do NOT re-list the data.",
     input_schema: {
       type: "object",
       properties: {
-        kind: { type: "string", enum: ["client", "performance"], description: "Report type." },
-        client: { type: "string", description: "For kind=client: the client's full name or id." },
+        kind: { type: "string", enum: ["client", "performance", "custom"], description: "Report type." },
+        client: { type: "string", description: "For kind=client: the client's full name." },
         period: { type: "string", enum: ["week", "month"], description: "For kind=performance: bucket size (default month)." },
+        title: { type: "string", description: "For kind=custom: the report title." },
+        subtitle: { type: "string", description: "For kind=custom: optional subtitle." },
+        sections: {
+          type: "array",
+          description: "For kind=custom: the report sections, in order.",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["kpis", "bar", "line", "pie", "table", "products", "note"] },
+              title: { type: "string" },
+              sql: { type: "string", description: "A single SELECT/WITH query returning rows shaped for this section type." },
+              unit: { type: "string", enum: ["eur", "num"], description: "Value unit for kpis/charts (default: auto by column name)." },
+              body: { type: "string", description: "For type=note: the text." },
+            },
+            required: ["type"],
+          },
+        },
       },
       required: ["kind"],
     },
@@ -767,16 +800,88 @@ async function runReportSql(client: ReturnType<typeof createClient>, sql: string
 }
 const q = (s: string) => s.replace(/'/g, "''"); // escape single quotes
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+const eurFmt = (v: unknown) => `€${Math.round(num(v)).toLocaleString("it-IT")}`;
+const humanize = (c: string) => c.replace(/_/g, " ").replace(/\b\w/g, (x) => x.toUpperCase());
+const looksMoney = (c: string) => /(price|revenue|spend|ticket|value|amount|premium|cost|total|selling)/i.test(c);
+
+// Every report — the client & performance presets AND any ad-hoc request — is a
+// generic list of sections the frontend renders (and exports to PDF/Excel).
+// Section shapes: kpis {label,value}, bar|line|pie {label,value}, table
+// {columns,rows}, products {name,subtitle,price,image_url,url}, note {body}.
+type Section =
+  | { type: "kpis"; title?: string; items: { label: string; value: string }[] }
+  | { type: "bar" | "line" | "pie"; title?: string; unit?: "eur" | "num"; data: { label: string; value: number }[] }
+  | { type: "table"; title?: string; columns: { key: string; header: string }[]; rows: Row[] }
+  | { type: "products"; title?: string; items: { name: string; subtitle?: string | null; price?: number | null; image_url?: string | null; url?: string | null }[] }
+  | { type: "note"; title?: string; body: string };
 
 async function buildReport(
   client: ReturnType<typeof createClient>, brandId: number, brandName: string | null,
-  input: { kind?: string; client?: string; period?: string },
+  input: { kind?: string; client?: string; period?: string; title?: string; subtitle?: string; sections?: unknown },
 ) {
   const generated_at = new Date().toISOString();
   if (input.kind === "performance") {
     return await buildPerformanceReport(client, brandName, input.period === "week" ? "week" : "month", generated_at);
   }
+  if (input.kind === "custom" || Array.isArray(input.sections)) {
+    return await buildCustomReport(client, brandName, input, generated_at);
+  }
   return await buildClientReport(client, brandName, input.client ?? "", generated_at);
+}
+
+// Ad-hoc report: the model supplies a title + sections, each with a SQL query and
+// a type; we run each query (RLS-safe) and shape the rows to the section type.
+async function buildCustomReport(
+  client: ReturnType<typeof createClient>, brandName: string | null,
+  input: { title?: string; subtitle?: string; sections?: unknown }, generated_at: string,
+) {
+  const title = String(input.title ?? "Report").trim() || "Report";
+  const specs = Array.isArray(input.sections) ? input.sections : [];
+  if (specs.length === 0) return { error: "Provide at least one section (type + sql) for a custom report." };
+
+  const sections: Section[] = [];
+  for (const raw of specs) {
+    const spec = raw as { type?: string; title?: string; sql?: string; unit?: string; body?: string };
+    const type = spec.type ?? "table";
+    if (type === "note") { sections.push({ type: "note", title: spec.title, body: String(spec.body ?? "") }); continue; }
+    if (!spec.sql) continue;
+    let rows: Row[] = [];
+    try { rows = await runReportSql(client, spec.sql); }
+    catch (e) { console.warn("[custom section]", e instanceof Error ? e.message : e); continue; }
+    const cols = rows.length ? Object.keys(rows[0]).filter((c) => !/(^|_)id$/i.test(c)) : [];
+    const unit = spec.unit === "eur" ? "eur" : (spec.unit === "num" ? "num" : undefined);
+
+    if (type === "kpis") {
+      const r = rows[0] ?? {};
+      sections.push({ type: "kpis", title: spec.title, items: cols.map((c) => ({ label: humanize(c), value: looksMoney(c) || unit === "eur" ? eurFmt(r[c]) : String(r[c] ?? "—") })) });
+    } else if (type === "bar" || type === "line" || type === "pie") {
+      const [labCol, valCol] = [cols[0], cols[1]];
+      sections.push({ type, title: spec.title, unit: unit ?? (valCol && looksMoney(valCol) ? "eur" : "num"), data: rows.map((r) => ({ label: String(r[labCol] ?? "—"), value: num(r[valCol]) })) });
+    } else if (type === "products") {
+      sections.push({ type: "products", title: spec.title, items: rows.map((r) => shapeProduct(r)) });
+    } else {
+      sections.push({ type: "table", title: spec.title, columns: cols.map((c) => ({ key: c, header: humanize(c) })), rows });
+    }
+  }
+  if (sections.length === 0) return { error: "None of the report sections returned data — check the queries." };
+  return { title, subtitle: input.subtitle ?? null, generated_at, brand: brandName, sections };
+}
+
+// Map a result row to a product card (detect the usual columns).
+function shapeProduct(r: Row) {
+  const pick = (re: RegExp) => Object.keys(r).find((k) => re.test(k));
+  const nameC = pick(/^(name|title|product|prodotto)$/i) ?? pick(/name/i);
+  const subC = pick(/^(collection|collezione|category|categoria)$/i);
+  const priceC = pick(/(^|_)(price|selling_price|value)$/i);
+  const imgC = pick(/(^|_)(image_url|picture|photo|image)$/i);
+  const urlC = pick(/(^|_)(product_url|url|link)$/i);
+  return {
+    name: nameC ? String(r[nameC] ?? "—") : "—",
+    subtitle: subC ? (r[subC] as string ?? null) : null,
+    price: priceC ? (r[priceC] != null ? num(r[priceC]) : null) : null,
+    image_url: imgC ? (r[imgC] as string ?? null) : null,
+    url: urlC ? (r[urlC] as string ?? null) : null,
+  };
 }
 
 async function buildClientReport(
@@ -834,30 +939,37 @@ async function buildClientReport(
     if (y) byYear.set(y, (byYear.get(y) ?? 0) + num(p.selling_price));
   }
 
-  return {
-    kind: "client", generated_at, brand: brandName,
-    client: {
-      name: `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "—",
-      email: c.email ?? null, phone: c.phone_number ?? null,
-      city: c.city ?? null, country: c.country ?? null,
-      since: dates[0] ? dates[0].slice(0, 10) : (c.registered_at ? String(c.registered_at).slice(0, 10) : null),
-    },
-    kpis: {
-      total_spend: Math.round(spend), pieces: purchases.length,
-      avg_ticket: purchases.length ? Math.round(spend / purchases.length) : 0,
-      open_claims: openClaims,
-    },
-    purchases: purchases.map((p) => ({
-      name: p.name ?? "—", collection: p.collection ?? null, image_url: p.image_url ?? null,
+  const name = `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "—";
+  const since = dates[0] ? dates[0].slice(0, 10) : (c.registered_at ? String(c.registered_at).slice(0, 10) : null);
+  const sections: Section[] = [];
+  sections.push({ type: "kpis", items: [
+    { label: "Spesa totale", value: eurFmt(spend) },
+    { label: "Pezzi", value: String(purchases.length) },
+    { label: "Scontrino medio", value: eurFmt(purchases.length ? spend / purchases.length : 0) },
+    { label: "Claim aperti", value: String(openClaims) },
+  ] });
+  if (byYear.size > 1) {
+    sections.push({ type: "bar", title: "Spesa per anno", unit: "eur",
+      data: [...byYear.entries()].sort().map(([label, value]) => ({ label, value: Math.round(value) })) });
+  }
+  if (purchases.length) {
+    sections.push({ type: "products", title: "Pezzi acquistati", items: purchases.map((p) => ({
+      name: String(p.name ?? "—"), subtitle: (p.collection as string) ?? null,
       price: num(p.selling_price) || (p.online_price != null ? num(p.online_price) : null),
-      date: p.start_date ? String(p.start_date).slice(0, 10) : null, status: p.status ?? null,
-    })),
-    claims: claims.map((c) => ({ type: c.type ?? "—", status: c.status ?? null, date: c.incident_date ? String(c.incident_date).slice(0, 10) : null })),
-    feedback: fbRows[0]
-      ? { satisfaction: num(fbRows[0].satisfaction_rate), recommendation: num(fbRows[0].recommendation_rate), peace_of_mind: num(fbRows[0].peace_of_mind_rate), comment: fbRows[0].comment ?? null }
-      : null,
-    spend_by_year: [...byYear.entries()].sort().map(([year, value]) => ({ year, value: Math.round(value) })),
-  };
+      image_url: (p.image_url as string) ?? null, url: null,
+    })) });
+  }
+  const fb = fbRows[0];
+  if (fb) {
+    sections.push({ type: "kpis", title: "Feedback", items: [
+      { label: "Soddisfazione", value: `${num(fb.satisfaction_rate)}/5` },
+      { label: "Raccomandazione", value: `${num(fb.recommendation_rate)}/5` },
+      { label: "Serenità", value: `${num(fb.peace_of_mind_rate)}/5` },
+    ] });
+    if (fb.comment) sections.push({ type: "note", body: `“${String(fb.comment)}”` });
+  }
+  const meta = [ [c.city, c.country].filter(Boolean).join(", "), since ? `cliente dal ${since}` : "", c.email ?? "" ].filter(Boolean).join(" · ");
+  return { title: `Report cliente — ${name}`, subtitle: meta || null, generated_at, brand: brandName, sections };
 }
 
 async function buildPerformanceReport(
@@ -892,18 +1004,28 @@ async function buildPerformanceReport(
     WHERE po.${win} GROUP BY 1 ORDER BY revenue DESC LIMIT 6`);
 
   const revenue = num(kpiRow.revenue), covers = num(kpiRow.covers);
-  return {
-    kind: "performance", generated_at, brand: brandName, period,
-    kpis: {
-      revenue: Math.round(revenue), covers,
-      avg_ticket: covers ? Math.round(revenue / covers) : 0,
-      customers: num(kpiRow.customers), claims: num(claimsRow.claims),
-    },
-    series: series.map((r) => ({ bucket: String(r.bucket).slice(0, 10), revenue: num(r.revenue), covers: num(r.covers) })),
-    category_mix: categoryMix.map((r) => ({ label: r.label ?? "—", count: num(r.count), revenue: num(r.revenue) })),
-    top_collections: topCollections.map((r) => ({ label: r.label ?? "—", count: num(r.count), revenue: num(r.revenue) })),
-    top_clients: topClients.map((r) => ({ label: (r.label as string)?.trim() || "—", count: num(r.count), revenue: num(r.revenue) })),
-  };
+  const rangeLabel = period === "week" ? "ultime 12 settimane" : "ultimi 12 mesi";
+  const tableRows = (rows: Row[]) => rows.map((r) => ({ label: r.label ?? "—", count: num(r.count), revenue: num(r.revenue) }));
+  const sections: Section[] = [
+    { type: "kpis", items: [
+      { label: "Ricavi", value: eurFmt(revenue) },
+      { label: "Pezzi venduti", value: String(covers) },
+      { label: "Scontrino medio", value: eurFmt(covers ? revenue / covers : 0) },
+      { label: "Clienti", value: String(num(kpiRow.customers)) },
+      { label: "Claim", value: String(num(claimsRow.claims)) },
+    ] },
+    { type: "bar", title: "Andamento ricavi", unit: "eur",
+      data: series.map((r) => ({ label: String(r.bucket).slice(period === "month" ? 0 : 5, period === "month" ? 7 : 10), value: num(r.revenue) })) },
+    { type: "pie", title: "Mix categorie (ricavi)", unit: "eur",
+      data: categoryMix.map((r) => ({ label: String(r.label ?? "—"), value: num(r.revenue) })) },
+    { type: "table", title: "Top collezioni",
+      columns: [{ key: "label", header: "Collezione" }, { key: "count", header: "Pezzi" }, { key: "revenue", header: "Ricavi" }],
+      rows: tableRows(topCollections) },
+    { type: "table", title: "Top clienti",
+      columns: [{ key: "label", header: "Cliente" }, { key: "count", header: "Pezzi" }, { key: "revenue", header: "Ricavi" }],
+      rows: tableRows(topClients) },
+  ];
+  return { title: `Performance ${period === "week" ? "settimanale" : "mensile"}`, subtitle: `${brandName ?? ""} · ${rangeLabel}`.trim(), generated_at, brand: brandName, sections };
 }
 
 // Suggest 3 follow-up questions the associate might tap next.
