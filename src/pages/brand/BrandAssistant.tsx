@@ -122,6 +122,8 @@ const formatCell = (v: unknown, col?: string): string => {
 
 const isImageColumn = (col: string) =>
   /(^|_)(picture|avatar|photo|thumbnail|image)(_url)?$/i.test(col);
+// Technical columns a store associate should never see (UUIDs, foreign keys).
+const isHiddenColumn = (col: string) => /(^|_)id$/i.test(col) || /^uuid$/i.test(col);
 // Only ever called for a known image column (see DataTable), so accept ANY
 // http(s) URL — product feeds often serve images from extension-less endpoints
 // (e.g. .../Base/Image/154499). Truly broken URLs are hidden via <img onError>.
@@ -786,7 +788,16 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
   message: AssistantMessage; locale: string; isLast: boolean; onFollowup: (q: string) => void;
 }) => {
   const { summary, sources, columns, rows, activity, followups, report, streaming } = message;
-  const hasAnything = summary || sources.length > 0 || rows.length > 0 || !!report;
+  // Drop technical columns (ids/uuids) before showing anything to the associate.
+  const displayCols = columns.filter((c) => !isHiddenColumn(c));
+  const hasImageCol = displayCols.some(isImageColumn);
+  // Photo grid: render whenever there are pieces to see (even one). Plain table:
+  // only for multi-row rankings the model didn't already tabulate in prose —
+  // a single-row lookup is spoken, not tabulated.
+  const showGrid = !streaming && rows.length > 0 && displayCols.length > 0 && hasImageCol;
+  const showTable = !streaming && rows.length > 1 && displayCols.length > 0 && !hasImageCol
+    && !/(^|\n)\s*\|.*\|/.test(summary);
+  const hasAnything = summary || sources.length > 0 || showGrid || showTable || !!report;
 
   if (!hasAnything && streaming) {
     return (
@@ -817,16 +828,11 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
 
       {report && <ReportView report={report} locale={locale} />}
 
-      {/* Product/entity lists (anything with an image) → a big-image card grid;
-          pure numeric/ranking data → the compact table. The card grid ALWAYS
-          renders (photos can't be duplicated in prose); only the plain table is
-          suppressed when the model already tabulated the data in markdown. */}
-      {!streaming && columns.length > 0 && rows.length > 0
-        && !(rows.length <= 1 && columns.length <= 2) && (
-        columns.some(isImageColumn)
-          ? <ProductGrid columns={columns} rows={rows} locale={locale} />
-          : !/(^|\n)\s*\|.*\|/.test(summary) && <DataTable columns={columns} rows={rows} locale={locale} />
-      )}
+      {/* Pieces → big-image card grid (photos can't be duplicated in prose, so
+          it always renders); multi-row numeric data → compact table with the
+          technical columns stripped. Single-row lookups aren't tabulated. */}
+      {showGrid && <ProductGrid columns={displayCols} rows={rows} locale={locale} />}
+      {showTable && <DataTable columns={displayCols} rows={rows} locale={locale} />}
 
       {sources.length > 0 && (
         <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
