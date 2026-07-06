@@ -193,7 +193,10 @@ export default function BrandAssistant() {
   const brandId = profile?.brand_id ?? null;
 
   const [chats, setChats] = useState<ChatSummary[]>([]);
-  const [chatId, setChatId] = useState<string | null>(urlChatId);
+  // Start null (not urlChatId) so the [urlChatId] effect actually fires loadChat
+  // on a fresh page load — otherwise chatId already equals urlChatId and the
+  // chat never loads (blank on reload).
+  const [chatId, setChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [image, setImage] = useState<string | null>(null);

@@ -46,6 +46,30 @@ async function loadImage(url: string): Promise<Img | null> {
   } catch { return null; }
 }
 
+// Crop transparent margins off a (data-URL) logo so it aligns flush to the
+// left margin instead of appearing indented by the PNG's built-in padding.
+async function trimTransparent(img: Img): Promise<Img> {
+  try {
+    const el = await new Promise<HTMLImageElement>((res, rej) => {
+      const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error("load")); im.src = img.data;
+    });
+    const w = el.naturalWidth, h = el.naturalHeight;
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const ctx = c.getContext("2d"); if (!ctx) return img;
+    ctx.drawImage(el, 0, 0);
+    const px = ctx.getImageData(0, 0, w, h).data;
+    let minX = w, minY = h, maxX = 0, maxY = 0, found = false;
+    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
+      if (px[(yy * w + xx) * 4 + 3] > 8) { found = true; if (xx < minX) minX = xx; if (xx > maxX) maxX = xx; if (yy < minY) minY = yy; if (yy > maxY) maxY = yy; }
+    }
+    if (!found || maxX <= minX || maxY <= minY) return img;
+    const cw = maxX - minX + 1, ch = maxY - minY + 1;
+    const oc = document.createElement("canvas"); oc.width = cw; oc.height = ch;
+    oc.getContext("2d")!.drawImage(c, minX, minY, cw, ch, 0, 0, cw, ch);
+    return { data: oc.toDataURL("image/png"), w: cw, h: ch };
+  } catch { return img; }
+}
+
 export async function downloadReportPdf(report: ReportPayload, filename: string) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -73,18 +97,23 @@ export async function downloadReportPdf(report: ReportPayload, filename: string)
   };
 
   // ── Header ─────────────────────────────────────────────────────────────────
-  const logo = report.brand_logo ? imgs.get(report.brand_logo) : null;
-  if (logo && logo.data) {
-    const lh = 11, lw = Math.min(58, (lh * logo.w) / logo.h);
-    doc.addImage(logo.data, "PNG", M, y, lw, lh);
-  } else if (report.brand) {
-    doc.setFont("helvetica", "bold"); doc.setFontSize(11); setColor(GOLD);
-    doc.text(report.brand.toUpperCase(), M, y + 6);
-  }
+  let logo = report.brand_logo ? imgs.get(report.brand_logo) ?? null : null;
+  if (logo && logo.data) logo = await trimTransparent(logo);
   doc.setFont("helvetica", "normal"); doc.setFontSize(8); setColor(MUTED);
   doc.text(new Date(report.generated_at).toLocaleDateString("it-IT"), W - M, y + 4, { align: "right" });
-  y += 16;
-  doc.setFont("times", "bold"); doc.setFontSize(20); setColor(INK);
+  if (logo && logo.data) {
+    // Preserve aspect ratio (cap by width AND height so a wide wordmark isn't
+    // squished).
+    let lh = 8, lw = (lh * logo.w) / logo.h;
+    const maxW = 55;
+    if (lw > maxW) { lw = maxW; lh = (lw * logo.h) / logo.w; }
+    doc.addImage(logo.data, "PNG", M, y, lw, lh);
+    y += Math.max(lh, 7) + 5;
+  } else {
+    if (report.brand) { doc.setFont("helvetica", "bold"); doc.setFontSize(11); setColor(GOLD); doc.text(report.brand.toUpperCase(), M, y + 5); }
+    y += 12;
+  }
+  doc.setFont("times", "bold"); doc.setFontSize(19); setColor(INK);
   doc.text(report.title, M, y);
   y += 6;
   if (report.subtitle) {
