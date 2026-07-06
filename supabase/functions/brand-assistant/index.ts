@@ -798,13 +798,26 @@ async function buildClientReport(
     FROM policies po JOIN catalogues c ON c.id = po.item_id
     LEFT JOIN storefront_products s ON s.brand_id = po.brand_id AND s.sku = c.sku
     WHERE po.customer_id = '${id}' ORDER BY po.start_date DESC`);
-  const claims = await runReportSql(client, `
-    SELECT cl.type, cl.status, cl.incident_date
-    FROM claims cl JOIN policies po ON po.id = cl.policy_id
-    WHERE po.customer_id = '${id}' ORDER BY cl.incident_date DESC NULLS LAST`);
-  const fbRows = await runReportSql(client, `
-    SELECT satisfaction_rate, recommendation_rate, peace_of_mind_rate, comment
-    FROM feedback WHERE user_id = '${id}' ORDER BY id DESC LIMIT 1`);
+  // Claims + feedback are best-effort — a hiccup here must never sink the report.
+  let claims: Row[] = [];
+  try {
+    claims = await runReportSql(client, `
+      SELECT cl.type, cl.status, cl.incident_date
+      FROM claims cl JOIN policies po ON po.id = cl.policy_id
+      WHERE po.customer_id = '${id}' ORDER BY cl.incident_date DESC NULLS LAST`);
+  } catch (e) { console.warn("[report claims]", e instanceof Error ? e.message : e); }
+  // Read feedback via the query builder, NOT ai_run_query_user: its SQL keyword
+  // blocklist rejects the literal column name "comment".
+  let fbRows: Row[] = [];
+  try {
+    const { data: fbData } = await client
+      .from("feedback")
+      .select("satisfaction_rate, recommendation_rate, peace_of_mind_rate, comment")
+      .eq("user_id", id)
+      .order("id", { ascending: false })
+      .limit(1);
+    fbRows = (fbData ?? []) as Row[];
+  } catch (e) { console.warn("[report feedback]", e instanceof Error ? e.message : e); }
 
   const spend = purchases.reduce((s, p) => s + num(p.selling_price), 0);
   const dates = purchases.map((p) => String(p.start_date ?? "")).filter(Boolean).sort();
