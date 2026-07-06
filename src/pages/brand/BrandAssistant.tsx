@@ -795,7 +795,10 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
   // only for multi-row rankings the model didn't already tabulate in prose —
   // a single-row lookup is spoken, not tabulated.
   const showGrid = !streaming && rows.length > 0 && displayCols.length > 0 && hasImageCol;
-  const showTable = !streaming && rows.length > 1 && displayCols.length > 0 && !hasImageCol
+  // Plain data tables are noise for a store manager (they've said so). Only show
+  // one for a genuinely long list to scan (>= 6 rows); smaller numeric/aggregate
+  // results are the model's own reasoning and stay hidden — it speaks the number.
+  const showTable = !streaming && rows.length >= 6 && displayCols.length > 0 && !hasImageCol
     && !/(^|\n)\s*\|.*\|/.test(summary);
   const hasAnything = summary || sources.length > 0 || showGrid || showTable || !!report;
 

@@ -74,17 +74,20 @@ export const downloadPdfFromNode = async (node: HTMLElement, filename: string) =
     allowTaint: false,
     imageTimeout: 20000,
     logging: false,
-    // Cross-origin images without CORS headers would taint the canvas and make
-    // toDataURL throw. Keep images from CORS-friendly hosts; blank the rest so
-    // the PDF always generates (layout, charts, KPIs stay intact).
+    // Cross-origin images (e.g. the legacy x-tra.it feed) don't send CORS
+    // headers, so html2canvas would taint the canvas and toDataURL would throw.
+    // Route every cross-origin image through our CORS-enabled image-proxy so the
+    // photos actually appear in the PDF.
     onclone: (doc) => {
-      const okHost = (h: string) => h === location.hostname || /(^|\.)shopify\.com$/i.test(h) || /(^|\.)supabase\.co$/i.test(h);
+      const base = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
       doc.querySelectorAll("img").forEach((img) => {
+        const el = img as HTMLImageElement;
         try {
-          const u = new URL((img as HTMLImageElement).src, location.href);
-          if (!okHost(u.hostname)) { (img as HTMLImageElement).removeAttribute("src"); }
-          else { (img as HTMLImageElement).crossOrigin = "anonymous"; }
-        } catch { (img as HTMLImageElement).removeAttribute("src"); }
+          const u = new URL(el.src, location.href);
+          if (u.hostname === location.hostname) return; // same-origin: leave as-is
+          el.crossOrigin = "anonymous";
+          if (base) el.src = `${base}/functions/v1/image-proxy?url=${encodeURIComponent(u.href)}`;
+        } catch { el.removeAttribute("src"); }
       });
     },
   });
