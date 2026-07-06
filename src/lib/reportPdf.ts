@@ -160,7 +160,7 @@ export async function downloadReportPdf(report: ReportPayload, filename: string)
       row.forEach((p, i) => {
         const x = M + i * (cw + gap);
         const im = p.image_url ? imgs.get(p.image_url) : null;
-        doc.setFillColor(...PANEL); doc.setDrawColor(...HAIR); doc.setLineWidth(0.2);
+        doc.setFillColor(255, 255, 255); doc.setDrawColor(...HAIR); doc.setLineWidth(0.2);
         doc.rect(x, y, imgS, imgS, "FD");
         if (im && im.data) {
           const scale = Math.min(imgS / im.w, imgS / im.h), iw = im.w * scale, ih = im.h * scale;
@@ -188,21 +188,28 @@ export async function downloadReportPdf(report: ReportPayload, filename: string)
       doc.line(bx, yy, bx + bw, yy);
       doc.text(money ? `€${Math.round((max * f) / 1000)}k` : String(Math.round(max * f)), bx - 2, yy + 1, { align: "right" });
     });
+    const fmtVal = (v: number) => money ? (v >= 1000 ? `€${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : eur(v)) : grp(v);
     if (s.type === "bar") {
-      const slot = bw / data.length, barW = Math.min(slot * 0.6, 12);
+      // Centre the bars in a band so a few points don't float far apart.
+      const areaW = Math.min(bw, data.length * 34), x0 = bx + (bw - areaW) / 2;
+      const slot = areaW / data.length, barW = Math.min(slot * 0.5, 24);
       data.forEach((d, i) => {
-        const hh = bh * (d.value / max), x = bx + i * slot + (slot - barW) / 2;
+        const hh = bh * (d.value / max), x = x0 + i * slot + (slot - barW) / 2;
         doc.setFillColor(...GOLD); doc.rect(x, by + bh - hh, barW, hh, "F");
-        setColor(MUTED); doc.setFontSize(6); doc.text(String(d.label), x + barW / 2, by + bh + 3, { align: "center" });
+        doc.setFont("helvetica", "bold"); doc.setFontSize(6.5); setColor(INK);
+        doc.text(fmtVal(d.value), x + barW / 2, by + bh - hh - 1.5, { align: "center" });
+        doc.setFont("helvetica", "normal"); doc.setFontSize(6.5); setColor(MUTED);
+        doc.text(String(d.label), x + barW / 2, by + bh + 4, { align: "center" });
       });
     } else {
       doc.setDrawColor(...CHART[0]); doc.setLineWidth(0.6);
       const pts = data.map((d, i) => [bx + (bw / Math.max(1, data.length - 1)) * i, by + bh - bh * (d.value / max)] as [number, number]);
       for (let i = 1; i < pts.length; i++) doc.line(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
-      setColor(MUTED); doc.setFontSize(6);
-      data.forEach((d, i) => doc.text(String(d.label), pts[i][0], by + bh + 3, { align: "center" }));
+      doc.setFillColor(...CHART[0]); pts.forEach((p) => doc.circle(p[0], p[1], 0.8, "F"));
+      setColor(MUTED); doc.setFontSize(6.5);
+      data.forEach((d, i) => doc.text(String(d.label), pts[i][0], by + bh + 4, { align: "center" }));
     }
-    y = by + bh + 8;
+    y = by + bh + 10;
   };
 
   const drawPie = (s: ChartSection) => {
