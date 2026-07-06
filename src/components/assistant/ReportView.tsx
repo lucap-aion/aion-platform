@@ -33,8 +33,12 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) =>
 
 const axisMoney = (v: number) => `€${(v / 1000).toFixed(0)}k`;
 
-function Chart({ s }: { s: Extract<ReportSection, { type: "bar" | "line" | "pie" }> }) {
+function Chart({ s, locale }: { s: Extract<ReportSection, { type: "bar" | "line" | "pie" }>; locale: string }) {
   const money = s.unit === "eur";
+  const total = (s.data ?? []).reduce((a, d) => a + (Number(d.value) || 0), 0);
+  if (!s.data?.length || total === 0) {
+    return <p className="py-4 text-xs text-muted-foreground">{tt(locale, "No data for this period.", "Nessun dato per questo periodo.")}</p>;
+  }
   if (s.type === "pie") {
     return (
       <div className="h-48 w-full">
@@ -167,7 +171,7 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
               : s.type === "table" ? <DataSection s={s} />
               : s.type === "products" ? <Products s={s} />
               : s.type === "note" ? <p className="mt-2 text-xs italic text-muted-foreground">{s.body}</p>
-              : <Chart s={s} />}
+              : <Chart s={s} locale={locale} />}
           </div>
         ))}
       </div>
@@ -194,8 +198,11 @@ function sectionsToSheets(report: ReportPayload, locale: string): Sheet[] {
   const sheets: Sheet[] = [];
   const used = new Set<string>();
   const name = (base: string) => {
-    let n = (base || "Sheet").slice(0, 28); let k = n; let i = 2;
-    while (used.has(k)) k = `${n} ${i++}`;
+    // Excel forbids \ / ? * [ ] : and caps sheet names at 31 chars.
+    const clean = (base || "Sheet").replace(/[\\/?*[\]:]/g, " ").replace(/\s+/g, " ").trim() || "Sheet";
+    let k = clean.slice(0, 31);
+    let i = 2;
+    while (used.has(k)) { const suf = ` ${i++}`; k = clean.slice(0, 31 - suf.length) + suf; }
     used.add(k); return k;
   };
   const kpiRows: Record<string, unknown>[] = [];

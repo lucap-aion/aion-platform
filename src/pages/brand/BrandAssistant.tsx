@@ -198,6 +198,7 @@ export default function BrandAssistant() {
   const [input, setInput] = useState("");
   const [image, setImage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>(() => buildSuggestions(locale, null, null, null));
@@ -256,6 +257,7 @@ export default function BrandAssistant() {
 
   // ── Load a chat ────────────────────────────────────────────────────────────
   const loadChat = useCallback(async (id: string) => {
+    abortRef.current?.abort(); // stop any in-flight stream from the previous chat
     setChatLoading(true);
     const { data, error } = await supabase
       .from("ai_chats_brand" as any)
@@ -270,12 +272,24 @@ export default function BrandAssistant() {
     const row = data as unknown as { id: string; messages: unknown };
     setChatId(row.id);
     const raw = (row.messages as Message[]) ?? [];
-    // Backfill fields that may be missing on older saved assistant turns.
-    const restored: Message[] = raw.map((m) =>
-      m.role === "assistant"
-        ? { sources: [], columns: [], rows: [], sql: null, activity: null, followups: [], report: null, ...m, streaming: false }
-        : m,
-    );
+    // Coerce each field on older/malformed saved turns (a null array would crash
+    // rendering) rather than a blanket spread that lets null override defaults.
+    const restored: Message[] = raw.map((m) => {
+      if (m.role !== "assistant") return m;
+      const a = m as Partial<AssistantMessage>;
+      return {
+        role: "assistant" as const,
+        summary: typeof a.summary === "string" ? a.summary : "",
+        sources: Array.isArray(a.sources) ? a.sources : [],
+        columns: Array.isArray(a.columns) ? a.columns : [],
+        rows: Array.isArray(a.rows) ? a.rows : [],
+        sql: a.sql ?? null,
+        activity: null,
+        followups: Array.isArray(a.followups) ? a.followups : [],
+        report: a.report && Array.isArray((a.report as ReportPayload).sections) && (a.report as ReportPayload).sections.length > 0 ? a.report : null,
+        streaming: false,
+      };
+    });
     setMessages(restored);
   }, [locale]);
 
@@ -299,11 +313,15 @@ export default function BrandAssistant() {
       // rows; admins (incl. while viewing-as) are allowed by the admin-override
       // RLS policy on ai_chats_brand.
       if (!ownerId) return existingId;
+      // Don't persist heavy base64 photos — they'd bloat the JSONB row and get
+      // re-uploaded on every subsequent turn. Keep the message, drop the inline
+      // image data.
+      const slim = msgs.map((m) => (m.role === "user" && m.image ? { ...m, image: undefined } : m));
 
       if (existingId) {
         const { error } = await supabase
           .from("ai_chats_brand" as any)
-          .update({ messages: msgs as unknown as any })
+          .update({ messages: slim as unknown as any })
           .eq("id", existingId);
         if (error) console.error("[brand-assistant update]", error);
         return existingId;
@@ -318,7 +336,7 @@ export default function BrandAssistant() {
           profile_id: ownerId,
           user_id: user.id,
           title: titleFromQuestion(firstUserMsg),
-          messages: msgs as unknown as any,
+          messages: slim as unknown as any,
         })
         .select("id")
         .single();
@@ -383,6 +401,12 @@ export default function BrandAssistant() {
 
     setMessages([...messages, { role: "user", content: text, image: attached ?? undefined }, emptyAssistant()]);
     setLoading(true);
+    // Abort any prior in-flight stream; a chat switch will abort this one so its
+    // answer never bleeds into (or gets saved to) another conversation.
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const sendChatId = chatId;
 
     const patch = (fn: (m: AssistantMessage) => AssistantMessage) =>
       setMessages((prev) => {
@@ -409,6 +433,7 @@ export default function BrandAssistant() {
           "Content-Type": "application/json",
           "Accept": "text/event-stream",
         },
+        signal: ac.signal,
         // brand_id is used only when the caller is an admin (e.g. viewing-as a
         // brand user); real brand users are pinned to their own brand server-side.
         body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id, image: attached ?? undefined }),
@@ -440,22 +465,25 @@ export default function BrandAssistant() {
         }
       }
     } catch (err: unknown) {
+      if (ac.signal.aborted) return; // superseded by a new send / chat switch
       const msg = err instanceof Error ? err.message : tt(locale, "Query failed.", "Richiesta non riuscita.");
       toast.error(msg);
       patch((m) => ({ ...m, summary: m.summary || `⚠️ ${msg}`, streaming: false }));
     } finally {
-      patch((m) => ({ ...m, streaming: false }));
-      setLoading(false);
-      taRef.current?.focus();
-
-      const firstUser = messagesRef.current.find((m) => m.role === "user") as
-        | { role: "user"; content: string } | undefined;
-      const newId = await persistChat(messagesRef.current, chatId, firstUser?.content ?? text);
-      if (newId && newId !== chatId) {
-        setChatId(newId);
-        setSearchParams({ chat: newId }, { replace: true });
+      if (!ac.signal.aborted) {
+        patch((m) => ({ ...m, streaming: false }));
+        setLoading(false);
+        taRef.current?.focus();
+        // Only persist if we're still on the chat this send belongs to.
+        const firstUser = messagesRef.current.find((m) => m.role === "user") as
+          | { role: "user"; content: string } | undefined;
+        const newId = await persistChat(messagesRef.current, sendChatId, firstUser?.content ?? text);
+        if (newId && newId !== chatId) {
+          setChatId(newId);
+          setSearchParams({ chat: newId }, { replace: true });
+        }
+        void refreshChatList();
       }
-      void refreshChatList();
     }
   };
 
@@ -683,12 +711,19 @@ function handleEvent(
       return { ...m, sources: merged };
     });
   } else if (event === "sql_result") {
-    patch((m) => ({
-      ...m,
-      sql: data?.sql ?? m.sql,
-      columns: data?.columns ?? [],
-      rows: data?.rows ?? [],
-    }));
+    patch((m) => {
+      const cols: string[] = Array.isArray(data?.columns) ? data.columns : [];
+      const rows: Record<string, unknown>[] = Array.isArray(data?.rows) ? data.rows : [];
+      // Keep the prior result if this frame carried none (never wipe on a partial
+      // frame). And don't let a later non-image result (e.g. an aggregate the
+      // model ran for exact totals) clobber product cards already on screen.
+      const incomingHasImage = cols.some(isImageColumn);
+      const currentHasImage = m.columns.some(isImageColumn);
+      if (currentHasImage && !incomingHasImage && m.rows.length > 0) {
+        return { ...m, sql: data?.sql ?? m.sql };
+      }
+      return { ...m, sql: data?.sql ?? m.sql, columns: cols.length ? cols : m.columns, rows: rows.length ? rows : m.rows };
+    });
   } else if (event === "done") {
     patch((m) => ({ ...m, streaming: false, activity: null }));
   } else if (event === "error") {
@@ -798,9 +833,12 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
   // Plain data tables are noise for a store manager (they've said so). Only show
   // one for a genuinely long list to scan (>= 6 rows); smaller numeric/aggregate
   // results are the model's own reasoning and stay hidden — it speaks the number.
-  const showTable = !streaming && rows.length >= 6 && displayCols.length > 0 && !hasImageCol
-    && !/(^|\n)\s*\|.*\|/.test(summary);
-  const hasAnything = summary || sources.length > 0 || showGrid || showTable || !!report;
+  // The markdown check requires a real separator row (---) so prose like "S | M"
+  // doesn't false-positive.
+  const hasMdTable = /(^|\n)\s*\|?[\s:|-]*-{3,}[\s:|-]*\|/.test(summary);
+  const showTable = !streaming && rows.length >= 6 && displayCols.length > 0 && !hasImageCol && !hasMdTable;
+  const hasReport = !!report && Array.isArray(report.sections) && report.sections.length > 0;
+  const hasAnything = summary.trim() || sources.length > 0 || showGrid || showTable || hasReport;
 
   if (!hasAnything && streaming) {
     return (
@@ -813,7 +851,7 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
 
   return (
     <div className="flex flex-col gap-4">
-      {(summary || streaming) && (
+      {(summary.trim() || streaming) && (
         <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-a:text-primary prose-code:text-foreground prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-table:text-xs prose-th:bg-muted/40">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown>
           {streaming && !summary && (
@@ -829,7 +867,7 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
         </div>
       )}
 
-      {report && <ReportView report={report} locale={locale} />}
+      {hasReport && report && <ReportView report={report} locale={locale} />}
 
       {/* Pieces → big-image card grid (photos can't be duplicated in prose, so
           it always renders); multi-row numeric data → compact table with the

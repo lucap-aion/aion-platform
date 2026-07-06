@@ -90,7 +90,13 @@ the brand, or a policy.
 ## run_sql(sql) — live client & sales data (your brand only)
 Use for what a client bought and when, average ticket, lifetime value, claims,
 feedback, and data-driven cross-sell. Resolve a client by name with ILIKE; if
-several match, list them and ask which one before going deeper.
+several match, list them and ask which one before going deeper. If ILIKE returns
+NOBODY, say plainly you can't find them under that name and ask for the spelling
+or email — never answer about the nearest different person.
+Renewals / expiring covers (a core strength): a cover is active when
+status='live'; "expiring this month / soon" = expiration_date BETWEEN
+CURRENT_DATE AND CURRENT_DATE + interval '30 days'. Use today's date for any
+"this month / recently / soon / still active" question.
 
 Don't mix them up: the brand story, craftsmanship, care and policy come from
 search_knowledge; client history AND the live product catalogue (with photos)
@@ -127,12 +133,13 @@ Schema (your brand only):
     JOIN catalogues c ON c.id = po.item_id
     LEFT JOIN storefront_products s ON s.brand_id = po.brand_id AND s.sku = c.sku
     WHERE po.customer_id = <id> ORDER BY po.start_date DESC
-  Make this your ONLY query for the purchases and compute the count, average
-  ticket and lifetime total FROM THESE ROWS yourself — do NOT run a separate
-  aggregate query afterwards (it would replace the pieces on screen). Do NOT
-  build a KPI markdown table and do NOT list the pieces in text: the cards render
-  below; give the totals/average in ONE short line only. Every product list — a
-  client's purchases included — must carry an image column so it renders as cards.
+  For the count / average ticket / lifetime total: you only receive the first ~30
+  rows here, so for a client with many pieces run ONE aggregate query
+  (SUM(selling_price), AVG, COUNT) and state THOSE exact figures — the photo cards
+  from the query above stay on screen (a later numbers-only query won't replace
+  them). Do NOT build a KPI markdown table and do NOT list the pieces in text: the
+  cards render below; give the totals/average in ONE short line. Every product
+  list — a client's purchases included — must carry an image column to render as cards.
 - claims(id, policy_id->policies.id, type, status, incident_date).
 - feedback(id, user_id->profiles.id, satisfaction_rate, recommendation_rate,
     peace_of_mind_rate, comment) — rates 1-5.
@@ -176,6 +183,12 @@ client. A product answer with no pieces to show is a failed answer.
   Match generously (try the collection name, then keywords), but return only the
   ~6 BEST pieces — the UI shows big image cards, so it's quality over quantity.
   Don't dump the whole collection; pick the most relevant/iconic to show first.
+- Budget / "something under €X" / "most affordable" / "entry price": filter
+  price IS NOT NULL AND price <= X and ORDER BY price ASC; say the price band in
+  one line. A price-on-request piece (price IS NULL) must NOT count toward a cap.
+- Availability / "in stock" / "what can I sell today": filter available = true,
+  and add one line that availability is the online-catalogue status, not THIS
+  boutique's stock — confirm on the floor.
 - Then keep your prose to ONE short line — a lead-in or the single most useful
   point — and let the photo cards below carry the pieces (name + price are on the
   card). Don't describe each piece in text or re-list what the cards already show.
@@ -217,6 +230,19 @@ and Download PDF / Excel buttons.
   windows. Don't select raw id columns.
 After the tool runs, give ONE short sentence ("Here's the report — download it as
 PDF or Excel below.") — never re-list the figures; the report shows them.
+
+# Scope — one house only
+You represent this house and only this house. Questions that compare, rank, or
+comment on ANOTHER brand, a competitor, or the wider market are out of scope —
+don't answer them even from general knowledge (your training about any brand may
+be outdated or wrong; only the indexed materials + our data are truth). Warmly
+redirect to how OUR pieces answer the client's need.
+
+# What you can't do — hand off gracefully
+You surface information; you don't take actions. You can't send emails, place or
+reserve orders, book appointments, take payments, or change any record. If asked,
+say so in one friendly line and hand the action to the associate ("I can't place
+the order, but here's everything you need to close it — …").
 
 # Accuracy — NON-NEGOTIABLE
 - Use ONLY what the tools return. Do NOT draw on your own prior knowledge about
@@ -653,8 +679,10 @@ Deno.serve(async (req: Request) => {
 
         emit("done", {});
       } catch (err: unknown) {
+        // Log the detail server-side; show the associate a clean message (never
+        // forward a raw provider/DB error, which can carry internals).
         console.error("[brand-assistant]", err);
-        emit("error", { message: err instanceof Error ? err.message : "internal error" });
+        emit("error", { message: "Something went wrong on our side — please try again in a moment." });
       } finally {
         controller.close();
       }
@@ -821,18 +849,18 @@ async function buildReport(
 ) {
   const generated_at = new Date().toISOString();
   if (input.kind === "performance") {
-    return await buildPerformanceReport(client, brandName, input.period === "week" ? "week" : "month", generated_at);
+    return await buildPerformanceReport(client, brandId, brandName, input.period === "week" ? "week" : "month", generated_at);
   }
   if (input.kind === "custom" || Array.isArray(input.sections)) {
-    return await buildCustomReport(client, brandName, input, generated_at);
+    return await buildCustomReport(client, brandId, brandName, input, generated_at);
   }
-  return await buildClientReport(client, brandName, input.client ?? "", generated_at);
+  return await buildClientReport(client, brandId, brandName, input.client ?? "", generated_at);
 }
 
 // Ad-hoc report: the model supplies a title + sections, each with a SQL query and
 // a type; we run each query (RLS-safe) and shape the rows to the section type.
 async function buildCustomReport(
-  client: ReturnType<typeof createClient>, brandName: string | null,
+  client: ReturnType<typeof createClient>, _brandId: number, brandName: string | null,
   input: { title?: string; subtitle?: string; sections?: unknown }, generated_at: string,
 ) {
   const title = String(input.title ?? "Report").trim() || "Report";
@@ -885,14 +913,16 @@ function shapeProduct(r: Row) {
 }
 
 async function buildClientReport(
-  client: ReturnType<typeof createClient>, brandName: string | null, who: string, generated_at: string,
+  client: ReturnType<typeof createClient>, brandId: number, brandName: string | null, who: string, generated_at: string,
 ) {
   who = who.trim();
   if (!who) return { error: "Ask the associate which client the report is for." };
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(who);
+  // Scope to this brand explicitly — RLS is unscoped for an admin caller, so an
+  // admin "viewing-as" a brand must not resolve another brand's client.
   const where = isUuid
-    ? `id = '${who}'`
-    : `(role IS NULL OR role = 'customer') AND (coalesce(first_name,'') || ' ' || coalesce(last_name,'')) ILIKE '%${q(who)}%'`;
+    ? `id = '${who}' AND brand_id = ${brandId}`
+    : `brand_id = ${brandId} AND (role IS NULL OR role = 'customer') AND (coalesce(first_name,'') || ' ' || coalesce(last_name,'')) ILIKE '%${q(who)}%'`;
   const people = await runReportSql(client,
     `SELECT id, first_name, last_name, email, phone_number, city, country, date_of_birth, registered_at FROM profiles WHERE ${where} LIMIT 6`);
   if (people.length === 0) return { error: `No client matches "${who}". Ask the associate to check the name.` };
@@ -908,14 +938,14 @@ async function buildClientReport(
            s.price AS online_price, po.selling_price, po.start_date, po.status
     FROM policies po JOIN catalogues c ON c.id = po.item_id
     LEFT JOIN storefront_products s ON s.brand_id = po.brand_id AND s.sku = c.sku
-    WHERE po.customer_id = '${id}' ORDER BY po.start_date DESC`);
+    WHERE po.customer_id = '${id}' AND po.brand_id = ${brandId} ORDER BY po.start_date DESC`);
   // Claims + feedback are best-effort — a hiccup here must never sink the report.
   let claims: Row[] = [];
   try {
     claims = await runReportSql(client, `
       SELECT cl.type, cl.status, cl.incident_date
       FROM claims cl JOIN policies po ON po.id = cl.policy_id
-      WHERE po.customer_id = '${id}' ORDER BY cl.incident_date DESC NULLS LAST`);
+      WHERE po.customer_id = '${id}' AND po.brand_id = ${brandId} ORDER BY cl.incident_date DESC NULLS LAST`);
   } catch (e) { console.warn("[report claims]", e instanceof Error ? e.message : e); }
   // Read feedback via the query builder, NOT ai_run_query_user: its SQL keyword
   // blocklist rejects the literal column name "comment".
@@ -973,10 +1003,11 @@ async function buildClientReport(
 }
 
 async function buildPerformanceReport(
-  client: ReturnType<typeof createClient>, brandName: string | null, period: "week" | "month", generated_at: string,
+  client: ReturnType<typeof createClient>, brandId: number, brandName: string | null, period: "week" | "month", generated_at: string,
 ) {
   const interval = period === "week" ? "84 days" : "365 days";
-  const win = `start_date >= (CURRENT_DATE - interval '${interval}')`;
+  // Explicit brand scope (RLS is unscoped for an admin caller).
+  const win = `brand_id = ${brandId} AND start_date >= (CURRENT_DATE - interval '${interval}')`;
 
   const series = await runReportSql(client, `
     SELECT to_char(date_trunc('${period}', start_date), 'YYYY-MM-DD') AS bucket,
@@ -988,7 +1019,7 @@ async function buildPerformanceReport(
     FROM policies WHERE ${win}`))[0] ?? {};
   const claimsRow = (await runReportSql(client, `
     SELECT count(*) AS claims FROM claims cl JOIN policies po ON po.id = cl.policy_id
-    WHERE cl.incident_date >= (CURRENT_DATE - interval '${interval}')`))[0] ?? {};
+    WHERE po.brand_id = ${brandId} AND cl.incident_date >= (CURRENT_DATE - interval '${interval}')`))[0] ?? {};
   const categoryMix = await runReportSql(client, `
     SELECT c.category AS label, count(*) AS count, COALESCE(SUM(po.selling_price),0) AS revenue
     FROM policies po JOIN catalogues c ON c.id = po.item_id

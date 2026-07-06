@@ -67,8 +67,11 @@ export const downloadPdfFromNode = async (node: HTMLElement, filename: string) =
     import("html2canvas"),
     import("jspdf"),
   ]);
+  // Cap the scale so a very tall report never exceeds the browser canvas height
+  // limit (~16k px) — that would silently produce a blank/clipped capture.
+  const nodeH = node.scrollHeight || node.offsetHeight || 1200;
   const canvas = await html2canvas(node, {
-    scale: 2,
+    scale: Math.min(2, Math.max(1, 15000 / nodeH)),
     backgroundColor: "#ffffff",
     useCORS: true,
     allowTaint: false,
@@ -84,7 +87,8 @@ export const downloadPdfFromNode = async (node: HTMLElement, filename: string) =
         const el = img as HTMLImageElement;
         try {
           const u = new URL(el.src, location.href);
-          if (u.hostname === location.hostname) return; // same-origin: leave as-is
+          if (u.protocol === "data:" || u.protocol === "blob:") return; // inline: fine as-is
+          if (u.hostname === location.hostname) return;                 // same-origin: fine
           el.crossOrigin = "anonymous";
           if (base) el.src = `${base}/functions/v1/image-proxy?url=${encodeURIComponent(u.href)}`;
         } catch { el.removeAttribute("src"); }
@@ -100,21 +104,24 @@ export const downloadPdfFromNode = async (node: HTMLElement, filename: string) =
   if (imgH <= pageH) {
     pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, imgW, imgH);
   } else {
-    // Slice the tall canvas into page-height chunks.
+    // Slice the tall canvas into page-height chunks. Each page canvas is sized to
+    // its actual slice height (no distortion on the last partial page) and filled
+    // white (no black transparent areas in the JPEG).
+    const sliceH = Math.floor((canvas.width * pageH) / pageW);
     const pageCanvas = document.createElement("canvas");
     const ctx = pageCanvas.getContext("2d")!;
-    const sliceH = Math.floor((canvas.width * pageH) / pageW);
-    pageCanvas.width = canvas.width;
-    pageCanvas.height = sliceH;
     let y = 0;
     let first = true;
     while (y < canvas.height) {
-      ctx.clearRect(0, 0, pageCanvas.width, pageCanvas.height);
-      ctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+      const srcH = Math.min(sliceH, canvas.height - y);
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = srcH;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, srcH);
+      ctx.drawImage(canvas, 0, y, canvas.width, srcH, 0, 0, canvas.width, srcH);
       if (!first) pdf.addPage();
-      const chunkH = Math.min(pageH, ((canvas.height - y) * imgW) / canvas.width);
-      pdf.addImage(pageCanvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, imgW, chunkH);
-      y += sliceH;
+      pdf.addImage(pageCanvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, imgW, (srcH * imgW) / canvas.width);
+      y += srcH;
       first = false;
     }
   }
