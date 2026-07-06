@@ -818,14 +818,14 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
       {report && <ReportView report={report} locale={locale} />}
 
       {/* Product/entity lists (anything with an image) → a big-image card grid;
-          pure numeric/ranking data → the compact table. Never for a single
-          scalar/count or a list the model already tabulated in prose. */}
+          pure numeric/ranking data → the compact table. The card grid ALWAYS
+          renders (photos can't be duplicated in prose); only the plain table is
+          suppressed when the model already tabulated the data in markdown. */}
       {!streaming && columns.length > 0 && rows.length > 0
-        && !(rows.length <= 1 && columns.length <= 2)
-        && !/(^|\n)\s*\|.*\|/.test(summary) && (
+        && !(rows.length <= 1 && columns.length <= 2) && (
         columns.some(isImageColumn)
           ? <ProductGrid columns={columns} rows={rows} locale={locale} />
-          : <DataTable columns={columns} rows={rows} locale={locale} />
+          : !/(^|\n)\s*\|.*\|/.test(summary) && <DataTable columns={columns} rows={rows} locale={locale} />
       )}
 
       {sources.length > 0 && (

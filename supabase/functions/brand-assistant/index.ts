@@ -120,15 +120,19 @@ Schema (your brand only):
     browse the range — storefront_products is the full catalogue.
 - policies(...) above link item_id -> catalogues.id.
   When listing what a CLIENT BOUGHT, ALWAYS show the pieces with photos: join the
-  catalogue AND left-join the storefront for a clean image + current price, e.g.
+  catalogue AND left-join the storefront for a clean image + price, e.g.
     SELECT c.name, c.collection, COALESCE(s.image_url, c.picture) AS image_url,
-           s.price, s.product_url, po.start_date, po.selling_price
+           po.selling_price AS price, po.start_date
     FROM policies po
     JOIN catalogues c ON c.id = po.item_id
     LEFT JOIN storefront_products s ON s.brand_id = po.brand_id AND s.sku = c.sku
     WHERE po.customer_id = <id> ORDER BY po.start_date DESC
-  Every product list — a client's purchases included — must carry an image column
-  so it renders as cards, never a bare text list.
+  Make this your ONLY query for the purchases and compute the count, average
+  ticket and lifetime total FROM THESE ROWS yourself — do NOT run a separate
+  aggregate query afterwards (it would replace the pieces on screen). Do NOT
+  build a KPI markdown table and do NOT list the pieces in text: the cards render
+  below; give the totals/average in ONE short line only. Every product list — a
+  client's purchases included — must carry an image column so it renders as cards.
 - claims(id, policy_id->policies.id, type, status, incident_date).
 - feedback(id, user_id->profiles.id, satisfaction_rate, recommendation_rate,
     peace_of_mind_rate, comment) — rates 1-5.
