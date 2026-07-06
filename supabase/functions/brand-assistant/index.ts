@@ -154,8 +154,10 @@ client. A product answer with no pieces to show is a failed answer.
     FROM storefront_products
     WHERE collection ILIKE '%…%' OR name ILIKE '%…%' OR category ILIKE '%…%'
     ORDER BY price DESC NULLS LAST
-  Match generously (try the collection name, then keywords), keep to the ~12
-  most relevant pieces.
+    LIMIT 6
+  Match generously (try the collection name, then keywords), but return only the
+  ~6 BEST pieces — the UI shows big image cards, so it's quality over quantity.
+  Don't dump the whole collection; pick the most relevant/iconic to show first.
 - Then keep your prose SHORT — a sentence or two of context — and let the photo
   cards below carry the pieces. Don't re-list in a table what the cards show.
 - The catalogue is a subset of the full range. If a named collection isn't in it,
@@ -366,7 +368,7 @@ Deno.serve(async (req: Request) => {
             const embedding = await voyageEmbedImage(`data:${image.mediaType};base64,${image.data}`);
             const { data: matchData, error: matchErr } = await userClient.rpc(
               "match_storefront_images",
-              { p_brand_id: brandId, p_query_embedding: embedding, p_match_count: 8, p_min_similarity: 0.2 },
+              { p_brand_id: brandId, p_query_embedding: embedding, p_match_count: 6, p_min_similarity: 0.2 },
             );
             if (matchErr) throw new Error(matchErr.message);
             const matches = (matchData ?? []) as {

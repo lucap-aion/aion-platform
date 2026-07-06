@@ -808,12 +808,15 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
         </div>
       )}
 
-      {/* Show the rich table only for real lists the model didn't already
-          tabulate in prose, and never for a single scalar/count. */}
+      {/* Product/entity lists (anything with an image) → a big-image card grid;
+          pure numeric/ranking data → the compact table. Never for a single
+          scalar/count or a list the model already tabulated in prose. */}
       {!streaming && columns.length > 0 && rows.length > 0
         && !(rows.length <= 1 && columns.length <= 2)
         && !/(^|\n)\s*\|.*\|/.test(summary) && (
-        <DataTable columns={columns} rows={rows} locale={locale} />
+        columns.some(isImageColumn)
+          ? <ProductGrid columns={columns} rows={rows} locale={locale} />
+          : <DataTable columns={columns} rows={rows} locale={locale} />
       )}
 
       {sources.length > 0 && (
@@ -860,6 +863,86 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
             </button>
           ))}
         </div>
+      )}
+    </div>
+  );
+};
+
+// A product/entity result (any result carrying an image column) renders as a
+// visual card grid with LARGE images — fewer, bigger, tappable — instead of a
+// dense table. Much closer to browsing pieces on the floor.
+const productColumns = (columns: string[]) => ({
+  image: columns.find(isImageColumn),
+  link: columns.find(isLinkColumn),
+  price: columns.find(isPriceColumn),
+  title: columns.find((c) => /(^|_)(name|title|product|prodotto|nome)$/i.test(c))
+    ?? columns.find((c) => !isImageColumn(c) && !isLinkColumn(c) && !isPriceColumn(c) && !/currency|valuta/i.test(c)),
+  subtitle: columns.find((c) => /(^|_)(collection|collezione)$/i.test(c))
+    ?? columns.find((c) => /(^|_)(category|categoria)$/i.test(c)),
+});
+
+const ProductCard = ({ row, cols, locale }: {
+  row: Record<string, unknown>; cols: ReturnType<typeof productColumns>; locale: string;
+}) => {
+  const img = cols.image ? row[cols.image] : null;
+  const urlVal = cols.link ? row[cols.link] : null;
+  const href = typeof urlVal === "string" && /^https?:\/\/\S+/i.test(urlVal.trim()) ? urlVal : undefined;
+  const title = cols.title ? formatCell(row[cols.title]) : "";
+  const subtitle = cols.subtitle ? String(row[cols.subtitle] ?? "").trim() : "";
+  const priceRaw = cols.price ? row[cols.price] : null;
+  const price = cols.price ? formatCell(priceRaw, cols.price) : "";
+  const cls = "group flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-md";
+
+  const inner = (
+    <>
+      <div className="aspect-square w-full overflow-hidden bg-muted/30">
+        {looksLikeImageUrl(img) ? (
+          <img src={img} alt={title} loading="lazy"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
+        ) : <div className="h-full w-full" />}
+      </div>
+      <div className="flex flex-1 flex-col gap-0.5 p-3">
+        {subtitle && (
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{subtitle}</span>
+        )}
+        <span className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{title}</span>
+        <div className="mt-auto flex items-center justify-between pt-2">
+          <span className="text-sm font-semibold text-foreground">
+            {price !== "—" && price ? price : (cols.price ? tt(locale, "On request", "Su richiesta") : "")}
+          </span>
+          {href && (
+            <span className="inline-flex items-center gap-0.5 text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100">
+              {tt(locale, "Open", "Apri")}<ExternalLink className="h-3 w-3" />
+            </span>
+          )}
+        </div>
+      </div>
+    </>
+  );
+
+  return href
+    ? <a href={href} target="_blank" rel="noreferrer" className={cls}>{inner}</a>
+    : <div className={cls}>{inner}</div>;
+};
+
+const ProductGrid = ({ columns, rows, locale }: {
+  columns: string[]; rows: Record<string, unknown>[]; locale: string;
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const cols = productColumns(columns);
+  const CAP = 6;
+  const visible = expanded ? rows : rows.slice(0, CAP);
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {visible.map((row, i) => <ProductCard key={i} row={row} cols={cols} locale={locale} />)}
+      </div>
+      {rows.length > CAP && (
+        <button type="button" onClick={() => setExpanded((e) => !e)}
+          className="self-center rounded-full border border-border bg-card px-4 py-1.5 text-xs text-foreground transition-colors hover:bg-muted">
+          {expanded ? tt(locale, "Show fewer", "Mostra meno") : `${tt(locale, "Show all", "Mostra tutti")} ${rows.length}`}
+        </button>
       )}
     </div>
   );
