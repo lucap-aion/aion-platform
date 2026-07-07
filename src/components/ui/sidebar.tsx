@@ -215,8 +215,10 @@ const Sidebar = React.forwardRef<
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
             : "group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l",
-          // While peeking (collapsed rail hovered open) float above the page.
-          "group-data-[peek=true]:z-30 group-data-[peek=true]:shadow-2xl",
+          // While peeking (collapsed rail hovered open) float above the page —
+          // including above the sticky top bar (z-30) so it overlays cleanly as
+          // a drawer instead of being clipped by the header / view-as banner.
+          "group-data-[peek=true]:z-40 group-data-[peek=true]:shadow-2xl",
           className,
         )}
         {...props}
