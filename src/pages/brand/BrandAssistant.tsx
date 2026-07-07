@@ -262,6 +262,8 @@ export default function BrandAssistant() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<SheetAttachment | null>(null);
   const sheetRef = useRef<HTMLInputElement>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepth = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
@@ -433,26 +435,17 @@ export default function BrandAssistant() {
     if (chatId === id) startNewChat();
   };
 
-  // ── Image attach ─────────────────────────────────────────────────────────
-  const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (e.target) e.target.value = ""; // allow re-picking the same file
-    if (!file) return;
+  // ── Attachments: photo (visual search) or spreadsheet (analysis) ───────────
+  const attachImage = async (file: File) => {
     if (!file.type.startsWith("image/")) {
       toast.error(tt(locale, "Please choose an image.", "Scegli un'immagine."));
       return;
     }
-    try {
-      setImage(await fileToScaledDataUrl(file));
-    } catch {
-      toast.error(tt(locale, "Couldn't read that image.", "Impossibile leggere l'immagine."));
-    }
+    try { setImage(await fileToScaledDataUrl(file)); }
+    catch { toast.error(tt(locale, "Couldn't read that image.", "Impossibile leggere l'immagine.")); }
   };
 
-  const onPickSheet = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (e.target) e.target.value = ""; // allow re-picking the same file
-    if (!file) return;
+  const attachSheet = async (file: File) => {
     const lower = file.name.toLowerCase();
     if (!lower.endsWith(".xlsx") && !lower.endsWith(".csv")) {
       toast.error(tt(locale, "Attach a .xlsx or .csv file.", "Allega un file .xlsx o .csv."));
@@ -465,6 +458,49 @@ export default function BrandAssistant() {
     } catch {
       toast.error(tt(locale, "Couldn't read that spreadsheet.", "Impossibile leggere il foglio."));
     }
+  };
+
+  // Route a picked/dropped file to the right slot by type.
+  const attachFile = (file: File) => {
+    const lower = file.name.toLowerCase();
+    if (file.type.startsWith("image/")) { void attachImage(file); return; }
+    if (lower.endsWith(".xlsx") || lower.endsWith(".csv")) { void attachSheet(file); return; }
+    toast.error(tt(locale, "Drop an image, .xlsx or .csv.", "Trascina un'immagine, un .xlsx o un .csv."));
+  };
+
+  const onPickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (e.target) e.target.value = ""; // allow re-picking the same file
+    if (file) void attachImage(file);
+  };
+  const onPickSheet = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (e.target) e.target.value = ""; // allow re-picking the same file
+    if (file) void attachSheet(file);
+  };
+
+  // Drag-and-drop a file anywhere on the chat panel. A depth counter avoids the
+  // flicker from dragenter/dragleave bubbling across child elements.
+  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragActive(true);
+  };
+  const onDragOver = (e: React.DragEvent) => { if (hasFiles(e)) e.preventDefault(); };
+  const onDragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragActive(false);
+  };
+  const onDrop = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragActive(false);
+    if (loading) return;
+    const file = e.dataTransfer?.files?.[0];
+    if (file) attachFile(file);
   };
 
   // ── Send ─────────────────────────────────────────────────────────────────
@@ -627,7 +663,21 @@ export default function BrandAssistant() {
         </div>
       </aside>
 
-      <div className="flex min-w-0 min-h-0 flex-1 flex-col">
+      <div
+        className="relative flex min-w-0 min-h-0 flex-1 flex-col"
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        {dragActive && (
+          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/5 backdrop-blur-[1px]">
+            <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-primary/50 bg-background/95 px-10 py-8 text-primary shadow-xl">
+              <FileSpreadsheet className="h-8 w-8" />
+              <p className="text-sm font-medium">{tt(locale, "Drop a photo or Excel/CSV here", "Rilascia qui una foto o un Excel/CSV")}</p>
+            </div>
+          </div>
+        )}
         <div className="border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
