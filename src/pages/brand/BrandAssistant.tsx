@@ -259,7 +259,7 @@ const emptyAssistant = (): AssistantMessage => ({
 });
 
 export default function BrandAssistant() {
-  const { profile, canWrite } = useAuth();
+  const { profile, isRealAdmin } = useAuth();
   const { locale } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlChatId = searchParams.get("chat");
@@ -724,7 +724,10 @@ export default function BrandAssistant() {
                   "Prodotto, cliente, storytelling e policy — in negozio")}
               </p>
             </div>
-            {canWrite && (
+            {/* The assistant auto-detects a brand's setup, so brand users never
+                need (or see) the configurator. It stays available only to AION
+                admins — including while viewing-as a brand — for advanced tuning. */}
+            {isRealAdmin && (
               <button
                 type="button"
                 onClick={() => setConfigOpen(true)}
