@@ -229,6 +229,17 @@ const Sidebar = React.forwardRef<
         >
           {children}
         </div>
+        {/* Collapse toggle pinned to the sidebar's top-right corner — the same
+            for every sidebar (admin / brand / customer). Hidden on the bare icon
+            rail; the rail peeks open on hover and the toggle appears here. */}
+        {collapsible === "icon" && (
+          <SidebarTrigger
+            className={cn(
+              "absolute right-2 top-3.5 z-10 hidden h-7 w-7 text-muted-foreground transition-opacity hover:text-foreground md:inline-flex",
+              state === "collapsed" ? "pointer-events-none opacity-0" : "opacity-100",
+            )}
+          />
+        )}
       </div>
     </div>
   );

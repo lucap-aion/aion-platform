@@ -10,7 +10,6 @@ import { sendEmail } from "@/utils/sendEmail";
 import { useNavigate } from "react-router-dom";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import SmartLogo from "@/components/SmartLogo";
-import { cn } from "@/lib/utils";
 import {
   Sidebar,
   SidebarContent,
@@ -22,7 +21,6 @@ import {
   SidebarMenuItem,
   SidebarFooter,
   SidebarHeader,
-  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
 import {
@@ -168,10 +166,7 @@ const AppSidebar = () => {
   return (
     <>
     <Sidebar collapsible="icon" className="border-r border-border bg-card">
-      <SidebarHeader className={cn("relative", collapsed ? "p-2" : "py-4 px-2")}>
-        {/* Collapse toggle is pinned to the sidebar's top-right corner. When the
-            sidebar is expanded it's always shown; when collapsed it stays hidden
-            and is revealed on hover, so it never crowds the narrow rail. */}
+      <SidebarHeader className={collapsed ? "p-2" : "py-4 px-2"}>
         <div className={`flex items-center ${collapsed ? "justify-center" : "justify-start"}`}>
           {collapsed ? (
             tenant.logoIconUrl
@@ -179,18 +174,10 @@ const AppSidebar = () => {
               : <span className="text-lg font-serif font-bold text-foreground">{tenant.logoInitial}</span>
           ) : (
             tenant.logoUrl
-              ? <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="block h-10 max-w-[150px] object-contain object-left" />
+              ? <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="block h-10 max-w-[160px] object-contain object-left" />
               : <span className="text-2xl font-serif font-bold text-foreground tracking-tight">{tenant.name}</span>
           )}
         </div>
-        <SidebarTrigger
-          className={cn(
-            "absolute right-2 top-4 z-10 hidden h-7 w-7 shrink-0 text-muted-foreground transition-opacity hover:text-foreground md:inline-flex",
-            // Hidden on the bare icon rail; the sidebar peeks open on hover, and
-            // once expanded the toggle appears here in the top-right corner.
-            collapsed ? "pointer-events-none opacity-0" : "opacity-100",
-          )}
-        />
       </SidebarHeader>
 
       <SidebarContent>
