@@ -185,10 +185,10 @@ const AppSidebar = () => {
         </div>
         <SidebarTrigger
           className={cn(
-            "absolute z-10 hidden h-7 w-7 shrink-0 text-muted-foreground transition-opacity hover:text-foreground md:inline-flex",
-            collapsed
-              ? "right-1 top-1.5 rounded-md bg-card opacity-0 group-hover:opacity-100"
-              : "right-2 top-4 opacity-100",
+            "absolute right-2 top-4 z-10 hidden h-7 w-7 shrink-0 text-muted-foreground transition-opacity hover:text-foreground md:inline-flex",
+            // Hidden on the bare icon rail; the sidebar peeks open on hover, and
+            // once expanded the toggle appears here in the top-right corner.
+            collapsed ? "pointer-events-none opacity-0" : "opacity-100",
           )}
         />
       </SidebarHeader>
