@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   BookOpen, Globe, Loader2, Plus, RefreshCw, Trash2, FileText, AlertCircle,
   CheckCircle2, Clock, X, UploadCloud, Link2, Pencil, Eye, Newspaper, RotateCw,
+  Lightbulb, FileSpreadsheet, ThumbsDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -40,6 +41,8 @@ const UPLOAD_MAX_MB = 25;
 
 type SourceRow = { kind: string; enabled: boolean; target: string | null; last_seeded_at: string | null; config: { news_enabled?: boolean } | null };
 type FailedItem = { id: string; url: string; error: string | null };
+type GapRow = { id: string; query: string; hits: number; last_seen: string };
+type DownvoteRow = { id: string; question: string | null; created_at: string };
 
 const CATEGORIES = ["product", "storytelling", "policy", "training", "other"];
 const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
@@ -64,8 +67,11 @@ export default function BrandKnowledge() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [scrapeOpen, setScrapeOpen] = useState(false);
   const [addUrlOpen, setAddUrlOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [failed, setFailed] = useState<FailedItem[]>([]);
+  const [gaps, setGaps] = useState<GapRow[]>([]);
+  const [downvotes, setDownvotes] = useState<DownvoteRow[]>([]);
   const [retrying, setRetrying] = useState(false);
   const [editDoc, setEditDoc] = useState<Doc | null>(null);
   const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
@@ -93,10 +99,26 @@ export default function BrandKnowledge() {
       .eq("brand_id", brandId)
       .eq("status", "error")
       .limit(100);
+    const { data: gapData } = await supabase
+      .from("knowledge_gaps" as never)
+      .select("id, query, hits, last_seen")
+      .eq("brand_id", brandId)
+      .eq("dismissed", false)
+      .order("hits", { ascending: false })
+      .limit(20);
+    const { data: dvData } = await supabase
+      .from("assistant_feedback" as never)
+      .select("id, question, created_at")
+      .eq("brand_id", brandId)
+      .eq("rating", -1)
+      .order("created_at", { ascending: false })
+      .limit(10);
     setLoading(false);
     setPending(count ?? 0);
     setSources((srcData as unknown as SourceRow[]) ?? []);
     setFailed((failData as unknown as FailedItem[]) ?? []);
+    setGaps((gapData as unknown as GapRow[]) ?? []);
+    setDownvotes((dvData as unknown as DownvoteRow[]) ?? []);
     if (error) {
       console.error("[knowledge list]", error);
       toast.error(tt(locale, "Couldn't load the knowledge base.", "Impossibile caricare la knowledge base."));
@@ -206,6 +228,12 @@ export default function BrandKnowledge() {
     toast.success(next ? tt(locale, "Recent news will be included.", "Le news recenti saranno incluse.") : tt(locale, "Recent news turned off.", "News recenti disattivate."));
   };
 
+  const dismissGap = async (id: string) => {
+    setGaps((g) => g.filter((x) => x.id !== id));
+    const { error } = await supabase.from("knowledge_gaps" as never).update({ dismissed: true } as never).eq("id", id);
+    if (error) { toast.error(tt(locale, "Couldn't dismiss.", "Impossibile ignorare.")); void refresh(); }
+  };
+
   const totalChunks = docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0);
 
   if (!brandId) {
@@ -247,6 +275,14 @@ export default function BrandKnowledge() {
             >
               <UploadCloud className="h-4 w-4" />
               {tt(locale, "Upload files", "Carica file")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              {tt(locale, "Import spreadsheet", "Importa foglio")}
             </button>
             <button
               type="button"
@@ -333,6 +369,42 @@ export default function BrandKnowledge() {
                 ))}
               </ul>
             </details>
+          )}
+        </div>
+      )}
+
+      {/* Gaps to fill — questions the assistant couldn't answer + downvoted answers */}
+      {canWrite && (gaps.length > 0 || downvotes.length > 0) && (
+        <div className="rounded-xl border border-amber-300/40 bg-amber-50/50 px-4 py-3 dark:bg-amber-950/10">
+          <div className="mb-2 flex items-center gap-2">
+            <Lightbulb className="h-4 w-4 text-amber-600" />
+            <h2 className="text-sm font-semibold text-foreground">{tt(locale, "Gaps to fill", "Lacune da colmare")}</h2>
+            <span className="text-xs text-muted-foreground">{tt(locale, "what your Assistant couldn't answer — add knowledge for these", "a cosa l'Assistente non ha saputo rispondere — aggiungi contenuti")}</span>
+          </div>
+          {gaps.length > 0 && (
+            <ul className="space-y-1">
+              {gaps.map((g) => (
+                <li key={g.id} className="flex items-center gap-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate text-foreground" title={g.query}>“{g.query}”</span>
+                  {g.hits > 1 && <span className="shrink-0 rounded bg-amber-200/60 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">{tt(locale, `asked ${g.hits}×`, `chiesto ${g.hits}×`)}</span>}
+                  <button onClick={() => void dismissGap(g.id)} className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground" aria-label={tt(locale, "Dismiss", "Ignora")} title={tt(locale, "Dismiss", "Ignora")}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {downvotes.length > 0 && (
+            <div className="mt-2 border-t border-amber-300/30 pt-2">
+              <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <ThumbsDown className="h-3 w-3" /> {tt(locale, "Answers marked not helpful", "Risposte segnalate come non utili")}
+              </div>
+              <ul className="space-y-0.5">
+                {downvotes.filter((d) => d.question).slice(0, 5).map((d) => (
+                  <li key={d.id} className="truncate text-xs text-muted-foreground" title={d.question ?? ""}>“{d.question}”</li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       )}
@@ -466,6 +538,19 @@ export default function BrandKnowledge() {
 
       {addUrlOpen && (
         <AddUrlModal locale={locale} onClose={() => setAddUrlOpen(false)} onSubmit={handleAddUrls} />
+      )}
+
+      {importOpen && (
+        <ImportModal
+          locale={locale}
+          onClose={() => setImportOpen(false)}
+          onSubmit={async (category, sourceLabel, cards) => {
+            const r = await callFn("import-cards", { brand_id: brandId, category, source_label: sourceLabel, cards });
+            setImportOpen(false);
+            toast.success(tt(locale, `Imported ${r.docs_created} cards.`, `Importate ${r.docs_created} schede.`));
+            await refresh();
+          }}
+        />
       )}
 
       {editDoc && (
@@ -900,6 +985,134 @@ const PreviewChunksModal = ({ locale, doc, onClose }: { locale: string; doc: Doc
               <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{c.content}</p>
             </div>
           ))}
+        </div>
+      </div>
+    </Overlay>
+  );
+};
+
+// ── Import a spreadsheet: each row → a knowledge card ──────────────────────────
+// The browser parses the sheet, the user maps a "title" column, and every row
+// becomes a card (title + "column: value" lines) sent to the import-cards fn.
+const IMPORT_MAX_ROWS = 2000;
+
+const ImportModal = ({
+  locale, onClose, onSubmit,
+}: {
+  locale: string;
+  onClose: () => void;
+  onSubmit: (category: string, sourceLabel: string, cards: { title: string; content: string }[]) => Promise<void>;
+}) => {
+  const [fileName, setFileName] = useState("");
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rows, setRows] = useState<Record<string, string>[]>([]);
+  const [titleCol, setTitleCol] = useState("");
+  const [category, setCategory] = useState("other");
+  const [parsing, setParsing] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const parse = async (file: File) => {
+    setParsing(true);
+    try {
+      const XLSX = await import("xlsx");
+      const lower = file.name.toLowerCase();
+      const wb = lower.endsWith(".csv")
+        ? XLSX.read(await file.text(), { type: "string" })
+        : XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false, defval: "" });
+      if (matrix.length < 2) { toast.error(tt(locale, "Need a header row + at least one data row.", "Serve una riga di intestazione + almeno una riga.")); setParsing(false); return; }
+      const hdr = (matrix[0] as unknown[]).map((x, i) => String(x ?? "").trim() || `col${i + 1}`);
+      const data = matrix.slice(1, 1 + IMPORT_MAX_ROWS).map((r) => {
+        const o: Record<string, string> = {};
+        hdr.forEach((h, i) => { o[h] = String((r as unknown[])[i] ?? "").trim(); });
+        return o;
+      }).filter((o) => Object.values(o).some(Boolean));
+      setFileName(file.name);
+      setHeaders(hdr);
+      setRows(data);
+      setTitleCol(hdr[0] ?? "");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Parse failed");
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const buildCards = () => rows.map((r) => ({
+    title: String(r[titleCol] ?? "").trim(),
+    content: headers.filter((h) => r[h]).map((h) => `${h}: ${r[h]}`).join("\n"),
+  })).filter((c) => c.title || c.content);
+
+  const submit = async () => {
+    const cards = buildCards();
+    if (cards.length === 0) { toast.error(tt(locale, "No rows to import.", "Nessuna riga da importare.")); return; }
+    setBusy(true);
+    try { await onSubmit(category, fileName, cards); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
+    finally { setBusy(false); }
+  };
+
+  const preview = rows.slice(0, 3).map((r) => ({
+    title: String(r[titleCol] ?? "").trim(),
+    content: headers.filter((h) => r[h]).map((h) => `${h}: ${r[h]}`).join("\n"),
+  }));
+
+  return (
+    <Overlay onClose={busy ? () => {} : onClose}>
+      <div className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border border-border bg-background p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-foreground">{tt(locale, "Import a spreadsheet", "Importa un foglio")}</h2>
+          <button onClick={onClose} disabled={busy} className="text-muted-foreground hover:text-foreground disabled:opacity-40"><X className="h-4 w-4" /></button>
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">{tt(locale, "Each row becomes a knowledge card the Assistant can find by name — e.g. a client or a product per row.", "Ogni riga diventa una scheda che l'Assistente trova per nome — es. un cliente o un prodotto per riga.")}</p>
+
+        {rows.length === 0 ? (
+          <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-border px-4 py-8 text-center hover:bg-muted/40">
+            {parsing ? <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /> : <FileSpreadsheet className="h-6 w-6 text-muted-foreground" />}
+            <span className="text-sm font-medium text-foreground">{tt(locale, "Choose a CSV / XLSX / XLS file", "Scegli un file CSV / XLSX / XLS")}</span>
+            <input type="file" accept=".csv,.xlsx,.xls" className="hidden" disabled={parsing}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void parse(f); e.target.value = ""; }} />
+          </label>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
+            <div className="text-xs text-muted-foreground">{fileName} · {tt(locale, `${rows.length} rows`, `${rows.length} righe`)}</div>
+            <div className="flex gap-2">
+              <label className="flex-1">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{tt(locale, "Title column", "Colonna titolo")}</span>
+                <select value={titleCol} onChange={(e) => setTitleCol(e.target.value)} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40">
+                  {headers.map((h) => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </label>
+              <label className="flex-1">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{tt(locale, "Category", "Categoria")}</span>
+                <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40">
+                  {CATEGORIES.map((c) => <option key={c} value={c}>{tt(locale, CATEGORY_LABEL[c].en, CATEGORY_LABEL[c].it)}</option>)}
+                </select>
+              </label>
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{tt(locale, "Preview (first rows)", "Anteprima (prime righe)")}</span>
+              <div className="space-y-1.5">
+                {preview.map((c, i) => (
+                  <div key={i} className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                    <div className="text-xs font-semibold text-foreground">{c.title || tt(locale, "(no title)", "(senza titolo)")}</div>
+                    <div className="mt-0.5 whitespace-pre-wrap text-[11px] leading-snug text-muted-foreground line-clamp-4">{c.content}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} disabled={busy} className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted disabled:opacity-40">{tt(locale, "Cancel", "Annulla")}</button>
+          {rows.length > 0 && (
+            <button onClick={() => void submit()} disabled={busy || !titleCol}
+              className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />}{tt(locale, `Import ${rows.length} rows`, `Importa ${rows.length} righe`)}
+            </button>
+          )}
         </div>
       </div>
     </Overlay>

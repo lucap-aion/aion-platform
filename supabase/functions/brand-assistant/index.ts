@@ -379,6 +379,9 @@ Deno.serve(async (req: Request) => {
   const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
   });
+  // Service-role client for best-effort telemetry the associate's RLS can't
+  // write (e.g. logging a knowledge gap). Never used to read another brand.
+  const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   const { data: { user }, error: userErr } = await userClient.auth.getUser();
   if (userErr || !user) return jsonError("invalid session", 401);
@@ -657,6 +660,13 @@ Deno.serve(async (req: Request) => {
                     )
                     : "No matching knowledge found for this brand. Tell the user this isn't in the knowledge base yet.",
                 });
+                // Coverage signal: the associate asked something the KB couldn't
+                // answer. Log it (deduped, best-effort) so the brand sees what to
+                // add. Only when we surfaced nothing relevant.
+                if (matches.length === 0) {
+                  serviceClient.rpc("log_knowledge_gap", { p_brand_id: brandId, p_query: query, p_top_similarity: null })
+                    .then(({ error }) => { if (error) console.warn("[gap log]", error.message); });
+                }
               } catch (e) {
                 toolResults.push({
                   type: "tool_result",

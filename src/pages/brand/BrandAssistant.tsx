@@ -16,7 +16,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
-  Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus,
+  Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -631,6 +631,20 @@ export default function BrandAssistant() {
     }
   };
 
+  // Rate an answer (👍/👎). The preceding user turn is the question. Best-effort;
+  // feeds the "gaps to fill" view in the Knowledge base.
+  const submitFeedback = async (i: number, rating: 1 | -1) => {
+    const msg = messages[i];
+    if (!msg || msg.role !== "assistant") return;
+    const prevUser = [...messages.slice(0, i)].reverse().find((m) => m.role === "user") as { content?: string } | undefined;
+    const { error } = await supabase.from("assistant_feedback" as never).insert({
+      brand_id: brandId, profile_id: ownerId, chat_id: chatId,
+      question: prevUser?.content ?? null, answer_excerpt: (msg.summary || "").slice(0, 500), rating,
+    } as never);
+    if (error) { toast.error(tt(locale, "Couldn't send feedback.", "Impossibile inviare il feedback.")); return; }
+    toast.success(rating === 1 ? tt(locale, "Thanks!", "Grazie!") : tt(locale, "Thanks — logged for improvement.", "Grazie — registrato per migliorare."));
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-full min-h-0 overflow-hidden">
@@ -745,7 +759,7 @@ export default function BrandAssistant() {
               {messages.map((m, i) =>
                 m.role === "user"
                   ? <UserBubble key={i} text={m.content} image={m.image} file={m.file} />
-                  : <AssistantBlock key={i} message={m} locale={locale} isLast={i === messages.length - 1} onFollowup={(q) => void send(q)} />,
+                  : <AssistantBlock key={i} message={m} locale={locale} isLast={i === messages.length - 1} onFollowup={(q) => void send(q)} onFeedback={(rating) => void submitFeedback(i, rating)} />,
               )}
             </div>
           )}
@@ -1041,10 +1055,11 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
   other: { en: "Doc", it: "Documento" },
 };
 
-const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
-  message: AssistantMessage; locale: string; isLast: boolean; onFollowup: (q: string) => void;
+const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback }: {
+  message: AssistantMessage; locale: string; isLast: boolean; onFollowup: (q: string) => void; onFeedback?: (rating: 1 | -1) => void;
 }) => {
   const { summary, sources, columns, rows, activity, followups, report, streaming } = message;
+  const [voted, setVoted] = useState<1 | -1 | null>(null);
   // Drop technical columns (ids/uuids) before showing anything to the associate.
   const displayCols = columns.filter((c) => !isHiddenColumn(c));
   const hasImageCol = displayCols.some(isImageColumn);
@@ -1125,6 +1140,27 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup }: {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {!streaming && summary.trim() && onFeedback && (
+        <div className="flex items-center gap-1 pt-0.5">
+          <button
+            type="button"
+            onClick={() => { setVoted(1); onFeedback(1); }}
+            className={`rounded-md p-1 transition-colors hover:bg-muted ${voted === 1 ? "text-emerald-600" : "text-muted-foreground/60 hover:text-foreground"}`}
+            aria-label={tt(locale, "Helpful", "Utile")} title={tt(locale, "Helpful", "Utile")}
+          >
+            <ThumbsUp className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => { setVoted(-1); onFeedback(-1); }}
+            className={`rounded-md p-1 transition-colors hover:bg-muted ${voted === -1 ? "text-destructive" : "text-muted-foreground/60 hover:text-foreground"}`}
+            aria-label={tt(locale, "Not helpful", "Non utile")} title={tt(locale, "Not helpful", "Non utile")}
+          >
+            <ThumbsDown className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
