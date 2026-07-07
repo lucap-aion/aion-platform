@@ -420,23 +420,41 @@ Deno.serve(async (req: Request) => {
   const locale = body.locale === "it" ? "it" : "en";
   // Optional photo for visual product search (data URL: "data:image/…;base64,…").
   const image = parseDataUrl(body.image);
-  // A photo alone is a valid turn ("what piece is this?"); text is only required
-  // when there's no image.
-  if (!question && !image) return jsonError("question or image is required", 400);
+  // Optional spreadsheet the user attached to analyse ({ name, text }); the text
+  // is a compact table the client already parsed from an .xlsx/.csv. Capped.
+  const sheet = body.spreadsheet && typeof body.spreadsheet === "object"
+    ? {
+        name: String((body.spreadsheet as Record<string, unknown>).name ?? "foglio").slice(0, 200),
+        text: String((body.spreadsheet as Record<string, unknown>).text ?? "").slice(0, 60000),
+      }
+    : null;
+  // A photo or a spreadsheet alone is a valid turn; text is only required when
+  // there's no attachment.
+  if (!question && !image && !sheet?.text) return jsonError("question or attachment is required", 400);
 
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
   const encoder = new TextEncoder();
 
   // The newest user turn carries the photo (as an image block) when present, so
   // the model can reason over it directly alongside the catalogue matches.
+  // An attached spreadsheet is appended to the user's turn as context the model
+  // reads directly (no separate tool): it can summarise it, compute over it,
+  // cross-reference the knowledge base / catalogue, or turn it into a report for
+  // PDF/Excel export.
+  const sheetBlock = sheet?.text
+    ? `\n\n--- ATTACHED SPREADSHEET "${sheet.name}" (data for this question; may be truncated) ---\n${sheet.text}\n--- end spreadsheet ---`
+    : "";
+  const fallbackText = image
+    ? (locale === "it" ? "Che pezzo è questo? Identificalo dal nostro catalogo." : "What piece is this? Identify it from our catalogue.")
+    : (sheet ? (locale === "it" ? "Analizza il foglio allegato." : "Analyze the attached spreadsheet.") : "");
+  const userText = (question || fallbackText) + sheetBlock;
+
   const latestContent: Anthropic.ContentBlockParam[] | string = image
     ? [
         { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
-        { type: "text", text: question || (locale === "it"
-          ? "Che pezzo è questo? Identificalo dal nostro catalogo."
-          : "What piece is this? Identify it from our catalogue.") },
+        { type: "text", text: userText },
       ] as Anthropic.ContentBlockParam[]
-    : question;
+    : userText;
 
   const messages: Anthropic.MessageParam[] = [
     ...history.map((m: { role?: string; content?: string }) => ({

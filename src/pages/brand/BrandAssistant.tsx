@@ -15,7 +15,7 @@ import { useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  ArrowUp, BookOpen, ExternalLink, ImagePlus, Loader2, MessageSquarePlus, ShoppingBag,
+  ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, ShoppingBag,
   Sparkles, Trash2, Users, ScrollText, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -53,7 +53,7 @@ type AssistantMessage = {
 };
 
 type Message =
-  | { role: "user"; content: string; image?: string }
+  | { role: "user"; content: string; image?: string; file?: string }
   | AssistantMessage;
 
 // Read an image file and downscale to a modest JPEG data URL. Keeps the upload
@@ -82,6 +82,65 @@ async function fileToScaledDataUrl(file: File, maxDim = 1024, quality = 0.82): P
   if (!ctx) return dataUrl;
   ctx.drawImage(img, 0, 0, w, h);
   return canvas.toDataURL("image/jpeg", quality);
+}
+
+// ── Spreadsheet attach ──────────────────────────────────────────────────────
+// Parse an uploaded .xlsx/.csv entirely in the browser (exceljs is already a
+// dependency, loaded lazily) into a compact pipe-table the model can read.
+// Capped so a big file can't blow the context window.
+const SHEET_MAX_ROWS = 300;
+const SHEET_MAX_CHARS = 45000;
+type SheetAttachment = { name: string; text: string; rows: number };
+
+function cellToText(v: unknown): string {
+  if (v == null) return "";
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (Array.isArray(o.richText)) return (o.richText as { text?: string }[]).map((r) => r.text ?? "").join("");
+    if (o.result != null) return String(o.result);         // formula → its result
+    if (o.text != null) return String(o.text);              // hyperlink / rich cell
+    if (o.hyperlink != null) return String(o.hyperlink);
+    return "";
+  }
+  return String(v);
+}
+
+async function spreadsheetToText(file: File): Promise<SheetAttachment> {
+  const name = file.name;
+  const lower = name.toLowerCase();
+  let text = "";
+  let rows = 0;
+
+  if (lower.endsWith(".csv")) {
+    const lines = (await file.text()).split(/\r?\n/).filter((l) => l.trim().length);
+    rows = lines.length;
+    text = lines.slice(0, SHEET_MAX_ROWS).join("\n");
+    if (rows > SHEET_MAX_ROWS) text += `\n… (+${rows - SHEET_MAX_ROWS} righe non mostrate)`;
+  } else if (lower.endsWith(".xlsx")) {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await file.arrayBuffer());
+    const parts: string[] = [];
+    wb.eachSheet((ws) => {
+      parts.push(`## ${ws.name}`);
+      let n = 0;
+      ws.eachRow({ includeEmpty: false }, (row) => {
+        if (n >= SHEET_MAX_ROWS) return;
+        const cells = (row.values as unknown[]).slice(1).map(cellToText);
+        parts.push("| " + cells.join(" | ") + " |");
+        n++; rows++;
+      });
+      if (ws.actualRowCount > SHEET_MAX_ROWS) parts.push(`… (+${ws.actualRowCount - SHEET_MAX_ROWS} righe non mostrate)`);
+      parts.push("");
+    });
+    text = parts.join("\n").trim();
+  } else {
+    throw new Error("unsupported");
+  }
+
+  if (text.length > SHEET_MAX_CHARS) text = text.slice(0, SHEET_MAX_CHARS) + "\n… (troncato)";
+  return { name, text, rows };
 }
 
 type ChatSummary = { id: string; title: string; updated_at: string };
@@ -201,6 +260,8 @@ export default function BrandAssistant() {
   const [input, setInput] = useState("");
   const [image, setImage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [sheet, setSheet] = useState<SheetAttachment | null>(null);
+  const sheetRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
@@ -388,13 +449,33 @@ export default function BrandAssistant() {
     }
   };
 
+  const onPickSheet = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (e.target) e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith(".xlsx") && !lower.endsWith(".csv")) {
+      toast.error(tt(locale, "Attach a .xlsx or .csv file.", "Allega un file .xlsx o .csv."));
+      return;
+    }
+    try {
+      const parsed = await spreadsheetToText(file);
+      if (!parsed.text) { toast.error(tt(locale, "That file looks empty.", "Il file sembra vuoto.")); return; }
+      setSheet(parsed);
+    } catch {
+      toast.error(tt(locale, "Couldn't read that spreadsheet.", "Impossibile leggere il foglio."));
+    }
+  };
+
   // ── Send ─────────────────────────────────────────────────────────────────
   const send = async (question: string) => {
     const text = question.trim();
     const attached = image; // a photo alone is a valid turn (visual search)
-    if ((!text && !attached) || loading) return;
+    const attachedSheet = sheet; // an Excel/CSV alone is a valid turn (analyse it)
+    if ((!text && !attached && !attachedSheet) || loading) return;
     setInput("");
     setImage(null);
+    setSheet(null);
 
     const priorHistory = messages.map((m) =>
       m.role === "user"
@@ -402,7 +483,7 @@ export default function BrandAssistant() {
         : { role: "assistant", content: m.summary },
     );
 
-    setMessages([...messages, { role: "user", content: text, image: attached ?? undefined }, emptyAssistant()]);
+    setMessages([...messages, { role: "user", content: text, image: attached ?? undefined, file: attachedSheet?.name }, emptyAssistant()]);
     setLoading(true);
     // Abort any prior in-flight stream; a chat switch will abort this one so its
     // answer never bleeds into (or gets saved to) another conversation.
@@ -439,7 +520,7 @@ export default function BrandAssistant() {
         signal: ac.signal,
         // brand_id is used only when the caller is an admin (e.g. viewing-as a
         // brand user); real brand users are pinned to their own brand server-side.
-        body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id, image: attached ?? undefined }),
+        body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id, image: attached ?? undefined, spreadsheet: attachedSheet ? { name: attachedSheet.name, text: attachedSheet.text } : undefined }),
       });
 
       if (!res.ok || !res.body) {
@@ -577,7 +658,7 @@ export default function BrandAssistant() {
             <div className="mx-auto flex max-w-3xl flex-col gap-6">
               {messages.map((m, i) =>
                 m.role === "user"
-                  ? <UserBubble key={i} text={m.content} image={m.image} />
+                  ? <UserBubble key={i} text={m.content} image={m.image} file={m.file} />
                   : <AssistantBlock key={i} message={m} locale={locale} isLast={i === messages.length - 1} onFollowup={(q) => void send(q)} />,
               )}
             </div>
@@ -604,6 +685,23 @@ export default function BrandAssistant() {
                 </span>
               </div>
             )}
+            {sheet && (
+              <div className="mb-2 flex items-center gap-2">
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2">
+                  <FileSpreadsheet className="h-4 w-4 text-primary" />
+                  <span className="max-w-[220px] truncate text-xs font-medium text-foreground">{sheet.name}</span>
+                  <span className="text-[11px] text-muted-foreground">· {sheet.rows} {tt(locale, "rows", "righe")}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSheet(null)}
+                    className="ml-1 flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                    aria-label={tt(locale, "Remove file", "Rimuovi file")}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex items-end gap-2">
               <input
                 ref={fileRef}
@@ -622,13 +720,30 @@ export default function BrandAssistant() {
               >
                 <ImagePlus className="h-4 w-4" />
               </button>
+              <input
+                ref={sheetRef}
+                type="file"
+                accept=".xlsx,.csv"
+                className="hidden"
+                onChange={(e) => void onPickSheet(e)}
+              />
+              <button
+                type="button"
+                onClick={() => sheetRef.current?.click()}
+                disabled={loading}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                aria-label={tt(locale, "Attach an Excel or CSV", "Allega un Excel o CSV")}
+                title={tt(locale, "Attach an Excel/CSV to analyse", "Allega un Excel/CSV da analizzare")}
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+              </button>
               <textarea
                 ref={taRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKeyDown}
-                placeholder={tt(locale, "Ask, or attach a photo of a piece to identify it…",
-                  "Chiedi, o allega la foto di un pezzo da identificare…")}
+                placeholder={tt(locale, "Ask, attach a photo to identify a piece, or an Excel to analyse…",
+                  "Chiedi, allega una foto per identificare un pezzo, o un Excel da analizzare…")}
                 rows={1}
                 disabled={loading}
                 className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
@@ -637,7 +752,7 @@ export default function BrandAssistant() {
               <button
                 type="button"
                 onClick={() => void send(input)}
-                disabled={loading || (!input.trim() && !image)}
+                disabled={loading || (!input.trim() && !image && !sheet)}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
                 aria-label={tt(locale, "Send", "Invia")}
               >
@@ -800,10 +915,16 @@ const EmptyState = ({ locale, prompts, onPick }: { locale: string; prompts: Sugg
   </div>
 );
 
-const UserBubble = ({ text, image }: { text: string; image?: string }) => (
+const UserBubble = ({ text, image, file }: { text: string; image?: string; file?: string }) => (
   <div className="flex flex-col items-end gap-1.5">
     {image && (
       <img src={image} alt="" className="max-h-56 max-w-[80%] rounded-2xl rounded-tr-md border border-border object-cover" />
+    )}
+    {file && (
+      <div className="flex items-center gap-1.5 rounded-2xl rounded-tr-md border border-border bg-muted px-3 py-2 text-xs text-foreground">
+        <FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-primary" />
+        <span className="max-w-[220px] truncate">{file}</span>
+      </div>
     )}
     {text && (
       <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">
