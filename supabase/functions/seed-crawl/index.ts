@@ -69,6 +69,13 @@ Deno.serve(async (req: Request) => {
   try { origin = new URL(baseUrl); } catch { return jsonError("invalid base_url", 400); }
   const maxPages = Math.min(HARD_MAX_PAGES, Math.max(1, Number(body.max_pages ?? DEFAULT_MAX_PAGES) || DEFAULT_MAX_PAGES));
 
+  // News preference: an explicit body.news wins; otherwise use the persisted
+  // per-brand pref (set from the UI toggle), defaulting to on. This is what the
+  // weekly cron (which passes no news flag) honours.
+  const { data: existingSrc } = await admin.from("knowledge_sources").select("config").eq("brand_id", brandId).eq("kind", "website").maybeSingle();
+  const existingCfg = (existingSrc?.config ?? {}) as { news_enabled?: boolean };
+  const newsPref = typeof body.news === "boolean" ? body.news : (existingCfg.news_enabled ?? true);
+
   try {
     // Homepage two ways → SPA detection + link discovery.
     let rawHomeHtml = ""; try { rawHomeHtml = await fetchText(origin.href); } catch { /* JS-gated */ }
@@ -103,7 +110,7 @@ Deno.serve(async (req: Request) => {
 
     // News via Google News RSS.
     const newsItems: { url: string; title: string }[] = [];
-    if (body.news !== false && brandName) {
+    if (newsPref && brandName) {
       try {
         const rss = await (await fetch(`https://news.google.com/rss/search?q=${encodeURIComponent(`"${brandName}"`)}&hl=en-US&gl=US&ceid=US:en`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10000) })).text();
         for (const m of rss.matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
@@ -118,7 +125,7 @@ Deno.serve(async (req: Request) => {
     // Persist source config.
     await admin.from("knowledge_sources").upsert({
       brand_id: brandId, kind: "website", target: origin.href, enabled: true,
-      config: { render, boilerplate, max_pages: maxPages }, last_seeded_at: new Date().toISOString(),
+      config: { render, boilerplate, max_pages: maxPages, news_enabled: newsPref }, last_seeded_at: new Date().toISOString(),
     }, { onConflict: "brand_id,kind" });
     if (newsItems.length) {
       await admin.from("knowledge_sources").upsert({

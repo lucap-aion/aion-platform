@@ -1,14 +1,15 @@
 // BrandKnowledge — manage the brand's AI knowledge base (the RAG corpus the
 // in-store Assistant answers from). Brand admins / master users can:
-//   • Scrape the brand's public website (scrape-knowledge edge fn)
-//   • Add a document by pasting text (ingest-knowledge edge fn)
-//   • Delete documents (RLS-gated direct delete; chunks cascade)
+//   • Crawl the brand's public website + news (seed-crawl → crawl-worker)
+//   • Add specific page URLs, retry failed pages, toggle news
+//   • Upload files (parse-knowledge) or paste text (ingest-knowledge)
+//   • Edit / re-embed (update-knowledge), preview chunks, delete
 // Everyone in the brand can view the corpus.
 
 import { useCallback, useEffect, useState } from "react";
 import {
   BookOpen, Globe, Loader2, Plus, RefreshCw, Trash2, FileText, AlertCircle,
-  CheckCircle2, Clock, X, UploadCloud,
+  CheckCircle2, Clock, X, UploadCloud, Link2, Pencil, Eye, Newspaper, RotateCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -37,6 +38,9 @@ const UPLOAD_BUCKET = "brand-knowledge-uploads";
 const UPLOAD_ACCEPT = ".pdf,.docx,.pptx,.txt,.md,.csv";
 const UPLOAD_MAX_MB = 25;
 
+type SourceRow = { kind: string; enabled: boolean; target: string | null; last_seeded_at: string | null; config: { news_enabled?: boolean } | null };
+type FailedItem = { id: string; url: string; error: string | null };
+
 const CATEGORIES = ["product", "storytelling", "policy", "training", "other"];
 const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
   product: { en: "Product", it: "Prodotto" },
@@ -59,6 +63,12 @@ export default function BrandKnowledge() {
   const [addOpen, setAddOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [scrapeOpen, setScrapeOpen] = useState(false);
+  const [addUrlOpen, setAddUrlOpen] = useState(false);
+  const [sources, setSources] = useState<SourceRow[]>([]);
+  const [failed, setFailed] = useState<FailedItem[]>([]);
+  const [retrying, setRetrying] = useState(false);
+  const [editDoc, setEditDoc] = useState<Doc | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
 
   const refresh = useCallback(async () => {
     if (!brandId) return;
@@ -73,8 +83,20 @@ export default function BrandKnowledge() {
       .select("id", { count: "exact", head: true })
       .eq("brand_id", brandId)
       .eq("status", "pending");
+    const { data: srcData } = await supabase
+      .from("knowledge_sources" as never)
+      .select("kind, enabled, target, last_seeded_at, config")
+      .eq("brand_id", brandId);
+    const { data: failData } = await supabase
+      .from("knowledge_crawl_queue" as never)
+      .select("id, url, error")
+      .eq("brand_id", brandId)
+      .eq("status", "error")
+      .limit(100);
     setLoading(false);
     setPending(count ?? 0);
+    setSources((srcData as unknown as SourceRow[]) ?? []);
+    setFailed((failData as unknown as FailedItem[]) ?? []);
     if (error) {
       console.error("[knowledge list]", error);
       toast.error(tt(locale, "Couldn't load the knowledge base.", "Impossibile caricare la knowledge base."));
@@ -139,6 +161,49 @@ export default function BrandKnowledge() {
     }
     setDocs((d) => d.filter((x) => x.id !== doc.id));
     toast.success(tt(locale, "Deleted.", "Eliminato."));
+  };
+
+  // Enqueue one or more specific page URLs to be crawled (beyond the site the
+  // scraper auto-discovers). The background worker picks them up within a minute.
+  const handleAddUrls = async (urls: string[]) => {
+    const rows = urls.map((u) => ({ brand_id: brandId, url: u, kind: "page", status: "pending" }));
+    const { error } = await supabase
+      .from("knowledge_crawl_queue" as never)
+      .upsert(rows as never, { onConflict: "brand_id,url", ignoreDuplicates: false });
+    if (error) throw new Error(error.message);
+    setAddUrlOpen(false);
+    toast.success(tt(locale, `Queued ${urls.length} page${urls.length > 1 ? "s" : ""} — indexing shortly.`, `In coda ${urls.length} pagine — indicizzazione a breve.`));
+    await refresh();
+  };
+
+  // Reset every failed crawl URL to 'pending' so the worker retries them.
+  const handleRetryFailed = async () => {
+    setRetrying(true);
+    const { error } = await supabase
+      .from("knowledge_crawl_queue" as never)
+      .update({ status: "pending", error: null } as never)
+      .eq("brand_id", brandId)
+      .eq("status", "error");
+    setRetrying(false);
+    if (error) { toast.error(tt(locale, "Retry failed.", "Nuovo tentativo non riuscito.")); return; }
+    toast.success(tt(locale, "Retrying failed pages…", "Nuovo tentativo sulle pagine non riuscite…"));
+    await refresh();
+  };
+
+  // Toggle recent-news ingestion on/off (persisted on the website source config;
+  // the weekly re-crawl honours it).
+  const website = sources.find((s) => s.kind === "website");
+  const newsEnabled = website?.config?.news_enabled ?? true;
+  const handleToggleNews = async (next: boolean) => {
+    if (!website) { toast.message(tt(locale, "Run a crawl first to set this.", "Avvia prima una scansione.")); return; }
+    const { error } = await supabase
+      .from("knowledge_sources" as never)
+      .update({ config: { ...(website.config ?? {}), news_enabled: next } } as never)
+      .eq("brand_id", brandId)
+      .eq("kind", "website");
+    if (error) { toast.error(tt(locale, "Couldn't update.", "Aggiornamento non riuscito.")); return; }
+    setSources((prev) => prev.map((s) => (s.kind === "website" ? { ...s, config: { ...(s.config ?? {}), news_enabled: next } } : s)));
+    toast.success(next ? tt(locale, "Recent news will be included.", "Le news recenti saranno incluse.") : tt(locale, "Recent news turned off.", "News recenti disattivate."));
   };
 
   const totalChunks = docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0);
@@ -214,6 +279,64 @@ export default function BrandKnowledge() {
         </button>
       </div>
 
+      {/* Sources & crawl */}
+      {canWrite && (website || failed.length > 0) && (
+        <div className="rounded-xl border border-border bg-card px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            {website && (
+              <div className="flex items-center gap-2 text-sm">
+                <Globe className="h-4 w-4 text-muted-foreground" />
+                <a href={website.target ?? undefined} target="_blank" rel="noreferrer" className="max-w-[220px] truncate font-medium text-foreground hover:underline" title={website.target ?? ""}>
+                  {(website.target ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                </a>
+                {website.last_seeded_at && (
+                  <span className="text-xs text-muted-foreground">· {tt(locale, "crawled", "scansionato")} {new Date(website.last_seeded_at).toLocaleDateString(locale === "it" ? "it-IT" : "en-GB")}</span>
+                )}
+              </div>
+            )}
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
+              <Newspaper className="h-4 w-4 text-muted-foreground" />
+              {tt(locale, "Include recent news", "Includi news recenti")}
+              <input type="checkbox" checked={newsEnabled} onChange={(e) => void handleToggleNews(e.target.checked)} className="h-4 w-4 accent-primary" />
+            </label>
+            <button
+              type="button"
+              onClick={() => setAddUrlOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+            >
+              <Link2 className="h-3.5 w-3.5" /> {tt(locale, "Add page URL", "Aggiungi URL")}
+            </button>
+            {failed.length > 0 && (
+              <div className="flex items-center gap-2 text-xs text-destructive">
+                <AlertCircle className="h-3.5 w-3.5" />
+                {tt(locale, `${failed.length} page${failed.length > 1 ? "s" : ""} failed`, `${failed.length} pagine non riuscite`)}
+                <button
+                  type="button"
+                  onClick={() => void handleRetryFailed()}
+                  disabled={retrying}
+                  className="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                >
+                  {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCw className="h-3 w-3" />} {tt(locale, "Retry", "Riprova")}
+                </button>
+              </div>
+            )}
+          </div>
+          {failed.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">{tt(locale, "Show failed pages", "Mostra pagine non riuscite")}</summary>
+              <ul className="mt-1.5 max-h-32 space-y-1 overflow-auto text-xs">
+                {failed.slice(0, 50).map((f) => (
+                  <li key={f.id} className="flex gap-2">
+                    <span className="max-w-[280px] truncate text-foreground" title={f.url}>{f.url.replace(/^https?:\/\//, "")}</span>
+                    <span className="truncate text-muted-foreground" title={f.error ?? ""}>— {f.error ?? "error"}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+
       {/* List */}
       <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
         {loading ? (
@@ -267,15 +390,35 @@ export default function BrandKnowledge() {
                   <td className="px-3 py-2.5 text-right tabular-nums text-foreground">{d.chunk_count}</td>
                   <td className="px-3 py-2.5"><StatusBadge status={d.status} error={d.error} locale={locale} /></td>
                   {canWrite && (
-                    <td className="px-3 py-2.5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => void handleDelete(d)}
-                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                        aria-label={tt(locale, "Delete", "Elimina")}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center justify-end gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewDoc(d)}
+                          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                          aria-label={tt(locale, "Preview", "Anteprima")}
+                          title={tt(locale, "Preview indexed sections", "Anteprima sezioni indicizzate")}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditDoc(d)}
+                          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                          aria-label={tt(locale, "Edit", "Modifica")}
+                          title={tt(locale, "Edit", "Modifica")}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDelete(d)}
+                          className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                          aria-label={tt(locale, "Delete", "Elimina")}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -319,6 +462,28 @@ export default function BrandKnowledge() {
           onCancel={() => setScrapeOpen(false)}
           onConfirm={handleScrape}
         />
+      )}
+
+      {addUrlOpen && (
+        <AddUrlModal locale={locale} onClose={() => setAddUrlOpen(false)} onSubmit={handleAddUrls} />
+      )}
+
+      {editDoc && (
+        <EditDocModal
+          locale={locale}
+          doc={editDoc}
+          onClose={() => setEditDoc(null)}
+          onSubmit={async (title, category, content) => {
+            await callFn("update-knowledge", { doc_id: editDoc.id, title, category, content, brand_id: brandId });
+            setEditDoc(null);
+            toast.success(tt(locale, "Document updated.", "Documento aggiornato."));
+            await refresh();
+          }}
+        />
+      )}
+
+      {previewDoc && (
+        <PreviewChunksModal locale={locale} doc={previewDoc} onClose={() => setPreviewDoc(null)} />
       )}
     </div>
   );
@@ -587,3 +752,156 @@ const Overlay = ({ children, onClose }: { children: React.ReactNode; onClose: ()
     {children}
   </div>
 );
+
+// ── Add specific page URLs to the crawl queue ─────────────────────────────────
+const AddUrlModal = ({
+  locale, onClose, onSubmit,
+}: { locale: string; onClose: () => void; onSubmit: (urls: string[]) => Promise<void> }) => {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const urls = text.split(/\s+/).map((u) => u.trim()).filter(Boolean)
+      .map((u) => (/^https?:\/\//i.test(u) ? u : `https://${u}`))
+      .filter((u) => { try { new URL(u); return true; } catch { return false; } });
+    const unique = [...new Set(urls)];
+    if (!unique.length) { toast.error(tt(locale, "Enter at least one valid URL.", "Inserisci almeno un URL valido.")); return; }
+    setBusy(true);
+    try { await onSubmit(unique); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className="w-full max-w-lg rounded-xl border border-border bg-background p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-foreground">{tt(locale, "Add page URLs", "Aggiungi URL")}</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <p className="mb-2 text-xs text-muted-foreground">{tt(locale, "One URL per line. They'll be crawled and indexed in the background.", "Un URL per riga. Verranno scansionati e indicizzati in background.")}</p>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5}
+          placeholder={"https://brand.com/heritage\nhttps://brand.com/care"}
+          className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40" />
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted">{tt(locale, "Cancel", "Annulla")}</button>
+          <button onClick={() => void submit()} disabled={busy || !text.trim()}
+            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}{tt(locale, "Add to crawl", "Aggiungi")}
+          </button>
+        </div>
+      </div>
+    </Overlay>
+  );
+};
+
+// ── Edit an existing doc (title / category / content). A content change
+// re-chunks + re-embeds via the update-knowledge edge fn. ──────────────────────
+const EditDocModal = ({
+  locale, doc, onClose, onSubmit,
+}: {
+  locale: string; doc: Doc;
+  onClose: () => void;
+  onSubmit: (title: string, category: string, content: string) => Promise<void>;
+}) => {
+  const [title, setTitle] = useState(doc.title);
+  const [category, setCategory] = useState(doc.category);
+  const [content, setContent] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const options = CATEGORIES.includes(doc.category) ? CATEGORIES : [...CATEGORIES, doc.category];
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const { data } = await supabase.from("brand_knowledge_docs" as never).select("content").eq("id", doc.id).maybeSingle();
+      if (!alive) return;
+      setContent(((data as unknown as { content?: string } | null)?.content) ?? "");
+      setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [doc.id]);
+
+  const submit = async () => {
+    if (!title.trim() || !content.trim()) return;
+    setBusy(true);
+    try { await onSubmit(title.trim(), category, content.trim()); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border border-border bg-background p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-foreground">{tt(locale, "Edit document", "Modifica documento")}</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        {loading ? (
+          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {tt(locale, "Loading…", "Caricamento…")}</div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col gap-3">
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tt(locale, "Title", "Titolo")}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40" />
+            <select value={category} onChange={(e) => setCategory(e.target.value)}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40">
+              {options.map((c) => <option key={c} value={c}>{tt(locale, CATEGORY_LABEL[c]?.en ?? c, CATEGORY_LABEL[c]?.it ?? c)}</option>)}
+            </select>
+            <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={12}
+              className="min-h-0 flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40" />
+            <p className="text-xs text-muted-foreground">{tt(locale, "Changing the text re-indexes this document.", "Modificando il testo il documento viene re-indicizzato.")}</p>
+          </div>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted">{tt(locale, "Cancel", "Annulla")}</button>
+          <button onClick={() => void submit()} disabled={busy || loading || !title.trim() || !content.trim()}
+            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}{tt(locale, "Save", "Salva")}
+          </button>
+        </div>
+      </div>
+    </Overlay>
+  );
+};
+
+// ── Preview the indexed chunks of a doc (what the assistant actually retrieves).
+const PreviewChunksModal = ({ locale, doc, onClose }: { locale: string; doc: Doc; onClose: () => void }) => {
+  const [chunks, setChunks] = useState<{ chunk_index: number; content: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const { data } = await supabase.from("brand_knowledge_chunks" as never)
+        .select("chunk_index, content").eq("doc_id", doc.id).order("chunk_index", { ascending: true }).limit(300);
+      if (!alive) return;
+      setChunks((data as unknown as { chunk_index: number; content: string }[]) ?? []);
+      setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [doc.id]);
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border border-border bg-background p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="truncate text-base font-semibold text-foreground" title={doc.title}>{doc.title}</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">{tt(locale, `${chunks.length} indexed section${chunks.length === 1 ? "" : "s"} — what the Assistant searches.`, `${chunks.length} sezioni indicizzate — ciò che l'Assistente cerca.`)}</p>
+        <div className="min-h-0 flex-1 space-y-2 overflow-auto">
+          {loading ? (
+            <div className="flex h-32 items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {tt(locale, "Loading…", "Caricamento…")}</div>
+          ) : chunks.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">{tt(locale, "No indexed sections.", "Nessuna sezione indicizzata.")}</p>
+          ) : chunks.map((c) => (
+            <div key={c.chunk_index} className="rounded-lg border border-border/60 bg-muted/20 p-2.5">
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tt(locale, "Section", "Sezione")} {c.chunk_index + 1}</div>
+              <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{c.content}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Overlay>
+  );
+};
