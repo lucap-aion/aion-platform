@@ -15,7 +15,7 @@ import { useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, ShoppingBag,
+  ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
   Sparkles, Trash2, Users, ScrollText, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -934,10 +934,22 @@ function buildSuggestions(
         : tt(locale, "Tell me about our signature piece — materials, craftsmanship and care.", "Parlami del nostro pezzo iconico — materiali, lavorazione e cura."),
     },
     {
+      icon: Sparkles,
+      text: product
+        ? tt(locale, `Build a full look around ${product} — coordinating accessories, shoes and bag.`, `Completa il look attorno a ${product} — accessori, scarpe e borsa coordinati.`)
+        : tt(locale, "Build a full look around a hero piece — coordinating accessories, shoes and bag.", "Completa il look attorno a un capo — accessori, scarpe e borsa coordinati."),
+    },
+    {
       icon: Users,
       text: customer
         ? tt(locale, `What has ${customer} bought, and what's their average ticket?`, `Cosa ha comprato ${customer} e qual è il suo scontrino medio?`)
         : tt(locale, "Look up a client — what have they bought and their average ticket?", "Cerca un cliente — cosa ha comprato e il suo scontrino medio?"),
+    },
+    {
+      icon: Send,
+      text: customer
+        ? tt(locale, `Draft a ready-to-send message to ${customer} about our new arrivals.`, `Scrivi un messaggio pronto da inviare a ${customer} sui nuovi arrivi.`)
+        : tt(locale, "Draft a ready-to-send clienteling message for a client about new arrivals.", "Scrivi un messaggio clienteling pronto da inviare a una cliente sui nuovi arrivi."),
     },
     {
       icon: BookOpen,
@@ -962,8 +974,8 @@ const EmptyState = ({ locale, prompts, onPick }: { locale: string; prompts: Sugg
     </h2>
     <p className="mt-1 text-sm text-muted-foreground">
       {tt(locale,
-        "Ask about products, your clients, the brand story, or company policies.",
-        "Chiedi di prodotti, clienti, storia del brand o policy aziendali.")}
+        "Ask about products and clients, build a look, write a message — or attach a photo or an Excel.",
+        "Chiedi di prodotti e clienti, completa un look, scrivi un messaggio — o allega una foto o un Excel.")}
     </p>
     <div className="mt-8 grid w-full grid-cols-1 gap-2 text-left sm:grid-cols-2">
       {prompts.map(({ icon: Icon, text }, i) => (
