@@ -135,6 +135,22 @@ async function spreadsheetToText(file: File): Promise<SheetAttachment> {
       parts.push("");
     });
     text = parts.join("\n").trim();
+  } else if (lower.endsWith(".xls")) {
+    // Legacy BIFF .xls (exceljs can't read it) → SheetJS, lazy-loaded.
+    const XLSX = await import("xlsx");
+    const wb = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
+    const parts: string[] = [];
+    for (const sn of wb.SheetNames) {
+      const matrix = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sn], { header: 1, blankrows: false, defval: "" });
+      parts.push(`## ${sn}`);
+      for (let i = 0; i < Math.min(matrix.length, SHEET_MAX_ROWS); i++) {
+        parts.push("| " + (matrix[i] ?? []).map((c) => (c == null ? "" : String(c))).join(" | ") + " |");
+        rows++;
+      }
+      if (matrix.length > SHEET_MAX_ROWS) parts.push(`… (+${matrix.length - SHEET_MAX_ROWS} righe non mostrate)`);
+      parts.push("");
+    }
+    text = parts.join("\n").trim();
   } else {
     throw new Error("unsupported");
   }
@@ -447,8 +463,8 @@ export default function BrandAssistant() {
 
   const attachSheet = async (file: File) => {
     const lower = file.name.toLowerCase();
-    if (!lower.endsWith(".xlsx") && !lower.endsWith(".csv")) {
-      toast.error(tt(locale, "Attach a .xlsx or .csv file.", "Allega un file .xlsx o .csv."));
+    if (!lower.endsWith(".xlsx") && !lower.endsWith(".xls") && !lower.endsWith(".csv")) {
+      toast.error(tt(locale, "Attach a .xlsx, .xls or .csv file.", "Allega un file .xlsx, .xls o .csv."));
       return;
     }
     try {
@@ -464,8 +480,8 @@ export default function BrandAssistant() {
   const attachFile = (file: File) => {
     const lower = file.name.toLowerCase();
     if (file.type.startsWith("image/")) { void attachImage(file); return; }
-    if (lower.endsWith(".xlsx") || lower.endsWith(".csv")) { void attachSheet(file); return; }
-    toast.error(tt(locale, "Drop an image, .xlsx or .csv.", "Trascina un'immagine, un .xlsx o un .csv."));
+    if (lower.endsWith(".xlsx") || lower.endsWith(".xls") || lower.endsWith(".csv")) { void attachSheet(file); return; }
+    toast.error(tt(locale, "Drop an image, .xlsx, .xls or .csv.", "Trascina un'immagine, un .xlsx, .xls o .csv."));
   };
 
   const onPickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -773,7 +789,7 @@ export default function BrandAssistant() {
               <input
                 ref={sheetRef}
                 type="file"
-                accept=".xlsx,.csv"
+                accept=".xlsx,.xls,.csv"
                 className="hidden"
                 onChange={(e) => void onPickSheet(e)}
               />
