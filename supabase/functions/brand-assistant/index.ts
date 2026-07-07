@@ -599,8 +599,12 @@ Deno.serve(async (req: Request) => {
 
             if (block.name === "run_sql") {
               const sql = String((block.input as { sql?: string })?.sql ?? "");
-              const { data, error } = await userClient.rpc("ai_run_query_user", {
+              // Brand-scoped runner: pins RLS to THIS brand for the query, so an
+              // admin viewing-as a brand can never read another brand's rows even
+              // though the model's SQL carries no brand_id filter.
+              const { data, error } = await userClient.rpc("ai_run_query_scoped", {
                 p_sql: sql,
+                p_brand_id: brandId,
               });
               if (error) {
                 toolResults.push({
@@ -926,8 +930,10 @@ function buildBrandBlocks(cfg: AssistantConfig | null, brandName: string | null)
 // charts + PDF/Excel download.
 type Row = Record<string, unknown>;
 
-async function runReportSql(client: ReturnType<typeof createClient>, sql: string): Promise<Row[]> {
-  const { data, error } = await client.rpc("ai_run_query_user", { p_sql: sql });
+// Brand-scoped: every report query runs pinned to brandId, so an admin viewing-as
+// a brand can't pull another brand's rows even via a model-authored custom section.
+async function runReportSql(client: ReturnType<typeof createClient>, brandId: number, sql: string): Promise<Row[]> {
+  const { data, error } = await client.rpc("ai_run_query_scoped", { p_sql: sql, p_brand_id: brandId });
   if (error) throw new Error(error.message);
   return ((data as { rows?: Row[] })?.rows) ?? [];
 }
@@ -971,7 +977,7 @@ async function buildReport(
 // Ad-hoc report: the model supplies a title + sections, each with a SQL query and
 // a type; we run each query (RLS-safe) and shape the rows to the section type.
 async function buildCustomReport(
-  client: ReturnType<typeof createClient>, _brandId: number, brandName: string | null,
+  client: ReturnType<typeof createClient>, brandId: number, brandName: string | null,
   input: { title?: string; subtitle?: string; sections?: unknown }, generated_at: string,
 ) {
   const title = String(input.title ?? "Report").trim() || "Report";
@@ -985,7 +991,7 @@ async function buildCustomReport(
     if (type === "note") { sections.push({ type: "note", title: spec.title, body: String(spec.body ?? "") }); continue; }
     if (!spec.sql) continue;
     let rows: Row[] = [];
-    try { rows = await runReportSql(client, spec.sql); }
+    try { rows = await runReportSql(client, brandId, spec.sql); }
     catch (e) { console.warn("[custom section]", e instanceof Error ? e.message : e); continue; }
     const cols = rows.length ? Object.keys(rows[0]).filter((c) => !/(^|_)id$/i.test(c)) : [];
     const unit = spec.unit === "eur" ? "eur" : (spec.unit === "num" ? "num" : undefined);
@@ -1034,7 +1040,7 @@ async function buildClientReport(
   const where = isUuid
     ? `id = '${who}' AND brand_id = ${brandId}`
     : `brand_id = ${brandId} AND (role IS NULL OR role = 'customer') AND (coalesce(first_name,'') || ' ' || coalesce(last_name,'')) ILIKE '%${q(who)}%'`;
-  const people = await runReportSql(client,
+  const people = await runReportSql(client, brandId,
     `SELECT id, first_name, last_name, email, phone_number, city, country, date_of_birth, registered_at FROM profiles WHERE ${where} LIMIT 6`);
   if (people.length === 0) return { error: `No client matches "${who}". Ask the associate to check the name.` };
   if (people.length > 1) {
@@ -1044,7 +1050,7 @@ async function buildClientReport(
   const c = people[0];
   const id = String(c.id);
 
-  const purchases = await runReportSql(client, `
+  const purchases = await runReportSql(client, brandId, `
     SELECT c.name, c.collection, COALESCE(s.image_url, c.picture) AS image_url,
            s.price AS online_price, po.selling_price, po.start_date, po.status
     FROM policies po JOIN catalogues c ON c.id = po.item_id
@@ -1053,7 +1059,7 @@ async function buildClientReport(
   // Claims + feedback are best-effort — a hiccup here must never sink the report.
   let claims: Row[] = [];
   try {
-    claims = await runReportSql(client, `
+    claims = await runReportSql(client, brandId, `
       SELECT cl.type, cl.status, cl.incident_date
       FROM claims cl JOIN policies po ON po.id = cl.policy_id
       WHERE po.customer_id = '${id}' AND po.brand_id = ${brandId} ORDER BY cl.incident_date DESC NULLS LAST`);
@@ -1120,26 +1126,26 @@ async function buildPerformanceReport(
   // Explicit brand scope (RLS is unscoped for an admin caller).
   const win = `brand_id = ${brandId} AND start_date >= (CURRENT_DATE - interval '${interval}')`;
 
-  const series = await runReportSql(client, `
+  const series = await runReportSql(client, brandId, `
     SELECT to_char(date_trunc('${period}', start_date), 'YYYY-MM-DD') AS bucket,
            count(*) AS covers, COALESCE(SUM(selling_price),0) AS revenue
     FROM policies WHERE ${win} GROUP BY 1 ORDER BY 1`);
-  const kpiRow = (await runReportSql(client, `
+  const kpiRow = (await runReportSql(client, brandId, `
     SELECT COALESCE(SUM(selling_price),0) AS revenue, count(*) AS covers,
            count(DISTINCT customer_id) AS customers
     FROM policies WHERE ${win}`))[0] ?? {};
-  const claimsRow = (await runReportSql(client, `
+  const claimsRow = (await runReportSql(client, brandId, `
     SELECT count(*) AS claims FROM claims cl JOIN policies po ON po.id = cl.policy_id
     WHERE po.brand_id = ${brandId} AND cl.incident_date >= (CURRENT_DATE - interval '${interval}')`))[0] ?? {};
-  const categoryMix = await runReportSql(client, `
+  const categoryMix = await runReportSql(client, brandId, `
     SELECT c.category AS label, count(*) AS count, COALESCE(SUM(po.selling_price),0) AS revenue
     FROM policies po JOIN catalogues c ON c.id = po.item_id
     WHERE po.${win} GROUP BY 1 ORDER BY revenue DESC LIMIT 8`);
-  const topCollections = await runReportSql(client, `
+  const topCollections = await runReportSql(client, brandId, `
     SELECT c.collection AS label, count(*) AS count, COALESCE(SUM(po.selling_price),0) AS revenue
     FROM policies po JOIN catalogues c ON c.id = po.item_id
     WHERE po.${win} AND c.collection IS NOT NULL GROUP BY 1 ORDER BY revenue DESC LIMIT 6`);
-  const topClients = await runReportSql(client, `
+  const topClients = await runReportSql(client, brandId, `
     SELECT trim(coalesce(p.first_name,'') || ' ' || coalesce(p.last_name,'')) AS label,
            count(*) AS count, COALESCE(SUM(po.selling_price),0) AS revenue
     FROM policies po JOIN profiles p ON p.id = po.customer_id
