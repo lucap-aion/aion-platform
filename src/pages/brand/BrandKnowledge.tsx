@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   BookOpen, Globe, Loader2, Plus, RefreshCw, Trash2, FileText, AlertCircle,
-  CheckCircle2, Clock, X,
+  CheckCircle2, Clock, X, UploadCloud,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -33,6 +33,10 @@ type Doc = {
   updated_at: string;
 };
 
+const UPLOAD_BUCKET = "brand-knowledge-uploads";
+const UPLOAD_ACCEPT = ".pdf,.docx,.pptx,.txt,.md,.csv";
+const UPLOAD_MAX_MB = 25;
+
 const CATEGORIES = ["product", "storytelling", "policy", "training", "other"];
 const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
   product: { en: "Product", it: "Prodotto" },
@@ -53,6 +57,7 @@ export default function BrandKnowledge() {
   const [scraping, setScraping] = useState(false);
   const [pending, setPending] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [scrapeOpen, setScrapeOpen] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -172,6 +177,14 @@ export default function BrandKnowledge() {
             </button>
             <button
               type="button"
+              onClick={() => setUploadOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              <UploadCloud className="h-4 w-4" />
+              {tt(locale, "Upload files", "Carica file")}
+            </button>
+            <button
+              type="button"
               onClick={() => setAddOpen(true)}
               className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
@@ -285,6 +298,16 @@ export default function BrandKnowledge() {
         />
       )}
 
+      {uploadOpen && (
+        <UploadModal
+          locale={locale}
+          brandId={brandId}
+          callFn={callFn}
+          onClose={() => setUploadOpen(false)}
+          onDone={() => void refresh()}
+        />
+      )}
+
       {scrapeOpen && (
         <ConfirmModal
           locale={locale}
@@ -387,6 +410,158 @@ const AddDocModal = ({
       </div>
     </Overlay>
   );
+};
+
+type UpItem = { id: string; file: File; status: "queued" | "uploading" | "parsing" | "done" | "error"; note?: string };
+
+const UploadModal = ({
+  locale, brandId, callFn, onClose, onDone,
+}: {
+  locale: string;
+  brandId: number;
+  callFn: (fn: string, body: Record<string, unknown>) => Promise<{ chunk_count?: number; truncated?: boolean } & Record<string, unknown>>;
+  onClose: () => void;
+  onDone: () => void;
+}) => {
+  const [category, setCategory] = useState("other");
+  const [items, setItems] = useState<UpItem[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [drag, setDrag] = useState(false);
+
+  const update = (id: string, patch: Partial<UpItem>) =>
+    setItems((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+
+  const addFiles = (list: FileList | null) => {
+    if (!list) return;
+    const allowed = UPLOAD_ACCEPT.split(",").map((e) => e.replace(".", "").toLowerCase());
+    const next: UpItem[] = [];
+    for (const file of Array.from(list)) {
+      const ext = (file.name.split(".").pop() ?? "").toLowerCase();
+      if (!allowed.includes(ext)) {
+        toast.error(tt(locale, `${file.name}: unsupported type`, `${file.name}: tipo non supportato`));
+        continue;
+      }
+      if (file.size > UPLOAD_MAX_MB * 1024 * 1024) {
+        toast.error(tt(locale, `${file.name}: over ${UPLOAD_MAX_MB}MB`, `${file.name}: oltre ${UPLOAD_MAX_MB}MB`));
+        continue;
+      }
+      next.push({ id: crypto.randomUUID(), file, status: "queued" });
+    }
+    if (next.length) setItems((prev) => [...prev, ...next]);
+  };
+
+  const start = async () => {
+    const queued = items.filter((i) => i.status === "queued");
+    if (queued.length === 0) return;
+    setBusy(true);
+    let ok = 0;
+    for (const it of queued) {
+      update(it.id, { status: "uploading", note: undefined });
+      const ext = (it.file.name.split(".").pop() ?? "bin").toLowerCase();
+      const path = `${brandId}/${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from(UPLOAD_BUCKET)
+        .upload(path, it.file, { upsert: false, contentType: it.file.type || undefined });
+      if (upErr) {
+        update(it.id, { status: "error", note: upErr.message });
+        continue;
+      }
+      update(it.id, { status: "parsing" });
+      try {
+        const r = await callFn("parse-knowledge", { storage_path: path, filename: it.file.name, category });
+        const secs = `${r.chunk_count} ${tt(locale, "sections", "sezioni")}`;
+        update(it.id, { status: "done", note: r.truncated ? `${secs} · ${tt(locale, "truncated", "troncato")}` : secs });
+        ok++;
+      } catch (e) {
+        update(it.id, { status: "error", note: e instanceof Error ? e.message : "failed" });
+        // Best-effort cleanup so a failed parse doesn't orphan the raw file.
+        void supabase.storage.from(UPLOAD_BUCKET).remove([path]);
+      }
+    }
+    setBusy(false);
+    if (ok) {
+      toast.success(tt(locale, `Indexed ${ok} file${ok > 1 ? "s" : ""}.`, `Indicizzati ${ok} file.`));
+      onDone();
+    }
+  };
+
+  const queuedCount = items.filter((i) => i.status === "queued").length;
+
+  return (
+    <Overlay onClose={busy ? () => {} : onClose}>
+      <div className="w-full max-w-lg rounded-xl border border-border bg-background p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-foreground">{tt(locale, "Upload files", "Carica file")}</h2>
+          <button onClick={onClose} disabled={busy} className="text-muted-foreground hover:text-foreground disabled:opacity-40"><X className="h-4 w-4" /></button>
+        </div>
+
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          disabled={busy}
+          className="mb-3 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+        >
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c}>{tt(locale, CATEGORY_LABEL[c].en, CATEGORY_LABEL[c].it)}</option>
+          ))}
+        </select>
+
+        <label
+          onDragOver={(e) => { e.preventDefault(); if (!busy) setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); if (!busy) addFiles(e.dataTransfer.files); }}
+          className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors ${drag ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"} ${busy ? "pointer-events-none opacity-60" : ""}`}
+        >
+          <UploadCloud className="h-6 w-6 text-muted-foreground" />
+          <span className="text-sm font-medium text-foreground">{tt(locale, "Drag files here or click to browse", "Trascina i file qui o clicca per sceglierli")}</span>
+          <span className="text-xs text-muted-foreground">PDF · DOCX · PPTX · TXT · MD · CSV · {tt(locale, `max ${UPLOAD_MAX_MB}MB`, `max ${UPLOAD_MAX_MB}MB`)}</span>
+          <input type="file" accept={UPLOAD_ACCEPT} multiple className="hidden" disabled={busy}
+            onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+        </label>
+
+        {items.length > 0 && (
+          <div className="mt-3 max-h-52 space-y-1.5 overflow-auto">
+            {items.map((it) => (
+              <div key={it.id} className="flex items-center gap-2 rounded-lg border border-border/60 px-2.5 py-1.5 text-sm">
+                <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-foreground" title={it.file.name}>{it.file.name}</span>
+                <UploadItemStatus item={it} locale={locale} />
+                {it.status === "queued" && !busy && (
+                  <button onClick={() => setItems((p) => p.filter((x) => x.id !== it.id))} className="text-muted-foreground hover:text-destructive" aria-label="remove">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} disabled={busy} className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted disabled:opacity-40">
+            {tt(locale, "Close", "Chiudi")}
+          </button>
+          <button
+            onClick={() => void start()}
+            disabled={busy || queuedCount === 0}
+            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+            {busy
+              ? tt(locale, "Indexing…", "Indicizzazione…")
+              : tt(locale, `Upload${queuedCount ? ` ${queuedCount}` : ""}`, `Carica${queuedCount ? ` ${queuedCount}` : ""}`)}
+          </button>
+        </div>
+      </div>
+    </Overlay>
+  );
+};
+
+const UploadItemStatus = ({ item, locale }: { item: UpItem; locale: string }) => {
+  if (item.status === "queued") return <span className="text-xs text-muted-foreground">{tt(locale, "queued", "in coda")}</span>;
+  if (item.status === "uploading") return <span className="inline-flex items-center gap-1 text-xs text-amber-600"><Loader2 className="h-3 w-3 animate-spin" /> {tt(locale, "uploading", "caricamento")}</span>;
+  if (item.status === "parsing") return <span className="inline-flex items-center gap-1 text-xs text-amber-600"><Loader2 className="h-3 w-3 animate-spin" /> {tt(locale, "indexing", "indicizzazione")}</span>;
+  if (item.status === "done") return <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><CheckCircle2 className="h-3 w-3" /> {item.note}</span>;
+  return <span className="inline-flex items-center gap-1 text-xs text-destructive" title={item.note}><AlertCircle className="h-3 w-3" /> {tt(locale, "failed", "errore")}</span>;
 };
 
 const ConfirmModal = ({
