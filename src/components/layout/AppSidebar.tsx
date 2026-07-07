@@ -10,6 +10,7 @@ import { sendEmail } from "@/utils/sendEmail";
 import { useNavigate } from "react-router-dom";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
 import SmartLogo from "@/components/SmartLogo";
+import { cn } from "@/lib/utils";
 import {
   Sidebar,
   SidebarContent,
@@ -167,23 +168,29 @@ const AppSidebar = () => {
   return (
     <>
     <Sidebar collapsible="icon" className="border-r border-border bg-card">
-      <SidebarHeader className={collapsed ? "p-2" : "py-4 px-2"}>
-        {/* Logo + the sidebar collapse toggle live together here — the toggle
-            sits by the logo rather than floating alone in the page header. */}
-        <div className={`flex ${collapsed ? "flex-col items-center gap-2" : "items-center justify-between gap-2"}`}>
-          <div className="flex min-w-0 items-center">
-            {collapsed ? (
-              tenant.logoIconUrl
-                ? <SmartLogo src={tenant.logoIconUrl} alt={tenant.name} className="h-8 w-8 object-contain object-left" />
-                : <span className="text-lg font-serif font-bold text-foreground">{tenant.logoInitial}</span>
-            ) : (
-              tenant.logoUrl
-                ? <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="block h-10 max-w-[150px] object-contain object-left" />
-                : <span className="text-2xl font-serif font-bold text-foreground tracking-tight">{tenant.name}</span>
-            )}
-          </div>
-          <SidebarTrigger className="hidden shrink-0 text-muted-foreground hover:text-foreground md:inline-flex" />
+      <SidebarHeader className={cn("relative", collapsed ? "p-2" : "py-4 px-2")}>
+        {/* Collapse toggle is pinned to the sidebar's top-right corner. When the
+            sidebar is expanded it's always shown; when collapsed it stays hidden
+            and is revealed on hover, so it never crowds the narrow rail. */}
+        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-start"}`}>
+          {collapsed ? (
+            tenant.logoIconUrl
+              ? <SmartLogo src={tenant.logoIconUrl} alt={tenant.name} className="h-8 w-8 object-contain object-left" />
+              : <span className="text-lg font-serif font-bold text-foreground">{tenant.logoInitial}</span>
+          ) : (
+            tenant.logoUrl
+              ? <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="block h-10 max-w-[150px] object-contain object-left" />
+              : <span className="text-2xl font-serif font-bold text-foreground tracking-tight">{tenant.name}</span>
+          )}
         </div>
+        <SidebarTrigger
+          className={cn(
+            "absolute z-10 hidden h-7 w-7 shrink-0 text-muted-foreground transition-opacity hover:text-foreground md:inline-flex",
+            collapsed
+              ? "right-1 top-1.5 rounded-md bg-card opacity-0 group-hover:opacity-100"
+              : "right-2 top-4 opacity-100",
+          )}
+        />
       </SidebarHeader>
 
       <SidebarContent>
