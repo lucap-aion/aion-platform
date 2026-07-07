@@ -481,21 +481,17 @@ Deno.serve(async (req: Request) => {
     return `\n\n# Today\nToday is ${human} (${iso}). Use this for any "today / this week / this month / recent / expiring soon" reasoning. In SQL prefer CURRENT_DATE / now().`;
   })();
 
-  // Some brands keep their CRM (customers), product catalogue and event data in
-  // the knowledge base as text "cards" rather than the SQL tables — e.g. their
-  // clients are not app users, so `profiles`/`policies` are empty for them. For
-  // those brands, steer the model to search_knowledge for customer/product/event
-  // questions instead of run_sql (which would wrongly return "no customer").
-  // Strictly additive: empty for every other brand.
-  const KB_FIRST_BRANDS = new Set<number>([17]); // 17 = Luisa Beccaria
-  const dataSourceNote = KB_FIRST_BRANDS.has(brandId ?? 0)
-    ? `\n\n# Where this brand's data lives (IMPORTANT)\nFor ${brandName ?? "this brand"}:\n- CLIENTS / "schede anagrafiche" (total & yearly spend, segment VIC/Premium/Regular/Entry, loyalty, favourite categories, sizes & colours, trunk shows attended, top products) and the London trunk-show confirmed-attendee list are ONLY in the KNOWLEDGE BASE. Use search_knowledge (by the client's name) — the SQL tables profiles/policies do NOT contain this brand's clients, so run_sql returns empty for them. A client card is titled "Scheda cliente — <Name> (ID <n>)".\n- PRODUCTS live in TWO places: (a) the KNOWLEDGE BASE has product cards with sales history + a "Trunk Show Londra 2026" flag — use search_knowledge for style/recommendation questions ("cosa raccomando a…", pizzo/ricamo, per il trunk show); titled "Scheda prodotto — <code> <description>". (b) The SQL table storefront_products holds the LIVE online catalogue (name, description, price, availability, image_url) — use run_sql for price/availability/what's-online, and it also powers photo search. Combine both when useful, and cite what you used.\n\n# Signature moves for the associate (offer proactively when it helps a sale)\n- COMPLETA IL LOOK (styling / cross-sell): from a chosen piece OR a client, build ONE coordinated outfit from the live catalogue — the hero piece plus complementary accessories, shoes, bag, belt in matching colours/collection (and the client's size/colours when known). Do it with run_sql on storefront_products selecting those pieces WITH image_url so they render as photo cards, then add ONE short line on why they work together. Prefer available pieces.\n- CLIENTELING MESSAGE: when asked to write to a client, draft a short, warm, ready-to-send WhatsApp/email note — personalised from her card (favourite categories, sizes, colours, last purchase, trunk shows) and the relevant NEW arrivals from the catalogue. Put the message in a Markdown quote block (>) so the associate can copy it verbatim, in the client's language, with an elegant sign-off, never pushy.\n- STYLING FROM AN INSPIRATION PHOTO: if the associate attaches a photo as INSPIRATION (a look to recreate, not an exact item to identify), use the visual matches as a starting point and build a coordinated Luisa Beccaria outfit around the closest pieces — and say clearly it's a styling suggestion inspired by the photo, not an exact match.`
-    : "";
+  // Per-brand customization (brand_assistant_config). A brand shapes its own
+  // assistant — name, where its data lives, house instructions, signature moves,
+  // scope — without a code change. RLS lets a brand read its own config (and an
+  // admin viewing-as any brand). Absent config → default 'sql' behaviour, i.e.
+  // exactly how every brand behaved before this table existed.
+  const brandBlocks = buildBrandBlocks(await loadAssistantConfig(userClient, brandId), brandName);
 
   const systemBlocks = [
     { type: "text" as const, text: SYSTEM, cache_control: { type: "ephemeral" as const } },
     { type: "text" as const, text: brandScope },
-    ...(dataSourceNote ? [{ type: "text" as const, text: dataSourceNote }] : []),
+    ...brandBlocks.map((text) => ({ type: "text" as const, text })),
     ...(languageNote ? [{ type: "text" as const, text: languageNote }] : []),
     { type: "text" as const, text: todayNote },
   ];
@@ -843,6 +839,75 @@ function jsonError(message: string, status: number) {
     status,
     headers: { "Content-Type": "application/json", ...CORS },
   });
+}
+
+// ─── Per-brand assistant config ──────────────────────────────────────────────
+type AssistantConfig = {
+  assistant_name: string | null;
+  custom_instructions: string | null;
+  data_home: "sql" | "knowledge" | "hybrid";
+  signature_moves: { title?: string; prompt?: string }[];
+  scope_note: string | null;
+};
+
+async function loadAssistantConfig(
+  client: ReturnType<typeof createClient>, brandId: number | null,
+): Promise<AssistantConfig | null> {
+  if (!brandId) return null;
+  const { data } = await client
+    .from("brand_assistant_config")
+    .select("assistant_name, custom_instructions, data_home, signature_moves, scope_note")
+    .eq("brand_id", brandId)
+    .maybeSingle();
+  if (!data) return null;
+  const row = data as Record<string, unknown>;
+  const dh = row.data_home === "knowledge" || row.data_home === "hybrid" ? row.data_home : "sql";
+  return {
+    assistant_name: (row.assistant_name as string) ?? null,
+    custom_instructions: (row.custom_instructions as string) ?? null,
+    data_home: dh as AssistantConfig["data_home"],
+    signature_moves: Array.isArray(row.signature_moves)
+      ? (row.signature_moves as { title?: string; prompt?: string }[])
+      : [],
+    scope_note: (row.scope_note as string) ?? null,
+  };
+}
+
+// Turn a brand's saved config into extra system blocks appended after the base
+// persona. Absent/empty config yields no blocks — i.e. the default behaviour
+// every brand had before this table existed.
+function buildBrandBlocks(cfg: AssistantConfig | null, brandName: string | null): string[] {
+  if (!cfg) return [];
+  const who = brandName ?? "this brand";
+  const blocks: string[] = [];
+
+  if (cfg.assistant_name?.trim()) {
+    blocks.push(`\n\n# Your name\nThe associates call you "${cfg.assistant_name.trim()}". Use it if you introduce yourself.`);
+  }
+
+  if (cfg.data_home === "knowledge") {
+    blocks.push(`\n\n# Where this brand's data lives (IMPORTANT)\nFor ${who}, the clients and much of the product knowledge live in the KNOWLEDGE BASE as text cards, NOT in the SQL CRM. For any question about a specific client (history, spend, sizes, preferences, segment) or a style/product recommendation, use search_knowledge by name FIRST — profiles/policies are empty for this brand's clients, so run_sql would wrongly return "no customer". Use run_sql on storefront_products for live price / availability / what's online. Combine both when useful and cite what you used.`);
+  } else if (cfg.data_home === "hybrid") {
+    blocks.push(`\n\n# Where this brand's data lives\nFor ${who}, clients and products may live in BOTH the CRM (run_sql on profiles/policies) and the KNOWLEDGE BASE (search_knowledge cards). Check BOTH before concluding a client or product can't be found, and cite what you used.`);
+  }
+
+  if (cfg.custom_instructions?.trim()) {
+    blocks.push(`\n\n# ${who} — house instructions\n${cfg.custom_instructions.trim()}`);
+  }
+
+  const moves = cfg.signature_moves.filter((m) => m && (m.title || m.prompt));
+  if (moves.length) {
+    const list = moves
+      .map((m) => `- ${m.title ? `${m.title.toUpperCase()}: ` : ""}${(m.prompt ?? "").trim()}`.trim())
+      .join("\n");
+    blocks.push(`\n\n# Signature moves for the associate (offer proactively when it helps a sale)\n${list}`);
+  }
+
+  if (cfg.scope_note?.trim()) {
+    blocks.push(`\n\n# Extra scope guidance\n${cfg.scope_note.trim()}`);
+  }
+
+  return blocks;
 }
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

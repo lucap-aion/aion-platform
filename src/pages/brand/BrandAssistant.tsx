@@ -16,7 +16,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
-  Sparkles, Trash2, Users, ScrollText, X,
+  Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -259,7 +259,7 @@ const emptyAssistant = (): AssistantMessage => ({
 });
 
 export default function BrandAssistant() {
-  const { profile } = useAuth();
+  const { profile, canWrite } = useAuth();
   const { locale } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlChatId = searchParams.get("chat");
@@ -267,6 +267,7 @@ export default function BrandAssistant() {
   const ownerId = profile?.id ?? null;
   const brandId = profile?.brand_id ?? null;
 
+  const [configOpen, setConfigOpen] = useState(false);
   const [chats, setChats] = useState<ChatSummary[]>([]);
   // Start null (not urlChatId) so the [urlChatId] effect actually fires loadChat
   // on a fresh page load — otherwise chatId already equals urlChatId and the
@@ -709,8 +710,27 @@ export default function BrandAssistant() {
                   "Prodotto, cliente, storytelling e policy — in negozio")}
               </p>
             </div>
+            {canWrite && (
+              <button
+                type="button"
+                onClick={() => setConfigOpen(true)}
+                className="ml-auto flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title={tt(locale, "Configure the Assistant", "Configura l'Assistente")}
+              >
+                <Settings2 className="h-4 w-4" />
+                <span className="hidden sm:inline">{tt(locale, "Configure", "Configura")}</span>
+              </button>
+            )}
           </div>
         </div>
+
+        {configOpen && brandId && (
+          <AssistantConfigDrawer
+            locale={locale}
+            brandId={brandId}
+            onClose={() => setConfigOpen(false)}
+          />
+        )}
 
         <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-6">
           {chatLoading ? (
@@ -1254,6 +1274,180 @@ const DataTable = ({
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+};
+
+// ── Assistant configuration drawer ───────────────────────────────────────────
+// Brand admins / master users shape their own assistant here (name, where the
+// brand's data lives, house instructions, signature moves, scope). Saved to
+// brand_assistant_config; the brand-assistant edge fn reads it per request.
+type SigMove = { title: string; prompt: string };
+
+const DATA_HOME_OPTIONS: { value: "sql" | "knowledge" | "hybrid"; en: string; it: string; enDesc: string; itDesc: string }[] = [
+  { value: "sql", en: "My clients are app users", it: "I miei clienti sono utenti dell'app",
+    enDesc: "The assistant reads clients & sales from the CRM (default).", itDesc: "L'assistente legge clienti e vendite dal CRM (predefinito)." },
+  { value: "knowledge", en: "My clients live in the knowledge base", it: "I miei clienti sono nella knowledge base",
+    enDesc: "Client & product info lives in uploaded/indexed cards, not the CRM.", itDesc: "Clienti e prodotti sono nelle schede indicizzate, non nel CRM." },
+  { value: "hybrid", en: "Both", it: "Entrambi",
+    enDesc: "Check both the CRM and the knowledge base.", itDesc: "Controlla sia il CRM sia la knowledge base." },
+];
+
+const AssistantConfigDrawer = ({
+  locale, brandId, onClose,
+}: { locale: string; brandId: number; onClose: () => void }) => {
+  const { profile } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState("");
+  const [dataHome, setDataHome] = useState<"sql" | "knowledge" | "hybrid">("sql");
+  const [instructions, setInstructions] = useState("");
+  const [scope, setScope] = useState("");
+  const [moves, setMoves] = useState<SigMove[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const { data } = await supabase
+        .from("brand_assistant_config" as never)
+        .select("assistant_name, custom_instructions, data_home, signature_moves, scope_note")
+        .eq("brand_id", brandId)
+        .maybeSingle();
+      if (!alive) return;
+      const r = (data ?? null) as {
+        assistant_name?: string | null; custom_instructions?: string | null;
+        data_home?: string | null; signature_moves?: SigMove[] | null; scope_note?: string | null;
+      } | null;
+      if (r) {
+        setName(r.assistant_name ?? "");
+        setDataHome(r.data_home === "knowledge" || r.data_home === "hybrid" ? r.data_home : "sql");
+        setInstructions(r.custom_instructions ?? "");
+        setScope(r.scope_note ?? "");
+        setMoves(Array.isArray(r.signature_moves) ? r.signature_moves.map((m) => ({ title: m?.title ?? "", prompt: m?.prompt ?? "" })) : []);
+      }
+      setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [brandId]);
+
+  const save = async () => {
+    setSaving(true);
+    const cleanMoves = moves.map((m) => ({ title: m.title.trim(), prompt: m.prompt.trim() })).filter((m) => m.title || m.prompt);
+    const { error } = await supabase.from("brand_assistant_config" as never).upsert({
+      brand_id: brandId,
+      assistant_name: name.trim() || null,
+      custom_instructions: instructions.trim() || null,
+      data_home: dataHome,
+      signature_moves: cleanMoves,
+      scope_note: scope.trim() || null,
+      updated_by: profile?.id ?? null,
+    } as never, { onConflict: "brand_id" });
+    setSaving(false);
+    if (error) {
+      console.error("[assistant config save]", error);
+      toast.error(tt(locale, "Couldn't save. Check your permissions.", "Salvataggio non riuscito. Controlla i permessi."));
+      return;
+    }
+    toast.success(tt(locale, "Assistant updated.", "Assistente aggiornato."));
+    onClose();
+  };
+
+  const field = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40";
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <div className="flex h-full w-full max-w-md flex-col border-l border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="flex items-center gap-2">
+            <Settings2 className="h-4 w-4 text-primary" />
+            <h2 className="text-base font-semibold text-foreground">{tt(locale, "Configure the Assistant", "Configura l'Assistente")}</h2>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+
+        {loading ? (
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {tt(locale, "Loading…", "Caricamento…")}
+          </div>
+        ) : (
+          <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+            {/* Name */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">{tt(locale, "Assistant name", "Nome dell'assistente")}</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="AION Assistant" className={field} />
+              <p className="mt-1 text-xs text-muted-foreground">{tt(locale, "What associates call it. Leave blank for the default.", "Come lo chiamano gli addetti. Vuoto per il predefinito.")}</p>
+            </div>
+
+            {/* Data home */}
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">{tt(locale, "Where your data lives", "Dove sono i tuoi dati")}</label>
+              <div className="space-y-2">
+                {DATA_HOME_OPTIONS.map((o) => (
+                  <label key={o.value} className={`flex cursor-pointer gap-2.5 rounded-lg border px-3 py-2 transition-colors ${dataHome === o.value ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"}`}>
+                    <input type="radio" name="data_home" checked={dataHome === o.value} onChange={() => setDataHome(o.value)} className="mt-0.5" />
+                    <span>
+                      <span className="block text-sm font-medium text-foreground">{tt(locale, o.en, o.it)}</span>
+                      <span className="block text-xs text-muted-foreground">{tt(locale, o.enDesc, o.itDesc)}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom instructions */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">{tt(locale, "House instructions", "Istruzioni della maison")}</label>
+              <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={5}
+                placeholder={tt(locale, "Tone of voice, must-dos, how to talk about the brand, anything specific to how you sell…", "Tono di voce, cose da fare sempre, come parlare del brand, tutto ciò che è specifico…")}
+                className={`${field} resize-none`} />
+            </div>
+
+            {/* Signature moves */}
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground">{tt(locale, "Signature moves", "Mosse distintive")}</label>
+                <button type="button" onClick={() => setMoves((m) => [...m, { title: "", prompt: "" }])} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                  <Plus className="h-3.5 w-3.5" /> {tt(locale, "Add", "Aggiungi")}
+                </button>
+              </div>
+              <p className="mb-2 text-xs text-muted-foreground">{tt(locale, "Proactive plays the assistant offers when they help a sale (e.g. complete the look, draft a clienteling message).", "Azioni proattive che l'assistente propone per aiutare la vendita (es. completa il look, scrivi un messaggio di clienteling).")}</p>
+              <div className="space-y-3">
+                {moves.map((m, i) => (
+                  <div key={i} className="rounded-lg border border-border/60 p-2.5">
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <input value={m.title} onChange={(e) => setMoves((arr) => arr.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))}
+                        placeholder={tt(locale, "Move name", "Nome della mossa")} className={`${field} py-1.5`} />
+                      <button type="button" onClick={() => setMoves((arr) => arr.filter((_, j) => j !== i))} className="shrink-0 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="remove">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <textarea value={m.prompt} onChange={(e) => setMoves((arr) => arr.map((x, j) => (j === i ? { ...x, prompt: e.target.value } : x)))} rows={2}
+                      placeholder={tt(locale, "What the assistant should do…", "Cosa deve fare l'assistente…")} className={`${field} resize-none py-1.5`} />
+                  </div>
+                ))}
+                {moves.length === 0 && <p className="text-xs text-muted-foreground/70">{tt(locale, "No signature moves yet.", "Ancora nessuna mossa distintiva.")}</p>}
+              </div>
+            </div>
+
+            {/* Scope */}
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">{tt(locale, "Scope notes", "Note sull'ambito")}</label>
+              <textarea value={scope} onChange={(e) => setScope(e.target.value)} rows={2}
+                placeholder={tt(locale, "Anything the assistant should or shouldn't talk about…", "Cosa l'assistente può o non può trattare…")}
+                className={`${field} resize-none`} />
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
+          <button onClick={onClose} disabled={saving} className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted disabled:opacity-40">{tt(locale, "Cancel", "Annulla")}</button>
+          <button onClick={() => void save()} disabled={saving || loading}
+            className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            {tt(locale, "Save", "Salva")}
+          </button>
+        </div>
       </div>
     </div>
   );
