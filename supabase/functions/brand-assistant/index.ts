@@ -486,10 +486,15 @@ Deno.serve(async (req: Request) => {
 
   // Per-brand customization (brand_assistant_config). A brand shapes its own
   // assistant — name, where its data lives, house instructions, signature moves,
-  // scope — without a code change. RLS lets a brand read its own config (and an
-  // admin viewing-as any brand). Absent config → default 'sql' behaviour, i.e.
-  // exactly how every brand behaved before this table existed.
-  const brandBlocks = buildBrandBlocks(await loadAssistantConfig(userClient, brandId), brandName);
+  // scope. But setting it up (especially "where your data lives") is fiddly and,
+  // if wrong, the assistant can't find the brand's clients. So a brand that
+  // hasn't configured anything gets an AUTO config: we detect where the data
+  // lives from what actually exists (CRM clients vs knowledge-base cards) and
+  // apply default signature moves — the assistant just works, zero setup. A
+  // saved config always wins (advanced override).
+  const savedCfg = await loadAssistantConfig(userClient, brandId);
+  const effectiveCfg = savedCfg ?? await autoAssistantConfig(serviceClient, brandId);
+  const brandBlocks = buildBrandBlocks(effectiveCfg, brandName);
 
   const systemBlocks = [
     { type: "text" as const, text: SYSTEM, cache_control: { type: "ephemeral" as const } },
@@ -884,6 +889,83 @@ async function loadAssistantConfig(
       ? (row.signature_moves as { title?: string; prompt?: string }[])
       : [],
     scope_note: (row.scope_note as string) ?? null,
+  };
+}
+
+// Default signature moves — the proactive plays that fit almost any luxury
+// fashion/accessories house. Applied automatically to any brand that hasn't
+// authored its own, so a brand-new brand still gets a real selling assistant.
+const DEFAULT_SIGNATURE_MOVES: { title: string; prompt: string }[] = [
+  {
+    title: "Completa il look (styling / cross-sell)",
+    prompt:
+      "from a chosen piece OR a client, build ONE coordinated outfit from the " +
+      "live catalogue — the hero piece plus complementary accessories, shoes, " +
+      "bag or jewellery in matching colours/collection (and the client's size/" +
+      "colours when known). Pull the pieces with run_sql on storefront_products " +
+      "selecting image_url so they render as photo cards, then add ONE short line " +
+      "on why they work together. Prefer available pieces.",
+  },
+  {
+    title: "Clienteling message",
+    prompt:
+      "when asked to write to a client, draft a short, warm, ready-to-send " +
+      "WhatsApp/email note — personalised from what you know about them " +
+      "(favourite categories, sizes, colours, last purchase) and the relevant NEW " +
+      "arrivals from the catalogue. Put the message in a Markdown quote block (>) " +
+      "so the associate can copy it verbatim, in the client's language, with an " +
+      "elegant sign-off, never pushy.",
+  },
+  {
+    title: "Styling from an inspiration photo",
+    prompt:
+      "if the associate attaches a photo as INSPIRATION (a look to recreate, not " +
+      "an exact item to identify), use the visual matches as a starting point and " +
+      "build a coordinated outfit around the closest pieces — and say clearly it's " +
+      "a styling suggestion inspired by the photo, not an exact match.",
+  },
+];
+
+// Auto-detect where a brand's data lives from what it actually holds, so a brand
+// never has to pick the (error-prone) "where your data lives" option by hand:
+//   • real CRM clients + a knowledge base  → 'hybrid' (check both)
+//   • a knowledge base but no CRM clients  → 'knowledge' (clients live in cards)
+//   • CRM clients only / nothing yet       → 'sql' (the historical default)
+// Uses the service client (metadata counts only, explicit brand filter — never
+// reads another brand's rows).
+async function detectDataHome(
+  client: ReturnType<typeof createClient>, brandId: number,
+): Promise<AssistantConfig["data_home"]> {
+  try {
+    const [clients, kb] = await Promise.all([
+      client.from("profiles").select("id", { count: "exact", head: true })
+        .eq("brand_id", brandId).or("role.is.null,role.eq.customer"),
+      client.from("brand_knowledge_chunks").select("id", { count: "exact", head: true })
+        .eq("brand_id", brandId),
+    ]);
+    // A handful of stray/test profiles shouldn't count as "the CRM has clients".
+    const hasCrm = (clients.count ?? 0) >= 10;
+    const hasKb = (kb.count ?? 0) > 0;
+    if (hasKb && !hasCrm) return "knowledge";
+    if (hasKb && hasCrm) return "hybrid";
+    return "sql";
+  } catch (e) {
+    console.warn("[brand-assistant detectDataHome]", e instanceof Error ? e.message : e);
+    return "sql";
+  }
+}
+
+// The config a brand gets when it hasn't saved one: detected data location +
+// default signature moves. Name/instructions stay empty (sensible base persona).
+async function autoAssistantConfig(
+  client: ReturnType<typeof createClient>, brandId: number | null,
+): Promise<AssistantConfig> {
+  return {
+    assistant_name: null,
+    custom_instructions: null,
+    data_home: brandId ? await detectDataHome(client, brandId) : "sql",
+    signature_moves: DEFAULT_SIGNATURE_MOVES,
+    scope_note: null,
   };
 }
 
