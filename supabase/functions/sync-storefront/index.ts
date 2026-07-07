@@ -29,8 +29,11 @@ const CORS = {
 };
 
 // Brand storefronts we can ingest. Shopify stores expose /products.json.
-const STOREFRONTS: Record<number, { base: string; currency: string }> = {
+const STOREFRONTS: Record<number, { base: string; currency: string; keepUntyped?: boolean }> = {
   2: { base: "https://www.robertocoin.com", currency: "EUR" }, // Roberto Coin
+  // Luisa Beccaria's Shopify leaves product_type empty on every item, so we must
+  // NOT skip untyped products for this store (they are the real catalogue).
+  17: { base: "https://luisabeccaria.com", currency: "EUR", keepUntyped: true },
 };
 
 // product_type values that aren't real sellable jewelry.
@@ -76,7 +79,7 @@ Deno.serve(async (req: Request) => {
 
 async function syncBrand(admin: ReturnType<typeof createClient>, brandId: number, maxEmbed: number) {
   const store = STOREFRONTS[brandId];
-  const products = await fetchStorefront(store.base);
+  const products = await fetchStorefront(store.base, store.keepUntyped ?? false);
 
   // 1. Upsert product fields for the whole range (cheap, every run).
   const rows = products.map((p) => ({
@@ -157,7 +160,7 @@ type SProduct = {
   compareAt: number | null; available: boolean; imageUrl: string | null;
 };
 
-async function fetchStorefront(base: string): Promise<SProduct[]> {
+async function fetchStorefront(base: string, keepUntyped = false): Promise<SProduct[]> {
   const out: SProduct[] = [];
   for (let page = 1; page <= 40; page++) {
     const res = await fetch(`${base}/products.json?limit=250&page=${page}`, {
@@ -168,7 +171,9 @@ async function fetchStorefront(base: string): Promise<SProduct[]> {
     if (!products.length) break;
     for (const p of products as ShopifyProduct[]) {
       const type = (p.product_type ?? "").trim();
-      if (SKIP_TYPES.has(type.toLowerCase())) continue;
+      // Some stores leave product_type empty on real products (keepUntyped);
+      // only apply the junk-type skip list to non-empty types there.
+      if (SKIP_TYPES.has(type.toLowerCase()) && !(keepUntyped && type === "")) continue;
       const variants = p.variants ?? [];
       const available = variants.some((v) => v.available);
       const prices = variants.map((v) => Number(v.price)).filter((n) => Number.isFinite(n) && n > 0);

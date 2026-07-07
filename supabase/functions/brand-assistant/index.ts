@@ -463,9 +463,21 @@ Deno.serve(async (req: Request) => {
     return `\n\n# Today\nToday is ${human} (${iso}). Use this for any "today / this week / this month / recent / expiring soon" reasoning. In SQL prefer CURRENT_DATE / now().`;
   })();
 
+  // Some brands keep their CRM (customers), product catalogue and event data in
+  // the knowledge base as text "cards" rather than the SQL tables — e.g. their
+  // clients are not app users, so `profiles`/`policies` are empty for them. For
+  // those brands, steer the model to search_knowledge for customer/product/event
+  // questions instead of run_sql (which would wrongly return "no customer").
+  // Strictly additive: empty for every other brand.
+  const KB_FIRST_BRANDS = new Set<number>([17]); // 17 = Luisa Beccaria
+  const dataSourceNote = KB_FIRST_BRANDS.has(brandId ?? 0)
+    ? `\n\n# Where this brand's data lives (IMPORTANT)\nFor ${brandName ?? "this brand"}:\n- CLIENTS / "schede anagrafiche" (total & yearly spend, segment VIC/Premium/Regular/Entry, loyalty, favourite categories, sizes & colours, trunk shows attended, top products) and the London trunk-show confirmed-attendee list are ONLY in the KNOWLEDGE BASE. Use search_knowledge (by the client's name) — the SQL tables profiles/policies do NOT contain this brand's clients, so run_sql returns empty for them. A client card is titled "Scheda cliente — <Name> (ID <n>)".\n- PRODUCTS live in TWO places: (a) the KNOWLEDGE BASE has product cards with sales history + a "Trunk Show Londra 2026" flag — use search_knowledge for style/recommendation questions ("cosa raccomando a…", pizzo/ricamo, per il trunk show); titled "Scheda prodotto — <code> <description>". (b) The SQL table storefront_products holds the LIVE online catalogue (name, description, price, availability, image_url) — use run_sql for price/availability/what's-online, and it also powers photo search. Combine both when useful, and cite what you used.`
+    : "";
+
   const systemBlocks = [
     { type: "text" as const, text: SYSTEM, cache_control: { type: "ephemeral" as const } },
     { type: "text" as const, text: brandScope },
+    ...(dataSourceNote ? [{ type: "text" as const, text: dataSourceNote }] : []),
     ...(languageNote ? [{ type: "text" as const, text: languageNote }] : []),
     { type: "text" as const, text: todayNote },
   ];
