@@ -21,6 +21,7 @@ import {
   SidebarMenuItem,
   SidebarFooter,
   SidebarHeader,
+  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
 import {
@@ -167,16 +168,21 @@ const AppSidebar = () => {
     <>
     <Sidebar collapsible="icon" className="border-r border-border bg-card">
       <SidebarHeader className={collapsed ? "p-2" : "py-4 px-2"}>
-        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-start"}`}>
-          {collapsed ? (
-            tenant.logoIconUrl
-              ? <SmartLogo src={tenant.logoIconUrl} alt={tenant.name} className="h-8 w-8 object-contain object-left" />
-              : <span className="text-lg font-serif font-bold text-foreground">{tenant.logoInitial}</span>
-          ) : (
-            tenant.logoUrl
-              ? <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="block h-10 max-w-[160px] object-contain object-left" />
-              : <span className="text-2xl font-serif font-bold text-foreground tracking-tight">{tenant.name}</span>
-          )}
+        {/* Logo + the sidebar collapse toggle live together here — the toggle
+            sits by the logo rather than floating alone in the page header. */}
+        <div className={`flex ${collapsed ? "flex-col items-center gap-2" : "items-center justify-between gap-2"}`}>
+          <div className="flex min-w-0 items-center">
+            {collapsed ? (
+              tenant.logoIconUrl
+                ? <SmartLogo src={tenant.logoIconUrl} alt={tenant.name} className="h-8 w-8 object-contain object-left" />
+                : <span className="text-lg font-serif font-bold text-foreground">{tenant.logoInitial}</span>
+            ) : (
+              tenant.logoUrl
+                ? <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="block h-10 max-w-[150px] object-contain object-left" />
+                : <span className="text-2xl font-serif font-bold text-foreground tracking-tight">{tenant.name}</span>
+            )}
+          </div>
+          <SidebarTrigger className="hidden shrink-0 text-muted-foreground hover:text-foreground md:inline-flex" />
         </div>
       </SidebarHeader>
 
