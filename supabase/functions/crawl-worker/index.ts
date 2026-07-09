@@ -77,7 +77,15 @@ Deno.serve(async (req: Request) => {
         const j = parseJinaMarkdown(await jinaRaw(it.url, JINA_API_KEY));
         title = title || j.title; text = j.text;
       } else if (render) {
-        const j = parseJinaMarkdown(await jinaRaw(it.url, JINA_API_KEY));
+        // Prefer the Jina-rendered version, but fall back to a raw fetch when
+        // Jina is unavailable (quota/402, rate-limit/429, transient 5xx) or
+        // returns too little — static pages (policies, help) render fine raw.
+        let j = { title: "", text: "" };
+        try { j = parseJinaMarkdown(await jinaRaw(it.url, JINA_API_KEY)); } catch { /* fall back to raw below */ }
+        if (j.text.length < MIN_PAGE_CHARS) {
+          const e = extractContent(await fetchText(it.url));
+          if (e.text.length > j.text.length) j = { title: e.title || j.title, text: e.text };
+        }
         title = title || j.title; text = j.text;
       } else {
         const e = extractContent(await fetchText(it.url));

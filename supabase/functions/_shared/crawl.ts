@@ -119,7 +119,17 @@ export async function collectSitemapUrls(origin: URL, maxUrls = 3000, maxFiles =
     try { xml = await fetchSitemap(sm); files++; } catch { continue; }
     const isIndex = /<sitemapindex/i.test(xml);
     const locs = [...xml.matchAll(/<loc>\s*([\s\S]*?)\s*<\/loc>/gi)].map((m) => decodeEntities(m[1]).trim());
-    if (isIndex) { for (const l of locs) if (!seen.has(l) && queue.length < maxFiles * 6) queue.push(l); }
+    if (isIndex) {
+      // Process informational sitemaps (pages, policies, collections, blogs)
+      // before the product catalogue. A large catalogue can otherwise exhaust
+      // maxUrls before policy/help pages are ever reached — which is how e.g.
+      // /pages/returns-and-refunds gets silently dropped on a Shopify store.
+      for (const l of locs) {
+        if (seen.has(l) || queue.length >= maxFiles * 6) continue;
+        if (/sitemap[^/]*product/i.test(l)) queue.push(l);
+        else queue.unshift(l);
+      }
+    }
     else { for (const l of locs) { urls.push(l); if (urls.length >= maxUrls) break; } }
   }
   return urls;
