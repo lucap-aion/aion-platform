@@ -259,6 +259,59 @@ the order, but here's everything you need to close it — …").
   Venetian Princess page") — never external news-outlet names or system
   identifiers — and only cite a source that actually supports your claim.
 
+# Deep client brief — "tell me everything about <client>"
+When the associate asks for the full picture on a client (a complete brief /
+"raccontami tutto su…", "scheda completa di…", "chi è <nome>", "profilo di…"),
+build ONE consolidated brief. RESOLVE the client first, then pull their history.
+Where the client lives depends on the brand (see "Where this brand's data lives"):
+
+- Clients in the CRM (profiles/policies populated): resolve with run_sql — ILIKE
+  on the client's name (role IS NULL or 'customer'). If several match, list them
+  and ask which one; if none, say so plainly and ask for the spelling/email —
+  never brief the nearest different person. Then, once you have the one client,
+  gather in a FEW focused queries:
+  • Purchases — the policies→catalogues join (left-join storefront for image +
+    price) from the schema, newest first, WITH an image column so they render as
+    photo cards.
+  • Totals — ONE aggregate (COUNT, SUM(selling_price), AVG). SPEAK these in one
+    line; the cards stay on screen (a numbers-only query won't replace them).
+  • Signals — open claims (status NOT closed/cancelled) and the latest feedback
+    (satisfaction / recommendation / peace-of-mind + comment).
+  • Cross-sell — up to 5 pieces from the catalogue the client does NOT own yet,
+    same category as past purchases first, WITH image_url so they render as cards.
+- Clients in the knowledge base (this brand's data lives there, OR run_sql finds
+  no client): RESOLVE the client with lookup_knowledge_card (its name) — that does
+  an exact by-name match on the client's card ("Scheda cliente — <Name>"), which
+  plain search_knowledge misses because a bare name has little semantic signal. Do
+  NOT conclude "no client" from a weak search_knowledge result — use
+  lookup_knowledge_card first. The card carries spend, segment (VIC/Premium/
+  Regular/Entry), favourite categories, sizes & colours, trunk shows attended and
+  top products. If the card names specific products, you may search_knowledge for
+  those for more detail. Build the brief from the card, then pull matching NEW
+  pieces from the live catalogue (storefront) as photo cards for the cross-sell.
+
+Shape it for the floor, not as a data dump: a 1–2 line identity + value lead ("VIP
+client — around €X over N pieces, last bought <month>"), the purchase cards, ONE
+line of signals (open claim / feedback), then the cross-sell cards with ONE line
+on why they fit. Close with ONE concrete next step (renewal, open claim, ask for
+feedback, or the strongest cross-sell). Speak the numbers; never show a raw table.
+
+# Product analysis — "who buys <piece> and why"
+When asked who buys a piece / to analyse a product's buyers ("chi compra…",
+"analizza i clienti di…", "che clientela ha <pezzo>"), resolve the piece first
+(by name or SKU), then give the useful signal — not an analytics dump:
+- Clients in the CRM: run_sql to profile its buyers — how many own it, where they
+  are (top cities/countries), repeat buyers, the pieces most often owned ALONGSIDE
+  it (basket affinity), and satisfaction vs the brand average. Speak the key
+  figures in tight prose and show the co-owned pieces as photo cards. Give 1–3
+  concrete plays ("pair with <piece> — most of its buyers already own it").
+- Clients in the knowledge base: resolve the piece with lookup_knowledge_card (its
+  name/code) to pull its product card ("Scheda prodotto — …", sales history,
+  trunk-show flag) for context, and show the piece plus its closest catalogue
+  pairings as cards. Be honest about what the card does and doesn't tell you.
+For anything the associate wants to keep as a structured breakdown or ranking,
+offer generate_report instead (it renders a clean report with charts + PDF/Excel).
+
 # Selling instinct
 When it serves the sale, proactively add something the associate can use: a
 relevant cross-sell or pairing, a care tip or talking point that builds desire,
@@ -302,6 +355,27 @@ const TOOLS = [
         },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "lookup_knowledge_card",
+    description:
+      "Find a specific knowledge-base CARD by name — a client's card (\"Scheda " +
+      "cliente — <Name>\") or a product card (\"Scheda prodotto — <code> <desc>\"). " +
+      "Uses an exact by-name (lexical) match, so it reliably resolves a NAMED " +
+      "client or product even when semantic search_knowledge misses it (proper " +
+      "names carry little semantic signal). Use this to RESOLVE a client/product " +
+      "for a brief when the brand's clients/products live in the knowledge base. " +
+      "Returns matching cards with their full text.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "The client or product name/code to look up (e.g. \"Eugenia Gemmo\").",
+        },
+      },
+      required: ["name"],
     },
   },
   {
@@ -684,6 +758,32 @@ Deno.serve(async (req: Request) => {
                   content: `knowledge search failed: ${e instanceof Error ? e.message : "unknown"}`,
                 });
               }
+            } else if (block.name === "lookup_knowledge_card") {
+              const name = String((block.input as { name?: string })?.name ?? "").trim();
+              try {
+                const cards = await lookupKnowledgeCard(userClient, brandId!, name);
+                emit("knowledge", {
+                  query: name,
+                  sources: cards.map((c) => ({
+                    doc_title: c.title, source_url: null, category: c.category,
+                    similarity: 1, snippet: c.content.slice(0, 200),
+                  })),
+                });
+                toolResults.push({
+                  type: "tool_result",
+                  tool_use_id: block.id,
+                  content: cards.length
+                    ? JSON.stringify(cards.map((c) => ({ card: c.title, category: c.category, text: c.content })))
+                    : `No card found matching "${name}" in this brand's knowledge base. Tell the associate you can't find them under that name and ask for the spelling.`,
+                });
+              } catch (e) {
+                toolResults.push({
+                  type: "tool_result",
+                  tool_use_id: block.id,
+                  is_error: true,
+                  content: `card lookup failed: ${e instanceof Error ? e.message : "unknown"}`,
+                });
+              }
             } else if (block.name === "generate_report") {
               const input = block.input as { kind?: string; client?: string; period?: string };
               try {
@@ -745,6 +845,30 @@ Deno.serve(async (req: Request) => {
 });
 
 type KMatch = { doc_id: string; doc_title: string; source_url: string | null; category: string; content: string; similarity: number };
+
+// Resolve a named card (client "Scheda cliente — <Name>" / product "Scheda
+// prodotto — …") by an exact lexical match on the doc title — semantic search
+// misses bare proper names. brand_id is filtered EXPLICITLY (not via RLS): an
+// admin view-as caller has admin RLS on brand_knowledge_docs and would otherwise
+// see every brand's cards, so the .eq('brand_id') is the real brand gate here.
+async function lookupKnowledgeCard(
+  client: ReturnType<typeof createClient>,
+  brandId: number,
+  name: string,
+): Promise<{ title: string; category: string; content: string }[]> {
+  const q = name.trim();
+  if (!q) return [];
+  const { data, error } = await client
+    .from("brand_knowledge_docs")
+    .select("title, category, content")
+    .eq("brand_id", brandId)
+    .ilike("title", `%${q}%`)
+    .limit(5);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as { title: string; category: string; content: string }[];
+  // Cap each card so a big doc can't blow the tool-result budget.
+  return rows.map((r) => ({ ...r, content: (r.content ?? "").slice(0, 6000) }));
+}
 
 // Brand-scoped knowledge retrieval: embed the query, vector-search a broad
 // candidate set, rerank for precision (Voyage rerank), then diversify so the
