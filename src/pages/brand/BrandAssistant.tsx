@@ -908,7 +908,7 @@ function handleEvent(
         ? tt(locale, "Identifying the piece from the photo…", "Identifico il pezzo dalla foto…")
         : data?.tool === "generate_report"
           ? tt(locale, "Building the report…", "Preparo il report…")
-          : tt(locale, "Looking up client data…", "Consulto i dati cliente…");
+          : tt(locale, "Looking up data…", "Consulto i dati...");
     patch((m) => ({ ...m, activity: label }));
   } else if (event === "text_delta") {
     patch((m) => ({ ...m, summary: m.summary + (data?.text ?? ""), activity: null }));
