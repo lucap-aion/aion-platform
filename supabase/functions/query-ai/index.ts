@@ -237,7 +237,7 @@ and the pool denominator is INDEPENDENT of the "Customers" count above.
                         Business info (vat, entity_name, business_address)
                         is synced from eplay for B2B records and is NEVER a
                         profilation field. On a profile that carries any of
-                        those, the `address` column holds the COMPANY address,
+                        those, the "address" column holds the COMPANY address,
                         so it does NOT count toward profilation.
 - feedback_rate     = COUNT(DISTINCT p.id) WHERE EXISTS(
                         SELECT 1 FROM feedback fb
@@ -380,7 +380,12 @@ Step 1 — Resolve the customer. ONE run_sql call:
   ORDER BY p.registered_at DESC NULLS LAST
   LIMIT 25;
 Replace :q with the literal value, properly escaped via single quotes.
-If 0 rows: tell the user no customer matched and STOP.
+If 0 rows: the brand may keep its clients in the KNOWLEDGE BASE, not the CRM
+(e.g. Luisa Beccaria). Before giving up, call lookup_knowledge_card with the name
+— if a "Scheda cliente — <Name>" card comes back, build the brief from that card
+(spend, segment, favourite categories, sizes, trunk shows, top products) instead
+of the SQL blocks, and note the client lives in the knowledge base. Only if that
+ALSO returns nothing: tell the user no customer matched and STOP.
 If >1 rows: render the table as a disambiguation list, ask the user to pick
 one by id, and STOP. Do NOT proceed to step 2 on ambiguous input.
 
@@ -527,7 +532,11 @@ Step 1 — Resolve the product. ONE run_sql call:
      OR cat.brand_item_id  = :q
      OR lower(cat.name)    ILIKE '%' || lower(:q) || '%'
   ORDER BY covers DESC LIMIT 25;
-0 rows → say so and STOP. >1 rows → disambiguation table, STOP.
+0 rows → the brand may keep its products in the KNOWLEDGE BASE, not the CRM.
+Call lookup_knowledge_card with the name/code first; if a "Scheda prodotto — …"
+card comes back, build the analysis from that card and note it lives in the
+knowledge base. Only if that ALSO returns nothing: say so and STOP.
+>1 rows → disambiguation table, STOP.
 
 Step 2 — Product card + customer set (one query each, or batched):
 
@@ -774,6 +783,24 @@ const TOOLS = [
     },
   },
   {
+    name: "lookup_knowledge_card",
+    description:
+      "Find a knowledge-base CARD by name — a client card (\"Scheda cliente — " +
+      "<Name>\") or product card (\"Scheda prodotto — …\"). Some brands keep their " +
+      "clients/products in the knowledge base instead of the CRM tables (e.g. " +
+      "Luisa Beccaria), so run_sql on profiles/catalogues returns nothing for " +
+      "them. When a Customer 360 / Product analysis lookup returns 0 rows, use " +
+      "this to resolve the client/product by exact name (lexical match, which " +
+      "semantic search misses on proper names). Returns matching cards with text.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The client or product name/code to look up." },
+      },
+      required: ["name"],
+    },
+  },
+  {
     name: "generate_daily_chubb_export",
     description:
       "Generate the daily Chubb-formatted export (CSV or XLSX) for a given " +
@@ -842,6 +869,30 @@ const TOOLS = [
     },
   },
 ];
+
+// Resolve a knowledge-base card by an exact lexical title match (semantic search
+// misses proper names). brand_id is filtered EXPLICITLY when scoped to a brand:
+// an admin caller has all-brand RLS on brand_knowledge_docs, so the .eq() is the
+// real brand gate. In cross-brand admin mode (brandId null) it searches all and
+// returns brand_id so the model can disambiguate.
+async function lookupKnowledgeCard(
+  client: ReturnType<typeof createClient>,
+  brandId: number | null,
+  name: string,
+): Promise<{ title: string; brand_id: number; category: string; content: string }[]> {
+  const q = name.trim();
+  if (!q) return [];
+  let query = client
+    .from("brand_knowledge_docs")
+    .select("title, brand_id, category, content")
+    .ilike("title", `%${q}%`)
+    .limit(8);
+  if (brandId) query = query.eq("brand_id", brandId);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as { title: string; brand_id: number; category: string; content: string }[];
+  return rows.map((r) => ({ ...r, content: (r.content ?? "").slice(0, 6000) }));
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -974,7 +1025,7 @@ Deno.serve(async (req: Request) => {
         // generation hits admin-only edge functions and would 403 anyway).
         const activeTools = mode === "brand"
           ? TOOLS.filter((t) =>
-            t.name === "run_sql" || t.name === "render_chart"
+            t.name === "run_sql" || t.name === "render_chart" || t.name === "lookup_knowledge_card"
           )
           : TOOLS;
 
@@ -1061,6 +1112,25 @@ Deno.serve(async (req: Request) => {
                       ? `Only the first 40 of ${rows.length} rows shown to you; the user sees all.`
                       : undefined,
                   }),
+                });
+              }
+            } else if (block.name === "lookup_knowledge_card") {
+              const name = String(block.input?.name ?? "").trim();
+              try {
+                const cards = await lookupKnowledgeCard(userClient, brandId, name);
+                toolResults.push({
+                  type: "tool_result",
+                  tool_use_id: block.id,
+                  content: cards.length
+                    ? JSON.stringify(cards.map((c) => ({ card: c.title, brand_id: c.brand_id, category: c.category, text: c.content })))
+                    : `No card found matching "${name}". Tell the user you can't find them under that name.`,
+                });
+              } catch (e) {
+                toolResults.push({
+                  type: "tool_result",
+                  tool_use_id: block.id,
+                  is_error: true,
+                  content: `card lookup failed: ${e instanceof Error ? e.message : "unknown"}`,
                 });
               }
             } else if (block.name === "render_chart") {
