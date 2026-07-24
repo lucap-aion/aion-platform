@@ -144,6 +144,15 @@ Schema (your brand only):
 - feedback(id, user_id->profiles.id, satisfaction_rate, recommendation_rate,
     peace_of_mind_rate, comment) — rates 1-5.
 - shops(id, name, city, country).
+- events(id, name, city, country, venue, start_date, end_date, status, pr_agency,
+    pr_cost, venue_cost, shipping_cost, other_cost, guests_invited, guests_attended,
+    revenue) — TRUNK SHOWS / brand events, past and planned. status:
+    planned/confirmed/completed/cancelled. Use for event history, cost & ROI, and
+    planning a new one (see "Trunk show planning").
+- event_attendees(id, event_id->events.id, customer_id->profiles.id, customer_name,
+    segment, invited, attended, influencer, converted, revenue) — the invite &
+    attribution list per event (who was invited, who came, who converted, and which
+    influencer brought them).
 - brand_knowledge_docs(title, category, source_type, source_url, char_count) —
     INDEXED KNOWLEDGE crawled from the brand's site + news (product/storytelling/
     policy/news/other). Use for the brand STORY, care, policy, craftsmanship — not
@@ -312,6 +321,33 @@ When asked who buys a piece / to analyse a product's buyers ("chi compra…",
 For anything the associate wants to keep as a structured breakdown or ranking,
 offer generate_report instead (it renders a clean report with charts + PDF/Excel).
 
+# Trunk show planning — "help me organise the trunk show in <city> in <month>"
+When asked to plan a trunk show / brand event, produce a concrete plan grounded in
+THIS brand's past events (the events + event_attendees data), and keep the human
+in the loop on judgement calls (venue visits, negotiations, bookings). Work from
+what the data supports; be explicit about what it can't tell you.
+- Past performance (run_sql on events, completed only): revenue, guests invited vs
+  attended (conversion), and cost breakdown per past show. Use it to propose the
+  optimal number of days and the best period (compare cities/months you have), and
+  to benchmark the new event. Speak the figures.
+- PR ROI (run_sql on events): revenue and guests brought per pr_agency, and cost →
+  compute € per attending guest / per € revenue, and recommend renew vs change.
+- Stock & bags: from a comparable past show's attendance and revenue, suggest how
+  many pieces and shopper bags to prepare (order of magnitude, state the basis).
+- Invite list & attribution (run_sql on event_attendees): who to prioritise
+  (segment VIC/Premium first, past converters), and which influencer drove
+  conversions last time (converted + revenue by influencer). For a knowledge-base
+  brand, resolve named clients with lookup_knowledge_card for their segment/history.
+- Logistics: for the round-trip shipping + duties/VAT estimate, call
+  shipping_estimate (destination country, piece count or weight, declared value).
+  It's an ESTIMATE — say so, and note trunk-show goods usually travel on an ATA
+  Carnet (temporary import, duty deferred until sold).
+- Out of scope for the data: venue scouting and team travel need real-world
+  research/booking — say plainly you can't pull those from our data and hand them
+  to the associate as the human steps, with a checklist of what to confirm.
+Lay the plan out activity by activity (a short heading + the number + the one
+decision the human owns). Don't invent figures the data doesn't have.
+
 # Selling instinct
 When it serves the sale, proactively add something the associate can use: a
 relevant cross-sell or pairing, a care tip or talking point that builds desire,
@@ -376,6 +412,28 @@ const TOOLS = [
         },
       },
       required: ["name"],
+    },
+  },
+  {
+    name: "shipping_estimate",
+    description:
+      "Estimate round-trip freight + import duty/VAT for shipping a trunk-show " +
+      "collection to a destination country. Rough parametric estimate (not a live " +
+      "carrier quote). Provide the destination country, the number of pieces (or a " +
+      "total weight in kg), and the declared value of the collection.",
+    input_schema: {
+      type: "object",
+      properties: {
+        destination_country: {
+          type: "string",
+          description: "Destination ISO code or name (e.g. US, GB/UK, CH, IT/EU).",
+        },
+        pieces: { type: "number", description: "Number of pieces (garments/items). Used to estimate weight if weight_kg is omitted." },
+        weight_kg: { type: "number", description: "Total shipment weight in kg, if known (overrides the pieces estimate)." },
+        declared_value: { type: "number", description: "Declared value of the collection in EUR (for duty/VAT)." },
+        round_trip: { type: "boolean", description: "Round trip (out + return). Default true." },
+      },
+      required: ["destination_country"],
     },
   },
   {
@@ -784,6 +842,13 @@ Deno.serve(async (req: Request) => {
                   content: `card lookup failed: ${e instanceof Error ? e.message : "unknown"}`,
                 });
               }
+            } else if (block.name === "shipping_estimate") {
+              const est = estimateShipping(block.input as ShippingInput);
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: block.id,
+                content: JSON.stringify(est),
+              });
             } else if (block.name === "generate_report") {
               const input = block.input as { kind?: string; client?: string; period?: string };
               try {
@@ -868,6 +933,50 @@ async function lookupKnowledgeCard(
   const rows = (data ?? []) as { title: string; category: string; content: string }[];
   // Cap each card so a big doc can't blow the tool-result budget.
   return rows.map((r) => ({ ...r, content: (r.content ?? "").slice(0, 6000) }));
+}
+
+// ─── Shipping estimate (trunk-show logistics) ───────────────────────────────
+// Rough parametric estimate, NOT a live carrier quote. Zones give an express
+// €/kg rate; duty/VAT are the destination's approximate rates on jewellery/apparel
+// applied to declared value (only if goods are sold / permanently imported — a
+// trunk show usually travels on an ATA Carnet, so duty is deferred).
+type ShippingInput = {
+  destination_country?: string; pieces?: number; weight_kg?: number;
+  declared_value?: number; round_trip?: boolean;
+};
+function estimateShipping(input: ShippingInput) {
+  const raw = String(input.destination_country ?? "").trim().toUpperCase();
+  const zoneOf = (c: string): { zone: string; ratePerKg: number; dutyPct: number; vatPct: number } => {
+    if (["US", "USA", "UNITED STATES"].includes(c)) return { zone: "US", ratePerKg: 16, dutyPct: 0.055, vatPct: 0.07 };
+    if (["GB", "UK", "UNITED KINGDOM", "ENGLAND"].includes(c)) return { zone: "UK", ratePerKg: 12, dutyPct: 0.025, vatPct: 0.20 };
+    if (["CH", "SWITZERLAND", "SVIZZERA"].includes(c)) return { zone: "CH", ratePerKg: 14, dutyPct: 0.02, vatPct: 0.081 };
+    if (["IT", "FR", "DE", "ES", "EU", "ITALY", "ITALIA", "FRANCE", "GERMANY", "SPAIN"].includes(c)) return { zone: "EU", ratePerKg: 8, dutyPct: 0, vatPct: 0 };
+    return { zone: "Other", ratePerKg: 18, dutyPct: 0.05, vatPct: 0.15 };
+  };
+  const z = zoneOf(raw);
+  // ~0.6 kg per piece incl. protective packaging; min chargeable weight 5 kg.
+  const weight = input.weight_kg && input.weight_kg > 0
+    ? input.weight_kg
+    : Math.max(5, Math.round((Number(input.pieces) || 0) * 0.6 * 10) / 10);
+  const legs = input.round_trip === false ? 1 : 2;
+  const freight = Math.round(weight * z.ratePerKg * legs);
+  const declared = Number(input.declared_value) || 0;
+  const duty = Math.round(declared * z.dutyPct);
+  const vat = Math.round((declared + duty) * z.vatPct);
+  return {
+    disclaimer: "Rough estimate, not a live carrier quote. Duty/VAT apply only if pieces are SOLD / permanently imported; trunk-show goods usually travel on an ATA Carnet (temporary import, duty deferred until sold).",
+    destination: raw || "unknown",
+    zone: z.zone,
+    weight_kg: weight,
+    legs: legs === 2 ? "round trip" : "one way",
+    currency: "EUR",
+    freight_estimate: freight,
+    duty_estimate_if_sold: duty,
+    vat_estimate_if_sold: vat,
+    total_if_all_sold: freight + duty + vat,
+    rates_used: { freight_per_kg: z.ratePerKg, duty_pct: z.dutyPct, vat_pct: z.vatPct },
+    ata_carnet_recommended: z.zone !== "EU",
+  };
 }
 
 // Brand-scoped knowledge retrieval: embed the query, vector-search a broad
