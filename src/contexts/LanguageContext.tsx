@@ -18,7 +18,7 @@ const translations: Translations = {
   "nav.team": { en: "Team", it: "Team" },
   "nav.insights": { en: "Insights", it: "Insights" },
   "nav.aiQuery": { en: "Ask the data", it: "Chiedi ai dati" },
-  "nav.assistant": { en: "Assistant", it: "Assistente" },
+  "nav.assistant": { en: "AI Assistant", it: "Assistente AI" },
   "nav.knowledge": { en: "Knowledge base", it: "Knowledge base" },
   "nav.shops": { en: "Shops", it: "Boutique" },
   "nav.settings": { en: "Settings", it: "Impostazioni" },
@@ -369,7 +369,7 @@ const translations: Translations = {
   "support.send": { en: "Send Message", it: "Invia Messaggio" },
 
   // Admin — Ask the data (AI query chat)
-  "aiQuery.title": { en: "Ask the data", it: "Interroga i dati" },
+  "aiQuery.title": { en: "AI Assistant", it: "Assistente AI" },
   "aiQuery.subtitle": { en: "Ask AION. Read-only.", it: "Fai domande ad AION. Sola lettura." },
   "aiQuery.newChat": { en: "New chat", it: "Nuova chat" },
   "aiQuery.noChats": { en: "No chats yet", it: "Nessuna chat" },

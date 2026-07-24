@@ -25,7 +25,7 @@ import {
 
 const adminLinks = [
   { path: "/admin", icon: House, label: "Home" },
-  { path: "/admin/ai-query", icon: Sparkles, label: "Ask the data" },
+  { path: "/admin/ai-query", icon: Sparkles, label: "AI Assistant" },
   { path: "/admin/admins", icon: UserCog, label: "Admins" },
   { path: "/admin/shop-assistants", icon: Users2, label: "Brand Users" },
   { path: "/admin/brands", icon: Building2, label: "Brands" },

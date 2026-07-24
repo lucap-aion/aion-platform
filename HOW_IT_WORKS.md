@@ -50,6 +50,7 @@ For the luxury brand — each partner (a watchmaker, a fashion house) gets its o
 - Review and process incoming claims
 - Manage their team (multiple people from the brand can have access)
 - Adjust brand settings (logo, contact details, etc.)
+- Ask the **AI Assistant** about products, a client's history, the brand's story, or to plan a trunk show (see below)
 
 **Their journey, in plain words**
 
@@ -70,8 +71,52 @@ For the AION team — the internal control center.
 - Onboard new brands and shop assistants
 - Generate reports and view insights (registrations, claims volume, top categories)
 - Manage other admins and access permissions
+- Use the **AI Assistant** to query any single brand or compare across all brands (see below)
 
 This is where the AION team makes sure the whole system runs smoothly.
+
+---
+
+## The AI Assistant
+
+Both the Brand Portal and the Admin Portal include an **AI Assistant** — a chat helper you can simply talk to in plain language. It's one assistant that adapts to who's using it, and it always answers from real data, never guesswork.
+
+### For a brand team
+
+Open the **AI Assistant** from the sidebar and ask things the way you'd ask a knowledgeable colleague:
+
+- **"Show me a few evening dresses under €3,000"** — it pulls the actual pieces from the catalogue, with photos and prices.
+- **"Tell me everything about client Maria Rossi"** — her purchase history, spend, favourite categories, and a suggested cross-sell.
+- **"Tell me about the brand's craftsmanship"** — answered from the brand's own story and materials.
+- **"Build a full look around this gown"** — a coordinated outfit (shoes, bag, accessories) from the live catalogue.
+- **"Write a WhatsApp to Maria about the new arrivals"** — a warm, ready-to-send message.
+- **"Plan our London trunk show for May and give me the plan as a report"** — a downloadable report (PDF/Excel) with past-event benchmarks, an invite priority list, a shipping estimate, and a checklist.
+
+A brand only ever sees **its own** information — never another brand's, even if asked.
+
+### For the AION team
+
+The Admin Portal's **AI Assistant** is the same helper with a wider view — it can look at **any single brand** or **compare across all brands**:
+
+- **"Total revenue by brand this year"** — a ranked breakdown, and it can draw a chart.
+- **"Which brand has the most claims?"**, **"How many active customers per brand?"**
+- **"Customer 360 brief for: Angela Gemma"** — a full profile for a specific brand's client.
+- **"Generate the daily Chubb export for yesterday"** or **"the monthly report for June"** — it produces the file with a download link.
+
+### How it knows things
+
+Every brand keeps its information in one of two places, and the assistant uses whichever fits:
+
+- **Live data** — the customers, sales and catalogue already in the platform.
+- **The knowledge base** — documents a brand uploads (its story, product details, care guides, even client "profile cards"). Some brands keep their clients and products here rather than in the live system.
+
+The assistant works out automatically where each brand's information lives, so nobody has to configure it.
+
+### What keeps it safe
+
+- **Stays in its lane.** A brand user only ever sees their own brand's data. This is enforced by the system, not just good manners — it holds even if someone tries to trick it.
+- **Read-only.** The assistant can look things up and summarise, but it can never change, delete, or add records.
+- **No making things up.** If the answer isn't in the data or the knowledge base, it says so plainly rather than inventing a figure.
 
 ---
 
