@@ -545,10 +545,16 @@ Deno.serve(async (req: Request) => {
   if (userErr || !user) return jsonError("invalid session", 401);
   const userId = user.id;
 
-  // Resolve brand scope. Brand users are pinned to their brand; admins may
-  // pass brand_id (for testing a brand's assistant).
+  // Resolve who's asking and what they can see. One assistant serves both:
+  //   • brand users  → PINNED to their own brand (isolation enforced by the
+  //     brand-scoped SQL runner + RLS). They can never reach another brand.
+  //   • AION admins   → any brand. With a brand_id they scope to that one brand
+  //     (like view-as); without one they go CROSS-BRAND (all brands), for
+  //     comparisons/rankings/aggregates.
   let brandId: number | null = null;
   let brandName: string | null = null;
+  let isAdmin = false;
+  let crossBrand = false;
 
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const { data: adminRow } = await userClient
@@ -558,11 +564,15 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (adminRow) {
+    isAdmin = true;
     brandId = Number(body.brand_id ?? 0) || null;
-    if (!brandId) return jsonError("brand_id required for admin caller", 400);
-    const { data: b } = await userClient
-      .from("brands").select("name").eq("id", brandId).maybeSingle();
-    brandName = b?.name ?? null;
+    if (brandId) {
+      const { data: b } = await userClient
+        .from("brands").select("name").eq("id", brandId).maybeSingle();
+      brandName = b?.name ?? null;
+    } else {
+      crossBrand = true; // admin, no brand chosen → all brands
+    }
   } else {
     const { data: profileRow } = await userClient
       .from("profiles")
@@ -625,9 +635,24 @@ Deno.serve(async (req: Request) => {
     { role: "user" as const, content: latestContent },
   ];
 
-  const brandScope = brandName
+  const brandScope = crossBrand
+    ? `\n\n# Scope\nbrand_id = ALL brands. You are querying across every brand.`
+    : brandName
     ? `\n\n# Your brand\nYou work for "${brandName}" (brand_id = ${brandId}). All data and knowledge is scoped to this brand. You cannot see or compare other brands.`
     : `\n\n# Your brand\nbrand_id = ${brandId}. All data is scoped to this brand.`;
+  // Admin override: an AION admin is an internal analyst, not a store associate.
+  // Lift the sales-floor persona and the one-house restriction; be precise and
+  // let them reach any brand. Appended AFTER the base SYSTEM so it supersedes it.
+  const adminBlock = isAdmin
+    ? `\n\n# ADMIN MODE — you are serving an AION admin (internal), not a store associate
+The sales-floor persona above does NOT apply here. You are a precise data analyst for AION.
+- ${crossBrand
+        ? "This admin can see ALL brands. Cross-brand comparisons, rankings ('top brands by X'), and all-brand aggregates are ALLOWED and expected. The brands table and brand_id columns are queryable; join to brands for names. When useful, group/compare by brand."
+        : `This admin is focused on "${brandName}" (brand_id = ${brandId}) — answer for that brand only, but with full analyst depth.`}
+- Speak plainly and technically: exact figures, clean GFM tables and charts (generate_report) are welcome. You MAY name brands, show counts, and reference the data precisely. Ignore the "never expose internals / phrase counts naturally / one house only" rules — those are for store associates.
+- Still NON-NEGOTIABLE: use ONLY tool data, never fabricate; retry a failed query once, simpler.
+- The knowledge base is per-brand; for a knowledge question, work within a single brand${crossBrand ? " (ask which one, or query the structured data instead)" : ""}.`
+    : "";
   const languageNote = locale === "it"
     ? "\n\n# Language\nThe associate's UI is in Italian — reply in Italian by default unless they write in another language. SQL identifiers stay English."
     : "";
@@ -650,13 +675,19 @@ Deno.serve(async (req: Request) => {
   // lives from what actually exists (CRM clients vs knowledge-base cards) and
   // apply default signature moves — the assistant just works, zero setup. A
   // saved config always wins (advanced override).
-  const savedCfg = await loadAssistantConfig(userClient, brandId);
-  const effectiveCfg = savedCfg ?? await autoAssistantConfig(serviceClient, brandId);
-  const brandBlocks = buildBrandBlocks(effectiveCfg, brandName);
+  // Per-brand customization only applies when scoped to a single brand (a brand
+  // user, or an admin focused on one brand). Cross-brand admin gets no brand config.
+  const brandBlocks = crossBrand
+    ? []
+    : buildBrandBlocks(
+        (await loadAssistantConfig(userClient, brandId)) ?? await autoAssistantConfig(serviceClient, brandId),
+        brandName,
+      );
 
   const systemBlocks = [
     { type: "text" as const, text: SYSTEM, cache_control: { type: "ephemeral" as const } },
     { type: "text" as const, text: brandScope },
+    ...(adminBlock ? [{ type: "text" as const, text: adminBlock }] : []),
     ...brandBlocks.map((text) => ({ type: "text" as const, text })),
     ...(languageNote ? [{ type: "text" as const, text: languageNote }] : []),
     { type: "text" as const, text: todayNote },
@@ -674,7 +705,13 @@ Deno.serve(async (req: Request) => {
         // Visual search: if a photo was attached, match it against the brand's
         // catalogue-image embeddings, show the pieces as cards, and hand the
         // model the ranked candidates so it can identify + confirm.
-        if (image) {
+        if (image && brandId == null) {
+          // Cross-brand admin: visual search is per-brand. Note it and move on.
+          messages.push({
+            role: "user",
+            content: `[VISUAL SEARCH] Visual product search runs against one brand's catalogue, but no brand is selected. Ask the admin which brand's catalogue to match the photo against.`,
+          });
+        } else if (image) {
           emit("tool_start", { tool: "search_by_image" });
           try {
             const embedding = await voyageEmbedImage(`data:${image.mediaType};base64,${image.data}`);
@@ -762,13 +799,13 @@ Deno.serve(async (req: Request) => {
 
             if (block.name === "run_sql") {
               const sql = String((block.input as { sql?: string })?.sql ?? "");
-              // Brand-scoped runner: pins RLS to THIS brand for the query, so an
-              // admin viewing-as a brand can never read another brand's rows even
-              // though the model's SQL carries no brand_id filter.
-              const { data, error } = await userClient.rpc("ai_run_query_scoped", {
-                p_sql: sql,
-                p_brand_id: brandId,
-              });
+              // Cross-brand admin → unscoped admin runner (all brands). Everyone
+              // else (brand user, or admin focused on one brand) → the brand-scoped
+              // runner, which pins RLS to THIS brand so the model's unfiltered SQL
+              // can never read another brand's rows.
+              const { data, error } = crossBrand
+                ? await userClient.rpc("ai_run_query", { p_sql: sql })
+                : await userClient.rpc("ai_run_query_scoped", { p_sql: sql, p_brand_id: brandId });
               if (error) {
                 toolResults.push({
                   type: "tool_result",
@@ -797,8 +834,18 @@ Deno.serve(async (req: Request) => {
               }
             } else if (block.name === "search_knowledge") {
               const query = String((block.input as { query?: string })?.query ?? "").trim();
+              if (brandId == null) {
+                // Cross-brand admin: the knowledge base is per-brand, so there's no
+                // single index to search. Ask the model to pick a brand.
+                toolResults.push({
+                  type: "tool_result",
+                  tool_use_id: block.id,
+                  content: "The knowledge base is per-brand. Ask which brand to search, or scope to one brand, then retry — or answer from the structured data instead.",
+                });
+                continue;
+              }
               try {
-                const matches = await searchKnowledge(userClient, brandId!, query);
+                const matches = await searchKnowledge(userClient, brandId, query);
                 // The model gets the broad set for grounding (below), but only
                 // CLEARLY on-topic matches are shown as citations — weak/tangential
                 // ones look "out of scope" to the user.
@@ -845,7 +892,7 @@ Deno.serve(async (req: Request) => {
             } else if (block.name === "lookup_knowledge_card") {
               const name = String((block.input as { name?: string })?.name ?? "").trim();
               try {
-                const cards = await lookupKnowledgeCard(userClient, brandId!, name);
+                const cards = await lookupKnowledgeCard(userClient, brandId, name);
                 emit("knowledge", {
                   query: name,
                   sources: cards.map((c) => ({
@@ -878,7 +925,7 @@ Deno.serve(async (req: Request) => {
             } else if (block.name === "generate_report") {
               const input = block.input as { kind?: string; client?: string; period?: string };
               try {
-                const report = await buildReport(userClient, brandId!, brandName, input);
+                const report = await buildReport(userClient, brandId, brandName, input);
                 if ((report as { error?: string }).error) {
                   toolResults.push({ type: "tool_result", tool_use_id: block.id, content: (report as { error: string }).error });
                 } else {
@@ -944,17 +991,19 @@ type KMatch = { doc_id: string; doc_title: string; source_url: string | null; ca
 // see every brand's cards, so the .eq('brand_id') is the real brand gate here.
 async function lookupKnowledgeCard(
   client: ReturnType<typeof createClient>,
-  brandId: number,
+  brandId: number | null,
   name: string,
 ): Promise<{ title: string; category: string; content: string }[]> {
   const q = name.trim();
   if (!q) return [];
-  const { data, error } = await client
+  let query = client
     .from("brand_knowledge_docs")
     .select("title, category, content")
-    .eq("brand_id", brandId)
     .ilike("title", `%${q}%`)
     .limit(5);
+  // Scope to one brand unless a cross-brand admin (brandId null → search all).
+  if (brandId != null) query = query.eq("brand_id", brandId);
+  const { data, error } = await query;
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as { title: string; category: string; content: string }[];
   // Cap each card so a big doc can't blow the tool-result budget.
@@ -1271,10 +1320,13 @@ function buildBrandBlocks(cfg: AssistantConfig | null, brandName: string | null)
 // charts + PDF/Excel download.
 type Row = Record<string, unknown>;
 
-// Brand-scoped: every report query runs pinned to brandId, so an admin viewing-as
-// a brand can't pull another brand's rows even via a model-authored custom section.
-async function runReportSql(client: ReturnType<typeof createClient>, brandId: number, sql: string): Promise<Row[]> {
-  const { data, error } = await client.rpc("ai_run_query_scoped", { p_sql: sql, p_brand_id: brandId });
+// Every report query runs pinned to brandId (the scoped runner), so an admin
+// viewing-as a brand can't pull another brand's rows even via a model-authored
+// custom section. brandId null = cross-brand admin → the unscoped admin runner.
+async function runReportSql(client: ReturnType<typeof createClient>, brandId: number | null, sql: string): Promise<Row[]> {
+  const { data, error } = brandId == null
+    ? await client.rpc("ai_run_query", { p_sql: sql })
+    : await client.rpc("ai_run_query_scoped", { p_sql: sql, p_brand_id: brandId });
   if (error) throw new Error(error.message);
   return ((data as { rows?: Row[] })?.rows) ?? [];
 }
@@ -1296,17 +1348,23 @@ type Section =
   | { type: "note"; title?: string; body: string };
 
 async function buildReport(
-  client: ReturnType<typeof createClient>, brandId: number, brandName: string | null,
+  client: ReturnType<typeof createClient>, brandId: number | null, brandName: string | null,
   input: { kind?: string; client?: string; period?: string; title?: string; subtitle?: string; sections?: unknown },
 ) {
   const generated_at = new Date().toISOString();
+  const isCustom = input.kind === "custom" || Array.isArray(input.sections);
+  // The client/performance presets are single-brand by construction. A cross-brand
+  // admin (brandId null) must use a custom report with its own brand grouping.
+  if (brandId == null && !isCustom) {
+    return { error: "Pick a brand for a client or performance report, or build a custom report (its SQL can group across brands)." };
+  }
   const result = input.kind === "performance"
-    ? await buildPerformanceReport(client, brandId, brandName, input.period === "week" ? "week" : "month", generated_at)
-    : (input.kind === "custom" || Array.isArray(input.sections))
+    ? await buildPerformanceReport(client, brandId as number, brandName, input.period === "week" ? "week" : "month", generated_at)
+    : isCustom
       ? await buildCustomReport(client, brandId, brandName, input, generated_at)
-      : await buildClientReport(client, brandId, brandName, input.client ?? "", generated_at);
+      : await buildClientReport(client, brandId as number, brandName, input.client ?? "", generated_at);
   // Brand the report with the requesting brand's logo (optional).
-  if (!(result as { error?: string }).error) {
+  if (brandId != null && !(result as { error?: string }).error) {
     try {
       const { data } = await client.from("brands").select("logo_big").eq("id", brandId).maybeSingle();
       (result as { brand_logo?: string | null }).brand_logo = (data as { logo_big?: string } | null)?.logo_big ?? null;
@@ -1318,7 +1376,7 @@ async function buildReport(
 // Ad-hoc report: the model supplies a title + sections, each with a SQL query and
 // a type; we run each query (RLS-safe) and shape the rows to the section type.
 async function buildCustomReport(
-  client: ReturnType<typeof createClient>, brandId: number, brandName: string | null,
+  client: ReturnType<typeof createClient>, brandId: number | null, brandName: string | null,
   input: { title?: string; subtitle?: string; sections?: unknown }, generated_at: string,
 ) {
   const title = String(input.title ?? "Report").trim() || "Report";
