@@ -606,7 +606,9 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
       const accessToken = sessionData.session?.access_token;
       if (!accessToken) throw new Error("Not signed in");
 
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/query-ai`, {
+      // Merged assistant: admins hit the same function brand users do, but with
+      // all-brand (or view-as) scope and the analyst persona + charts + exports.
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/brand-assistant`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${accessToken}`,

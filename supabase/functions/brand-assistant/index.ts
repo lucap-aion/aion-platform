@@ -19,6 +19,9 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.32.1";
 import { createClient } from "npm:@supabase/supabase-js@2";
+// Analyst persona + full schema/glossary/playbooks, used for ADMIN callers (the
+// merged assistant serves both the sales floor and the admin analyst).
+import { ANALYST_SYSTEM } from "../_shared/analyst-prompt.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -521,7 +524,61 @@ const TOOLS = [
       required: ["kind"],
     },
   },
+  // ── Admin-only tools (folded in from query-ai; gated to admin callers) ──────
+  {
+    name: "render_chart",
+    description: "Tell the client to render a Recharts chart from the most recent run_sql result.",
+    input_schema: {
+      type: "object",
+      properties: {
+        type: { type: "string", enum: ["bar", "line", "pie"] },
+        x_key: { type: "string" },
+        y_keys: { type: "array", items: { type: "string" } },
+        title: { type: "string" },
+      },
+      required: ["type", "x_key", "y_keys"],
+    },
+  },
+  {
+    name: "generate_daily_chubb_export",
+    description:
+      "Generate the daily Chubb-formatted export (CSV/XLSX) for a date. `kind`: " +
+      "'new_policies' (SalesFile of policies started that day, status=live), " +
+      "'cancelled_policies' (cancellation SalesFile), 'claims' (daily Claims XLSX). " +
+      "Defaults to yesterday. Returns one signed download URL per Chubb-reporting " +
+      "brand. Does NOT push to Chubb SFTP.",
+    input_schema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "YYYY-MM-DD. Defaults to yesterday (UTC)." },
+        kind: { type: "string", enum: ["new_policies", "cancelled_policies", "claims"], description: "Which export. Default 'new_policies'." },
+        brand_id: { type: "integer", description: "Optional brand id to scope to one brand." },
+      },
+    },
+  },
+  {
+    name: "generate_monthly_internal_report",
+    description:
+      "Generate the Monthly Internal Policies Report (Excel) for a month. Defaults " +
+      "to every Chubb-reporting brand; pass brand_id to scope. Returns one signed " +
+      "download URL per brand. Use for 'the monthly report' / 'internal report'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        year: { type: "integer", description: "Four-digit year. Defaults to previous month's year." },
+        month: { type: "integer", minimum: 1, maximum: 12, description: "Month 1-12. Defaults to previous month." },
+        brand_id: { type: "integer", description: "Optional brand id to scope to one brand." },
+      },
+    },
+  },
 ];
+
+// Tool sets by role: brand users get the sales-floor toolkit; admins get the
+// analyst toolkit (charts + Chubb/monthly exports). generate_report is brand-only
+// (the admin UI renders 'chart'/'report_files', not the 'report' object);
+// shipping_estimate is a trunk-show/brand tool.
+const BRAND_TOOL_NAMES = new Set(["search_knowledge", "lookup_knowledge_card", "shipping_estimate", "run_sql", "generate_report"]);
+const ADMIN_TOOL_NAMES = new Set(["run_sql", "search_knowledge", "lookup_knowledge_card", "render_chart", "generate_daily_chubb_export", "generate_monthly_internal_report"]);
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -565,7 +622,14 @@ Deno.serve(async (req: Request) => {
 
   if (adminRow) {
     isAdmin = true;
+    // Scope target: an explicit brand_id, or (from the admin "Ask the data" UI)
+    // the brand of the profile the admin is viewing-as. Neither → cross-brand.
     brandId = Number(body.brand_id ?? 0) || null;
+    if (!brandId && body.impersonate_profile_id) {
+      const { data: ip } = await userClient
+        .from("profiles").select("brand_id").eq("id", String(body.impersonate_profile_id)).maybeSingle();
+      brandId = (ip?.brand_id as number) ?? null;
+    }
     if (brandId) {
       const { data: b } = await userClient
         .from("brands").select("name").eq("id", brandId).maybeSingle();
@@ -635,24 +699,16 @@ Deno.serve(async (req: Request) => {
     { role: "user" as const, content: latestContent },
   ];
 
-  const brandScope = crossBrand
-    ? `\n\n# Scope\nbrand_id = ALL brands. You are querying across every brand.`
-    : brandName
-    ? `\n\n# Your brand\nYou work for "${brandName}" (brand_id = ${brandId}). All data and knowledge is scoped to this brand. You cannot see or compare other brands.`
-    : `\n\n# Your brand\nbrand_id = ${brandId}. All data is scoped to this brand.`;
-  // Admin override: an AION admin is an internal analyst, not a store associate.
-  // Lift the sales-floor persona and the one-house restriction; be precise and
-  // let them reach any brand. Appended AFTER the base SYSTEM so it supersedes it.
-  const adminBlock = isAdmin
-    ? `\n\n# ADMIN MODE — you are serving an AION admin (internal), not a store associate
-The sales-floor persona above does NOT apply here. You are a precise data analyst for AION.
-- ${crossBrand
-        ? "This admin can see ALL brands. Cross-brand comparisons, rankings ('top brands by X'), and all-brand aggregates are ALLOWED and expected. The brands table and brand_id columns are queryable; join to brands for names. When useful, group/compare by brand."
-        : `This admin is focused on "${brandName}" (brand_id = ${brandId}) — answer for that brand only, but with full analyst depth.`}
-- Speak plainly and technically: exact figures, clean GFM tables and charts (generate_report) are welcome. You MAY name brands, show counts, and reference the data precisely. Ignore the "never expose internals / phrase counts naturally / one house only" rules — those are for store associates.
-- Still NON-NEGOTIABLE: use ONLY tool data, never fabricate; retry a failed query once, simpler.
-- The knowledge base is per-brand; for a knowledge question, work within a single brand${crossBrand ? " (ask which one, or query the structured data instead)" : ""}.`
-    : "";
+  // Role-switch the whole persona. Brand users get the sales-floor SYSTEM; AION
+  // admins get the analyst ANALYST_SYSTEM (full schema + glossary + playbooks).
+  const baseSystem = isAdmin ? ANALYST_SYSTEM : SYSTEM;
+  const scopeNote = !isAdmin
+    ? (brandName
+        ? `\n\n# Your brand\nYou work for "${brandName}" (brand_id = ${brandId}). All data and knowledge is scoped to this brand. You cannot see or compare other brands.`
+        : `\n\n# Your brand\nbrand_id = ${brandId}. All data is scoped to this brand.`)
+    : crossBrand
+    ? `\n\n# Scope — ALL brands\nYou are an AION admin analyst with read access to EVERY brand. Cross-brand comparisons, rankings ("top brands by X") and all-brand aggregates are expected. Join to brands for names; group/compare by brand when useful.`
+    : `\n\n# Scope — one brand\nYou are focused on "${brandName}" (brand_id = ${brandId}). Filter EVERY query to brand_id = ${brandId} (for tables without the column, join through policies). Do not reference or compare other brands.`;
   const languageNote = locale === "it"
     ? "\n\n# Language\nThe associate's UI is in Italian — reply in Italian by default unless they write in another language. SQL identifiers stay English."
     : "";
@@ -675,9 +731,10 @@ The sales-floor persona above does NOT apply here. You are a precise data analys
   // lives from what actually exists (CRM clients vs knowledge-base cards) and
   // apply default signature moves — the assistant just works, zero setup. A
   // saved config always wins (advanced override).
-  // Per-brand customization only applies when scoped to a single brand (a brand
-  // user, or an admin focused on one brand). Cross-brand admin gets no brand config.
-  const brandBlocks = crossBrand
+  // Per-brand customization (name, data-home, signature moves) only applies to a
+  // brand USER. Admins use the analyst persona and query directly, so no brand
+  // config blocks.
+  const brandBlocks = isAdmin
     ? []
     : buildBrandBlocks(
         (await loadAssistantConfig(userClient, brandId)) ?? await autoAssistantConfig(serviceClient, brandId),
@@ -685,13 +742,16 @@ The sales-floor persona above does NOT apply here. You are a precise data analys
       );
 
   const systemBlocks = [
-    { type: "text" as const, text: SYSTEM, cache_control: { type: "ephemeral" as const } },
-    { type: "text" as const, text: brandScope },
-    ...(adminBlock ? [{ type: "text" as const, text: adminBlock }] : []),
+    { type: "text" as const, text: baseSystem, cache_control: { type: "ephemeral" as const } },
+    { type: "text" as const, text: scopeNote },
     ...brandBlocks.map((text) => ({ type: "text" as const, text })),
     ...(languageNote ? [{ type: "text" as const, text: languageNote }] : []),
     { type: "text" as const, text: todayNote },
   ];
+
+  const activeTools = TOOLS.filter((t) =>
+    (isAdmin ? ADMIN_TOOL_NAMES : BRAND_TOOL_NAMES).has(t.name)
+  );
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -769,7 +829,7 @@ The sales-floor persona above does NOT apply here. You are a precise data analys
             model: MODEL,
             max_tokens: MAX_TOKENS,
             system: systemBlocks,
-            tools: TOOLS as Anthropic.Tool[],
+            tools: activeTools as Anthropic.Tool[],
             messages,
           });
 
@@ -938,6 +998,46 @@ The sales-floor persona above does NOT apply here. You are a precise data analys
                 }
               } catch (e) {
                 toolResults.push({ type: "tool_result", tool_use_id: block.id, is_error: true, content: `report failed: ${e instanceof Error ? e.message : "unknown"}` });
+              }
+            } else if (block.name === "render_chart") {
+              // Admin analyst: chart from the most recent run_sql result.
+              emit("chart", {
+                type: String((block.input as { type?: string })?.type ?? "bar"),
+                x_key: String((block.input as { x_key?: string })?.x_key ?? ""),
+                y_keys: Array.isArray((block.input as { y_keys?: unknown[] })?.y_keys)
+                  ? (block.input as { y_keys: unknown[] }).y_keys.map(String) : [],
+                title: (block.input as { title?: string })?.title ? String((block.input as { title: string }).title) : undefined,
+              });
+              toolResults.push({ type: "tool_result", tool_use_id: block.id, content: "chart spec accepted" });
+            } else if (block.name === "generate_daily_chubb_export" || block.name === "generate_monthly_internal_report") {
+              // Admin-only export tools — proxy to the existing generator edge
+              // functions (they return signed download URLs, no SFTP push).
+              const isDaily = block.name === "generate_daily_chubb_export";
+              const fnUrl = `${SUPABASE_URL}/functions/v1/${isDaily ? "generate-daily-chubb-export" : "generate-internal-report"}`;
+              const inp = block.input as Record<string, unknown>;
+              const payload = isDaily
+                ? { date: inp.date ?? null, kind: inp.kind ?? "new_policies", brand_id: inp.brand_id ?? null }
+                : { year: inp.year ?? null, month: inp.month ?? null, brand_id: inp.brand_id ?? null };
+              try {
+                const res = await fetch(fnUrl, {
+                  method: "POST",
+                  headers: { "Authorization": authHeader, "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+                  body: JSON.stringify(payload),
+                });
+                const out = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                  toolResults.push({ type: "tool_result", tool_use_id: block.id, is_error: true, content: `export failed: ${(out as { error?: string })?.error ?? `HTTP ${res.status}`}` });
+                } else {
+                  const reports = Array.isArray((out as { reports?: unknown[] })?.reports) ? (out as { reports: unknown[] }).reports : [];
+                  emit("report_files", { reports });
+                  toolResults.push({
+                    type: "tool_result",
+                    tool_use_id: block.id,
+                    content: JSON.stringify({ generated: reports.length, brands: reports.map((r) => ({ brand_name: (r as { brand_name?: string }).brand_name, row_count: (r as { row_count?: number }).row_count })) }),
+                  });
+                }
+              } catch (e) {
+                toolResults.push({ type: "tool_result", tool_use_id: block.id, is_error: true, content: `export crashed: ${e instanceof Error ? e.message : "unknown"}` });
               }
             } else {
               toolResults.push({
