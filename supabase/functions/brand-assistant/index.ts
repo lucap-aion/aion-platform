@@ -709,9 +709,18 @@ Deno.serve(async (req: Request) => {
     : crossBrand
     ? `\n\n# Scope — ALL brands\nYou are an AION admin analyst with read access to EVERY brand. Cross-brand comparisons, rankings ("top brands by X") and all-brand aggregates are expected. Join to brands for names; group/compare by brand when useful.`
     : `\n\n# Scope — one brand\nYou are focused on "${brandName}" (brand_id = ${brandId}). Filter EVERY query to brand_id = ${brandId} (for tables without the column, join through policies). Do not reference or compare other brands.`;
+  // The analyst prompt predates these tables; admins need them or they answer
+  // catalogue/event questions against the wrong (or empty) table.
+  const adminSchemaSupplement = isAdmin
+    ? `\n\n# Additional tables (NOT in the schema above — use these)
+- storefront_products(id, brand_id, name, category, collection, description, sku, price, price_currency, compare_at_price, available, image_url, product_url) — the brand's FULL live e-commerce catalogue (complete range, photos, prices). For "how many products / what's in the catalogue / the online range / price / availability", query THIS — NOT catalogues (catalogues is only the sales-synced subset that links a policy to its item, and is empty for brands whose range lives online, e.g. Luisa Beccaria). Brand-scoped by brand_id.
+- events(id, brand_id, name, city, country, venue, start_date, end_date, status, pr_agency, pr_cost, venue_cost, shipping_cost, other_cost, guests_invited, guests_attended, revenue) — trunk shows / brand events (past + planned).
+- event_attendees(id, event_id, brand_id, customer_id, customer_name, segment, invited, attended, influencer, converted, revenue) — per-event invite & attribution list.
+- brand_knowledge_docs(id, brand_id, title, category, source_type, source_url, content) — indexed brand knowledge (story/care/policy, and for some brands client/product "Scheda …" cards). Prefer search_knowledge / lookup_knowledge_card over run_sql for these.`
+    : "";
   const languageNote = locale === "it"
     ? "\n\n# Language\nThe associate's UI is in Italian — reply in Italian by default unless they write in another language. SQL identifiers stay English."
-    : "";
+    : "\n\n# Language\nThe UI is in English — reply in English by default unless the user clearly writes in another language. Do not default to the brand's home language for ambiguous or empty input.";
   // The model has no clock — give it today's date so "this month / expiring
   // soon / recent" reasoning is correct. Boutique-local (Europe/Rome).
   const todayNote = (() => {
@@ -744,6 +753,7 @@ Deno.serve(async (req: Request) => {
   const systemBlocks = [
     { type: "text" as const, text: baseSystem, cache_control: { type: "ephemeral" as const } },
     { type: "text" as const, text: scopeNote },
+    ...(adminSchemaSupplement ? [{ type: "text" as const, text: adminSchemaSupplement }] : []),
     ...brandBlocks.map((text) => ({ type: "text" as const, text })),
     ...(languageNote ? [{ type: "text" as const, text: languageNote }] : []),
     { type: "text" as const, text: todayNote },
