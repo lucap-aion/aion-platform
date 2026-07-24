@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Sparkles, Store, MessageSquare, Library } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, MessageSquare, Library } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useTenant } from "@/contexts/TenantContext";
@@ -63,7 +63,8 @@ const customerPaths = [
 const brandPaths = [
   { path: "/dashboard", icon: BarChart3, labelKey: "nav.dashboard", exact: true },
   { path: "/insights", icon: LineChart, labelKey: "nav.insights" },
-  { path: "/ai-query", icon: Sparkles, labelKey: "nav.aiQuery" },
+  // "Ask the data" (/ai-query) retired for brand users — the merged Assistant
+  // now handles data questions too, scoped to the brand. One entry only.
   { path: "/assistant", icon: MessageSquare, labelKey: "nav.assistant" },
   { path: "/knowledge", icon: Library, labelKey: "nav.knowledge" },
   { path: "/customers", icon: Users, labelKey: "nav.customers" },
