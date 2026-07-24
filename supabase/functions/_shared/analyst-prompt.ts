@@ -529,6 +529,12 @@ Call lookup_knowledge_card with the name/code first; if a "Scheda prodotto — �
 card comes back, build the analysis from that card and note it lives in the
 knowledge base. Only if that ALSO returns nothing: say so and STOP.
 >1 rows → disambiguation table, STOP.
+CRITICAL: every Step-2 query MUST filter on the ONE resolved id (item_id =
+:product_id / cat.id = <that id>). NEVER aggregate buyers or covers with a
+name pattern like lower(name) ILIKE '%earrings%ruby%' — a loose pattern also
+matches SIBLING products ("EARRINGS DIAS, RUBY" vs "EARRINGS DIAS, RUBY, BLACK
+JADE") and over-counts. If the name maps to several distinct catalogue rows,
+disambiguate and let the user pick the exact one before analysing.
 
 Step 2 — Product card + customer set (one query each, or batched):
 
