@@ -164,6 +164,17 @@ SQL tips: EUR money; cast before round (ROUND(AVG(x)::numeric,2)); ILIKE
 '%name%' to find a client; ORDER BY start_date DESC for recency. When you list
 products, SELECT image_url + price so photos and prices render; for clients
 SELECT avatar. If a query errors, retry once, simpler.
+Dates are timestamps: for a SINGLE calendar day always filter start_date::date =
+'YYYY-MM-DD' (a bare start_date = 'YYYY-MM-DD' matches only midnight and silently
+misses the day — never use it). For a month use date_trunc('month', start_date).
+
+# Attachments — the associate can attach a spreadsheet
+When a turn includes an "--- ATTACHED SPREADSHEET … ---" block, that is a file the
+associate deliberately attached for THIS question — it is legitimate input, not an
+external/off-limits source. Read it and do what they ask: summarise it, total or
+average columns, spot the trend, cross-reference it with the catalogue/knowledge,
+or turn it into a report. Never refuse it as "an external file". (It's the only
+outside data you may use; product/client facts still come from the tools.)
 
 IMPORTANT — how run_sql results reach the associate. Only results WITH A PHOTO
 (a product/client image column) render, as clean photo cards. Plain
@@ -708,7 +719,7 @@ Deno.serve(async (req: Request) => {
         : `\n\n# Your brand\nbrand_id = ${brandId}. All data is scoped to this brand.`)
     : crossBrand
     ? `\n\n# Scope — ALL brands\nYou are an AION admin analyst with read access to EVERY brand. Cross-brand comparisons, rankings ("top brands by X") and all-brand aggregates are expected. Join to brands for names; group/compare by brand when useful.`
-    : `\n\n# Scope — one brand\nYou are focused on "${brandName}" (brand_id = ${brandId}). Filter EVERY query to brand_id = ${brandId} (for tables without the column, join through policies). Do not reference or compare other brands.`;
+    : `\n\n# Scope — one brand\nYou are focused on "${brandName}" (brand_id = ${brandId}). Your data access is filtered to this brand, so queries on brands / cross-brand aggregates will only ever RETURN this one brand — that is the scope filter, NOT evidence that other brands don't exist. Never say "only one brand is in the database" or "the only active brand". If asked to rank or compare brands, reply that you're in single-brand view for ${brandName} and cross-brand comparison needs the all-brands view — then give this brand's own numbers.`;
   // The analyst prompt predates these tables; admins need them or they answer
   // catalogue/event questions against the wrong (or empty) table.
   const adminSchemaSupplement = isAdmin
@@ -832,6 +843,7 @@ Deno.serve(async (req: Request) => {
           }
         }
 
+        let sawText = false;
         for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
           emit("turn_start", { turn });
 
@@ -849,7 +861,7 @@ Deno.serve(async (req: Request) => {
               (ev.delta as { type?: string }).type === "text_delta"
             ) {
               const text = (ev.delta as { text?: string }).text ?? "";
-              if (text) emit("text_delta", { text });
+              if (text) { emit("text_delta", { text }); sawText = true; }
             }
           }
 
@@ -1059,6 +1071,32 @@ Deno.serve(async (req: Request) => {
             }
           }
           messages.push({ role: "user", content: toolResults });
+        }
+
+        // Recovery: the model gathered data via tools but produced NO answer text
+        // (or ran out of tool turns). Never leave the user with an empty reply —
+        // force ONE final text-only turn from what was gathered.
+        if (!sawText) {
+          try {
+            const recovery = anthropic.messages.stream({
+              model: MODEL,
+              max_tokens: MAX_TOKENS,
+              system: systemBlocks,
+              messages: [
+                ...messages,
+                { role: "user", content: "Write the answer NOW as text, from the data already gathered above. Do not call any tools. Follow your normal format; if a part is missing, say so plainly. Never reply empty." },
+              ],
+            });
+            for await (const ev of recovery) {
+              if (ev.type === "content_block_delta" && (ev.delta as { type?: string }).type === "text_delta") {
+                const text = (ev.delta as { text?: string }).text ?? "";
+                if (text) { emit("text_delta", { text }); sawText = true; }
+              }
+            }
+            await recovery.finalMessage();
+          } catch (e) {
+            console.warn("[brand-assistant recovery]", e instanceof Error ? e.message : e);
+          }
         }
 
         // Suggest 3 natural follow-ups the associate might tap next (cheap, fast
