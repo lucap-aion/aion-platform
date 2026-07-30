@@ -76,6 +76,7 @@ const BRANDS_SCHEMA: ExportColumn[] = [
   { key: "chubb_policy_prefix",   label: "Chubb Policy Prefix" },
 ];
 import AdminDrawer from "./_components/AdminDrawer";
+import BrandOnboarding from "./_components/BrandOnboarding";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, TextArea, SaveBar } from "./_components/FormField";
 import { ImageUpload } from "./_components/ImageUpload";
@@ -147,6 +148,8 @@ const AdminBrands = () => {
   const [faqItStr, setFaqItStr] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Brand | null>(null);
+  // Brand whose demo-preparation panel is open (lead → demo, in one place).
+  const [onboarding, setOnboarding] = useState<Brand | null>(null);
   const [deleting, setDeleting] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -305,6 +308,18 @@ const AdminBrands = () => {
         onAdd={openAdd} addLabel="New Brand"
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Brand)}
+        extraRowAction={(row) => {
+          const r = row as unknown as Brand;
+          return (
+            <button
+              onClick={(e) => { e.stopPropagation(); setOnboarding(r); }}
+              title="Prepare this brand for a demo"
+              className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Demo
+            </button>
+          );
+        }}
         filters={[
           { key: "status", label: "Status", options: [{ value: "pending", label: "Pending" }, { value: "verified", label: "Verified" }, { value: "blocked", label: "Blocked" }] },
         ]}
@@ -341,6 +356,20 @@ const AdminBrands = () => {
           },
         ]}
       />
+
+      <AdminDrawer
+        open={onboarding !== null}
+        onClose={() => setOnboarding(null)}
+        title={onboarding ? `Prepare demo: ${onboarding.name ?? ""}` : ""}
+      >
+        {onboarding && (
+          <BrandOnboarding
+            brandId={onboarding.id!}
+            brandName={onboarding.name ?? ""}
+            website={onboarding.website ?? null}
+          />
+        )}
+      </AdminDrawer>
 
       <AdminDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={drawerTitle}>
         <form onSubmit={handleSave} className="space-y-4">

@@ -28,13 +28,30 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Brand storefronts we can ingest. Shopify stores expose /products.json.
-const STOREFRONTS: Record<number, { base: string; currency: string; keepUntyped?: boolean }> = {
-  2: { base: "https://www.robertocoin.com", currency: "EUR" }, // Roberto Coin
-  // Luisa Beccaria's Shopify leaves product_type empty on every item, so we must
-  // NOT skip untyped products for this store (they are the real catalogue).
-  17: { base: "https://luisabeccaria.com", currency: "EUR", keepUntyped: true },
-};
+// Brand storefronts we can ingest (Shopify stores expose /products.json) come
+// from the storefront_sources table, not from code: onboarding a new brand is an
+// INSERT, not a deploy. onboard-brand detects the feed and writes the row.
+type Storefront = { base: string; currency: string; keepUntyped: boolean };
+
+async function loadStorefronts(
+  admin: ReturnType<typeof createClient>, only: number | null,
+): Promise<Map<number, Storefront>> {
+  let q = admin.from("storefront_sources")
+    .select("brand_id, base_url, currency, keep_untyped, platform, enabled")
+    .eq("enabled", true).eq("platform", "shopify");
+  if (only) q = q.eq("brand_id", only);
+  const { data, error } = await q;
+  if (error) throw new Error(`storefront_sources: ${error.message}`);
+  const out = new Map<number, Storefront>();
+  for (const r of data ?? []) {
+    out.set(Number(r.brand_id), {
+      base: String(r.base_url).replace(/\/+$/, ""),
+      currency: String(r.currency ?? "EUR"),
+      keepUntyped: Boolean(r.keep_untyped),
+    });
+  }
+  return out;
+}
 
 // product_type values that aren't real sellable jewelry.
 const SKIP_TYPES = new Set(["storytelling", "storytelling 3", "gadget", ""]);
@@ -65,11 +82,15 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const only = Number(body.brand_id ?? 0) || null;
   const max = Math.min(Number(body.max ?? MAX_EMBED_PER_RUN) || MAX_EMBED_PER_RUN, MAX_EMBED_PER_RUN);
-  const brandIds = Object.keys(STOREFRONTS).map(Number).filter((b) => !only || b === only);
-
   try {
+    const stores = await loadStorefronts(admin, only);
+    if (stores.size === 0) {
+      return json({ results: [], note: only
+        ? `brand ${only} has no enabled Shopify storefront_sources row`
+        : "no enabled storefronts configured" });
+    }
     const results = [];
-    for (const brandId of brandIds) results.push(await syncBrand(admin, brandId, max));
+    for (const [brandId, store] of stores) results.push(await syncBrand(admin, brandId, store, max));
     return json({ results });
   } catch (err) {
     console.error("[sync-storefront]", err);
@@ -77,9 +98,10 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-async function syncBrand(admin: ReturnType<typeof createClient>, brandId: number, maxEmbed: number) {
-  const store = STOREFRONTS[brandId];
-  const products = await fetchStorefront(store.base, store.keepUntyped ?? false);
+async function syncBrand(
+  admin: ReturnType<typeof createClient>, brandId: number, store: Storefront, maxEmbed: number,
+) {
+  const products = await fetchStorefront(store.base, store.keepUntyped);
 
   // 1. Upsert product fields for the whole range (cheap, every run).
   const rows = products.map((p) => ({
