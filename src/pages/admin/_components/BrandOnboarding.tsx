@@ -82,28 +82,52 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
     return () => { if (poll.current !== null) { window.clearInterval(poll.current); poll.current = null; } };
   }, [status?.counts?.crawl_pending, refresh]);
 
+  // One request PER STAGE, never all of them in one.
+  //
+  // Asking the function to run the whole pipeline in a single call exceeds the
+  // edge runtime's wall clock on a real brand — a 500-page crawl seed plus a
+  // 481-product catalogue sync with image embedding. The work completes
+  // server-side but the caller gets nothing back, so the admin sees a failure
+  // for something that actually succeeded. Stage by stage also means the panel
+  // fills in as it goes instead of sitting on one spinner.
   const run = async (stages?: StageKey[]) => {
-    const label = stages?.length === 1 ? STAGES.find((s) => s.key === stages[0])?.label ?? "Stage" : "Demo preparation";
-    setBusy(stages?.length === 1 ? stages[0] : "all");
+    const queue = (stages?.length ? stages : STAGES.map((s) => s.key))
+      .filter((k) => demoEnabled || !DEMO_STAGES.includes(k));
+    const single = queue.length === 1;
+    const label = single ? STAGES.find((s) => s.key === queue[0])?.label ?? "Stage" : "Onboarding";
     setNeedsTicket(false);
-    try {
-      const options: Record<string, unknown> = {};
-      if (avgTicket.trim()) options.avg_ticket = Number(avgTicket.trim());
-      const out = await call({ stages, options });
-      const ran = (out.ran ?? {}) as Record<string, Record<string, unknown>>;
-      if (ran.demo_users?.accounts) setAccounts(ran.demo_users.accounts as Record<string, Account>);
-      setStatus(out.status as unknown as Status);
 
-      const failed = Object.entries(ran).find(([, v]) => v?.ok === false);
-      if (failed) {
-        if (failed[1]?.needs === "avg_ticket") setNeedsTicket(true);
-        toast({ title: `${label} stopped`, description: String(failed[1]?.reason ?? "see the stage detail"), variant: "destructive" });
-      } else {
-        toast({ title: `${label} complete` });
+    const options: Record<string, unknown> = {};
+    if (avgTicket.trim()) options.avg_ticket = Number(avgTicket.trim());
+
+    let stopped: { stage: StageKey; reason: string } | null = null;
+    for (const stage of queue) {
+      setBusy(single ? stage : `all:${stage}`);
+      try {
+        const out = await call({ stages: [stage], options });
+        const result = ((out.ran ?? {}) as Record<string, Record<string, unknown>>)[stage] ?? {};
+        if (result.accounts) setAccounts(result.accounts as Record<string, Account>);
+        setStatus(out.status as unknown as Status);
+        if (result.ok === false) {
+          if (result.needs === "avg_ticket") setNeedsTicket(true);
+          stopped = { stage, reason: String(result.reason ?? "stage did not complete") };
+          break;
+        }
+      } catch (e) {
+        stopped = { stage, reason: e instanceof Error ? e.message : "unknown error" };
+        break;
       }
-    } catch (e) {
-      toast({ title: `${label} failed`, description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
-    } finally { setBusy(null); }
+    }
+    setBusy(null);
+
+    if (stopped) {
+      toast({
+        title: `${label} stopped at ${STAGES.find((s) => s.key === stopped!.stage)?.label ?? stopped.stage}`,
+        description: stopped.reason, variant: "destructive",
+      });
+    } else {
+      toast({ title: `${label} complete` });
+    }
   };
 
   // Never purge blind: fetch exactly what would go and what would stay, and make
@@ -194,7 +218,7 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
           disabled={!website || busy !== null}
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
-          {busy === "all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+          {busy?.startsWith("all") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
           {demoEnabled ? "Prepare demo" : "Run onboarding"}
         </button>
         <button onClick={() => void buildDeck()} disabled={busy !== null}

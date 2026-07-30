@@ -61,7 +61,9 @@ const customerPaths = [
 // after Dashboard — because they're the marquee features. Position carries
 // the prominence; no separate group, no icon tinting.
 const brandPaths = [
-  { path: "/dashboard", icon: BarChart3, labelKey: "nav.dashboard", exact: true },
+  // The brand landing page: "Home", not "Dashboard" — it is where the day
+  // starts, not a reporting screen (Insights is the reporting screen).
+  { path: "/dashboard", icon: Home, labelKey: "nav.home", exact: true },
   { path: "/insights", icon: LineChart, labelKey: "nav.insights" },
   // "Ask the data" (/ai-query) retired for brand users — the merged Assistant
   // now handles data questions too, scoped to the brand. One entry only.
