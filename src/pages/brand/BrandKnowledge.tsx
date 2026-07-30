@@ -153,7 +153,8 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
     // the array yielded undefined, and the fallback quietly summed only the 500
     // documents we had loaded — 2,914 instead of 6,173. A wrong number is worse
     // than an obviously missing one, so this falls back to null, not a partial.
-    const totalsRow = Array.isArray(chunkTotalRow) ? chunkTotalRow[0] : (chunkTotalRow ?? null);
+    const totals = chunkTotalRow as unknown;
+    const totalsRow = Array.isArray(totals) ? totals[0] : totals;
     const chunkTotal = (totalsRow as { chunks?: number } | null)?.chunks;
     setChunkTotalCount(typeof chunkTotal === "number" ? chunkTotal : null);
     setSources((srcData as unknown as SourceRow[]) ?? []);
