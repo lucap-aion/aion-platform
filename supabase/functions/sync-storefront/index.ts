@@ -199,13 +199,17 @@ async function fetchStorefront(base: string, keepUntyped = false): Promise<SProd
   return out;
 }
 
-// Collection = the tag that isn't a housekeeping tag or the category itself.
+// Collection = the tag that isn't a housekeeping tag, an internal code, or the
+// category itself. Shops tag products with ERP codes too ("SAPG::9370 ~ Color");
+// those are noise to a sales associate, so skip them and take the next tag —
+// the DB trigger normalises whatever still gets through.
 function deriveCollection(tags: string[] | string | undefined, category: string): string | null {
   const list = Array.isArray(tags)
     ? tags
     : typeof tags === "string" ? tags.split(",").map((t) => t.trim()) : [];
   const stop = new Set(["all products", "new", "sale", category.toLowerCase()]);
-  const pick = list.find((t) => t && !stop.has(t.trim().toLowerCase()));
+  const isCode = (t: string) => /^SAPG::/i.test(t) || /~\s*Color$/i.test(t);
+  const pick = list.find((t) => t && !stop.has(t.trim().toLowerCase()) && !isCode(t.trim()));
   return pick ? pick.trim() : null;
 }
 

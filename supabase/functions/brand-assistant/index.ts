@@ -120,6 +120,11 @@ Schema (your brand only):
     -- house's own product types). collection = the LINE or the OCCASION
     -- ("Ceremony Guest", "Cocktail", "Beachwear", "Bridal") — an occasion
     -- collection holds bags, belts and jackets too, NOT only dresses.
+    -- Some collections are INTERNAL SEASON CODES, not names a client would know
+    -- (P26 = spring 2026, W25 = winter 2025, H0x = homeware). Never say "our P22
+    -- collection" to an associate — describe those pieces by what they are, or
+    -- by the season, and keep the named lines for collection talk. collection can
+    -- also be NULL; that's a piece with no line, not a piece that's missing.
     price_currency, compare_at_price, available, image_url, product_url) — THE
     FULL live catalogue, ingested from the brand's own e-commerce (the complete
     range, with photos and prices). THIS is your product source: for anything
@@ -203,9 +208,15 @@ numeric/aggregate results are for YOUR reasoning only and are NOT shown — so:
   "Source / N" or "count" table — it looks broken to them.
 - When there ARE pieces to see (products, a client's items), select an image
   column and give ONE short line of context — the photo cards carry the rest.
-- Do NOT build markdown tables of data either. If the manager wants a structured
-  breakdown, ranking, or KPI table they can keep, that's what generate_report is
-  for (it renders a clean report with charts + PDF/Excel) — offer it instead.
+- Tables: a chat answer is not a spreadsheet. ONE small comparison table is fine
+  when the associate actually asked to compare or rank a handful of things (past
+  events, a few converters) — up to 5 rows and 4 columns, and only when a table
+  genuinely reads better than a sentence. Everything else stays prose: no table
+  for a single client's figures, no table for a product list (those are photo
+  cards), no stacking two or three tables in one answer, and never a table of
+  raw query output. If the manager wants a structured breakdown, ranking or KPI
+  sheet they can KEEP, that's generate_report (clean layout, charts, PDF/Excel)
+  — offer it instead of growing the table.
 - For disambiguating a few people, a short inline list ("1. … 2. …") is fine.
 
 # Show the pieces — never leave a product answer photo-less
@@ -253,6 +264,10 @@ client. A product answer with no pieces to show is a failed answer.
   say "here are six" and give no range at all — quoting the range of your six
   tells the associate bridesmaids start at €5,850 when they really start at
   €1,470, and she'll repeat it to the client.
+  A range only covers the PRICED pieces. If some of the collection is
+  price-on-request (price IS NULL), count them in your aggregate and add the
+  half-line — "32 pieces, €1,080–€4,770; 7 are price on request" — so the count
+  and the range agree with each other.
 - SAME for any total you state in prose (a look, a client's spend, a basket): do
   the sum with SQL, or add it up digit by digit before you write it. A wrong
   total in a styling answer is a wrong price quoted to a client. If you're not
@@ -486,7 +501,9 @@ what the data supports; be explicit about what it can't tell you.
   When it's partly reconciled, quote the coverage ("32 of 51 pieces counted so
   far") before any percentage.
 - Logistics: for the round-trip shipping + duties/VAT estimate, call
-  shipping_estimate (destination country, piece count or weight, declared value).
+  shipping_estimate (destination country, piece count or weight, declared value,
+  and goods_type — "apparel" for ready-to-wear/accessories, "jewellery" for fine
+  jewellery; duty differs several-fold, so pass what THIS house actually ships).
   It's an ESTIMATE — say so, and note trunk-show goods usually travel on an ATA
   Carnet (temporary import, duty deferred until sold).
 - Out of scope for the data: venue scouting and team travel need real-world
@@ -611,6 +628,14 @@ const TOOLS = [
         weight_kg: { type: "number", description: "Total shipment weight in kg, if known (overrides the pieces estimate)." },
         declared_value: { type: "number", description: "Declared value of the collection in EUR (for duty/VAT)." },
         round_trip: { type: "boolean", description: "Round trip (out + return). Default true." },
+        goods_type: {
+          type: "string",
+          enum: ["apparel", "jewellery", "other"],
+          description:
+            "What is travelling — duty rates differ a lot by goods. 'apparel' for " +
+            "ready-to-wear/accessories, 'jewellery' for fine jewellery/watches. " +
+            "Default apparel. Pass what this house actually sells.",
+        },
       },
       required: ["destination_country"],
     },
@@ -1302,23 +1327,32 @@ async function lookupKnowledgeCard(
 
 // ─── Shipping estimate (trunk-show logistics) ───────────────────────────────
 // Rough parametric estimate, NOT a live carrier quote. Zones give an express
-// €/kg rate; duty/VAT are the destination's approximate rates on jewellery/apparel
-// applied to declared value (only if goods are sold / permanently imported — a
-// trunk show usually travels on an ATA Carnet, so duty is deferred).
+// €/kg rate and a VAT rate; duty depends on WHAT is travelling, so it comes from
+// the goods type — apparel is taxed several times harder than jewellery almost
+// everywhere (UK: ~12% on womenswear vs 2.5% on jewellery), and quoting the
+// jewellery rate for a dress trunk show understates the bill by five figures.
+// Duty/VAT apply only if goods are sold / permanently imported — a trunk show
+// usually travels on an ATA Carnet, so duty is deferred.
 type ShippingInput = {
   destination_country?: string; pieces?: number; weight_kg?: number;
   declared_value?: number; round_trip?: boolean;
+  goods_type?: "apparel" | "jewellery" | "other";
 };
 function estimateShipping(input: ShippingInput) {
   const raw = String(input.destination_country ?? "").trim().toUpperCase();
-  const zoneOf = (c: string): { zone: string; ratePerKg: number; dutyPct: number; vatPct: number } => {
-    if (["US", "USA", "UNITED STATES"].includes(c)) return { zone: "US", ratePerKg: 16, dutyPct: 0.055, vatPct: 0.07 };
-    if (["GB", "UK", "UNITED KINGDOM", "ENGLAND"].includes(c)) return { zone: "UK", ratePerKg: 12, dutyPct: 0.025, vatPct: 0.20 };
-    if (["CH", "SWITZERLAND", "SVIZZERA"].includes(c)) return { zone: "CH", ratePerKg: 14, dutyPct: 0.02, vatPct: 0.081 };
-    if (["IT", "FR", "DE", "ES", "EU", "ITALY", "ITALIA", "FRANCE", "GERMANY", "SPAIN"].includes(c)) return { zone: "EU", ratePerKg: 8, dutyPct: 0, vatPct: 0 };
-    return { zone: "Other", ratePerKg: 18, dutyPct: 0.05, vatPct: 0.15 };
+  const goods: "apparel" | "jewellery" | "other" =
+    input.goods_type === "jewellery" || input.goods_type === "other" ? input.goods_type : "apparel";
+  // duty by zone → { apparel, jewellery, other }. Approximate MFN rates.
+  const zoneOf = (c: string): { zone: string; ratePerKg: number; duty: Record<string, number>; vatPct: number } => {
+    if (["US", "USA", "UNITED STATES"].includes(c)) return { zone: "US", ratePerKg: 16, duty: { apparel: 0.145, jewellery: 0.055, other: 0.08 }, vatPct: 0 };
+    if (["GB", "UK", "UNITED KINGDOM", "ENGLAND"].includes(c)) return { zone: "UK", ratePerKg: 12, duty: { apparel: 0.12, jewellery: 0.025, other: 0.05 }, vatPct: 0.20 };
+    if (["CH", "SWITZERLAND", "SVIZZERA"].includes(c)) return { zone: "CH", ratePerKg: 14, duty: { apparel: 0.03, jewellery: 0.02, other: 0.025 }, vatPct: 0.081 };
+    if (["AE", "UAE", "UNITED ARAB EMIRATES", "DUBAI"].includes(c)) return { zone: "AE", ratePerKg: 15, duty: { apparel: 0.05, jewellery: 0.05, other: 0.05 }, vatPct: 0.05 };
+    if (["IT", "FR", "DE", "ES", "EU", "ITALY", "ITALIA", "FRANCE", "GERMANY", "SPAIN"].includes(c)) return { zone: "EU", ratePerKg: 8, duty: { apparel: 0, jewellery: 0, other: 0 }, vatPct: 0 };
+    return { zone: "Other", ratePerKg: 18, duty: { apparel: 0.10, jewellery: 0.05, other: 0.07 }, vatPct: 0.15 };
   };
-  const z = zoneOf(raw);
+  const zr = zoneOf(raw);
+  const z = { ...zr, dutyPct: zr.duty[goods] };
   // ~0.6 kg per piece incl. protective packaging; min chargeable weight 5 kg.
   const weight = input.weight_kg && input.weight_kg > 0
     ? input.weight_kg
@@ -1329,8 +1363,9 @@ function estimateShipping(input: ShippingInput) {
   const duty = Math.round(declared * z.dutyPct);
   const vat = Math.round((declared + duty) * z.vatPct);
   return {
-    disclaimer: "Rough estimate, not a live carrier quote. Duty/VAT apply only if pieces are SOLD / permanently imported; trunk-show goods usually travel on an ATA Carnet (temporary import, duty deferred until sold).",
+    disclaimer: "Rough estimate, not a live carrier quote. Duty/VAT apply only if pieces are SOLD / permanently imported; trunk-show goods usually travel on an ATA Carnet (temporary import, duty deferred until sold). Duty rates are indicative MFN rates for this goods type — a broker confirms the real tariff line.",
     destination: raw || "unknown",
+    goods_type: goods,
     zone: z.zone,
     weight_kg: weight,
     legs: legs === 2 ? "round trip" : "one way",
@@ -1339,7 +1374,7 @@ function estimateShipping(input: ShippingInput) {
     duty_estimate_if_sold: duty,
     vat_estimate_if_sold: vat,
     total_if_all_sold: freight + duty + vat,
-    rates_used: { freight_per_kg: z.ratePerKg, duty_pct: z.dutyPct, vat_pct: z.vatPct },
+    rates_used: { freight_per_kg: z.ratePerKg, duty_pct: z.dutyPct, vat_pct: z.vatPct, duty_basis: goods },
     ata_carnet_recommended: z.zone !== "EU",
   };
 }
