@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import AssistantMarkdown from "@/components/assistant/AssistantMarkdown";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -1256,7 +1255,7 @@ const AssistantBlock = ({
     <div className="flex flex-col gap-4">
       {(summary || streaming) && (
         <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-a:text-primary prose-code:text-foreground prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-table:text-xs prose-th:bg-muted/40">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown>
+          <AssistantMarkdown>{summary}</AssistantMarkdown>
           {streaming && !summary && (
             <span className="inline-block h-3 w-1.5 animate-pulse bg-foreground/40 align-middle" />
           )}

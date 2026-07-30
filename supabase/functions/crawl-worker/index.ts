@@ -114,7 +114,7 @@ Deno.serve(async (req: Request) => {
       if (chunks.length === 0) { await mark(admin, it.id, "skipped", null, null); skipped++; continue; }
       const embeddings = await embedDocuments(chunks, VOYAGE_API_KEY);
 
-      const category = it.kind === "news" ? "news" : categorize(`${it.url} ${title} ${text.slice(0, 300)}`);
+      const category = it.kind === "news" ? "news" : categorize(it.url, title, text);
       const cleanTitle = (title && !/online boutique|404|not found/i.test(title)) ? title : titleFromUrl(it.url, title || it.url);
 
       // Replace any prior doc for this URL.

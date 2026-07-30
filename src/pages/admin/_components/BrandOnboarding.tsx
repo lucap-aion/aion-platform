@@ -9,13 +9,14 @@ import { Loader2, Check, X, Play, RefreshCw, Copy, Trash2, AlertCircle } from "l
 // portals. Each stage runs on its own so a long crawl that needs a second pass
 // doesn't mean starting the brand over.
 
-type StageKey = "sources" | "storefront" | "demo_data" | "demo_users" | "assistant";
+type StageKey = "sources" | "storefront" | "demo_data" | "demo_users" | "documents" | "assistant";
 
 const STAGES: { key: StageKey; label: string; hint: string }[] = [
   { key: "sources", label: "Website & news", hint: "Register the site, discover pages, start the crawl" },
   { key: "storefront", label: "Catalogue", hint: "Detect the e-commerce feed and pull the products" },
   { key: "demo_data", label: "Demo book of business", hint: "Clients, covers, boutiques, claims and feedback" },
   { key: "demo_users", label: "Demo logins", hint: "Brand admin, sales associate and a client account" },
+  { key: "documents", label: "Brand documents", hint: "FAQ, sales one-pager, cover summary, activation email, proposal — drafted in their voice" },
   { key: "assistant", label: "Assistant", hint: "Confirm there is enough indexed to answer questions" },
 ];
 
@@ -306,6 +307,10 @@ function detailLine(st?: StageRow): string | null {
         : `${n("customers") ?? 0} clients · ${n("policies") ?? 0} covers · ${n("shops") ?? 0} boutiques — prices ${String(d.prices ?? "")}`;
     case "demo_users":
       return d.accounts ? `${Object.keys(d.accounts as object).length} accounts created` : null;
+    case "documents": {
+      const failed = (d.failed as string[] | undefined) ?? [];
+      return `${n("written") ?? 0} drafted${failed.length ? ` · ${failed.length} failed (${failed.join(", ")})` : ""} — review before sending anything`;
+    }
     case "assistant":
       return `${n("knowledge_chunks") ?? 0} chunks indexed`;
     default:

@@ -208,6 +208,10 @@ numeric/aggregate results are for YOUR reasoning only and are NOT shown — so:
   "Source / N" or "count" table — it looks broken to them.
 - When there ARE pieces to see (products, a client's items), select an image
   column and give ONE short line of context — the photo cards carry the rest.
+- NEVER put an image in a table. A photo belongs to a card, not a cell: a
+  product row with an image column renders the picture at full size and the
+  table collapses around it. If the answer wants pictures, let the photo cards
+  carry them and keep any table to text and numbers.
 - Tables: a chat answer is not a spreadsheet. ONE small comparison table is fine
   when the associate actually asked to compare or rank a handful of things (past
   events, a few converters) — up to 5 rows and 4 columns, and only when a table

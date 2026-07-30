@@ -6,6 +6,7 @@
 //   storefront  — detect an e-commerce feed, register it, pull the catalogue
 //   demo_data   — a believable book of business built from the brand's own pieces
 //   demo_users  — loginable brand admin, sales associate and client accounts
+//   documents   — the onboarding paperwork, drafted in the brand's own voice
 //   assistant   — confirm the brand has enough indexed to answer questions
 //
 // Stages are independent and re-runnable: the crawl is long and occasionally
@@ -26,7 +27,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
 const FUNCTIONS_BASE = `${SUPABASE_URL}/functions/v1`;
 
-const ALL_STAGES = ["sources", "storefront", "demo_data", "demo_users", "assistant"] as const;
+const ALL_STAGES = ["sources", "storefront", "demo_data", "demo_users", "documents", "assistant"] as const;
 type Stage = (typeof ALL_STAGES)[number];
 
 const CORS = {
@@ -198,6 +199,25 @@ async function runStage(
   }
 
   if (stage === "demo_users") return await createDemoUsers(admin, brand);
+
+  if (stage === "documents") {
+    // Bilingual FAQ (it lands on the public FAQ page once approved), the rest
+    // in English — a human reviews every one before it goes anywhere.
+    const out = await callFn("generate-brand-docs", {
+      brand_id: brandId,
+      kinds: ["faq", "associate_onepager", "cover_summary", "welcome_email", "partnership_proposal"],
+      locales: ["en"],
+    }) as { ok?: boolean; reason?: string; documents?: Record<string, unknown> };
+    if (out.ok === false) return out;
+    const docs = out.documents ?? {};
+    const failed = Object.entries(docs).filter(([, v]) => (v as { ok?: boolean })?.ok === false);
+    return {
+      ok: failed.length < Object.keys(docs).length,
+      written: Object.keys(docs).length - failed.length,
+      failed: failed.map(([k]) => k),
+      documents: docs,
+    };
+  }
 
   // assistant: the config auto-detects (data_home from CRM vs knowledge counts),
   // so there is nothing to write — just confirm there is something to answer from.

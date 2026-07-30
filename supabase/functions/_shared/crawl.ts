@@ -36,8 +36,33 @@ export function isJunkLine(l: string): boolean {
   return false;
 }
 
-export function categorize(haystack: string): string {
-  for (const r of CATEGORY_RULES) if (r.re.test(haystack)) return r.category;
+// A product page IS a product page, whatever its prose says. This has to be
+// checked first and on the URL alone.
+const PRODUCT_URL = /\/(products?|p|item|articolo|prodotti?)\/[^/]+/i;
+// Content that only a shop page has, for sites that don't put /products/ in the
+// path.
+const PRODUCT_BODY = /(add to (cart|bag)|aggiungi al carrello|select (a )?size|scegli la taglia|composition\s*:|composizione\s*:|sku\s*:|product details)/i;
+
+// Categorising on url + title + the first 300 characters of the page looked
+// sensible and was wrong: on most luxury sites those 300 characters are the
+// global navigation, which mentions "World", "About us", "Sustainability" and
+// "Craft" on EVERY page — so every page matched the storytelling rule before
+// the product rule was reached. Luisa Beccaria ended up with 112 of its 141
+// "storytelling" documents being product pages, which then won every search
+// for the brand's voice.
+//
+// So: trust the URL, then the title, and only fall back to body text when
+// neither says anything. Body text is the least reliable signal, not the most.
+export function categorize(url: string, title = "", text = ""): string {
+  const path = (() => { try { return new URL(url).pathname; } catch { return url; } })();
+
+  if (PRODUCT_URL.test(path)) return "product";
+
+  const label = `${path} ${title}`;
+  for (const r of CATEGORY_RULES) if (r.re.test(label)) return r.category;
+
+  if (PRODUCT_BODY.test(text)) return "product";
+  for (const r of CATEGORY_RULES) if (r.re.test(text)) return r.category;
   return "other";
 }
 
