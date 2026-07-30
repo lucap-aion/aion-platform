@@ -55,8 +55,10 @@ Deno.serve(async (req: Request) => {
     const { data: p } = await userClient.from("profiles").select("brand_id, role, is_master")
       .eq("user_id", user.id).in("role", ["brand", "brand_admin", "brand_user"]).maybeSingle();
     if (!p?.brand_id) return jsonError("admin or brand role required", 403);
-    // Only brand admins / master users may edit knowledge.
-    if (!(p.role === "brand_admin" || (p.role === "brand_user" && p.is_master))) {
+    // Only brand admins / master users may edit knowledge. Mirrors the client's
+    // `canWrite` (AuthContext) — any brand role with is_master, not just
+    // brand_user; every real brand profile carries role 'brand'.
+    if (!(p.role === "brand_admin" || p.is_master)) {
       return jsonError("insufficient permissions", 403);
     }
     brandId = p.brand_id as number;
