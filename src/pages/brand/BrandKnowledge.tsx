@@ -305,8 +305,8 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
 
       {/* Stats */}
       <div className="flex gap-3">
-        <Stat label={tt(locale, "Documents", "Documenti")} value={docs.length} />
-        <Stat label={tt(locale, "Knowledge chunks", "Sezioni indicizzate")} value={totalChunks} />
+        <Stat label={tt(locale, "Documents", "Documenti")} value={docs.length} loading={loading} />
+        <Stat label={tt(locale, "Knowledge chunks", "Sezioni indicizzate")} value={totalChunks} loading={loading} />
         {pending > 0 && (
           <div className="flex items-center gap-2 self-center rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -581,9 +581,14 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   );
 }
 
-const Stat = ({ label, value }: { label: string; value: number }) => (
+// A count we don't have yet is not zero. Rendering "0 Documents" while the
+// query is still running tells the user their knowledge base is empty, which is
+// both wrong and alarming — show the shape instead.
+const Stat = ({ label, value, loading }: { label: string; value: number; loading?: boolean }) => (
   <div className="rounded-lg border border-border bg-card px-4 py-2">
-    <div className="text-lg font-semibold tabular-nums text-foreground">{value.toLocaleString()}</div>
+    {loading
+      ? <div className="my-1 h-5 w-12 animate-pulse rounded bg-muted" />
+      : <div className="text-lg font-semibold tabular-nums text-foreground">{value.toLocaleString()}</div>}
     <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
   </div>
 );

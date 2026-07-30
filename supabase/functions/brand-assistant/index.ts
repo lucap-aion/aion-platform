@@ -954,9 +954,17 @@ Deno.serve(async (req: Request) => {
         brandName,
       );
 
+  // What is still landing right now. Without this the assistant says "we don't
+  // have anything on that" while 400 pages of the brand's own site are mid-crawl
+  // and the associate's upload is still being embedded — which reads as "the
+  // platform doesn't know", not "ask me again in ten minutes", and is how people
+  // stop trusting it.
+  const indexingNote = brandId ? await indexingStatusNote(serviceClient, brandId) : "";
+
   const systemBlocks = [
     { type: "text" as const, text: baseSystem, cache_control: { type: "ephemeral" as const } },
     { type: "text" as const, text: scopeNote },
+    ...(indexingNote ? [{ type: "text" as const, text: indexingNote }] : []),
     ...(adminSchemaSupplement ? [{ type: "text" as const, text: adminSchemaSupplement }] : []),
     ...brandBlocks.map((text) => ({ type: "text" as const, text })),
     ...(languageNote ? [{ type: "text" as const, text: languageNote }] : []),
@@ -1409,6 +1417,52 @@ function estimateShipping(input: ShippingInput) {
 // candidate set, rerank for precision (Voyage rerank), then diversify so the
 // answer draws on several documents rather than many chunks of one.
 // RLS on the chunks table is the real brand gate.
+// Is anything still being ingested for this brand? Uses the service-role client
+// so it can see the crawl queue (brand users cannot, by design).
+async function indexingStatusNote(
+  admin: ReturnType<typeof createClient>, brandId: number,
+): Promise<string> {
+  try {
+    const [queued, processing, recent] = await Promise.all([
+      admin.from("knowledge_crawl_queue").select("id", { count: "exact", head: true })
+        .eq("brand_id", brandId).in("status", ["pending", "processing"]),
+      admin.from("brand_knowledge_docs").select("id", { count: "exact", head: true })
+        .eq("brand_id", brandId).eq("status", "processing"),
+      admin.from("brand_knowledge_docs").select("title, created_at")
+        .eq("brand_id", brandId).eq("source_type", "upload")
+        .gte("created_at", new Date(Date.now() - 30 * 60_000).toISOString())
+        .order("created_at", { ascending: false }).limit(5),
+    ]);
+
+    const pages = queued.count ?? 0;
+    const docs = processing.count ?? 0;
+    const justUploaded = (recent.data ?? []) as { title: string }[];
+    if (!pages && !docs && !justUploaded.length) return "";
+
+    const lines: string[] = [
+      "# Still being indexed RIGHT NOW — read this before saying you don't have something",
+    ];
+    if (pages) lines.push(`- ${pages} page${pages === 1 ? "" : "s"} of this brand's own website are still being crawled and indexed.`);
+    if (docs) lines.push(`- ${docs} uploaded document${docs === 1 ? "" : "s"} are still being processed.`);
+    if (justUploaded.length) {
+      lines.push(`- Uploaded in the last half hour and now searchable: ${justUploaded.map((d) => d.title).join("; ")}.`);
+    }
+    lines.push(
+      "",
+      "So when a search finds nothing, the honest answer is NOT \"we don't have that\".",
+      "Say you can't find it YET, name what is still landing (\"about " + (pages || docs) + " still being indexed\"),",
+      "and tell them it's worth asking again shortly. If they just uploaded something and you",
+      "still can't see it, say that plainly rather than implying they didn't upload it.",
+      "Never present a partial index as the complete picture: if you're asked for a count, a",
+      "ranking or \"everything we have\" while indexing is in flight, give what you have AND say",
+      "it is incomplete.",
+    );
+    return lines.join("\n");
+  } catch {
+    return "";
+  }
+}
+
 // Lexical companion to the vector search: match the question's distinctive
 // words against document titles and chunk text. Deliberately narrow — capitalised
 // or rare terms only — so an ordinary question doesn't drag in half the corpus.

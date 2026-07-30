@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Check, X, Play, RefreshCw, Copy, Trash2, AlertCircle, FileText, Download } from "lucide-react";
+import { Loader2, Check, X, Play, RefreshCw, Copy, Trash2, AlertCircle, FileText, Download, Clock } from "lucide-react";
 
 // Prepare-demo panel: takes a brand that has just been created (name + website)
 // all the way to something you can put in front of a prospect — site crawled and
@@ -9,12 +9,13 @@ import { Loader2, Check, X, Play, RefreshCw, Copy, Trash2, AlertCircle, FileText
 // portals. Each stage runs on its own so a long crawl that needs a second pass
 // doesn't mean starting the brand over.
 
-type StageKey = "sources" | "storefront" | "demo_data" | "demo_users" | "documents" | "assistant";
+type StageKey = "branding" | "sources" | "storefront" | "demo_data" | "demo_users" | "documents" | "assistant";
 
 // Stages that invent data. Dev-only, enforced server-side.
 const DEMO_STAGES: StageKey[] = ["demo_data", "demo_users"];
 
 const STAGES: { key: StageKey; label: string; hint: string }[] = [
+  { key: "branding", label: "Brand identity", hint: "Logo, colours, description and hero imagery from their own site" },
   { key: "sources", label: "Website & news", hint: "Register the site, discover pages, start the crawl" },
   { key: "storefront", label: "Catalogue", hint: "Detect the e-commerce feed and pull the products" },
   { key: "demo_data", label: "Demo book of business", hint: "Clients, covers, boutiques, claims and feedback" },
@@ -23,7 +24,7 @@ const STAGES: { key: StageKey; label: string; hint: string }[] = [
   { key: "assistant", label: "Assistant", hint: "Confirm there is enough indexed to answer questions" },
 ];
 
-type StageRow = { stage: string; status: string; detail: Record<string, unknown>; error: string | null };
+type StageRow = { stage: string; status: string; detail: Record<string, unknown>; error: string | null; queued_at?: string | null };
 type Status = {
   demo_ready: boolean;
   // Server-authoritative: demo generation is dev-only, and the panel follows
@@ -69,65 +70,41 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // While the crawl drains its queue (a per-minute cron job does the work), keep
-  // the counts moving so the admin can see it is actually progressing.
+  // Poll while there is anything in flight: a queued or running stage, or a
+  // crawl still draining. Stops on its own when the work is done.
+  const inFlight = (status?.stages ?? []).some((st) => st.status === "running" || (st.status === "pending" && st.queued_at))
+    || (status?.counts?.crawl_pending ?? 0) > 0;
+
   useEffect(() => {
-    const pending = status?.counts?.crawl_pending ?? 0;
-    if (pending > 0 && poll.current === null) {
-      poll.current = window.setInterval(() => { void refresh(); }, 15000);
+    if (inFlight && poll.current === null) {
+      poll.current = window.setInterval(() => { void refresh(); }, 8000);
     }
-    if (pending === 0 && poll.current !== null) {
+    if (!inFlight && poll.current !== null) {
       window.clearInterval(poll.current); poll.current = null;
     }
     return () => { if (poll.current !== null) { window.clearInterval(poll.current); poll.current = null; } };
-  }, [status?.counts?.crawl_pending, refresh]);
+  }, [inFlight, refresh]);
 
-  // One request PER STAGE, never all of them in one.
-  //
-  // Asking the function to run the whole pipeline in a single call exceeds the
-  // edge runtime's wall clock on a real brand — a 500-page crawl seed plus a
-  // 481-product catalogue sync with image embedding. The work completes
-  // server-side but the caller gets nothing back, so the admin sees a failure
-  // for something that actually succeeded. Stage by stage also means the panel
-  // fills in as it goes instead of sitting on one spinner.
+  // The browser QUEUES the work; a cron tick runs it. Closing the tab,
+  // refreshing, or another admin opening the same brand all show the same live
+  // progress, because none of it lives in this component's state.
   const run = async (stages?: StageKey[]) => {
-    const queue = (stages?.length ? stages : STAGES.map((s) => s.key))
+    const wanted = (stages?.length ? stages : STAGES.map((s) => s.key))
       .filter((k) => demoEnabled || !DEMO_STAGES.includes(k));
-    const single = queue.length === 1;
-    const label = single ? STAGES.find((s) => s.key === queue[0])?.label ?? "Stage" : "Onboarding";
     setNeedsTicket(false);
-
-    const options: Record<string, unknown> = {};
-    if (avgTicket.trim()) options.avg_ticket = Number(avgTicket.trim());
-
-    let stopped: { stage: StageKey; reason: string } | null = null;
-    for (const stage of queue) {
-      setBusy(single ? stage : `all:${stage}`);
-      try {
-        const out = await call({ stages: [stage], options });
-        const result = ((out.ran ?? {}) as Record<string, Record<string, unknown>>)[stage] ?? {};
-        if (result.accounts) setAccounts(result.accounts as Record<string, Account>);
-        setStatus(out.status as unknown as Status);
-        if (result.ok === false) {
-          if (result.needs === "avg_ticket") setNeedsTicket(true);
-          stopped = { stage, reason: String(result.reason ?? "stage did not complete") };
-          break;
-        }
-      } catch (e) {
-        stopped = { stage, reason: e instanceof Error ? e.message : "unknown error" };
-        break;
-      }
-    }
-    setBusy(null);
-
-    if (stopped) {
+    setBusy(stages?.length === 1 ? stages[0] : "all");
+    try {
+      const options: Record<string, unknown> = {};
+      if (avgTicket.trim()) options.avg_ticket = Number(avgTicket.trim());
+      const out = await call({ action: "start", stages: wanted, options });
+      setStatus(out.status as unknown as Status);
       toast({
-        title: `${label} stopped at ${STAGES.find((s) => s.key === stopped!.stage)?.label ?? stopped.stage}`,
-        description: stopped.reason, variant: "destructive",
+        title: wanted.length === 1 ? "Stage queued" : "Onboarding queued",
+        description: "It runs in the background — you can close this and come back.",
       });
-    } else {
-      toast({ title: `${label} complete` });
-    }
+    } catch (e) {
+      toast({ title: "Could not queue", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
+    } finally { setBusy(null); }
   };
 
   // Never purge blind: fetch exactly what would go and what would stay, and make
@@ -332,15 +309,18 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
                 {state === "done" ? <Check className="h-4 w-4 text-emerald-600" />
                   : state === "failed" ? <X className="h-4 w-4 text-destructive" />
                   : state === "running" ? <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  : state === "queued" ? <Clock className="h-4 w-4 text-muted-foreground" />
                   : <span className="block h-4 w-4 rounded-full border border-border" />}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-foreground">{s.label}</p>
-                <p className="text-xs text-muted-foreground">{st?.error ?? detailLine(st) ?? s.hint}</p>
+                <p className="text-xs text-muted-foreground">
+                  {state === "queued" ? "Queued — starts within a minute" : st?.error ?? detailLine(st) ?? s.hint}
+                </p>
               </div>
               <button onClick={() => void run([s.key])} disabled={!website || busy !== null}
                 className="shrink-0 rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50">
-                {state === "done" ? "Re-run" : "Run"}
+                {state === "done" ? "Re-run" : state === "queued" ? "Queued" : "Run"}
               </button>
             </li>
           );
@@ -421,6 +401,13 @@ function detailLine(st?: StageRow): string | null {
     case "documents": {
       const failed = (d.failed as string[] | undefined) ?? [];
       return `${n("written") ?? 0} drafted${failed.length ? ` · ${failed.length} failed (${failed.join(", ")})` : ""} — review before sending anything`;
+    }
+    case "branding": {
+      const filled = (d.filled as string[] | undefined) ?? [];
+      const notes = (d.notes as string[] | undefined) ?? [];
+      return filled.length
+        ? `${filled.length} field${filled.length === 1 ? "" : "s"} filled: ${filled.join(", ")}${notes.length ? ` · ${notes[0]}` : ""}`
+        : notes[0] ?? "nothing new to fill — the record already has it";
     }
     case "assistant":
       return `${n("knowledge_chunks") ?? 0} chunks indexed`;

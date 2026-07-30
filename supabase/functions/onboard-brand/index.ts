@@ -2,6 +2,7 @@
 //
 // An AION admin creates the brand with its website; this runs everything after
 // it and reports where it got to:
+//   branding    — logo, colours, description and hero imagery, from their own site
 //   sources     — register the site + news as knowledge sources and kick the crawl
 //   storefront  — detect an e-commerce feed, register it, pull the catalogue
 //   demo_data   — a believable book of business built from the brand's own pieces
@@ -21,6 +22,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { demoToolsEnabled, demoToolsBlockedReason, isNonProduction } from "../_shared/environment.ts";
+import { harvestBrandIdentity } from "../_shared/brand-identity.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -28,7 +30,9 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
 const FUNCTIONS_BASE = `${SUPABASE_URL}/functions/v1`;
 
-const ALL_STAGES = ["sources", "storefront", "demo_data", "demo_users", "documents", "assistant"] as const;
+const ALL_STAGES = ["branding", "sources", "storefront", "demo_data", "demo_users", "documents", "assistant"] as const;
+// Stages that invent data — never run outside a non-production project.
+const DEMO_STAGES = ["demo_data", "demo_users"] as const;
 type Stage = (typeof ALL_STAGES)[number];
 
 const CORS = {
@@ -65,12 +69,53 @@ Deno.serve(async (req: Request) => {
 
   const brandId = Number(body.brand_id ?? 0);
   if (!brandId) return json({ error: "brand_id required" }, 400);
+  const options = (body.options ?? {}) as { customers?: number; policies?: number; avg_ticket?: number; force?: boolean };
 
   const { data: brand } = await admin.from("brands").select("*").eq("id", brandId).maybeSingle();
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
 
   const action = String(body.action ?? "run");
   if (action === "status") return json({ ...await status(admin, brandId), demo_tools_enabled: demoToolsEnabled() });
+
+  // Queue and return. The browser is not the runner: a cron tick advances one
+  // stage a minute, so closing the tab, refreshing, or handing the brand to a
+  // colleague all leave the run going and showing the same live progress.
+  if (action === "start") {
+    const wanted = (Array.isArray(body.stages) && body.stages.length
+      ? (body.stages as string[]).filter((s) => (ALL_STAGES as readonly string[]).includes(s))
+      : [...ALL_STAGES]) as Stage[];
+    const runnable = wanted.filter((s) => demoToolsEnabled() || !(DEMO_STAGES as readonly string[]).includes(s));
+    const skipped = wanted.filter((s) => !(runnable as string[]).includes(s));
+    for (const s of skipped) {
+      await setStage(admin, brandId, s, "skipped", { blocked: true, reason: demoToolsBlockedReason() });
+    }
+    const { error } = await admin.rpc("queue_onboarding_stages", { p_brand_id: brandId, p_stages: runnable });
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true, queued: runnable, skipped, status: await status(admin, brandId) });
+  }
+
+  // Called by the tick: run exactly ONE queued stage, then get out of the way.
+  if (action === "run_queued") {
+    const stage = String(body.stage ?? "") as Stage;
+    if (!(ALL_STAGES as readonly string[]).includes(stage)) return json({ error: "unknown stage" }, 400);
+    await setStage(admin, brandId, stage, "running");
+    try {
+      const out = await runStage(admin, brand, stage, options);
+      const ok = (out as { ok?: boolean }).ok !== false;
+      await setStage(admin, brandId, stage, ok ? "done" : "failed", out,
+        ok ? null : String((out as { reason?: string }).reason ?? "stage did not complete"));
+      // A failed stage cancels what was queued behind it: the later stages
+      // depend on it (no catalogue → no demo book), and silently running them
+      // would produce a half-built brand that looks finished.
+      if (!ok) await admin.from("brand_onboarding").update({ queued_at: null })
+        .eq("brand_id", brandId).eq("status", "pending").not("queued_at", "is", null);
+      return json({ ok, stage, result: out });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await setStage(admin, brandId, stage, "failed", {}, msg);
+      return json({ ok: false, stage, error: msg }, 200);
+    }
+  }
 
   // Dry run: what a purge would take out, and what it would leave behind.
   if (action === "preview_purge") {
@@ -105,15 +150,14 @@ Deno.serve(async (req: Request) => {
   const requested = (Array.isArray(body.stages) && body.stages.length
     ? body.stages.filter((s: string) => (ALL_STAGES as readonly string[]).includes(s))
     : [...ALL_STAGES]) as Stage[];
-  const options = (body.options ?? {}) as { customers?: number; policies?: number; avg_ticket?: number };
 
   // Demo stages are dev-only. Asking for them in production is not an error to
   // hide — it is reported per stage, and the real onboarding stages still run.
-  const DEMO_STAGES: Stage[] = ["demo_data", "demo_users"];
+  
 
   const results: Record<string, unknown> = {};
   for (const stage of requested) {
-    if (DEMO_STAGES.includes(stage) && !demoToolsEnabled()) {
+    if ((DEMO_STAGES as readonly string[]).includes(stage) && !demoToolsEnabled()) {
       await setStage(admin, brandId, stage, "skipped", { blocked: true, reason: demoToolsBlockedReason() });
       results[stage] = { ok: true, skipped: true, reason: demoToolsBlockedReason() };
       continue;
@@ -149,9 +193,49 @@ async function runStage(
   admin: ReturnType<typeof createClient>,
   brand: Record<string, unknown>,
   stage: Stage,
-  options: { customers?: number; policies?: number; avg_ticket?: number },
+  options: { customers?: number; policies?: number; avg_ticket?: number; force?: boolean },
 ): Promise<unknown> {
   const brandId = Number(brand.id);
+  const force = options.force === true;
+
+  if (stage === "branding") {
+    const website = String(brand.website ?? "").trim();
+    if (!website) return { ok: false, reason: "the brand has no website — add one on the brand record first" };
+
+    const id = await harvestBrandIdentity(website);
+    // Only fill what is EMPTY. A logo or colour an admin chose deliberately
+    // outranks anything scraped, and overwriting it silently would be worse
+    // than finding nothing.
+    const patch: Record<string, unknown> = {};
+    const fillable: [string, unknown][] = [
+      ["description", id.description], ["email", id.email],
+      ["logo_big", id.logo_big], ["logo_small", id.logo_small],
+      ["top_banner_image", id.top_banner_image], ["auth_background_image", id.auth_background_image],
+      ["theme_settings", id.theme_settings],
+    ];
+    const kept: string[] = [];
+    for (const [key, value] of fillable) {
+      if (value == null) continue;
+      const current = (brand as Record<string, unknown>)[key];
+      const empty = current == null || current === "" ||
+        (typeof current === "object" && Object.keys(current as object).length === 0);
+      if (empty || force) patch[key] = value;
+      else kept.push(key);
+    }
+
+    if (Object.keys(patch).length) {
+      const { error } = await admin.from("brands").update(patch).eq("id", brandId);
+      if (error) throw new Error(`brand update: ${error.message}`);
+    }
+
+    return {
+      ok: true,
+      filled: Object.keys(patch),
+      kept_existing: kept,
+      found: id.found,
+      notes: id.notes,
+    };
+  }
 
   if (stage === "sources") {
     const website = String(brand.website ?? "").trim();
@@ -439,6 +523,12 @@ async function setStage(
     p_brand_id: brandId, p_stage: stage, p_status: status,
     p_detail: detail ?? {}, p_error: error,
   });
+  // A finished stage leaves the queue; a running one stays claimed so the
+  // stuck-stage sweeper can tell the difference.
+  if (status === "done" || status === "failed" || status === "skipped") {
+    await admin.from("brand_onboarding").update({ queued_at: null })
+      .eq("brand_id", brandId).eq("stage", stage);
+  }
 }
 
 // The project has more than one service-role credential in circulation (legacy

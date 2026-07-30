@@ -88,7 +88,7 @@ const StarRating = ({
 const CustomerDashboard = () => {
   const tenant = useTenant();
   const { t, locale } = useLanguage();
-  const { profile } = useAuth();
+  const { profile, loading: authLoading } = useAuth();
   const slugPrefix = useAuthSlug();
 
   // Profile completion
@@ -193,8 +193,19 @@ const CustomerDashboard = () => {
 
   return (
     <div className="animate-fade-in space-y-4 p-4 md:p-6">
-      {/* Profile Completion Card — hidden when 100% */}
-      {completionPct < 100 && (
+      {/* Profile completion. While the profile is still loading every field
+          reads as empty, which rendered a confident "0% complete" and a nudge to
+          fix a profile that may well be finished — so show the shape, not a
+          number we don't have yet. */}
+      {authLoading || !profile ? (
+        <div className="flex items-center gap-5 rounded-xl bg-card p-6">
+          <div className="h-16 w-16 animate-pulse rounded-full bg-muted" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+            <div className="h-3 w-64 animate-pulse rounded bg-muted" />
+          </div>
+        </div>
+      ) : completionPct < 100 && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
