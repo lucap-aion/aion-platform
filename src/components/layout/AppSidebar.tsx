@@ -184,9 +184,13 @@ const AppSidebar = () => {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-xs uppercase tracking-widest text-muted-foreground">
-            {collapsed ? "" : mode === "customer" ? t("nav.menu") : t("nav.management")}
+        {/* No visible section header: everything in this sidebar is "management",
+            so the word was pure noise above the first item. The label stays for
+            screen readers — removing it outright would drop a navigation
+            landmark — and the space it freed goes to the nav itself. */}
+        <SidebarGroup className="pt-1">
+          <SidebarGroupLabel className="sr-only">
+            {mode === "customer" ? t("nav.menu") : t("nav.management")}
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -212,11 +216,13 @@ const AppSidebar = () => {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Master-only links */}
+        {/* Master-only links. They ARE a different concern, so they keep a
+            separation — but a hairline says it more quietly than a second
+            shouted heading. */}
         {masterLinks.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-xs uppercase tracking-widest text-muted-foreground">
-              {collapsed ? "" : t("nav.settings") || "Settings"}
+          <SidebarGroup className="mt-2 border-t border-border/60 pt-3">
+            <SidebarGroupLabel className="sr-only">
+              {t("nav.settings") || "Settings"}
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>

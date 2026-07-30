@@ -58,7 +58,8 @@ describe("page classification", () => {
 // 0.89. The lexical pass exists to catch invented names.
 const STOP = new Set(["what", "which", "the", "and", "our", "is", "are", "rules", "policy", "tell", "how", "does"]);
 function salientTerms(query: string): string[] {
-  return (query.match(/[\p{L}][\p{L}\p{N}'-]{3,}/gu) ?? [])
+  const words: string[] = query.match(/[\p{L}][\p{L}\p{N}'-]{3,}/gu) ?? [];
+  return words
     .filter((w) => !STOP.has(w.toLowerCase()))
     .filter((w) => /^[\p{Lu}]/u.test(w) || w.length >= 7)
     .slice(0, 4);

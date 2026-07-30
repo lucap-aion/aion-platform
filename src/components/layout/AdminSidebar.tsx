@@ -70,10 +70,10 @@ const AdminSidebar = () => {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-xs uppercase tracking-widest text-muted-foreground">
-            {collapsed ? "" : "Management"}
-          </SidebarGroupLabel>
+        <SidebarGroup className="pt-1">
+          {/* Same as the brand sidebar: the heading said nothing the items
+              didn't. Kept for screen readers only. */}
+          <SidebarGroupLabel className="sr-only">Management</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {adminLinks.map((link) => {
