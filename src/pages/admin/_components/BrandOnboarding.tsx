@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Check, X, Play, RefreshCw, Copy, Trash2, AlertCircle } from "lucide-react";
+import { Loader2, Check, X, Play, RefreshCw, Copy, Trash2, AlertCircle, FileText, Download } from "lucide-react";
 
 // Prepare-demo panel: takes a brand that has just been created (name + website)
 // all the way to something you can put in front of a prospect — site crawled and
@@ -45,6 +45,7 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
   const [avgTicket, setAvgTicket] = useState("");
   const [needsTicket, setNeedsTicket] = useState(false);
   const [preview, setPreview] = useState<PurgePreview | null>(null);
+  const [deck, setDeck] = useState<{ url: string; name: string; filled: number; total: number; review: string[] } | null>(null);
   const poll = useRef<number | null>(null);
 
   const call = useCallback(async (payload: Record<string, unknown>) => {
@@ -125,6 +126,26 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
     } finally { setBusy(null); }
   };
 
+  // The intro deck isn't an onboarding stage — it's a sales asset you regenerate
+  // whenever the catalogue changes, so it gets its own action.
+  const buildDeck = async () => {
+    setBusy("deck");
+    try {
+      const { data, error } = await supabase.functions.invoke("brand-deck", { body: { brand_id: brandId } });
+      if (error) throw new Error(error.message);
+      const d = data as Record<string, unknown>;
+      if (d.ok === false || d.error) throw new Error(String(d.reason ?? d.error));
+      setDeck({
+        url: String(d.download_url ?? ""), name: String(d.file_name ?? "deck.pptx"),
+        filled: Number(d.slots_filled ?? 0), total: Number(d.slots_total ?? 0),
+        review: (d.review as string[]) ?? [],
+      });
+      toast({ title: "Deck ready", description: `${d.slots_filled}/${d.slots_total} images swapped for their own pieces.` });
+    } catch (e) {
+      toast({ title: "Deck build failed", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
+    } finally { setBusy(null); }
+  };
+
   const stageStatus = (key: StageKey) => status?.stages?.find((s) => s.stage === key);
   const c = status?.counts ?? {};
 
@@ -145,6 +166,10 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
         >
           {busy === "all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
           Prepare demo
+        </button>
+        <button onClick={() => void buildDeck()} disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
+          {busy === "deck" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Intro deck
         </button>
         <button onClick={() => void refresh()} disabled={busy !== null}
           className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
@@ -252,6 +277,21 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
           );
         })}
       </ul>
+
+      {deck && (
+        <div className="rounded-lg border border-border p-3">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium">Intro deck</p>
+            <span className="text-xs text-muted-foreground">{deck.filled}/{deck.total} images from their catalogue</span>
+            <a href={deck.url} className="ml-auto inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+              <Download className="h-4 w-4" /> Download
+            </a>
+          </div>
+          <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+            {deck.review.map((r) => <li key={r}>{r}</li>)}
+          </ul>
+        </div>
+      )}
 
       {accounts && (
         <div className="rounded-lg border border-border p-3">
