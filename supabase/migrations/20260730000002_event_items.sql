@@ -59,11 +59,18 @@ create index if not exists event_items_outcome_idx on public.event_items (event_
 
 -- Revenue without a sale, or a sale without an outcome, would quietly corrupt
 -- every aggregate built on this table.
+-- CASE, not OR: a CHECK only rejects on FALSE, and passes on NULL. Written as
+-- a chain of ORs, the 'sold'/'returned' arms evaluate to NULL whenever outcome
+-- is NULL, so FALSE OR NULL OR NULL = NULL and the row was accepted — revenue
+-- could be set on a piece with no outcome, which is exactly what this is meant
+-- to stop. CASE always lands on one branch and returns a definite boolean.
 alter table public.event_items drop constraint if exists event_items_outcome_coherent;
 alter table public.event_items add constraint event_items_outcome_coherent check (
-  (outcome is null and sold_qty is null and revenue is null)
-  or (outcome = 'sold' and sold_qty is not null and sold_qty > 0)
-  or (outcome in ('returned', 'retained') and coalesce(sold_qty, 0) = 0)
+  case
+    when outcome is null  then sold_qty is null and revenue is null
+    when outcome = 'sold' then sold_qty is not null and sold_qty > 0
+    else coalesce(sold_qty, 0) = 0
+  end
 );
 
 drop trigger if exists event_items_touch_updated_at on public.event_items;
