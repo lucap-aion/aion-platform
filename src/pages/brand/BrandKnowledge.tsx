@@ -90,6 +90,9 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
       .from("brand_knowledge_docs" as never)
       .select("id, title, category, source_type, source_url, status, error, char_count, chunk_count, updated_at")
       .eq("brand_id", brandId)
+      // Deleted documents are hidden here and unreachable by the assistant;
+      // they stay in the table for 30 days so a mistake can be undone.
+      .is("deleted_at", null)
       .order("updated_at", { ascending: false });
     const { count } = await supabase
       .from("knowledge_crawl_queue" as never)
@@ -181,15 +184,36 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
     }
   };
 
+  // Deleting hides the document from the platform and the assistant at once,
+  // but keeps it recoverable for 30 days. Re-uploading and re-embedding a
+  // document someone removed by accident is a real cost, and most of these
+  // deletions will be accidents.
   const handleDelete = async (doc: Doc) => {
-    if (!confirm(tt(locale, `Delete "${doc.title}"?`, `Eliminare "${doc.title}"?`))) return;
-    const { error } = await supabase.from("brand_knowledge_docs" as never).delete().eq("id", doc.id);
-    if (error) {
-      toast.error(tt(locale, "Delete failed.", "Eliminazione non riuscita."));
+    if (!confirm(tt(locale,
+      `Delete "${doc.title}"?\n\nThe assistant stops using it immediately. You can restore it for 30 days.`,
+      `Eliminare "${doc.title}"?\n\nL'assistente smette subito di usarlo. Puoi ripristinarlo per 30 giorni.`))) return;
+
+    const { data, error } = await supabase.rpc("soft_delete_knowledge_doc" as never, { p_doc_id: doc.id } as never);
+    const result = data as { ok?: boolean; reason?: string } | null;
+    if (error || result?.ok === false) {
+      toast.error(error?.message ?? result?.reason ?? tt(locale, "Delete failed.", "Eliminazione non riuscita."));
       return;
     }
     setDocs((d) => d.filter((x) => x.id !== doc.id));
-    toast.success(tt(locale, "Deleted.", "Eliminato."));
+    toast.success(
+      tt(locale, "Deleted — restorable for 30 days.", "Eliminato — ripristinabile per 30 giorni."),
+      {
+        action: {
+          label: tt(locale, "Undo", "Annulla"),
+          onClick: async () => {
+            const { error: rErr } = await supabase.rpc("restore_knowledge_doc" as never, { p_doc_id: doc.id } as never);
+            if (rErr) { toast.error(tt(locale, "Restore failed.", "Ripristino non riuscito.")); return; }
+            toast.success(tt(locale, "Restored.", "Ripristinato."));
+            void refresh();
+          },
+        },
+      },
+    );
   };
 
   // Enqueue one or more specific page URLs to be crawled (beyond the site the

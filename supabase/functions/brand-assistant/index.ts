@@ -1331,7 +1331,7 @@ Deno.serve(async (req: Request) => {
   });
 });
 
-type KMatch = { doc_id: string; doc_title: string; source_url: string | null; category: string; content: string; similarity: number };
+type KMatch = { chunk_id: string; doc_id: string; doc_title: string; source_url: string | null; category: string; content: string; similarity: number };
 
 // Resolve a named card (client "Scheda cliente — <Name>" / product "Scheda
 // prodotto — …") by an exact lexical match on the doc title — semantic search
@@ -1348,6 +1348,7 @@ async function lookupKnowledgeCard(
   let query = client
     .from("brand_knowledge_docs")
     .select("title, category, content")
+    .is("deleted_at", null)   // a deleted card must not resolve either
     .ilike("title", `%${q}%`)
     .limit(5);
   // Scope to one brand unless a cross-brand admin (brandId null → search all).
@@ -1427,9 +1428,9 @@ async function indexingStatusNote(
       admin.from("knowledge_crawl_queue").select("id", { count: "exact", head: true })
         .eq("brand_id", brandId).in("status", ["pending", "processing"]),
       admin.from("brand_knowledge_docs").select("id", { count: "exact", head: true })
-        .eq("brand_id", brandId).eq("status", "processing"),
+        .eq("brand_id", brandId).eq("status", "processing").is("deleted_at", null),
       admin.from("brand_knowledge_docs").select("title, created_at")
-        .eq("brand_id", brandId).eq("source_type", "upload")
+        .eq("brand_id", brandId).eq("source_type", "upload").is("deleted_at", null)
         .gte("created_at", new Date(Date.now() - 30 * 60_000).toISOString())
         .order("created_at", { ascending: false }).limit(5),
     ]);
@@ -1491,8 +1492,12 @@ async function lexicalKnowledge(
     const like = `%${term.replace(/[%_]/g, "")}%`;
     const { data } = await client
       .from("brand_knowledge_chunks")
-      .select("id, doc_id, content, brand_knowledge_docs!inner(title, source_url, category)")
+      .select("id, doc_id, content, brand_knowledge_docs!inner(title, source_url, category, deleted_at)")
       .eq("brand_id", brandId)
+      // A deleted document must not answer. match_brand_knowledge filters this
+      // in SQL, but the lexical path queries chunks directly and would otherwise
+      // walk straight past it — verified: a "deleted" protocol kept answering.
+      .is("brand_knowledge_docs.deleted_at", null)
       .ilike("content", like)
       .limit(6);
     for (const r of (data ?? []) as Record<string, any>[]) {
@@ -1538,8 +1543,12 @@ async function searchKnowledge(
   // question and merge whatever it finds.
   const lexical = await lexicalKnowledge(client, brandId, query);
   if (lexical.length) {
-    const seen = new Set(rows.map((r) => r.id));
-    rows = [...rows, ...lexical.filter((l) => !seen.has(l.id))];
+    // Dedupe on chunk_id — which is what the RPC actually returns. This read
+    // r.id, a field KMatch never had, so the set was {undefined} and a chunk
+    // found by BOTH searches was added twice, eating two of the eight slots and
+    // both of its document's two-chunk allowance.
+    const seen = new Set(rows.map((r) => r.chunk_id));
+    rows = [...rows, ...lexical.filter((l) => !seen.has(l.chunk_id))];
   }
 
   if (rows.length === 0) return [];
