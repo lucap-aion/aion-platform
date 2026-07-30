@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   BookOpen, Globe, Loader2, Plus, RefreshCw, Trash2, FileText, AlertCircle,
   CheckCircle2, Clock, X, UploadCloud, Link2, Pencil, Eye, Newspaper, RotateCw,
-  Lightbulb, FileSpreadsheet, ThumbsDown,
+  Lightbulb, FileSpreadsheet, ThumbsDown, ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -73,6 +73,11 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   const [docs, setDocs] = useState<Doc[]>([]);
   // Totals come from a count, not from the length of the page we fetched.
   const [docTotalCount, setDocTotalCount] = useState<number | null>(null);
+  // Soft-deleted documents. The Undo on the toast is not a recovery path: dismiss
+  // it and the document is gone from the product for 30 days while sitting in the
+  // table. This is where it can actually be found and put back.
+  const [deletedDocs, setDeletedDocs] = useState<Doc[]>([]);
+  const [showDeleted, setShowDeleted] = useState(false);
   const [chunkTotalCount, setChunkTotalCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState(false);
@@ -107,6 +112,14 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
       // page and take the totals from a real count.
       .order("updated_at", { ascending: false })
       .range(0, LIST_PAGE_SIZE - 1);
+
+    const { data: deletedData } = await supabase
+      .from("brand_knowledge_docs" as never)
+      .select("id, title, category, source_type, source_url, status, error, char_count, chunk_count, updated_at")
+      .eq("brand_id", brandId)
+      .not("deleted_at", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(50);
 
     const { count: docTotal } = await supabase
       .from("brand_knowledge_docs" as never)
@@ -149,6 +162,7 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
     setLoading(false);
     setPending(count ?? 0);
     setDocTotalCount(docTotal ?? null);
+    setDeletedDocs((deletedData as unknown as Doc[]) ?? []);
     // A set-returning RPC comes back as an ARRAY of rows. Reading .chunks off
     // the array yielded undefined, and the fallback quietly summed only the 500
     // documents we had loaded — 2,914 instead of 6,173. A wrong number is worse
@@ -435,6 +449,60 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
                 ))}
               </ul>
             </details>
+          )}
+        </div>
+      )}
+
+      {/* Recently deleted — the real recovery path for a soft delete. */}
+      {canWrite && deletedDocs.length > 0 && (
+        <div className="rounded-xl border border-border">
+          <button
+            type="button"
+            onClick={() => setShowDeleted((v) => !v)}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm"
+          >
+            <Trash2 className="h-4 w-4 text-muted-foreground" />
+            <span className="font-medium text-foreground">{tt(locale, "Recently deleted", "Eliminati di recente")}</span>
+            <span className="text-xs text-muted-foreground">
+              {tt(locale,
+                `${deletedDocs.length} — restorable for 30 days, then removed for good`,
+                `${deletedDocs.length} — ripristinabili per 30 giorni, poi eliminati definitivamente`)}
+            </span>
+            <ChevronDown className={`ml-auto h-4 w-4 text-muted-foreground transition-transform ${showDeleted ? "rotate-180" : ""}`} />
+          </button>
+          {showDeleted && (
+            <ul className="divide-y divide-border border-t border-border">
+              {deletedDocs.map((d) => (
+                <li key={d.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-foreground">{d.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {tt(locale, CATEGORY_LABEL[d.category]?.en ?? d.category, CATEGORY_LABEL[d.category]?.it ?? d.category)}
+                      {d.chunk_count ? ` · ${d.chunk_count} ${tt(locale, "sections", "sezioni")}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const { data, error } = await supabase.rpc("restore_knowledge_doc" as never, { p_doc_id: d.id } as never);
+                      // The RPC reports refusal in its RESULT, not as an error —
+                      // RLS blocking the update simply matches zero rows. Only
+                      // checking `error` made a silent no-op look like success.
+                      const res = data as { ok?: boolean; reason?: string } | null;
+                      if (error || res?.ok === false) {
+                        toast.error(error?.message ?? res?.reason ?? tt(locale, "Restore failed.", "Ripristino non riuscito."));
+                        return;
+                      }
+                      toast.success(tt(locale, "Restored — the assistant can use it again.", "Ripristinato — l'assistente può usarlo di nuovo."));
+                      void refresh();
+                    }}
+                    className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-muted"
+                  >
+                    {tt(locale, "Restore", "Ripristina")}
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}
