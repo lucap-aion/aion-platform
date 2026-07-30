@@ -28,6 +28,11 @@ type Status = {
   stages: StageRow[];
 };
 type Account = { email: string; password: string; portal: string };
+type PurgePreview = {
+  will_remove: Record<string, number>;
+  will_remove_logins: { email: string; role: string }[];
+  will_keep: Record<string, number>;
+};
 
 export default function BrandOnboarding({ brandId, brandName, website }: {
   brandId: number; brandName: string; website: string | null;
@@ -38,6 +43,7 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
   const [accounts, setAccounts] = useState<Record<string, Account> | null>(null);
   const [avgTicket, setAvgTicket] = useState("");
   const [needsTicket, setNeedsTicket] = useState(false);
+  const [preview, setPreview] = useState<PurgePreview | null>(null);
   const poll = useRef<number | null>(null);
 
   const call = useCallback(async (payload: Record<string, unknown>) => {
@@ -92,13 +98,27 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
     } finally { setBusy(null); }
   };
 
-  const purge = async () => {
-    if (!confirm(`Remove ALL generated demo data for ${brandName}?\n\nClients, covers, boutiques, claims and feedback created by "Prepare demo" are deleted. Real data is untouched.`)) return;
+  // Never purge blind: fetch exactly what would go and what would stay, and make
+  // the admin confirm against that list.
+  const openPurge = async () => {
+    setBusy("purge");
+    try { setPreview(await call({ action: "preview_purge" }) as unknown as PurgePreview); }
+    catch (e) { toast({ title: "Could not read the demo data", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" }); }
+    finally { setBusy(null); }
+  };
+
+  const confirmPurge = async () => {
     setBusy("purge");
     try {
       const out = await call({ action: "purge_demo" });
-      toast({ title: "Demo data removed", description: JSON.stringify((out.purged as Record<string, unknown>)?.deleted ?? {}) });
-      await refresh();
+      const removed = (out.removed_logins as string[] | undefined)?.length ?? 0;
+      toast({
+        title: "Demo data removed",
+        description: `${sumCounts((out.purged as { deleted?: Record<string, number> })?.deleted)} rows and ${removed} login${removed === 1 ? "" : "s"} deleted. The brand, its indexed site and its catalogue are untouched.`,
+      });
+      setPreview(null);
+      setAccounts(null);
+      setStatus((out.status as unknown as Status) ?? null);
     } catch (e) {
       toast({ title: "Purge failed", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
     } finally { setBusy(null); }
@@ -129,7 +149,7 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
           className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
           <RefreshCw className="h-4 w-4" /> Refresh
         </button>
-        <button onClick={() => void purge()} disabled={busy !== null}
+        <button onClick={() => void openPurge()} disabled={busy !== null}
           className="ml-auto inline-flex items-center gap-2 rounded-lg border border-destructive/40 px-3 py-2 text-sm text-destructive disabled:opacity-50">
           {busy === "purge" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Remove demo data
         </button>
@@ -161,6 +181,48 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
             <span className="text-sm text-muted-foreground">EUR</span>
             <button onClick={() => void run(["demo_data"])} disabled={!avgTicket.trim() || busy !== null}
               className="rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50">Generate</button>
+          </div>
+        </div>
+      )}
+
+      {preview && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+          <p className="text-sm font-medium">Hand the account over to {brandName}?</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Everything generated for the demo is deleted. Everything harvested from the brand — the indexed
+            site, the news, the catalogue, the brand record itself — stays.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-destructive">Deleted</p>
+              <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                {Object.entries(preview.will_remove ?? {}).map(([k, n]) => (
+                  <li key={k}>{n} {label(k)}</li>
+                ))}
+                {preview.will_remove_logins?.map((l) => (
+                  <li key={l.email} className="truncate">login {l.email}</li>
+                ))}
+                {!Object.keys(preview.will_remove ?? {}).length && !preview.will_remove_logins?.length && (
+                  <li>nothing — no demo data on this brand</li>
+                )}
+              </ul>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">Kept</p>
+              <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                {Object.entries(preview.will_keep ?? {}).map(([k, n]) => (
+                  <li key={k}>{n} {label(k)}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button onClick={() => void confirmPurge()} disabled={busy !== null}
+              className="inline-flex items-center gap-2 rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground disabled:opacity-50">
+              {busy === "purge" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete the demo data
+            </button>
+            <button onClick={() => setPreview(null)} disabled={busy !== null}
+              className="rounded-lg border border-border px-3 py-2 text-sm">Cancel</button>
           </div>
         </div>
       )}
@@ -211,6 +273,23 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
       )}
     </div>
   );
+}
+
+function sumCounts(o?: Record<string, number>): number {
+  return Object.values(o ?? {}).reduce((a, b) => a + (Number(b) || 0), 0);
+}
+
+const LABELS: Record<string, string> = {
+  profiles: "demo clients", policies: "demo covers", catalogues: "demo catalogue items",
+  shops: "demo boutiques", claims: "demo claims", feedback: "demo feedback",
+  events: "seeded events", event_attendees: "seeded attendees",
+  brand_record: "brand record", knowledge_docs: "indexed pages",
+  knowledge_chunks: "knowledge chunks", knowledge_sources: "knowledge sources",
+  catalogue_products: "catalogue products", real_customers: "real clients",
+  real_policies: "real covers",
+};
+function label(key: string): string {
+  return LABELS[key] ?? key.replace(/_/g, " ");
 }
 
 // One line of "what actually landed" per stage, so a green tick is auditable.

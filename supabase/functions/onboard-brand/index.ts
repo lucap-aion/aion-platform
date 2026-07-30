@@ -69,11 +69,35 @@ Deno.serve(async (req: Request) => {
 
   const action = String(body.action ?? "run");
   if (action === "status") return json(await status(admin, brandId));
+
+  // Dry run: what a purge would take out, and what it would leave behind.
+  if (action === "preview_purge") {
+    if (body.include_legacy !== false) await admin.rpc("adopt_legacy_demo_rows", { p_brand_id: brandId });
+    const { data, error } = await admin.rpc("preview_brand_demo_purge", { p_brand_id: brandId });
+    if (error) return json({ error: error.message }, 500);
+    return json(data);
+  }
+
+  // Hand the account over: remove everything we fabricated, keep everything we
+  // harvested from the brand itself (site, news, catalogue, brand record).
   if (action === "purge_demo") {
+    // Older hand-seeded example rows predate the artifact log; tag them first or
+    // they survive and quietly become "the brand's data".
+    if (body.include_legacy !== false) await admin.rpc("adopt_legacy_demo_rows", { p_brand_id: brandId });
+
+    // Auth users FIRST, while the profiles that point at them still exist —
+    // otherwise the logins outlive the purge and keep working against a brand
+    // that has gone live. SQL can't remove auth users, so it happens here.
+    const removedLogins = await deleteDemoLogins(admin, brandId);
+
     const { data, error } = await admin.rpc("purge_brand_demo_data", { p_brand_id: brandId });
     if (error) return json({ error: error.message }, 500);
+
+    // The demo is gone, so the stages that produced it are no longer done.
     await setStage(admin, brandId, "demo_data", "pending", { purged: data });
-    return json({ ok: true, purged: data });
+    await setStage(admin, brandId, "demo_users", "pending", { removed_logins: removedLogins });
+
+    return json({ ok: true, purged: data, removed_logins: removedLogins, status: await status(admin, brandId) });
   }
 
   const requested = (Array.isArray(body.stages) && body.stages.length
@@ -180,7 +204,7 @@ async function runStage(
   const [{ count: chunks }, { count: products }, { count: customers }] = await Promise.all([
     admin.from("brand_knowledge_chunks").select("id", { count: "exact", head: true }).eq("brand_id", brandId),
     admin.from("storefront_products").select("id", { count: "exact", head: true }).eq("brand_id", brandId),
-    admin.from("profiles").select("id", { count: "exact", head: true }).eq("brand_id", brandId).is("role", null),
+    admin.from("profiles").select("id", { count: "exact", head: true }).eq("brand_id", brandId).or("role.is.null,role.eq.customer"),
   ]);
   if (!chunks) {
     return { ok: false, reason: "nothing indexed yet — the crawl is still running, re-run this stage in a few minutes" };
@@ -241,6 +265,29 @@ async function createDemoUsers(admin: ReturnType<typeof createClient>, brand: Re
   return { ok: true, accounts: created };
 }
 
+// Delete the auth users behind this brand's demo profiles. Driven off the
+// artifact log, so it can only ever reach logins onboarding itself created —
+// a real brand user who happens to share the brand is never touched.
+async function deleteDemoLogins(admin: ReturnType<typeof createClient>, brandId: number): Promise<string[]> {
+  const { data: arts } = await admin.from("brand_demo_artifacts")
+    .select("row_pk").eq("brand_id", brandId).eq("table_name", "profiles");
+  const ids = (arts ?? []).map((a) => String(a.row_pk));
+  if (!ids.length) return [];
+
+  const removed: string[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: profiles } = await admin.from("profiles")
+      .select("id, email, user_id").in("id", ids.slice(i, i + 200)).not("user_id", "is", null);
+    for (const p of profiles ?? []) {
+      const { error } = await admin.auth.admin.deleteUser(String(p.user_id));
+      // A login already gone is the desired end state, not a failure.
+      if (!error || /not.?found/i.test(error.message)) removed.push(String(p.email));
+      else console.warn("[onboard-brand] deleteUser", p.email, error.message);
+    }
+  }
+  return removed;
+}
+
 // Deterministic so re-running shows the same credentials instead of silently
 // invalidating the ones already handed to a prospect. Demo accounts only.
 function demoPassword(slug: string, key: string): string {
@@ -289,10 +336,12 @@ async function status(admin: ReturnType<typeof createClient>, brandId: number) {
     admin.from("brand_knowledge_docs").select("id", { count: "exact", head: true }).eq("brand_id", brandId),
     admin.from("knowledge_crawl_queue").select("id", { count: "exact", head: true }).eq("brand_id", brandId).eq("status", "pending"),
     admin.from("storefront_products").select("id", { count: "exact", head: true }).eq("brand_id", brandId),
-    admin.from("profiles").select("id", { count: "exact", head: true }).eq("brand_id", brandId).is("role", null),
+    // A client is role IS NULL *or* 'customer' — both exist in the data, so
+    // splitting on "role is null" alone counts real clients as staff.
+    admin.from("profiles").select("id", { count: "exact", head: true }).eq("brand_id", brandId).or("role.is.null,role.eq.customer"),
     admin.from("policies").select("id", { count: "exact", head: true }).eq("brand_id", brandId),
     admin.from("shops").select("id", { count: "exact", head: true }).eq("brand_id", brandId),
-    admin.from("profiles").select("id", { count: "exact", head: true }).eq("brand_id", brandId).not("role", "is", null),
+    admin.from("profiles").select("id", { count: "exact", head: true }).eq("brand_id", brandId).in("role", ["brand", "brand_admin", "brand_user"]),
     admin.from("storefront_sources").select("platform, base_url, enabled").eq("brand_id", brandId).maybeSingle(),
   ]);
 

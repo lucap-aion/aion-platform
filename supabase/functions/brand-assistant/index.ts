@@ -339,6 +339,15 @@ A superlative or a ranking may only come from:
   revenue" card) — read it and quote its order; or
 - an aggregate you ran yourself over the whole set with run_sql (ORDER BY … DESC
   over every row, not over a sample).
+LOOK FOR THAT CARD FIRST, with lookup_knowledge_card, BEFORE you conclude no
+ranking exists — and look it up by its TITLE, not by searching for the thing you
+want ranked. Brands whose clients live in the knowledge base usually carry
+pre-built ranking and overview cards with predictable names: try titles like
+"Top 40 clienti per fatturato", "Top clients", "Panoramica CRM", "Panoramica
+<brand>". A semantic search for "clienti americane con spesa più alta" returns
+individual client CARDS, never the league table — so it feels like no ranking
+exists when one does, and you end up ordering a handful of cards by eye and
+publishing a top-5 that omits the actual number 1.
 If neither exists for the slice you were asked about, say so in one line, give
 the ranking you DO have (naming what it ranks), and offer to look up specific
 names — never improvise the order.
