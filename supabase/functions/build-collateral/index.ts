@@ -130,6 +130,11 @@ async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: 
   const c = bc as Record<string, any>;
   if (c.ok === false) return { ok: false, reason: c.reason };
 
+  // Preview: the numbers, without building a deck. The perimeter gets adjusted
+  // several times before anyone wants a file, and generating a 10MB PPTX for
+  // each tweak is slow and litters storage.
+  if (body.preview === true) return { ok: true, preview: true, business_case: c };
+
   const eur = (n: number) => `€${Math.round(n).toLocaleString("en-US")}`;
   const pct = (n: number) => `${(n * 100).toFixed(2)}%`;
   const fees = c.aion_fees ?? {};
