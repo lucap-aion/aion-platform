@@ -176,7 +176,11 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  return json({ ok: true, brand_id: brandId, documents: written, grounded_in: context.sources.length });
+  return json({
+    ok: true, brand_id: brandId, documents: written,
+    grounded_in: context.sources.length,
+    retrieval: (context as { diagnostics?: unknown }).diagnostics,
+  });
 });
 
 // ── The house's own material ─────────────────────────────────────────────────
@@ -196,16 +200,28 @@ const CONTEXT_QUERIES = [
 
 async function brandContext(admin: ReturnType<typeof createClient>, brandId: number) {
   const seen = new Map<string, { title: string; url: string | null; category: string; content: string }>();
+  const retrievalErrors: string[] = [];
+  let semanticHits = 0;
 
   for (const q of CONTEXT_QUERIES) {
     try {
       const embedding = await embedQuery(q);
-      const { data } = await admin.rpc("match_brand_knowledge", {
+      // Check the error. Destructuring only `data` meant an RPC failure arrived
+      // as null, the loop ran zero times, and the whole thing reported "no
+      // matches" — indistinguishable from an empty knowledge base.
+      const { data, error: rpcErr } = await admin.rpc("match_brand_knowledge", {
         p_brand_id: brandId,
         p_query_embedding: embedding,
-        p_match_count: 6,
+        // Ask for a wide window, not a narrow one. Product pages dominate a
+        // luxury corpus — Pasquale Bruni is 256 products out of 412 documents —
+        // so the top six for "craftsmanship and materials" are ALL products,
+        // every one of them gets excluded from the voice context, and the search
+        // returns nothing usable. Widening past the product wall is what lets
+        // the editorial and the press coverage through.
+        p_match_count: 24,
         p_min_similarity: 0.15,
       });
+      if (rpcErr) throw new Error(rpcErr.message);
       for (const m of (data ?? []) as { doc_title: string; source_url: string | null; category: string; content: string }[]) {
         // Boilerplate the crawler couldn't strip is worse than nothing here: it
         // teaches the model the wrong voice.
@@ -215,12 +231,15 @@ async function brandContext(admin: ReturnType<typeof createClient>, brandId: num
         // house ended up with an activation email about a candle vase. The range
         // is supplied separately as facts (below); voice comes from editorial.
         if (m.category === "product") continue;
+        semanticHits++;
         if (!seen.has(m.doc_title)) {
           seen.set(m.doc_title, { title: m.doc_title, url: m.source_url, category: m.category, content: m.content });
         }
       }
     } catch (e) {
-      console.warn("[generate-brand-docs] retrieval", q, e instanceof Error ? e.message : e);
+      const msg = e instanceof Error ? e.message : String(e);
+      retrievalErrors.push(`${q}: ${msg}`);
+      console.warn("[generate-brand-docs] retrieval", q, msg);
     }
   }
 
@@ -237,6 +256,7 @@ async function brandContext(admin: ReturnType<typeof createClient>, brandId: num
     }
   }
 
+  const usedFallback = seen.size === 0;
   const picked = [...seen.values()].slice(0, 24);
   const range = await catalogueSummary(admin, brandId);
 
@@ -246,6 +266,7 @@ async function brandContext(admin: ReturnType<typeof createClient>, brandId: num
       ...picked.map((d) => `## ${d.title}\n${d.content.slice(0, 3000)}`),
     ],
     sources: picked.map((d) => ({ title: d.title, url: d.url, category: d.category })),
+    diagnostics: { semantic_hits: semanticHits, used_fallback: usedFallback, retrieval_errors: retrievalErrors.slice(0, 6) },
   };
 }
 
