@@ -33,9 +33,6 @@ const FUNCTIONS_BASE = `${SUPABASE_URL}/functions/v1`;
 const ALL_STAGES = ["branding", "sources", "storefront", "demo_data", "demo_users", "documents", "assistant"] as const;
 // Stages that invent data — never run outside a non-production project.
 const DEMO_STAGES = ["demo_data", "demo_users"] as const;
-// Product images embedded per invocation. Small enough that a run always
-// finishes and reports; the stage re-queues itself until the catalogue is done.
-const STOREFRONT_BATCH = 40;
 type Stage = (typeof ALL_STAGES)[number];
 
 const CORS = {
@@ -43,6 +40,45 @@ const CORS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-batch-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+// What each stage needs before it can do useful work.
+//
+// Checked against the DATA, not against whether a stage row says "done". Brands
+// onboarded before this pipeline existed have no stage rows at all — Luisa
+// Beccaria has 1,013 products and no storefront row — so gating on stage status
+// would block them forever. Same principle as the status endpoint: ask the
+// tables what is true, don't trust a status column's opinion.
+async function unmetRequirements(
+  admin: ReturnType<typeof createClient>, brandId: number, stage: Stage,
+): Promise<string | null> {
+  const has = async (table: string, extra?: (q: any) => any) => {
+    let q = admin.from(table).select("id", { count: "exact", head: true }).eq("brand_id", brandId);
+    if (extra) q = extra(q);
+    const { count } = await q;
+    return (count ?? 0) > 0;
+  };
+
+  if (stage === "demo_data") {
+    // The generator builds the book from the brand's own pieces, falling back to
+    // indexed product pages when there is no feed. If neither exists there is
+    // nothing to build from, and a demo of empty shelves is worse than none.
+    const [products, productPages] = await Promise.all([
+      has("storefront_products"),
+      has("brand_knowledge_docs", (q: any) => q.eq("category", "product")),
+    ]);
+    if (!products && !productPages) {
+      return "no catalogue yet — run the storefront stage (or let the crawl index the product pages) so the demo is built from real pieces";
+    }
+  }
+
+  if (stage === "documents" || stage === "assistant") {
+    if (!(await has("brand_knowledge_chunks"))) {
+      return "nothing indexed yet — the crawl has to run first, or there is nothing to write from";
+    }
+  }
+
+  return null;
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -224,6 +260,9 @@ async function runStage(
 ): Promise<unknown> {
   const brandId = Number(brand.id);
   const force = options.force === true;
+
+  const unmet = await unmetRequirements(admin, brandId, stage);
+  if (unmet) return { ok: false, reason: unmet };
 
   if (stage === "branding") {
     const website = String(brand.website ?? "").trim();
