@@ -147,16 +147,24 @@ async function syncBrand(
   const slice = todo.slice(0, maxEmbed);
 
   let embedded = 0;
+  let lastEmbedError: string | null = null;
   for (let i = 0; i < slice.length; i += EMBED_BATCH) {
     const batch = slice.slice(i, i + EMBED_BATCH);
     let embs: number[][];
     try {
       embs = await voyageEmbedImages(batch.map((b) => b.imageUrl!));
-    } catch {
+    } catch (e) {
+      // Fall back to one at a time, but REMEMBER why it failed. Swallowing this
+      // is how 223 products sat unembedded while the run reported success with
+      // "embedded: 0" and no error to chase.
+      lastEmbedError = e instanceof Error ? e.message : String(e);
       embs = [];
       for (const b of batch) {
         try { embs.push((await voyageEmbedImages([b.imageUrl!]))[0]); }
-        catch { embs.push([]); }
+        catch (inner) {
+          lastEmbedError = inner instanceof Error ? inner.message : String(inner);
+          embs.push([]);
+        }
       }
     }
     await Promise.all(batch.map(async (b, j) => {
@@ -173,7 +181,13 @@ async function syncBrand(
   }
 
   const remaining = Math.max(0, remainingBefore - embedded);
-  return { brand_id: brandId, products: products.length, upserted: rows.length, embedded, remaining, done: remaining === 0 };
+  return {
+    brand_id: brandId, products: products.length, upserted: rows.length,
+    embedded, remaining, done: remaining === 0,
+    // Present only when something went wrong, so a run that embeds nothing says
+    // why instead of looking like there was nothing to do.
+    ...(lastEmbedError && embedded < slice.length ? { embed_error: lastEmbedError.slice(0, 300) } : {}),
+  };
 }
 
 type SProduct = {
@@ -240,12 +254,29 @@ function stripHtml(html: string): string {
     .replace(/&amp;/g, "&").replace(/&#\d+;/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// Ask the CDN for a display-sized image before handing it to Voyage.
+//
+// Product photography is shipped at full resolution — Pasquale Bruni's PNGs run
+// to 6.6MB each. Eight of those in one multimodal request blows the payload
+// limit, the batch fails, the per-image retry fails too, and 223 products end up
+// with no visual-search embedding at all. A 1024px render is far more than the
+// model needs and cuts the payload by an order of magnitude. The stored
+// image_url is untouched — this only affects what we send for embedding.
+function embeddableUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)shopify\.com$/.test(u.hostname) && !u.hostname.includes("cdn.shopify")) return url;
+    u.searchParams.set("width", "1024");
+    return u.toString();
+  } catch { return url; }
+}
+
 async function voyageEmbedImages(urls: string[]): Promise<number[][]> {
   const res = await fetch("https://api.voyageai.com/v1/multimodalembeddings", {
     method: "POST",
     headers: { "Authorization": `Bearer ${VOYAGE_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      inputs: urls.map((u) => ({ content: [{ type: "image_url", image_url: u }] })),
+      inputs: urls.map((u) => ({ content: [{ type: "image_url", image_url: embeddableUrl(u) }] })),
       model: EMBED_MODEL, input_type: "document", output_dimension: EMBED_DIMS,
     }),
   });

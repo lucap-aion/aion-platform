@@ -33,6 +33,9 @@ const FUNCTIONS_BASE = `${SUPABASE_URL}/functions/v1`;
 const ALL_STAGES = ["branding", "sources", "storefront", "demo_data", "demo_users", "documents", "assistant"] as const;
 // Stages that invent data — never run outside a non-production project.
 const DEMO_STAGES = ["demo_data", "demo_users"] as const;
+// Product images embedded per invocation. Small enough that a run always
+// finishes and reports; the stage re-queues itself until the catalogue is done.
+const STOREFRONT_BATCH = 40;
 type Stage = (typeof ALL_STAGES)[number];
 
 const CORS = {
@@ -102,6 +105,18 @@ Deno.serve(async (req: Request) => {
     try {
       const out = await runStage(admin, brand, stage, options);
       const ok = (out as { ok?: boolean }).ok !== false;
+      const more = ok && (out as { continue?: boolean }).continue === true;
+
+      if (more) {
+        // Still work to do: back in the queue, at the end, so another brand's
+        // stages are not starved while this catalogue finishes.
+        await setStage(admin, brandId, stage, "pending", out);
+        await admin.from("brand_onboarding")
+          .update({ queued_at: new Date().toISOString() })
+          .eq("brand_id", brandId).eq("stage", stage);
+        return json({ ok: true, stage, continuing: true, result: out });
+      }
+
       await setStage(admin, brandId, stage, ok ? "done" : "failed", out,
         ok ? null : String((out as { reason?: string }).reason ?? "stage did not complete"));
       // A failed stage cancels what was queued behind it: the later stages
@@ -166,6 +181,18 @@ Deno.serve(async (req: Request) => {
     try {
       const out = await runStage(admin, brand, stage, options);
       const ok = (out as { ok?: boolean }).ok !== false;
+      const more = ok && (out as { continue?: boolean }).continue === true;
+
+      if (more) {
+        // Still work to do: back in the queue, at the end, so another brand's
+        // stages are not starved while this catalogue finishes.
+        await setStage(admin, brandId, stage, "pending", out);
+        await admin.from("brand_onboarding")
+          .update({ queued_at: new Date().toISOString() })
+          .eq("brand_id", brandId).eq("stage", stage);
+        return json({ ok: true, stage, continuing: true, result: out });
+      }
+
       await setStage(admin, brandId, stage, ok ? "done" : "failed", out,
         ok ? null : String((out as { reason?: string }).reason ?? "stage did not complete"));
       results[stage] = out;
@@ -280,9 +307,28 @@ async function runStage(
       { onConflict: "brand_id" },
     );
 
-    const synced = await callFn("sync-storefront", { brand_id: brandId, max: 150 });
+    // Embedding every product image takes longer than one invocation is allowed
+    // to live: 481 products meant the stage did real work (258 images embedded)
+    // and then died before reporting, so it looked stuck while it was in fact
+    // progressing. Do a SMALL batch that comfortably fits, and ask to be called
+    // again until there is nothing left.
+    const synced = await callFn("sync-storefront", { brand_id: brandId, max: STOREFRONT_BATCH }) as
+      { results?: { products?: number; embedded?: number; remaining?: number }[] };
+    const r = synced.results?.[0] ?? {};
     const { count } = await admin.from("storefront_products").select("id", { count: "exact", head: true }).eq("brand_id", brandId);
-    return { ok: true, platform: "shopify", base: detected.base, products: count ?? 0, synced };
+    const remaining = Number(r.remaining ?? 0);
+
+    return {
+      ok: true,
+      platform: "shopify",
+      base: detected.base,
+      products: count ?? 0,
+      embedded_this_run: Number(r.embedded ?? 0),
+      images_remaining: remaining,
+      // The runner re-queues rather than finishing, so progress is visible and
+      // no single call has to carry the whole catalogue.
+      continue: remaining > 0,
+    };
   }
 
   if (stage === "demo_data") {
