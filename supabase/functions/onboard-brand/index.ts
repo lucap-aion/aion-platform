@@ -379,7 +379,13 @@ async function runStage(
       p_avg_ticket: options.avg_ticket ?? null,
     });
     if (error) throw new Error(error.message);
-    return data;
+
+    // A demo catalogue built from indexed product PAGES has no images, and the
+    // customer portal then shows a grid of empty grey squares — which reads as
+    // broken, in the exact screen a prospect is shown during the demo. The
+    // pages carry an og:image, so recover it.
+    const pictures = await recoverCatalogueImages(admin, brandId);
+    return { ...(data as Record<string, unknown>), pictures_recovered: pictures };
   }
 
   if (stage === "demo_users") {
@@ -462,6 +468,53 @@ async function runStage(
   };
 }
 
+// Fill in missing product photos from the brand's own product pages. Bounded and
+// best-effort: a demo with most of its images beats a demo with none, and a
+// failure here must never fail the stage.
+async function recoverCatalogueImages(
+  admin: ReturnType<typeof createClient>, brandId: number,
+): Promise<number> {
+  const { data: rows } = await admin.from("catalogues")
+    .select("id, name").eq("brand_id", brandId).is("picture", null).limit(60);
+  if (!rows?.length) return 0;
+
+  const { data: docs } = await admin.from("brand_knowledge_docs")
+    .select("title, source_url").eq("brand_id", brandId).eq("category", "product")
+    .not("source_url", "is", null).limit(500);
+  const urlByTitle = new Map<string, string>();
+  for (const d of (docs ?? []) as { title: string; source_url: string }[]) {
+    if (!urlByTitle.has(d.title)) urlByTitle.set(d.title, d.source_url);
+  }
+
+  const found = new Map<number, string>();
+  for (const row of rows as { id: number; name: string }[]) {
+    const url = urlByTitle.get(row.name);
+    if (!url) continue;
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (AION onboarding)" } });
+      if (!res.ok) continue;
+      const html = await res.text();
+      const img = html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i)?.[1]
+        ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image["']/i)?.[1];
+      if (!img) continue;
+      found.set(row.id, img);
+    } catch { /* one missing photo is not a failed stage */ }
+  }
+
+  // A URL that comes back for several products is the site's social card, not a
+  // product photo. Better an empty tile than the same logo on every piece.
+  const uses = new Map<string, number>();
+  for (const url of found.values()) uses.set(url, (uses.get(url) ?? 0) + 1);
+
+  let filled = 0;
+  for (const [id, url] of found) {
+    if ((uses.get(url) ?? 0) > 2) continue;
+    const { error } = await admin.from("catalogues").update({ picture: url }).eq("id", id);
+    if (!error) filled++;
+  }
+  return filled;
+}
+
 // ── Demo logins ──────────────────────────────────────────────────────────────
 // A profile row keyed by email first, then the auth user: the existing
 // sync_user_metadata_to_profile trigger links user_id by matching the email.
@@ -477,11 +530,36 @@ async function createDemoUsers(admin: ReturnType<typeof createClient>, brand: Re
   ];
 
   const created: Record<string, { email: string; password: string; portal: string }> = {};
+
+  // The client account has to OWN something. A demo login with an empty account
+  // is worse than no login: the customer-side review is a step in the sales
+  // cycle, and "here is your portal" showing no covers, no claims and no
+  // history undoes the demo. So rather than minting an empty profile, attach
+  // the login to a generated client who already has a book — the one with the
+  // most covers, so their portal has the most to show.
+  // A set-returning RPC comes back as an ARRAY of rows — reading .profile_id
+  // straight off it yields undefined, which silently falls through to minting
+  // the empty profile this is meant to avoid. (Third time today this shape has
+  // bitten: the failure is always silent, because undefined is a valid-looking
+  // "nothing found".)
+  const { data: picked } = await admin.rpc("pick_demo_client_profile", { p_brand_id: brandId });
+  const pickedRow = Array.isArray(picked) ? picked[0] : picked;
+  const clientProfileId = (pickedRow as { profile_id?: string } | null)?.profile_id ?? null;
+
   for (const p of people) {
     const password = demoPassword(slug, p.key);
 
     const { data: existing } = await admin.from("profiles").select("id, user_id").eq("email", p.email).maybeSingle();
     let profileId = existing?.id as string | undefined;
+
+    // For the client: adopt the generated customer with the fullest history
+    // instead of creating an empty one.
+    if (!profileId && p.key === "customer" && clientProfileId) {
+      const { error } = await admin.from("profiles")
+        .update({ email: p.email, first_name: p.first, last_name: p.last })
+        .eq("id", clientProfileId);
+      if (!error) profileId = clientProfileId;
+    }
     if (!profileId) {
       profileId = crypto.randomUUID();
       const { error } = await admin.from("profiles").insert({

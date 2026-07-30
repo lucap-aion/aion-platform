@@ -131,6 +131,13 @@ begin
       where v_source = 'knowledge'
         and d.brand_id = p_brand_id and d.category = 'product'
         and coalesce(d.title, '') <> ''
+        -- Not every page classified as "product" IS one. Category and listing
+        -- pages carry add-to-cart markup too, and their titles are site titles:
+        -- "Pomellato Online Boutique | Jewelry - Rings, Earrings, Bracelets".
+        -- One of those in a demo customer's covers reads as a bug.
+        and d.title !~ '\|'
+        and length(d.title) between 4 and 60
+        and d.title !~* '(boutique|official (site|store)|online (shop|store)|^shop |^home$|^collections?$|sitemap|newsletter)'
     ) src
     order by random()
     limit greatest(p_policies, 40)
