@@ -19,6 +19,14 @@ const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY")!;
 const JINA_API_KEY = Deno.env.get("JINA_API_KEY") ?? "";
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
 
+// Compare hosts ignoring "www." — the brand record holds www.luisabeccaria.com
+// while the sitemap yields the apex, and a naive equality check would reject 295
+// of her own pages.
+function registrableHost(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./i, "").toLowerCase(); }
+  catch { return ""; }
+}
+
 const DEFAULT_LIMIT = 8;
 const MAX_CHUNKS_PER_PAGE = 40;
 const CORS = {
@@ -56,7 +64,7 @@ Deno.serve(async (req: Request) => {
   const limit = Math.min(20, Math.max(1, Number(body.limit ?? DEFAULT_LIMIT) || DEFAULT_LIMIT));
 
   // Source config: render flag + boilerplate set.
-  const { data: src } = await admin.from("knowledge_sources").select("config").eq("brand_id", brandId).eq("kind", "website").maybeSingle();
+  const { data: src } = await admin.from("knowledge_sources").select("config, target").eq("brand_id", brandId).eq("kind", "website").maybeSingle();
   const cfg = (src?.config ?? {}) as { render?: boolean; boilerplate?: string[] };
   const render = !!cfg.render;
   const boilerplate = new Set(cfg.boilerplate ?? []);
@@ -66,10 +74,30 @@ Deno.serve(async (req: Request) => {
   if (claimErr) return jsonError(`claim failed: ${claimErr.message}`, 500);
   const items = (batch ?? []) as { id: string; url: string; kind: string; title: string | null }[];
 
+  // Which host may become this brand's knowledge?
+  //
+  // seed-crawl scopes discovery to the brand's own hostname, but the queue is
+  // older than that rule and anything can be added to it by hand — Luisa
+  // Beccaria still carries nine watchmaster.com URLs (images and a privacy
+  // page) queued a month ago. They only failed to pollute her knowledge base
+  // because a paid rendering API ran out of credit. That is luck, not a
+  // boundary, so check it here, at the point where a page becomes knowledge.
+  //
+  // News is exempt: an article about the brand legitimately lives elsewhere.
+  const brandHost = registrableHost(String(src?.target ?? ""));
+
   let done = 0, skipped = 0, errored = 0, unchanged = 0;
 
   for (const it of items) {
     try {
+      if (it.kind !== "news" && brandHost && registrableHost(it.url) !== brandHost) {
+        await admin.from("knowledge_crawl_queue")
+          .update({ status: "skipped", processed_at: new Date().toISOString(),
+                    error: `off-domain (${registrableHost(it.url)}) — not this brand's site` })
+          .eq("id", it.id);
+        skipped++;
+        continue;
+      }
       // Fetch + extract.
       let title = it.title ?? "";
       let text = "";

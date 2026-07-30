@@ -394,6 +394,15 @@ reserve orders, book appointments, take payments, or change any record. If asked
 say so in one friendly line and hand the action to the associate ("I can't place
 the order, but here's everything you need to close it — …").
 
+# When you genuinely don't have something
+Search first. If the knowledge base really doesn't hold it, call
+report_knowledge_gap with the topic in the associate's own words, then say so
+plainly and point them to who can help. That list is what the brand works
+through to improve you, so it has to be TRUE: don't report a gap for something
+you answered, for something you got from the catalogue or the client record, or
+for a detail missing from material you did find. One wrong entry sends someone
+to write a document that already exists.
+
 # Accuracy — NON-NEGOTIABLE
 - Use ONLY what the tools return. Do NOT draw on your own prior knowledge about
   this brand — its history, people, dates, products, prices, anything — even if
@@ -598,6 +607,26 @@ Markdown renders (GFM tables OK). Keep every answer floor-ready.
 
 const TOOLS = [
   {
+    name: "report_knowledge_gap",
+    description:
+      "Call this when you have searched and the knowledge base genuinely does " +
+      "NOT contain what the associate asked for — the moment you are about to " +
+      "tell them you don't have it. Do not call it when you found the answer, " +
+      "when you answered from the catalogue or client data, or when you found " +
+      "related material and merely lacked one detail. It feeds the brand's list " +
+      "of what to add, so a wrong entry sends someone to fix a non-problem.",
+    input_schema: {
+      type: "object",
+      properties: {
+        topic: {
+          type: "string",
+          description: "What was missing, as the associate would say it (e.g. 'Aurora Boreale collection', 'repair turnaround time').",
+        },
+      },
+      required: ["topic"],
+    },
+  },
+  {
     name: "search_knowledge",
     description:
       "Semantic search over the brand's uploaded knowledge base (product " +
@@ -778,7 +807,7 @@ const TOOLS = [
 // analyst toolkit (charts + Chubb/monthly exports). generate_report is brand-only
 // (the admin UI renders 'chart'/'report_files', not the 'report' object);
 // shipping_estimate is a trunk-show/brand tool.
-const BRAND_TOOL_NAMES = new Set(["search_knowledge", "lookup_knowledge_card", "shipping_estimate", "run_sql", "generate_report"]);
+const BRAND_TOOL_NAMES = new Set(["search_knowledge", "lookup_knowledge_card", "shipping_estimate", "run_sql", "generate_report", "report_knowledge_gap"]);
 const ADMIN_TOOL_NAMES = new Set(["run_sql", "search_knowledge", "lookup_knowledge_card", "render_chart", "generate_daily_chubb_export", "generate_monthly_internal_report"]);
 
 Deno.serve(async (req: Request) => {
@@ -1157,13 +1186,15 @@ Deno.serve(async (req: Request) => {
                     )
                     : "No matching knowledge found for this brand. Tell the user this isn't in the knowledge base yet.",
                 });
-                // Coverage signal: the associate asked something the KB couldn't
-                // answer. Log it (deduped, best-effort) so the brand sees what to
-                // add. Only when we surfaced nothing relevant.
-                if (matches.length === 0) {
-                  serviceClient.rpc("log_knowledge_gap", { p_brand_id: brandId, p_query: query, p_top_similarity: null })
-                    .then(({ error }) => { if (error) console.warn("[gap log]", error.message); });
-                }
+                // Coverage signal — but decided at the END of the turn, not here.
+                //
+                // The assistant issues two to four searches per answer and often
+                // answers from one of them, from the lexical pass, or from SQL.
+                // Logging a gap per unproductive SUB-QUERY filled the brand's
+                // "add knowledge for these" list with things it answers
+                // correctly: the returns policy it quotes verbatim, a trunk show
+                // it reports from the events table. A to-do list that is mostly
+                // wrong is worse than none, because the brand stops reading it.
               } catch (e) {
                 toolResults.push({
                   type: "tool_result",
@@ -1172,6 +1203,17 @@ Deno.serve(async (req: Request) => {
                   content: `knowledge search failed: ${e instanceof Error ? e.message : "unknown"}`,
                 });
               }
+            } else if (block.name === "report_knowledge_gap") {
+              const topic = String((block.input as { topic?: string })?.topic ?? "").trim().slice(0, 200);
+              if (topic && brandId) {
+                serviceClient.rpc("log_knowledge_gap", { p_brand_id: brandId, p_query: topic, p_top_similarity: null })
+                  .then(({ error }) => { if (error) console.warn("[gap log]", error.message); });
+              }
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: block.id,
+                content: "Noted — it will appear on the brand's list of knowledge to add. Tell the associate you don't have it and suggest who can.",
+              });
             } else if (block.name === "lookup_knowledge_card") {
               const name = String((block.input as { name?: string })?.name ?? "").trim();
               try {
