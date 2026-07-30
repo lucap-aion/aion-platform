@@ -146,6 +146,26 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
     } finally { setBusy(null); }
   };
 
+  // Data request and ops deck need no inputs. The business case needs a declared
+  // perimeter (segments, COGS ratio, average price), so it stays an API call
+  // until there's a form for it.
+  const buildCollateral = async (kind: "data_request" | "operations") => {
+    setBusy(kind);
+    try {
+      const { data, error } = await supabase.functions.invoke("build-collateral", { body: { brand_id: brandId, kind } });
+      if (error) throw new Error(error.message);
+      const d = data as Record<string, unknown>;
+      if (d.error || d.ok === false) throw new Error(String(d.error ?? d.reason));
+      setDeck({
+        url: String(d.download_url ?? ""), name: String(d.file_name ?? ""),
+        filled: 0, total: 0, review: (d.review as string[]) ?? [],
+      });
+      toast({ title: `${String(d.file_name)} ready` });
+    } catch (e) {
+      toast({ title: "Build failed", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
+    } finally { setBusy(null); }
+  };
+
   const stageStatus = (key: StageKey) => status?.stages?.find((s) => s.stage === key);
   const c = status?.counts ?? {};
 
@@ -170,6 +190,14 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
         <button onClick={() => void buildDeck()} disabled={busy !== null}
           className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
           {busy === "deck" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Intro deck
+        </button>
+        <button onClick={() => void buildCollateral("data_request")} disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
+          {busy === "data_request" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Data request
+        </button>
+        <button onClick={() => void buildCollateral("operations")} disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
+          {busy === "operations" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Ops deck
         </button>
         <button onClick={() => void refresh()} disabled={busy !== null}
           className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
@@ -281,8 +309,10 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
       {deck && (
         <div className="rounded-lg border border-border p-3">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-medium">Intro deck</p>
-            <span className="text-xs text-muted-foreground">{deck.filled}/{deck.total} images from their catalogue</span>
+            <p className="text-sm font-medium">{deck.name || "Deck"}</p>
+            {deck.total > 0 && (
+              <span className="text-xs text-muted-foreground">{deck.filled}/{deck.total} images from their catalogue</span>
+            )}
             <a href={deck.url} className="ml-auto inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
               <Download className="h-4 w-4" /> Download
             </a>
