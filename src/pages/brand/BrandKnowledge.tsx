@@ -6,7 +6,7 @@
 //   • Edit / re-embed (update-knowledge), preview chunks, delete
 // Everyone in the brand can view the corpus.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BookOpen, Globe, Loader2, Plus, RefreshCw, Trash2, FileText, AlertCircle,
   CheckCircle2, Clock, X, UploadCloud, Link2, Pencil, Eye, Newspaper, RotateCw,
@@ -40,6 +40,41 @@ const UPLOAD_BUCKET = "brand-knowledge-uploads";
 // brand with thousands of documents sees the real number even though the list
 // shows the most recent slice.
 const LIST_PAGE_SIZE = 500;
+
+// Why a page didn't make it in.
+//
+// "15 pages failed" says nothing a brand can act on, and hides the one failure
+// that actually matters: when the renderer's quota is gone, every JavaScript-
+// rendered page silently stops being indexed. A brand whose story lives in JS
+// then gets a thin knowledge base, generic documents and a weaker assistant,
+// with no visible cause. Naming the causes is the difference between "something
+// broke" and "top up the renderer".
+type FailKind = "render_quota" | "rate_limited" | "not_found" | "unreachable" | "off_domain" | "unsupported" | "other";
+
+const classifyFailure = (error: string | null): FailKind => {
+  const e = (error ?? "").toLowerCase();
+  if (e.includes("402") || e.includes("quota")) return "render_quota";
+  if (e.includes("429")) return "rate_limited";
+  if (e.includes("404") || e.includes("410")) return "not_found";
+  if (e.includes("off-domain")) return "off_domain";
+  if (e.includes("timed out") || e.includes("503") || e.includes("502") || e.includes("403")) return "unreachable";
+  if (e.includes("non-html")) return "unsupported";
+  return "other";
+};
+
+const FAIL_COPY: Record<FailKind, { en: string; it: string; blocking?: boolean }> = {
+  render_quota: {
+    en: "the page renderer is out of credit — JavaScript-heavy pages can't be read until it's topped up",
+    it: "il renderer ha esaurito il credito — le pagine in JavaScript non possono essere lette finché non viene ricaricato",
+    blocking: true,
+  },
+  rate_limited: { en: "the site rate-limited us — retry later", it: "il sito ha limitato le richieste — riprova più tardi" },
+  not_found:    { en: "the page no longer exists", it: "la pagina non esiste più" },
+  unreachable:  { en: "the site didn't respond", it: "il sito non ha risposto" },
+  off_domain:   { en: "not this brand's website — skipped on purpose", it: "non è il sito di questo brand — ignorata di proposito" },
+  unsupported:  { en: "not a readable web page", it: "non è una pagina web leggibile" },
+  other:        { en: "couldn't be read", it: "non è stato possibile leggerla" },
+};
 const UPLOAD_ACCEPT = ".pdf,.docx,.pptx,.txt,.md,.csv";
 const UPLOAD_MAX_MB = 25;
 
@@ -316,6 +351,13 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   const totalChunks = chunkTotalCount ?? docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0);
   const chunksArePartial = chunkTotalCount === null && totalDocs > docs.length;
 
+  const failureGroups = useMemo(() => {
+    const by = new Map<FailKind, number>();
+    for (const f of failed) by.set(classifyFailure(f.error), (by.get(classifyFailure(f.error)) ?? 0) + 1);
+    return [...by.entries()].sort((a, b) => b[1] - a[1]);
+  }, [failed]);
+  const blockingFailure = failureGroups.find(([k]) => FAIL_COPY[k].blocking);
+
   if (!brandId) {
     return <div className="p-8 text-sm text-muted-foreground">{tt(locale, "No brand context.", "Nessun contesto brand.")}</div>;
   }
@@ -395,6 +437,20 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
         </button>
       </div>
 
+      {/* When the renderer is out of credit this is not a per-page nuisance —
+          entire sites stop being indexable, so it gets said once, loudly. */}
+      {canWrite && blockingFailure && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <span>
+            <strong>{tt(locale, "Some pages can't be read right now.", "Alcune pagine non possono essere lette.")}</strong>{" "}
+            {tt(locale,
+              `${blockingFailure[1]} page${blockingFailure[1] > 1 ? "s" : ""} need JavaScript rendering and the renderer is out of credit. Until it is topped up those pages — often the brand story and lookbooks — stay out of the knowledge base, and the Assistant will not know them.`,
+              `${blockingFailure[1]} pagine richiedono il rendering JavaScript e il renderer ha esaurito il credito. Finché non viene ricaricato quelle pagine — spesso la storia del brand e i lookbook — restano fuori dalla knowledge base e l'Assistente non le conoscerà.`)}
+          </span>
+        </div>
+      )}
+
       {/* Sources & crawl */}
       {canWrite && (website || failed.length > 0) && (
         <div className="rounded-xl border border-border bg-card px-4 py-3">
@@ -437,6 +493,17 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
               </div>
             )}
           </div>
+          {failureGroups.length > 0 && (
+            <ul className="mt-2 space-y-1 text-xs">
+              {failureGroups.map(([kind, n]) => (
+                <li key={kind} className={FAIL_COPY[kind].blocking ? "text-amber-700 dark:text-amber-500" : "text-muted-foreground"}>
+                  <span className="font-medium">{n}</span>{" "}
+                  {tt(locale, `page${n > 1 ? "s" : ""} — ${FAIL_COPY[kind].en}`, `pagine — ${FAIL_COPY[kind].it}`)}
+                </li>
+              ))}
+            </ul>
+          )}
+
           {failed.length > 0 && (
             <details className="mt-2">
               <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">{tt(locale, "Show failed pages", "Mostra pagine non riuscite")}</summary>
