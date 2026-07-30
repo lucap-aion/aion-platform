@@ -399,6 +399,7 @@ function detailLine(st?: StageRow): string | null {
     case "demo_users":
       return d.accounts ? `${Object.keys(d.accounts as object).length} accounts created` : null;
     case "documents": {
+      if (d.waiting_for_crawl) return String(d.note ?? "waiting for the crawl");
       const failed = (d.failed as string[] | undefined) ?? [];
       return `${n("written") ?? 0} drafted${failed.length ? ` · ${failed.length} failed (${failed.join(", ")})` : ""} — review before sending anything`;
     }

@@ -349,6 +349,33 @@ async function runStage(
   }
 
   if (stage === "documents") {
+    // Wait for the crawl. Documents written from a tenth of a website are
+    // grounded in whatever happened to be fetched first — Pasquale Bruni's FAQ
+    // came out based on Cannes press pages because the brand story had not been
+    // reached yet. An assistant answer from a partial index is recoverable; a
+    // document is an artifact someone sends to a client.
+    const { count: pending } = await admin.from("knowledge_crawl_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("brand_id", brandId).in("status", ["pending", "processing"]);
+
+    if ((pending ?? 0) > 0) {
+      // Unless the crawl has stalled — then waiting forever helps nobody, so
+      // write them and say they came from a partial index.
+      const { count: recent } = await admin.from("knowledge_crawl_queue")
+        .select("id", { count: "exact", head: true })
+        .eq("brand_id", brandId).eq("status", "done")
+        .gte("processed_at", new Date(Date.now() - 20 * 60_000).toISOString());
+
+      if ((recent ?? 0) > 0) {
+        return {
+          ok: true,
+          waiting_for_crawl: pending,
+          continue: true,
+          note: `holding until the site is indexed — ${pending} pages left, so the drafts are written from the whole brand rather than the first tenth of it`,
+        };
+      }
+    }
+
     // Bilingual FAQ (it lands on the public FAQ page once approved), the rest
     // in English — a human reviews every one before it goes anywhere.
     const out = await callFn("generate-brand-docs", {
