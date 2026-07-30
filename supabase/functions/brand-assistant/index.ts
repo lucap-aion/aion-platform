@@ -171,9 +171,22 @@ Schema (your brand only):
     planned/confirmed/completed/cancelled. Use for event history, cost & ROI, and
     planning a new one (see "Trunk show planning").
 - event_attendees(id, event_id->events.id, customer_id->profiles.id, customer_name,
-    segment, invited, attended, influencer, converted, revenue) — the invite &
+    segment, invited, attended, influencer, converted, revenue, email, phone,
+    appointment_date, appointment_time, venue, customer_ref, notes) — the invite &
     attribution list per event (who was invited, who came, who converted, and which
-    influencer brought them). This is also the ONLY place a client is "invited",
+    influencer brought them), and also the AGENDA: appointment_date +
+    appointment_time + venue give the running order, so "chi vediamo oggi / domani",
+    "a che ora", "chi viene alla Kaja Gallery" are ORDER BY appointment_date,
+    appointment_time. One show can run across several venues on different days —
+    filter by venue, never assume a single location. appointment_time NULL means
+    invited but unslotted (an open invitation), NOT absent — say "senza orario",
+    never drop the guest. customer_ref is the CRM id from the brand's client card
+    for brands whose clients live in the knowledge base; when it is set you can
+    pull that client's history with lookup_knowledge_card, and when it is NULL the
+    guest is a NEW prospect with no purchase history — worth flagging as such
+    rather than reporting her as a client with no spend. email/phone are the
+    contact details; give them only when asked for them.
+    This is also the ONLY place a client is "invited",
     "confirmed" or "attending" an upcoming event (some houses keep the confirmed
     list as a knowledge card instead — check there too). A client who once bought
     at a show in that city is NOT confirmed for the next one: say "worth inviting"
@@ -906,7 +919,7 @@ Deno.serve(async (req: Request) => {
 - event_items(id, event_id, brand_id, article, description, category, season, colour_code, colour_name, size, size_scale, qty, composition, ddt_number, ddt_date, outcome, sold_qty, revenue, customer_id, customer_name, reconciled_at) — one row per GARMENT sent to an event (the shipment manifest). Use this for any list/count/aggregate of what was sent ("which pieces went to X", "how many dresses", "what's in size 40"); the same shipment also exists as chunked knowledge cards, which return only a fraction of the list. size means nothing without size_scale ('IT' or 'US'). Any breakdown must come from its own GROUP BY — never tally the rows a SELECT returned, that is how a 31-dress shipment gets reported as 24.
 - event_sell_through (view over events + event_items): pieces_sent, pieces_reconciled, pieces_sold, pieces_returned, pieces_retained, revenue_from_items, sell_through_pct, fully_reconciled.
   IMPORTANT: outcome/sold_qty/revenue are NULL until the show is reconciled after it closes, and sell_through_pct is NULL while pieces_reconciled = 0. NULL MEANS NOT YET COUNTED, NOT ZERO SALES — never report "0 sold" or "0% sell-through" for an unreconciled event; say it hasn't been reconciled and report what was sent. Quote coverage (reconciled vs sent) before any percentage.
-- event_attendees(id, event_id, brand_id, customer_id, customer_name, segment, invited, attended, influencer, converted, revenue) — per-event invite & attribution list.
+- event_attendees(id, event_id, brand_id, customer_id, customer_name, segment, invited, attended, influencer, converted, revenue, email, phone, appointment_date, appointment_time, venue, customer_ref, notes) — per-event invite & attribution list, and the agenda: appointment_date/appointment_time/venue give the running order (one show can span several venues). appointment_time NULL = invited but unslotted, not absent. customer_ref NULL = a new prospect with no purchase history, not a client who spent nothing.
 - brand_knowledge_docs(id, brand_id, title, category, source_type, source_url, content) — indexed brand knowledge (story/care/policy, and for some brands client/product "Scheda …" cards). Prefer search_knowledge / lookup_knowledge_card over run_sql for these.`
     : "";
   const languageNote = locale === "it"
