@@ -36,6 +36,10 @@ type Doc = {
 };
 
 const UPLOAD_BUCKET = "brand-knowledge-uploads";
+// One page of the document list. The totals above it come from a count, so a
+// brand with thousands of documents sees the real number even though the list
+// shows the most recent slice.
+const LIST_PAGE_SIZE = 500;
 const UPLOAD_ACCEPT = ".pdf,.docx,.pptx,.txt,.md,.csv";
 const UPLOAD_MAX_MB = 25;
 
@@ -67,6 +71,9 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   const canWrite = canWriteOverride ?? canWriteProfile;
 
   const [docs, setDocs] = useState<Doc[]>([]);
+  // Totals come from a count, not from the length of the page we fetched.
+  const [docTotalCount, setDocTotalCount] = useState<number | null>(null);
+  const [chunkTotalCount, setChunkTotalCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState(false);
   const [pending, setPending] = useState(0);
@@ -93,7 +100,23 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
       // Deleted documents are hidden here and unreachable by the assistant;
       // they stay in the table for 30 days so a mistake can be undone.
       .is("deleted_at", null)
-      .order("updated_at", { ascending: false });
+      // PostgREST caps an unbounded select at 1000 rows. Luisa Beccaria has
+      // 3,759 documents, so the page was showing a third of them and reporting
+      // "1,000 DOCUMENTS" as if that were the total — the brand could not see,
+      // let alone manage, most of its own knowledge base. Ask for an explicit
+      // page and take the totals from a real count.
+      .order("updated_at", { ascending: false })
+      .range(0, LIST_PAGE_SIZE - 1);
+
+    const { count: docTotal } = await supabase
+      .from("brand_knowledge_docs" as never)
+      .select("id", { count: "exact", head: true })
+      .eq("brand_id", brandId)
+      .is("deleted_at", null);
+
+    const { data: chunkTotalRow } = await supabase
+      .rpc("brand_knowledge_totals" as never, { p_brand_id: brandId } as never);
+
     const { count } = await supabase
       .from("knowledge_crawl_queue" as never)
       .select("id", { count: "exact", head: true })
@@ -125,6 +148,14 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
       .limit(10);
     setLoading(false);
     setPending(count ?? 0);
+    setDocTotalCount(docTotal ?? null);
+    // A set-returning RPC comes back as an ARRAY of rows. Reading .chunks off
+    // the array yielded undefined, and the fallback quietly summed only the 500
+    // documents we had loaded — 2,914 instead of 6,173. A wrong number is worse
+    // than an obviously missing one, so this falls back to null, not a partial.
+    const totalsRow = Array.isArray(chunkTotalRow) ? chunkTotalRow[0] : (chunkTotalRow ?? null);
+    const chunkTotal = (totalsRow as { chunks?: number } | null)?.chunks;
+    setChunkTotalCount(typeof chunkTotal === "number" ? chunkTotal : null);
     setSources((srcData as unknown as SourceRow[]) ?? []);
     setFailed((failData as unknown as FailedItem[]) ?? []);
     setGaps((gapData as unknown as GapRow[]) ?? []);
@@ -265,7 +296,10 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
     if (error) { toast.error(tt(locale, "Couldn't dismiss.", "Impossibile ignorare.")); void refresh(); }
   };
 
-  const totalChunks = docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0);
+  // Never derive a total from the rows we happened to load.
+  const totalDocs = docTotalCount ?? docs.length;
+  const totalChunks = chunkTotalCount ?? docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0);
+  const chunksArePartial = chunkTotalCount === null && totalDocs > docs.length;
 
   if (!brandId) {
     return <div className="p-8 text-sm text-muted-foreground">{tt(locale, "No brand context.", "Nessun contesto brand.")}</div>;
@@ -329,8 +363,8 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
 
       {/* Stats */}
       <div className="flex gap-3">
-        <Stat label={tt(locale, "Documents", "Documenti")} value={docs.length} loading={loading} />
-        <Stat label={tt(locale, "Knowledge chunks", "Sezioni indicizzate")} value={totalChunks} loading={loading} />
+        <Stat label={tt(locale, "Documents", "Documenti")} value={totalDocs} loading={loading} />
+        <Stat label={tt(locale, "Knowledge chunks", "Sezioni indicizzate")} value={totalChunks} loading={loading || chunksArePartial} />
         {pending > 0 && (
           <div className="flex items-center gap-2 self-center rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -442,6 +476,13 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
 
       {/* List */}
       <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
+        {!loading && totalDocs > docs.length && (
+          <div className="border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+            {tt(locale,
+              `Showing the ${docs.length.toLocaleString()} most recently updated of ${totalDocs.toLocaleString()} documents.`,
+              `Mostrati i ${docs.length.toLocaleString()} documenti aggiornati più di recente su ${totalDocs.toLocaleString()}.`)}
+          </div>
+        )}
         {loading ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {tt(locale, "Loading…", "Caricamento…")}
