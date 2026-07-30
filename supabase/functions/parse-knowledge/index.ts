@@ -9,7 +9,7 @@
 // storage path's first segment MUST equal the resolved brand — the service-role
 // download bypasses RLS, so we re-check ownership here in defense of depth.
 //
-// Body: { storage_path, filename?, title?, category?, brand_id? }
+// Body: { storage_path, filename?, title?, category?, description?, brand_id? }
 // Returns: { doc_id, chunk_count, char_count, status }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -55,6 +55,7 @@ Deno.serve(async (req: Request) => {
   const filename = String(body.filename ?? storagePath.split("/").pop() ?? "document").trim();
   const category = VALID_CATEGORIES.includes(String(body.category)) ? String(body.category) : "other";
   const titleInput = String(body.title ?? "").trim();
+  const description = String(body.description ?? "").trim().slice(0, 1000);
   if (!storagePath) return jsonError("storage_path is required", 400);
 
   // Resolve brand scope + the caller's profile id, same as ingest-knowledge.
@@ -114,12 +115,20 @@ Deno.serve(async (req: Request) => {
 
   const title = (titleInput || filename.replace(/\.[a-z0-9]+$/i, "")).slice(0, 300) || "Document";
 
+  // The uploader's note goes INTO the text, at the top, before chunking. A file
+  // called "Protocollo_v3_FINAL.pdf" tells the assistant nothing about when to
+  // reach for it; the sentence the uploader wrote usually tells it everything —
+  // and it is often the only place the document's own name appears in prose.
+  if (description) {
+    content = `${title}\n${description}\n\n${content}`.slice(0, MAX_CONTENT_CHARS);
+  }
+
   // 3) Create the doc row up front (status='processing'), then embed. Same
   //    lifecycle as ingest-knowledge so the UI shows it immediately.
   const { data: doc, error: docErr } = await admin
     .from("brand_knowledge_docs")
     .insert({
-      brand_id: brandId, title, category,
+      brand_id: brandId, title, category, description: description || null,
       source_type: "upload", source_url: storagePath,
       content, char_count: content.length, status: "processing", created_by: profileId,
     })

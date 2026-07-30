@@ -1409,6 +1409,55 @@ function estimateShipping(input: ShippingInput) {
 // candidate set, rerank for precision (Voyage rerank), then diversify so the
 // answer draws on several documents rather than many chunks of one.
 // RLS on the chunks table is the real brand gate.
+// Lexical companion to the vector search: match the question's distinctive
+// words against document titles and chunk text. Deliberately narrow — capitalised
+// or rare terms only — so an ordinary question doesn't drag in half the corpus.
+async function lexicalKnowledge(
+  client: ReturnType<typeof createClient>,
+  brandId: number,
+  query: string,
+): Promise<KMatch[]> {
+  const STOP = new Set([
+    "what", "which", "when", "where", "who", "whom", "whose", "why", "how", "the", "and", "for",
+    "our", "your", "their", "this", "that", "these", "those", "with", "from", "about", "does",
+    "did", "are", "was", "were", "have", "has", "had", "can", "could", "should", "would", "tell",
+    "give", "show", "explain", "rules", "policy", "cosa", "come", "quale", "quali", "quando",
+    "nostro", "nostra", "della", "delle", "degli", "sono", "essere", "avere", "chi", "perche",
+  ]);
+  const terms = (query.match(/[\p{L}][\p{L}\p{N}'-]{3,}/gu) ?? [])
+    .filter((w) => !STOP.has(w.toLowerCase()))
+    // A term is worth a lexical lookup when it is capitalised mid-sentence (a
+    // name) or simply long enough to be distinctive.
+    .filter((w) => /^[\p{Lu}]/u.test(w) || w.length >= 7)
+    .slice(0, 4);
+  if (!terms.length) return [];
+
+  const seen = new Map<string, KMatch>();
+  for (const term of terms) {
+    const like = `%${term.replace(/[%_]/g, "")}%`;
+    const { data } = await client
+      .from("brand_knowledge_chunks")
+      .select("id, doc_id, content, brand_knowledge_docs!inner(title, source_url, category)")
+      .eq("brand_id", brandId)
+      .ilike("content", like)
+      .limit(6);
+    for (const r of (data ?? []) as Record<string, any>[]) {
+      const doc = Array.isArray(r.brand_knowledge_docs) ? r.brand_knowledge_docs[0] : r.brand_knowledge_docs;
+      if (!seen.has(r.id)) {
+        seen.set(r.id, {
+          id: r.id, doc_id: r.doc_id, content: r.content,
+          doc_title: doc?.title ?? "", source_url: doc?.source_url ?? null,
+          category: doc?.category ?? "other",
+          // Scored as a solid match: the question literally names it. The rerank
+          // that follows decides whether it actually belongs in the answer.
+          similarity: 0.75,
+        } as KMatch);
+      }
+    }
+  }
+  return [...seen.values()].slice(0, 8);
+}
+
 async function searchKnowledge(
   client: ReturnType<typeof createClient>,
   brandId: number,
@@ -1425,6 +1474,20 @@ async function searchKnowledge(
   });
   if (error) throw new Error(error.message);
   let rows = (data ?? []) as KMatch[];
+
+  // Vector search is blind to names. A proper noun the brand invented — a
+  // protocol, a programme, a collection, a person — carries almost no semantic
+  // signal, so a document that answers "what is the Zafferano Protocol?"
+  // perfectly can score below the floor while the same document answers the
+  // paraphrased question at 0.89. Anything a brand uploads is full of such
+  // names, so fall back to a LEXICAL pass on the distinctive words in the
+  // question and merge whatever it finds.
+  const lexical = await lexicalKnowledge(client, brandId, query);
+  if (lexical.length) {
+    const seen = new Set(rows.map((r) => r.id));
+    rows = [...rows, ...lexical.filter((l) => !seen.has(l.id))];
+  }
+
   if (rows.length === 0) return [];
 
   // Rerank for precision (best-effort — fall back to vector order on failure).

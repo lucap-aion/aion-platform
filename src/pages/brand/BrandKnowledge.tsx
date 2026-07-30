@@ -54,10 +54,17 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
   other: { en: "Other", it: "Altro" },
 };
 
-export default function BrandKnowledge() {
-  const { profile, canWrite } = useAuth();
+// Serves both portals. A brand user is pinned to their own brand; an AION admin
+// passes the brand they are working on (see AdminKnowledge), because the admin
+// profile has no brand_id of its own and would otherwise see an empty page.
+export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
+  brandIdOverride?: number | null;
+  canWriteOverride?: boolean;
+} = {}) {
+  const { profile, canWrite: canWriteProfile } = useAuth();
   const { locale } = useLanguage();
-  const brandId = profile?.brand_id ?? null;
+  const brandId = brandIdOverride ?? profile?.brand_id ?? null;
+  const canWrite = canWriteOverride ?? canWriteProfile;
 
   const [docs, setDocs] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
@@ -674,6 +681,9 @@ const UploadModal = ({
   onDone: () => void;
 }) => {
   const [category, setCategory] = useState("other");
+  // What the uploader knows and the file doesn't say: what this is and when to
+  // reach for it. Indexed with the document, not just stored beside it.
+  const [description, setDescription] = useState("");
   const [items, setItems] = useState<UpItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
@@ -718,7 +728,10 @@ const UploadModal = ({
       }
       update(it.id, { status: "parsing" });
       try {
-        const r = await callFn("parse-knowledge", { storage_path: path, filename: it.file.name, category });
+        const r = await callFn("parse-knowledge", {
+          storage_path: path, filename: it.file.name, category,
+          description: description.trim() || undefined,
+        });
         const secs = `${r.chunk_count} ${tt(locale, "sections", "sezioni")}`;
         update(it.id, { status: "done", note: r.truncated ? `${secs} · ${tt(locale, "truncated", "troncato")}` : secs });
         ok++;
@@ -755,6 +768,23 @@ const UploadModal = ({
             <option key={c} value={c}>{tt(locale, CATEGORY_LABEL[c].en, CATEGORY_LABEL[c].it)}</option>
           ))}
         </select>
+
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          disabled={busy}
+          rows={2}
+          maxLength={1000}
+          placeholder={tt(locale,
+            "Optional: what is this, and when should the assistant use it? e.g. \"Care instructions for embroidered tulle — use when a client asks how to look after a piece.\"",
+            "Facoltativo: che cos'è e quando l'assistente dovrebbe usarlo? es. \"Istruzioni di cura per il tulle ricamato — usare quando una cliente chiede come conservare un capo.\"")}
+          className="mb-3 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+        />
+        <p className="mb-3 -mt-2 text-xs text-muted-foreground">
+          {tt(locale,
+            "This note is indexed with the file — it is often what makes the assistant find it later.",
+            "Questa nota viene indicizzata insieme al file — spesso è ciò che permette all'assistente di ritrovarlo.")}
+        </p>
 
         <label
           onDragOver={(e) => { e.preventDefault(); if (!busy) setDrag(true); }}
