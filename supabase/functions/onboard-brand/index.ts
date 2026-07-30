@@ -377,7 +377,23 @@ async function runStage(
   if (!chunks) {
     return { ok: false, reason: "nothing indexed yet — the crawl is still running, re-run this stage in a few minutes" };
   }
-  return { ok: true, knowledge_chunks: chunks, products: products ?? 0, customers: customers ?? 0 };
+
+  // "Done" used to mean "there is something to answer from", which let a brand
+  // read as ready while most of its site was still being crawled. Report the
+  // coverage honestly: still crawling is not a failure, but it is not finished
+  // either, so the stage keeps itself queued until the queue is empty.
+  const { count: pending } = await admin.from("knowledge_crawl_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("brand_id", brandId).in("status", ["pending", "processing"]);
+
+  return {
+    ok: true,
+    knowledge_chunks: chunks,
+    products: products ?? 0,
+    customers: customers ?? 0,
+    pages_still_crawling: pending ?? 0,
+    continue: (pending ?? 0) > 0,
+  };
 }
 
 // ── Demo logins ──────────────────────────────────────────────────────────────

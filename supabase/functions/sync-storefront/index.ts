@@ -128,11 +128,25 @@ async function syncBrand(
   }
 
   // 2. Which rows need an image embedding (missing, or image changed)?
-  const { data: cur, error: curErr } = await admin
-    .from("storefront_products")
-    .select("id, handle, image_url, image_embedding")
-    .eq("brand_id", brandId);
-  if (curErr) throw new Error(`select: ${curErr.message}`);
+  // PAGINATE. PostgREST caps an unbounded select at 1000 rows, and Luisa
+  // Beccaria has 1013 products: the last 13 were invisible to this check, so
+  // they looked permanently unembedded, were retried on every single run, and
+  // kept `remaining` above zero forever. Harmless when the sync was fire-and-
+  // forget; with a stage that re-queues until remaining hits zero, it would
+  // loop for good.
+  const cur: { id: number; handle: string; image_url: string | null; image_embedding: unknown }[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page, error: curErr } = await admin
+      .from("storefront_products")
+      .select("id, handle, image_url, image_embedding")
+      .eq("brand_id", brandId)
+      .order("id")
+      .range(from, from + 999);
+    if (curErr) throw new Error(`select: ${curErr.message}`);
+    if (!page?.length) break;
+    cur.push(...(page as typeof cur));
+    if (page.length < 1000) break;
+  }
   const byHandle = new Map<string, string | null>(); // handle -> current image_url used for embedding
   const hasEmbedding = new Set<string>();
   for (const r of (cur ?? []) as { handle: string; image_url: string | null; image_embedding: unknown }[]) {

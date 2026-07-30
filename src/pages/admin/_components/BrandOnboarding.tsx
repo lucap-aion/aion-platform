@@ -409,8 +409,10 @@ function detailLine(st?: StageRow): string | null {
         ? `${filled.length} field${filled.length === 1 ? "" : "s"} filled: ${filled.join(", ")}${notes.length ? ` · ${notes[0]}` : ""}`
         : notes[0] ?? "nothing new to fill — the record already has it";
     }
-    case "assistant":
-      return `${n("knowledge_chunks") ?? 0} chunks indexed`;
+    case "assistant": {
+      const left = n("pages_still_crawling") ?? 0;
+      return `${n("knowledge_chunks") ?? 0} chunks indexed${left ? ` · ${left} pages still crawling` : ""}`;
+    }
     default:
       return d.website ? `crawling ${String(d.website)}` : null;
   }
