@@ -11,6 +11,9 @@ import { Loader2, Check, X, Play, RefreshCw, Copy, Trash2, AlertCircle, FileText
 
 type StageKey = "sources" | "storefront" | "demo_data" | "demo_users" | "documents" | "assistant";
 
+// Stages that invent data. Dev-only, enforced server-side.
+const DEMO_STAGES: StageKey[] = ["demo_data", "demo_users"];
+
 const STAGES: { key: StageKey; label: string; hint: string }[] = [
   { key: "sources", label: "Website & news", hint: "Register the site, discover pages, start the crawl" },
   { key: "storefront", label: "Catalogue", hint: "Detect the e-commerce feed and pull the products" },
@@ -23,6 +26,9 @@ const STAGES: { key: StageKey; label: string; hint: string }[] = [
 type StageRow = { stage: string; status: string; detail: Record<string, unknown>; error: string | null };
 type Status = {
   demo_ready: boolean;
+  // Server-authoritative: demo generation is dev-only, and the panel follows
+  // what the environment reports rather than guessing from the frontend build.
+  demo_tools_enabled?: boolean;
   blocking: string[];
   storefront: { platform: string; base_url: string; enabled: boolean } | null;
   counts: Record<string, number>;
@@ -168,6 +174,10 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
 
   const stageStatus = (key: StageKey) => status?.stages?.find((s) => s.stage === key);
   const c = status?.counts ?? {};
+  // Undefined while the first status is in flight — assume off, so demo controls
+  // never flash up on production.
+  const demoEnabled = status?.demo_tools_enabled === true;
+  const visibleStages = STAGES.filter((s) => demoEnabled || !DEMO_STAGES.includes(s.key));
 
   return (
     <div className="space-y-5">
@@ -185,7 +195,7 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
           {busy === "all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-          Prepare demo
+          {demoEnabled ? "Prepare demo" : "Run onboarding"}
         </button>
         <button onClick={() => void buildDeck()} disabled={busy !== null}
           className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
@@ -203,11 +213,18 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
           className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
           <RefreshCw className="h-4 w-4" /> Refresh
         </button>
-        <button onClick={() => void openPurge()} disabled={busy !== null}
+        {demoEnabled && <button onClick={() => void openPurge()} disabled={busy !== null}
           className="ml-auto inline-flex items-center gap-2 rounded-lg border border-destructive/40 px-3 py-2 text-sm text-destructive disabled:opacity-50">
           {busy === "purge" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Remove demo data
-        </button>
+        </button>}
       </div>
+
+      {status && !demoEnabled && (
+        <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+          Demo generation is disabled on this environment — a live brand account holds only its own data.
+          Crawling, catalogue, documents and the assistant check all run here.
+        </div>
+      )}
 
       {status && (
         <div className={`rounded-lg border p-3 text-sm ${status.demo_ready ? "border-emerald-500/40 bg-emerald-500/10" : "border-border bg-muted/40"}`}>
@@ -282,7 +299,7 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
       )}
 
       <ul className="divide-y divide-border rounded-lg border border-border">
-        {STAGES.map((s) => {
+        {visibleStages.map((s) => {
           const st = stageStatus(s.key);
           const state = busy === s.key ? "running" : st?.status ?? "pending";
           return (

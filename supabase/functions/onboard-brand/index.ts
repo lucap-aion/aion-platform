@@ -20,6 +20,7 @@
 //         stages?: string[], options?: { customers, policies, avg_ticket } }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { demoToolsEnabled, demoToolsBlockedReason, isNonProduction } from "../_shared/environment.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -69,7 +70,7 @@ Deno.serve(async (req: Request) => {
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
 
   const action = String(body.action ?? "run");
-  if (action === "status") return json(await status(admin, brandId));
+  if (action === "status") return json({ ...await status(admin, brandId), demo_tools_enabled: demoToolsEnabled() });
 
   // Dry run: what a purge would take out, and what it would leave behind.
   if (action === "preview_purge") {
@@ -106,8 +107,17 @@ Deno.serve(async (req: Request) => {
     : [...ALL_STAGES]) as Stage[];
   const options = (body.options ?? {}) as { customers?: number; policies?: number; avg_ticket?: number };
 
+  // Demo stages are dev-only. Asking for them in production is not an error to
+  // hide — it is reported per stage, and the real onboarding stages still run.
+  const DEMO_STAGES: Stage[] = ["demo_data", "demo_users"];
+
   const results: Record<string, unknown> = {};
   for (const stage of requested) {
+    if (DEMO_STAGES.includes(stage) && !demoToolsEnabled()) {
+      await setStage(admin, brandId, stage, "skipped", { blocked: true, reason: demoToolsBlockedReason() });
+      results[stage] = { ok: true, skipped: true, reason: demoToolsBlockedReason() };
+      continue;
+    }
     await setStage(admin, brandId, stage, "running");
     try {
       const out = await runStage(admin, brand, stage, options);
@@ -126,7 +136,11 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  return json({ ok: true, brand_id: brandId, ran: results, status: await status(admin, brandId) });
+  return json({
+    ok: true, brand_id: brandId, ran: results,
+    demo_tools_enabled: demoToolsEnabled(),
+    status: await status(admin, brandId),
+  });
 });
 
 // ── Stages ───────────────────────────────────────────────────────────────────
@@ -188,6 +202,7 @@ async function runStage(
   }
 
   if (stage === "demo_data") {
+    if (!demoToolsEnabled()) return { ok: true, skipped: true, reason: demoToolsBlockedReason() };
     const { data, error } = await admin.rpc("generate_brand_demo_data", {
       p_brand_id: brandId,
       p_customers: options.customers ?? 40,
@@ -198,7 +213,10 @@ async function runStage(
     return data;
   }
 
-  if (stage === "demo_users") return await createDemoUsers(admin, brand);
+  if (stage === "demo_users") {
+    if (!demoToolsEnabled()) return { ok: true, skipped: true, reason: demoToolsBlockedReason() };
+    return await createDemoUsers(admin, brand);
+  }
 
   if (stage === "documents") {
     // Bilingual FAQ (it lands on the public FAQ page once approved), the rest
