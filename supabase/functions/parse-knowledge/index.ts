@@ -56,6 +56,10 @@ Deno.serve(async (req: Request) => {
   const category = VALID_CATEGORIES.includes(String(body.category)) ? String(body.category) : "other";
   const titleInput = String(body.title ?? "").trim();
   const description = String(body.description ?? "").trim().slice(0, 1000);
+  // Ephemeral: extract the text, hand it back, keep nothing. This is how an
+  // associate asks a question ABOUT a file — a client brief, a supplier quote —
+  // without it becoming part of the brand's permanent knowledge.
+  const ephemeral = body.ephemeral === true;
   if (!storagePath) return jsonError("storage_path is required", 400);
 
   // Resolve brand scope + the caller's profile id, same as ingest-knowledge.
@@ -78,7 +82,11 @@ Deno.serve(async (req: Request) => {
     // hides these controls from everyone else, but a hidden button is not a
     // permission: three of the five write paths accepted any brand login
     // straight from the API. Same rule update-knowledge already enforces.
-    if (!(profileRow.role === "brand_admin" || profileRow.is_master)) {
+    //
+    // An ephemeral read is NOT a knowledge change — nothing is indexed and
+    // nothing is kept — so it is not gated. Asking a question about your own
+    // file should not require permission to alter the brand's knowledge.
+    if (!ephemeral && !(profileRow.role === "brand_admin" || profileRow.is_master)) {
       return jsonError("insufficient permissions", 403);
     }
     brandId = profileRow.brand_id as number;
@@ -121,6 +129,21 @@ Deno.serve(async (req: Request) => {
   if (content.length > MAX_CONTENT_CHARS) { content = content.slice(0, MAX_CONTENT_CHARS); truncated = true; }
 
   const title = (titleInput || filename.replace(/\.[a-z0-9]+$/i, "")).slice(0, 300) || "Document";
+
+  if (ephemeral) {
+    // Remove the raw upload immediately: a one-off document the brand did not
+    // choose to keep should not linger in storage.
+    await admin.storage.from(BUCKET).remove([storagePath]).catch(() => {});
+    return jsonOk({
+      ephemeral: true,
+      title,
+      filename,
+      char_count: content.length,
+      truncated,
+      text: content,
+      note: "Not indexed — this text was returned for a single conversation and nothing was stored.",
+    });
+  }
 
   // The uploader's note goes INTO the text, at the top, before chunking. A file
   // called "Protocollo_v3_FINAL.pdf" tells the assistant nothing about when to

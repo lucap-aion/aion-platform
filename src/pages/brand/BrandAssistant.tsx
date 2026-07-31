@@ -89,7 +89,8 @@ async function fileToScaledDataUrl(file: File, maxDim = 1024, quality = 0.82): P
 // Capped so a big file can't blow the context window.
 const SHEET_MAX_ROWS = 300;
 const SHEET_MAX_CHARS = 45000;
-type SheetAttachment = { name: string; text: string; rows: number };
+// rows is optional: a document attachment has text but no rows.
+type SheetAttachment = { name: string; text: string; rows?: number };
 
 function cellToText(v: unknown): string {
   if (v == null) return "";
@@ -277,6 +278,7 @@ export default function BrandAssistant() {
   const [image, setImage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<SheetAttachment | null>(null);
+  const [readingDoc, setReadingDoc] = useState(false);
   const sheetRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const dragDepth = useRef(0);
@@ -461,6 +463,56 @@ export default function BrandAssistant() {
     catch { toast.error(tt(locale, "Couldn't read that image.", "Impossibile leggere l'immagine.")); }
   };
 
+  // A one-off document — a client brief, a supplier quote, a lookbook PDF.
+  //
+  // This is deliberately NOT the knowledge base. The text is extracted, used
+  // for this conversation, and nothing is stored: the upload is deleted server
+  // side as soon as it is read. An associate asking about their own file should
+  // not have to add it to the brand's permanent knowledge — which would answer
+  // every future question for everyone — nor need permission to do so.
+  const DOC_EXT = [".pdf", ".docx", ".pptx", ".txt", ".md"];
+
+  const attachDoc = async (file: File) => {
+    const lower = file.name.toLowerCase();
+    if (!DOC_EXT.some((e) => lower.endsWith(e))) {
+      toast.error(tt(locale, "Attach a PDF, Word, PowerPoint, .txt or .md file.", "Allega un PDF, Word, PowerPoint, .txt o .md."));
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      toast.error(tt(locale, "That file is over 25MB.", "Il file supera i 25MB."));
+      return;
+    }
+    setReadingDoc(true);
+    const ext = lower.split(".").pop() ?? "bin";
+    const path = `${profile?.brand_id}/tmp-${crypto.randomUUID()}.${ext}`;
+    try {
+      const { error: upErr } = await supabase.storage
+        .from("brand-knowledge-uploads")
+        .upload(path, file, { upsert: false, contentType: file.type || undefined });
+      if (upErr) throw new Error(upErr.message);
+
+      const { data, error } = await supabase.functions.invoke("parse-knowledge", {
+        body: { storage_path: path, filename: file.name, ephemeral: true },
+      });
+      const res = data as { text?: string; title?: string; truncated?: boolean; error?: string } | null;
+      if (error || res?.error || !res?.text) {
+        // The function removes the upload itself on success; clean up when it
+        // never got that far.
+        void supabase.storage.from("brand-knowledge-uploads").remove([path]);
+        throw new Error(res?.error ?? error?.message ?? "no readable text");
+      }
+      setSheet({ name: file.name, text: res.text });
+      if (res.truncated) {
+        toast.info(tt(locale, "Long file — I read the first part of it.", "File lungo — ho letto solo la prima parte."));
+      }
+    } catch (e) {
+      toast.error(tt(locale, "Couldn't read that document.", "Impossibile leggere il documento."));
+      console.warn("[attach doc]", e);
+    } finally {
+      setReadingDoc(false);
+    }
+  };
+
   const attachSheet = async (file: File) => {
     const lower = file.name.toLowerCase();
     if (!lower.endsWith(".xlsx") && !lower.endsWith(".xls") && !lower.endsWith(".csv")) {
@@ -481,7 +533,8 @@ export default function BrandAssistant() {
     const lower = file.name.toLowerCase();
     if (file.type.startsWith("image/")) { void attachImage(file); return; }
     if (lower.endsWith(".xlsx") || lower.endsWith(".xls") || lower.endsWith(".csv")) { void attachSheet(file); return; }
-    toast.error(tt(locale, "Drop an image, .xlsx, .xls or .csv.", "Trascina un'immagine, un .xlsx, .xls o .csv."));
+    if (DOC_EXT.some((e) => lower.endsWith(e))) { void attachDoc(file); return; }
+    toast.error(tt(locale, "Drop an image, a spreadsheet, or a PDF/Word/PowerPoint file.", "Trascina un'immagine, un foglio di calcolo o un file PDF/Word/PowerPoint."));
   };
 
   const onPickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -492,7 +545,10 @@ export default function BrandAssistant() {
   const onPickSheet = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (e.target) e.target.value = ""; // allow re-picking the same file
-    if (file) void attachSheet(file);
+    if (!file) return;
+    const lower = file.name.toLowerCase();
+    if (DOC_EXT.some((x) => lower.endsWith(x))) void attachDoc(file);
+    else void attachSheet(file);
   };
 
   // Drag-and-drop a file anywhere on the chat panel. A depth counter avoids the
@@ -787,12 +843,26 @@ export default function BrandAssistant() {
                 </span>
               </div>
             )}
+            {readingDoc && !sheet && (
+              <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {tt(locale, "Reading the document…", "Lettura del documento…")}
+              </div>
+            )}
             {sheet && (
               <div className="mb-2 flex items-center gap-2">
                 <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2">
                   <FileSpreadsheet className="h-4 w-4 text-primary" />
                   <span className="max-w-[220px] truncate text-xs font-medium text-foreground">{sheet.name}</span>
-                  <span className="text-[11px] text-muted-foreground">· {sheet.rows} {tt(locale, "rows", "righe")}</span>
+                  {sheet.rows ? (
+                    <span className="text-[11px] text-muted-foreground">· {sheet.rows} {tt(locale, "rows", "righe")}</span>
+                  ) : null}
+                  {/* Say plainly that this is not the knowledge base. The
+                      difference between "ask about this once" and "everyone
+                      gets this answer forever" is invisible otherwise. */}
+                  <span className="text-[11px] text-muted-foreground">
+                    · {tt(locale, "this chat only, not saved", "solo in questa chat, non salvato")}
+                  </span>
                   <button
                     type="button"
                     onClick={() => setSheet(null)}
@@ -825,7 +895,7 @@ export default function BrandAssistant() {
               <input
                 ref={sheetRef}
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".xlsx,.xls,.csv,.pdf,.docx,.pptx,.txt,.md"
                 className="hidden"
                 onChange={(e) => void onPickSheet(e)}
               />
@@ -835,7 +905,7 @@ export default function BrandAssistant() {
                 disabled={loading}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
                 aria-label={tt(locale, "Attach an Excel or CSV", "Allega un Excel o CSV")}
-                title={tt(locale, "Attach an Excel/CSV to analyse", "Allega un Excel/CSV da analizzare")}
+                title={tt(locale, "Attach a file to ask about — PDF, Word, PowerPoint, Excel or CSV. Used for this chat only, not added to the knowledge base.", "Allega un file su cui fare domande — PDF, Word, PowerPoint, Excel o CSV. Solo per questa chat, non aggiunto alla knowledge base.")}
               >
                 <FileSpreadsheet className="h-4 w-4" />
               </button>
@@ -844,8 +914,9 @@ export default function BrandAssistant() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKeyDown}
-                placeholder={tt(locale, "Ask, attach a photo to identify a piece, or an Excel to analyse…",
-                  "Chiedi, allega una foto per identificare un pezzo, o un Excel da analizzare…")}
+                placeholder={tt(locale,
+                  "Ask, attach a photo to identify a piece, or a file to ask about…",
+                  "Chiedi, allega una foto per identificare un capo o un file su cui fare domande…")}
                 rows={1}
                 disabled={loading}
                 className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
