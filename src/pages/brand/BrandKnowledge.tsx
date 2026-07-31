@@ -6,11 +6,11 @@
 //   • Edit / re-embed (update-knowledge), preview chunks, delete
 // Everyone in the brand can view the corpus.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen, Globe, Loader2, Plus, RefreshCw, Trash2, FileText, AlertCircle,
   CheckCircle2, Clock, X, UploadCloud, Link2, Pencil, Eye, Newspaper, RotateCw,
-  Lightbulb, FileSpreadsheet, ThumbsDown, ChevronDown,
+  Lightbulb, FileSpreadsheet, ThumbsDown, ChevronDown, Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -106,6 +106,14 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   const canWrite = canWriteOverride ?? canWriteProfile;
 
   const [docs, setDocs] = useState<Doc[]>([]);
+  // Search runs SERVER-side, not over the loaded page. With 3,759 documents and
+  // a 500-row page, filtering what we happened to fetch would search a seventh
+  // of the corpus and confidently report nothing — the same "looks like an
+  // answer, is actually a truncation" trap the counts had.
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
   // Totals come from a count, not from the length of the page we fetched.
   const [docTotalCount, setDocTotalCount] = useState<number | null>(null);
   // Soft-deleted documents. The Undo on the toast is not a recovery path: dismiss
@@ -130,16 +138,42 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   const [editDoc, setEditDoc] = useState<Doc | null>(null);
   const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Guards against a stale response overwriting a newer one. Searching content
+  // across thousands of documents is slow and uneven, so a request for
+  // "Castelluccio" can land AFTER the request for "Brera" and repaint the list
+  // with the wrong query's results — verified: the UI showed 23 matches for a
+  // term that has 7. Only the newest request may touch state.
+  const requestSeq = useRef(0);
+
   const refresh = useCallback(async () => {
     if (!brandId) return;
+    const seq = ++requestSeq.current;
+    const isStale = () => seq !== requestSeq.current;
     setLoading(true);
-    const { data, error } = await supabase
+    let listQuery = supabase
       .from("brand_knowledge_docs" as never)
       .select("id, title, category, source_type, source_url, status, error, char_count, chunk_count, updated_at")
       .eq("brand_id", brandId)
       // Deleted documents are hidden here and unreachable by the assistant;
       // they stay in the table for 30 days so a mistake can be undone.
-      .is("deleted_at", null)
+      .is("deleted_at", null);
+
+    // Title first, then the body — a brand looking for "Zafferano" wants the
+    // document called Zafferano, but a brand looking for "ATA Carnet" may only
+    // know it appears somewhere inside one.
+    if (debouncedSearch) {
+      const safe = debouncedSearch.replace(/[%,()]/g, " ").trim();
+      if (safe) listQuery = listQuery.or(`title.ilike.%${safe}%,content.ilike.%${safe}%`);
+    }
+    if (categoryFilter) listQuery = listQuery.eq("category", categoryFilter);
+    if (sourceFilter) listQuery = listQuery.eq("source_type", sourceFilter);
+
+    const { data, error } = await listQuery
       // PostgREST caps an unbounded select at 1000 rows. Luisa Beccaria has
       // 3,759 documents, so the page was showing a third of them and reporting
       // "1,000 DOCUMENTS" as if that were the total — the brand could not see,
@@ -156,11 +190,20 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
       .order("updated_at", { ascending: false })
       .limit(50);
 
-    const { count: docTotal } = await supabase
+    // The same filters, or "showing 500 of 3,759" would be a lie while a search
+    // is active.
+    let countQuery = supabase
       .from("brand_knowledge_docs" as never)
       .select("id", { count: "exact", head: true })
       .eq("brand_id", brandId)
       .is("deleted_at", null);
+    if (debouncedSearch) {
+      const safe = debouncedSearch.replace(/[%,()]/g, " ").trim();
+      if (safe) countQuery = countQuery.or(`title.ilike.%${safe}%,content.ilike.%${safe}%`);
+    }
+    if (categoryFilter) countQuery = countQuery.eq("category", categoryFilter);
+    if (sourceFilter) countQuery = countQuery.eq("source_type", sourceFilter);
+    const { count: docTotal } = await countQuery;
 
     const { data: chunkTotalRow } = await supabase
       .rpc("brand_knowledge_totals" as never, { p_brand_id: brandId } as never);
@@ -194,6 +237,8 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
       .eq("rating", -1)
       .order("created_at", { ascending: false })
       .limit(10);
+    if (isStale()) return;
+
     setLoading(false);
     setPending(count ?? 0);
     setDocTotalCount(docTotal ?? null);
@@ -216,7 +261,7 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
       return;
     }
     setDocs((data as unknown as Doc[]) ?? []);
-  }, [brandId, locale]);
+  }, [brandId, locale, debouncedSearch, categoryFilter, sourceFilter]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -350,6 +395,7 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   const totalDocs = docTotalCount ?? docs.length;
   const totalChunks = chunkTotalCount ?? docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0);
   const chunksArePartial = chunkTotalCount === null && totalDocs > docs.length;
+  const isFiltered = !!(debouncedSearch || categoryFilter || sourceFilter);
 
   const failureGroups = useMemo(() => {
     const by = new Map<FailKind, number>();
@@ -610,18 +656,87 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
         </div>
       )}
 
+      {/* Find one document among thousands. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[240px] flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={tt(locale, "Search titles and contents…", "Cerca nei titoli e nei contenuti…")}
+            className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-8 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label={tt(locale, "Clear search", "Cancella ricerca")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+        >
+          <option value="">{tt(locale, "All categories", "Tutte le categorie")}</option>
+          {["product", "storytelling", "policy", "training", "news", "other"].map((c) => (
+            <option key={c} value={c}>{tt(locale, CATEGORY_LABEL[c].en, CATEGORY_LABEL[c].it)}</option>
+          ))}
+        </select>
+
+        <select
+          value={sourceFilter}
+          onChange={(e) => setSourceFilter(e.target.value)}
+          className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+        >
+          <option value="">{tt(locale, "All sources", "Tutte le origini")}</option>
+          <option value="url">{tt(locale, "Website", "Sito")}</option>
+          <option value="upload">{tt(locale, "Upload", "Caricato")}</option>
+          <option value="manual">{tt(locale, "Manual", "Manuale")}</option>
+          <option value="news">{tt(locale, "News", "News")}</option>
+        </select>
+
+        {(search || categoryFilter || sourceFilter) && (
+          <button
+            type="button"
+            onClick={() => { setSearch(""); setCategoryFilter(""); setSourceFilter(""); }}
+            className="rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+          >
+            {tt(locale, "Clear", "Azzera")}
+          </button>
+        )}
+      </div>
+
       {/* List */}
       <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
-        {!loading && totalDocs > docs.length && (
+        {!loading && (totalDocs > docs.length || isFiltered) && (
           <div className="border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-            {tt(locale,
-              `Showing the ${docs.length.toLocaleString()} most recently updated of ${totalDocs.toLocaleString()} documents.`,
-              `Mostrati i ${docs.length.toLocaleString()} documenti aggiornati più di recente su ${totalDocs.toLocaleString()}.`)}
+            {isFiltered
+              ? tt(locale,
+                  `${totalDocs.toLocaleString()} document${totalDocs === 1 ? "" : "s"} match${totalDocs === 1 ? "es" : ""}${totalDocs > docs.length ? ` — showing the first ${docs.length.toLocaleString()}` : ""}.`,
+                  `${totalDocs.toLocaleString()} documenti corrispondono${totalDocs > docs.length ? ` — mostrati i primi ${docs.length.toLocaleString()}` : ""}.`)
+              : tt(locale,
+                  `Showing the ${docs.length.toLocaleString()} most recently updated of ${totalDocs.toLocaleString()} documents.`,
+                  `Mostrati i ${docs.length.toLocaleString()} documenti aggiornati più di recente su ${totalDocs.toLocaleString()}.`)}
           </div>
         )}
         {loading ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {tt(locale, "Loading…", "Caricamento…")}
+          </div>
+        ) : docs.length === 0 && isFiltered ? (
+          <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
+            <Search className="h-7 w-7 text-muted-foreground/50" />
+            <p className="text-sm font-medium text-foreground">{tt(locale, "Nothing matches", "Nessun risultato")}</p>
+            <p className="max-w-sm text-xs text-muted-foreground">
+              {tt(locale, "No document matches these filters — the knowledge is there, this search just doesn't reach it.",
+                          "Nessun documento corrisponde a questi filtri — i contenuti ci sono, questa ricerca non li raggiunge.")}
+            </p>
           </div>
         ) : docs.length === 0 ? (
           <div className="flex h-56 flex-col items-center justify-center gap-2 text-center">
