@@ -32,6 +32,15 @@ const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY")!;
 // Upgraded to Sonnet for far better synthesis, tool use, and selling instinct.
 // Override per-env with ASSISTANT_MODEL; followups use a cheap fast model.
 const MODEL = Deno.env.get("ASSISTANT_MODEL") ?? "claude-sonnet-4-6";
+// Temperature is deliberately NOT set here. It looked like the obvious cause of
+// the guard-case flakiness — an assistant answering from retrieved facts running
+// at the API default of 1.0 — so it was set to 0.2 and MEASURED with the
+// retrieval eval, five runs against five. It made no difference: 4 guard
+// failures at the default, 5 at 0.2, which at that sample size is noise. The
+// variance is in the model's judgement on ambiguous questions ("who spent the
+// most" when no per-event data exists), not in sampling. Reverted rather than
+// left in on a theory the measurement rejected. Do not re-add it without
+// re-running the eval.
 const FOLLOWUP_MODEL = "claude-haiku-4-5-20251001";
 const EMBED_MODEL = "voyage-3.5";
 const EMBED_DIMS = 1024;
@@ -1324,7 +1333,7 @@ Deno.serve(async (req: Request) => {
             const recovery = anthropic.messages.stream({
               model: MODEL,
               max_tokens: MAX_TOKENS,
-              system: systemBlocks,
+                system: systemBlocks,
               messages: [
                 ...messages,
                 { role: "user", content: "Write the answer NOW as text, from the data already gathered above. Do not call any tools. Follow your normal format; if a part is missing, say so plainly. Never reply empty." },
