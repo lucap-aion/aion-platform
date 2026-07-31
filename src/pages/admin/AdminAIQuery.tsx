@@ -1091,8 +1091,18 @@ const PlaybookCard = ({
   );
 };
 
+// Make the ILIKE wildcards literal, so a user typing "50%" searches for "50%"
+// rather than matching everything.
 const escapeIlike = (s: string) =>
-  s.replace(/[\\%_,()]/g, (c) => `\\${c}`);
+  s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+// ...and then QUOTE the value for PostgREST. Backslash-escaping a comma does not
+// work: or() is split on commas BEFORE anything is unescaped, so "\," still ends
+// the term and the next fragment starts with "%", which is not a field name.
+// Measured: any admin question containing a comma — "Rank our brands by revenue,
+// biggest first" — made this 400 with PGRST100. It is caught and returns [], so
+// the customer lookup silently found nobody instead of failing visibly.
+const quoteVal = (s: string) => `"${s.replace(/["\\]/g, (c) => `\\${c}`)}"`;
 
 // Split the user input on whitespace so a multi-token query like
 // "Angela G" matches a row where the tokens live in different columns
@@ -1110,7 +1120,7 @@ const searchCustomers = async (q: string): Promise<SearchResult[]> => {
     .select("id, first_name, last_name, email, brands(name)")
     .or("role.is.null,role.eq.customer");
   for (const tok of tokens) {
-    const pattern = `%${escapeIlike(tok)}%`;
+    const pattern = quoteVal(`%${escapeIlike(tok)}%`);
     query = query.or(
       `first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},phone_number.ilike.${pattern}`,
     );
@@ -1146,7 +1156,7 @@ const searchProducts = async (q: string): Promise<SearchResult[]> => {
     .from("catalogues")
     .select("id, name, sku, category, brands(name)");
   for (const tok of tokens) {
-    const pattern = `%${escapeIlike(tok)}%`;
+    const pattern = quoteVal(`%${escapeIlike(tok)}%`);
     query = query.or(`name.ilike.${pattern},sku.ilike.${pattern}`);
   }
   const { data, error } = await query.limit(8);

@@ -96,6 +96,19 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
 // Serves both portals. A brand user is pinned to their own brand; an AION admin
 // passes the brand they are working on (see AdminKnowledge), because the admin
 // profile has no brand_id of its own and would otherwise see an empty page.
+// Build a PostgREST ilike term for a free-text search box.
+//
+// The previous version stripped "%,()" to spaces, so searching for a title that
+// contains a comma quietly matched nothing. Escaping the comma does not work
+// either: or() is split on commas BEFORE unescaping. Quote the value instead —
+// then punctuation is searchable and a typed "%" stays literal.
+const ilikeTerm = (raw: string): string => {
+  const t = raw.trim();
+  if (!t) return "";
+  const literal = t.replace(/[\\%_]/g, (c) => `\\${c}`);
+  return `"%${literal.replace(/["\\]/g, (c) => `\\${c}`)}%"`;
+};
+
 export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   brandIdOverride?: number | null;
   canWriteOverride?: boolean;
@@ -167,8 +180,8 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
     // document called Zafferano, but a brand looking for "ATA Carnet" may only
     // know it appears somewhere inside one.
     if (debouncedSearch) {
-      const safe = debouncedSearch.replace(/[%,()]/g, " ").trim();
-      if (safe) listQuery = listQuery.or(`title.ilike.%${safe}%,content.ilike.%${safe}%`);
+      const safe = ilikeTerm(debouncedSearch);
+      if (safe) listQuery = listQuery.or(`title.ilike.${safe},content.ilike.${safe}`);
     }
     if (categoryFilter) listQuery = listQuery.eq("category", categoryFilter);
     if (sourceFilter) listQuery = listQuery.eq("source_type", sourceFilter);
@@ -198,8 +211,8 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
       .eq("brand_id", brandId)
       .is("deleted_at", null);
     if (debouncedSearch) {
-      const safe = debouncedSearch.replace(/[%,()]/g, " ").trim();
-      if (safe) countQuery = countQuery.or(`title.ilike.%${safe}%,content.ilike.%${safe}%`);
+      const safe = ilikeTerm(debouncedSearch);
+      if (safe) countQuery = countQuery.or(`title.ilike.${safe},content.ilike.${safe}`);
     }
     if (categoryFilter) countQuery = countQuery.eq("category", categoryFilter);
     if (sourceFilter) countQuery = countQuery.eq("source_type", sourceFilter);
