@@ -85,11 +85,18 @@ Deno.serve(async (req: Request) => {
   } else {
     const { data: profileRow } = await userClient
       .from("profiles")
-      .select("id, brand_id, role")
+      .select("id, brand_id, role, is_master")
       .eq("user_id", user.id)
       .in("role", ["brand", "brand_admin", "brand_user"])
       .maybeSingle();
     if (!profileRow?.brand_id) return jsonError("admin or brand role required", 403);
+    // Only brand admins / master users may change the knowledge base. The UI
+    // hides these controls from everyone else, but a hidden button is not a
+    // permission: three of the five write paths accepted any brand login
+    // straight from the API. Same rule update-knowledge already enforces.
+    if (!(profileRow.role === "brand_admin" || profileRow.is_master)) {
+      return jsonError("insufficient permissions", 403);
+    }
     brandId = profileRow.brand_id as number;
     profileId = profileRow.id as string;
   }

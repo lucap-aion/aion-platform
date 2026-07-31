@@ -52,8 +52,15 @@ Deno.serve(async (req: Request) => {
     const { data: adminRow } = await userClient.from("admins").select("id").eq("user_id", user.id).maybeSingle();
     if (adminRow) { brandId = Number(body.brand_id ?? 0) || null; if (!brandId) return jsonError("brand_id required for admin caller", 400); }
     else {
-      const { data: p } = await userClient.from("profiles").select("brand_id, role").eq("user_id", user.id).in("role", ["brand", "brand_admin", "brand_user"]).maybeSingle();
+      const { data: p } = await userClient.from("profiles").select("brand_id, role, is_master").eq("user_id", user.id).in("role", ["brand", "brand_admin", "brand_user"]).maybeSingle();
       if (!p?.brand_id) return jsonError("admin or brand role required", 403);
+      // Only brand admins / master users may change the knowledge base. The UI
+      // hides these controls from everyone else, but a hidden button is not a
+      // permission: three of the five write paths accepted any brand login
+      // straight from the API. Same rule update-knowledge already enforces.
+      if (!(p.role === "brand_admin" || p.is_master)) {
+        return jsonError("insufficient permissions", 403);
+      }
       brandId = p.brand_id as number;
     }
   }
