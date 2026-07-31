@@ -294,6 +294,15 @@ client. A product answer with no pieces to show is a failed answer.
   price-on-request (price IS NULL), count them in your aggregate and add the
   half-line — "32 pieces, €1,080–€4,770; 7 are price on request" — so the count
   and the range agree with each other.
+  Concretely: NEVER put "price IS NOT NULL" in the WHERE clause of a counting
+  query. That filter is invisible in the result and turns "how many do we have"
+  into "how many have a price" — it reported 20 Bridesmaids pieces when there
+  are 26. Get both numbers from ONE query and no price filter:
+    SELECT COUNT(*) AS total, COUNT(price) AS priced,
+           MIN(price) AS from_price, MAX(price) AS to_price
+    FROM storefront_products WHERE collection ILIKE '%bridesmaid%'
+  Then say the TOTAL as the count. If priced < total, say so; the difference is
+  price-on-request, not missing stock.
 - SAME for any total you state in prose (a look, a client's spend, a basket): do
   the sum with SQL, or add it up digit by digit before you write it. A wrong
   total in a styling answer is a wrong price quoted to a client. If you're not
@@ -377,6 +386,20 @@ publishing a top-5 that omits the actual number 1.
 If neither exists for the slice you were asked about, say so in one line, give
 the ranking you DO have (naming what it ranks), and offer to look up specific
 names — never improvise the order.
+AND NEVER HAND-BUILD A RANKED TABLE OUT OF SEPARATE CARDS. This is the rule
+that matters, because every measured ordering failure came from doing it: you
+gather five or ten client cards, put their totals in a table headed "top clients
+by spend", and order them by eye. Sorting by eye does not work. Measured: a
+table listed €73,445, €9,700, €6,050, €4,500, €4,196, then €23,912 — the
+second-biggest client sat sixth, so the floor reads the €9,700 client as number
+two. The prose underneath was correct, which makes it worse, not better: the two
+disagreed and the table is what gets scanned.
+So a table may only be ordered by a column when that order came ready-made from
+ONE source — a ranking card you quote in its own order, or your own ORDER BY
+over the whole set. If you have neither, you may still name the relevant clients
+— as a plain shortlist, with no rank claim, no "top", no ordered column — and
+say in one line that they are not ranked and why. An honest unordered shortlist
+is worth more than a ranked table that is wrong.
 Two more traps in the same breath:
 - Label the number you actually have. A client card's spend is her TOTAL across
   all channels and years — it is not "her spend at the New York show". If the
@@ -1083,6 +1106,7 @@ Deno.serve(async (req: Request) => {
         }
 
         let sawText = false;
+        const textGuard = makeTableOrderGuard(emit, question);
         for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
           emit("turn_start", { turn });
 
@@ -1100,7 +1124,7 @@ Deno.serve(async (req: Request) => {
               (ev.delta as { type?: string }).type === "text_delta"
             ) {
               const text = (ev.delta as { text?: string }).text ?? "";
-              if (text) { emit("text_delta", { text }); sawText = true; }
+              if (text) { textGuard.push(text); sawText = true; }
             }
           }
 
@@ -1181,19 +1205,30 @@ Deno.serve(async (req: Request) => {
                     snippet: m.content.slice(0, 200),
                   })),
                 });
+                // Does the thing the question NAMES exist at all? Asked every
+                // time, not only when the search comes back empty — an invented
+                // name still retrieves plenty of loosely-related text, and that
+                // pile is exactly what gets confabulated into a description.
+                const absent = await absentTermsNote(serviceClient, brandId, query);
+                const found = matches.length
+                  ? JSON.stringify(
+                    matches.map((m) => ({
+                      source: m.doc_title,
+                      category: m.category,
+                      similarity: Math.round(m.similarity * 100) / 100,
+                      text: m.content,
+                    })),
+                  )
+                  : "";
                 toolResults.push({
                   type: "tool_result",
                   tool_use_id: block.id,
-                  content: matches.length
-                    ? JSON.stringify(
-                      matches.map((m) => ({
-                        source: m.doc_title,
-                        category: m.category,
-                        similarity: Math.round(m.similarity * 100) / 100,
-                        text: m.content,
-                      })),
-                    )
-                    : "No matching knowledge found for this brand. Tell the user this isn't in the knowledge base yet.",
+                  content: absent && found
+                    ? `${absent}\n\nThe search still returned the text below. It is RELATED, not about the name above — do not treat it as a description of it:\n${found}`
+                    : absent
+                    ? absent
+                    : found ||
+                      "No matching knowledge found for this brand. Tell the user this isn't in the knowledge base yet.",
                 });
                 // Coverage signal — but decided at the END of the turn, not here.
                 //
@@ -1342,7 +1377,7 @@ Deno.serve(async (req: Request) => {
             for await (const ev of recovery) {
               if (ev.type === "content_block_delta" && (ev.delta as { type?: string }).type === "text_delta") {
                 const text = (ev.delta as { text?: string }).text ?? "";
-                if (text) { emit("text_delta", { text }); sawText = true; }
+                if (text) { textGuard.push(text); sawText = true; }
               }
             }
             await recovery.finalMessage();
@@ -1350,6 +1385,9 @@ Deno.serve(async (req: Request) => {
             console.warn("[brand-assistant recovery]", e instanceof Error ? e.message : e);
           }
         }
+
+        // Release anything the table guard is still holding before we finish.
+        textGuard.flush();
 
         // Suggest 3 natural follow-ups the associate might tap next (cheap, fast
         // model). Best-effort — never block the answer on it.
@@ -1515,6 +1553,164 @@ async function indexingStatusNote(
   }
 }
 
+// A ranked table, ordered by the machine rather than by eye.
+//
+// Measured: asked who spent the most, the assistant published a table headed
+// "top clients by total spend" whose rows were not in that order — €13,410 below
+// €9,700, the second-biggest client sixth. It gets the leaders right and drifts
+// in the tail. Two prompt rules failed to fix it (4 of 8 runs still wrong),
+// which is the expected result: sorting numbers reliably is not something to
+// ask a language model for, and the client spend figures live only as text in
+// knowledge cards, so there is no ORDER BY to lean on.
+//
+// So the numbers get sorted here. Table lines are buffered as they stream, and
+// released in the right order. Everything outside a table streams through
+// untouched, token by token, so the answer still appears as it is written.
+//
+// Deliberately narrow: it only reorders when the table CLAIMS a ranking (a
+// money-ish header, a superlative in the text just before it), every row has a
+// figure, and the rows are actually out of order. A table that is merely a list
+// — "here are six pieces" — is never touched.
+function makeTableOrderGuard(emitFn: (event: string, data: unknown) => void, question = "") {
+  let carry = "";
+  let table: string[] = [];
+  let recent = "";
+
+  const out = (s: string) => {
+    if (!s) return;
+    emitFn("text_delta", { text: s });
+    recent = (recent + s).slice(-400);
+  };
+
+  const amount = (line: string): number | null => {
+    const m = line.match(/€\s?([\d.,]+)/);
+    if (!m) return null;
+    const n = Number(m[1].replace(/[.,](?=\d{3}\b)/g, ""));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const ordered = (lines: string[]): string[] => {
+    const isSep = (l: string) => /^[\s|:\-]+$/.test(l);
+    const header = lines[0];
+    if (!header || !/spend|revenue|total|fatturato|speso|valore|importo/i.test(header)) return lines;
+    // Only when a ranking is actually claimed — by the question that was asked,
+    // or by the prose just above the table. Match on the STEM: this first
+    // shipped with "ranked", and an answer opening "a clear ranking ... doesn't
+    // exist" slipped straight past it and published an unsorted table.
+    const CLAIM = /rank|leaderboard|top\b|highest|biggest|most|largest|classifica|migliori|maggior/i;
+    if (!CLAIM.test(recent) && !CLAIM.test(question)) return lines;
+
+    const sepIdx = lines.findIndex((l, i) => i > 0 && isSep(l));
+    if (sepIdx !== 1) return lines; // not a well-formed markdown table
+    const rows = lines.slice(2);
+    if (rows.length < 3) return lines;
+
+    // A table down the page in time order — "| 2024 | €120,000 |" — can carry a
+    // money header and sit under the word "most" without being a ranking at all.
+    // Reordering that would be a new bug, so leave anything period-shaped alone.
+    const firstCell = (l: string) => (l.split("|")[1] ?? "").replace(/\*/g, "").trim();
+    const TEMPORAL = /^((19|20)\d{2}|Q[1-4]|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|gen|mag|giu|lug|ago|set|ott|dic)/i;
+    if (rows.every((l) => TEMPORAL.test(firstCell(l)))) return lines;
+
+    const vals = rows.map(amount);
+    if (vals.some((v) => v === null)) return lines; // a row we can't read — leave it alone
+    const nums = vals as number[];
+    if (nums.every((v, i) => i === 0 || v <= nums[i - 1])) return lines; // already right
+
+    const sorted = rows
+      .map((row, i) => ({ row, v: nums[i] }))
+      .sort((a, b) => b.v - a.v)
+      .map((r) => r.row);
+    return [lines[0], lines[1], ...sorted];
+  };
+
+  const flushTable = () => {
+    if (!table.length) return;
+    const lines = table;
+    table = [];
+    for (const l of ordered(lines)) out(l);
+  };
+
+  return {
+    push(text: string) {
+      carry += text;
+      let i: number;
+      while ((i = carry.indexOf("\n")) >= 0) {
+        const line = carry.slice(0, i + 1);
+        carry = carry.slice(i + 1);
+        if (line.trimStart().startsWith("|")) table.push(line);
+        else { flushTable(); out(line); }
+      }
+      // Outside a table, don't hold a partial line back — keep streaming smooth.
+      if (!table.length && !carry.trimStart().startsWith("|")) { out(carry); carry = ""; }
+    },
+    flush() { flushTable(); out(carry); carry = ""; },
+  };
+}
+
+// Is the thing the question NAMES actually in our data?
+//
+// The failure this exists for: asked about a collection that does not exist,
+// the assistant roughly once a run described one anyway — inventing a piece an
+// associate would then describe to a client. Left to itself the model treats
+// "nothing matched" as weak evidence and fills the gap.
+//
+// Whether a name exists is not a judgement call, it is two lookups. So do them
+// and hand back a verdict, the same way the in-flight indexing note works: state
+// the fact rather than hoping it gets inferred.
+async function absentTermsNote(
+  admin: ReturnType<typeof createClient>,
+  brandId: number | null,
+  query: string,
+): Promise<string | null> {
+  if (!brandId) return null;
+
+  // Only names worth checking: capitalised mid-sentence, and not a word the
+  // brand itself uses everywhere ("Bridesmaids" is a real category).
+  const terms = salientTerms(query).filter((t) => /^[\p{Lu}]/u.test(t)).slice(0, 3);
+  if (!terms.length) return null;
+
+  const missing: string[] = [];
+  await Promise.all(terms.map(async (term) => {
+    const like = `%${term.replace(/[%_\\]/g, "")}%`;
+    try {
+      // limit(1), not a count: we only care whether it exists anywhere.
+      const [docs, chunks, products] = await Promise.all([
+        admin.from("brand_knowledge_docs").select("id").eq("brand_id", brandId)
+          .is("deleted_at", null).ilike("title", like).limit(1),
+        // Join through to the doc: soft delete sets deleted_at on the DOCUMENT
+        // and leaves its chunks in place, so querying chunks alone would let a
+        // deleted document vouch for a name we no longer hold — the same bypass
+        // that once kept a "deleted" protocol answering.
+        admin.from("brand_knowledge_chunks")
+          .select("id, brand_knowledge_docs!inner(deleted_at)").eq("brand_id", brandId)
+          .is("brand_knowledge_docs.deleted_at", null)
+          .ilike("content", like).limit(1),
+        admin.from("storefront_products").select("id").eq("brand_id", brandId)
+          .or(`name.ilike.${like},collection.ilike.${like}`).limit(1),
+      ]);
+      // A query that ERRORS must not be read as "absent" — that is how a
+      // permission problem turns into a confident denial.
+      if (docs.error || chunks.error || products.error) return;
+      if (!docs.data?.length && !chunks.data?.length && !products.data?.length) missing.push(term);
+    } catch { /* stay silent rather than deny something that may exist */ }
+  }));
+
+  if (!missing.length) return null;
+
+  return [
+    `VERIFIED ABSENT: ${missing.map((t) => `"${t}"`).join(" and ")} — checked directly against this brand's ` +
+    `documents, indexed text and product catalogue. It appears in NONE of them: not a document title, not a ` +
+    `product name, not a collection name.`,
+    "",
+    "This is a checked fact, not a weak search result. Therefore:",
+    "- Do NOT describe it, characterise it, or say what it is like. There is nothing to describe.",
+    "- Say plainly that we have nothing under that name.",
+    "- Call report_knowledge_gap so the brand can add it if it should exist.",
+    "- Then offer the closest thing you DO have, stated clearly as a different thing.",
+  ].join("\n");
+}
+
 // Lexical companion to the vector search: match the question's distinctive
 // words against document titles and chunk text. Deliberately narrow — capitalised
 // or rare terms only — so an ordinary question doesn't drag in half the corpus.
@@ -1523,6 +1719,13 @@ async function lexicalKnowledge(
   brandId: number,
   query: string,
 ): Promise<KMatch[]> {
+  const terms = salientTerms(query);
+  return terms.length ? await lexicalByTerms(client, brandId, terms) : [];
+}
+
+// The distinctive words in a question: a capitalised name, or something long
+// enough to be specific. Shared by the lexical search and the absence check.
+function salientTerms(query: string): string[] {
   const STOP = new Set([
     "what", "which", "when", "where", "who", "whom", "whose", "why", "how", "the", "and", "for",
     "our", "your", "their", "this", "that", "these", "those", "with", "from", "about", "does",
@@ -1530,14 +1733,20 @@ async function lexicalKnowledge(
     "give", "show", "explain", "rules", "policy", "cosa", "come", "quale", "quali", "quando",
     "nostro", "nostra", "della", "delle", "degli", "sono", "essere", "avere", "chi", "perche",
   ]);
-  const terms = (query.match(/[\p{L}][\p{L}\p{N}'-]{3,}/gu) ?? [])
+  const words: string[] = query.match(/[\p{L}][\p{L}\p{N}'-]{3,}/gu) ?? [];
+  return words
     .filter((w) => !STOP.has(w.toLowerCase()))
-    // A term is worth a lexical lookup when it is capitalised mid-sentence (a
-    // name) or simply long enough to be distinctive.
+    // A term is worth a lookup when it is capitalised mid-sentence (a name) or
+    // simply long enough to be distinctive.
     .filter((w) => /^[\p{Lu}]/u.test(w) || w.length >= 7)
     .slice(0, 4);
-  if (!terms.length) return [];
+}
 
+async function lexicalByTerms(
+  client: ReturnType<typeof createClient>,
+  brandId: number,
+  terms: string[],
+): Promise<KMatch[]> {
   const seen = new Map<string, KMatch>();
   for (const term of terms) {
     const like = `%${term.replace(/[%_]/g, "")}%`;

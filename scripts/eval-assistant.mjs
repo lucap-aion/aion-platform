@@ -71,11 +71,29 @@ const CASES = [
     // GOOD answer — one that correctly said no per-event attribution exists,
     // then gave the real lifetime ranking in the right order. Naming her is
     // fine. Crowning her is the bug, and that is what this asserts.
+    // The name assertion that used to live here was ALSO wrong — the third bad
+    // assertion on this one case. It demanded "Jane Lauder" or "Neapolitan",
+    // which failed a better answer: one that scoped to clients whose only
+    // registered show is New York. Naming who is top is not the property worth
+    // testing, because there are several defensible answers.
+    //
+    // What is NOT defensible is a table headed "top clients by total spend"
+    // whose rows are not in that order — measured here putting a EUR 23,912
+    // client sixth, below EUR 4,196, so the floor reads Jennifer Fischer as #2.
+    // That is the property: a ranking must be ranked.
     ask: "Which of our clients spent the most at the New York trunk show?",
-    says: [/neapolitan|jane lauder/i],
+    orderedDesc: true,
+    // FOURTH bad assertion on this case. The pair above banned her name near any
+    // superlative, and failed this, which is correct and well-scoped:
+    //   "Deborah Van Eck (EUR 139,815) and Eleanor Dejoux (EUR 65,355) are the
+    //    biggest spenders [among NY-attending clients], but their trunk-show
+    //    revenue isn't a single-edition figure"
+    // She IS one of the two largest among New York attendees; she is 7th across
+    // the house. A regex cannot see that scope, so match the bug instead: being
+    // crowned THE top client, singular and definite. Plural or hedged is fine.
     avoids: [
-      /eleanor dejoux[^.]{0,60}(top|highest|most|biggest)/i,
-      /(top|highest|biggest)[^.]{0,40}eleanor dejoux/i,
+      /eleanor dejoux[^.]{0,40}\b(is|was|remains)\b[^.]{0,25}\b(the|our)\s+(single\s+)?(top|biggest|highest|largest|number[- ]one)\b/i,
+      /\b(the|our)\s+(single\s+)?(top|biggest|highest|largest)\b[^.]{0,30}\b(spender|client|customer|buyer)\b[^.]{0,25}(is|was|:)\s*\**\s*eleanor dejoux/i,
     ],
   },
   {
@@ -93,6 +111,28 @@ const CASES = [
     avoids: [/aurora boreale (capsule )?(collection )?(is|was) (a|our) (new|beautiful|romantic|signature)/i],
   },
 ];
+
+// One money figure per markdown table row, in the order the rows are printed.
+// Used to assert that a table claiming to rank actually ranks.
+function moneyPerTableRow(text) {
+  const out = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim().startsWith("|")) continue;
+    if (/^[\s|:-]+$/.test(line)) continue; // the ---|--- separator
+    const m = line.match(/€\s?([\d.,]+)/);
+    if (!m) continue;
+    // "€73,445" and "€1.470" are both thousands-separated here; strip both.
+    const n = Number(m[1].replace(/[.,](?=\d{3}\b)/g, ""));
+    if (Number.isFinite(n)) out.push(n);
+  }
+  return out;
+}
+
+import fs from "node:fs";
+const FAIL_DIR = process.env.EVAL_FAIL_DIR ?? "./eval-failures";
+const runStamp = process.env.EVAL_STAMP ?? String(process.pid);
+// Run one case repeatedly: EVAL_ONLY=ranking npm run eval:assistant
+const ONLY = process.env.EVAL_ONLY ?? "";
 
 const ok = (s) => `\x1b[32m${s}\x1b[0m`;
 const bad = (s) => `\x1b[31m${s}\x1b[0m`;
@@ -138,7 +178,7 @@ async function ask(token, question) {
 const token = await getToken();
 let failures = 0;
 
-for (const c of CASES) {
+for (const c of CASES.filter((c) => !ONLY || c.name.includes(ONLY))) {
   const { text, sources } = await ask(token, c.ask);
   const problems = [];
 
@@ -151,6 +191,17 @@ for (const c of CASES) {
   for (const re of c.avoids ?? []) {
     if (re.test(text)) problems.push(`answer contains ${re} — it should not`);
   }
+  if (c.orderedDesc) {
+    const amounts = moneyPerTableRow(text);
+    // No money table at all = no ranking claimed = nothing to be wrong about.
+    // (`avoids` still catches crowning someone in prose.)
+    if (amounts.length >= 3) {
+      const wrong = amounts.findIndex((v, i) => i > 0 && v > amounts[i - 1]);
+      if (wrong > 0) {
+        problems.push(`table not in rank order: row ${wrong + 1} (${amounts[wrong]}) > row ${wrong} (${amounts[wrong - 1]})`);
+      }
+    }
+  }
   if (!text.trim()) problems.push("empty answer");
 
   if (problems.length) {
@@ -159,10 +210,20 @@ for (const c of CASES) {
     console.log(`      Q: ${c.ask}`);
     for (const p of problems) console.log(`      · ${p}`);
     console.log(`      retrieved: ${[...new Set(sources)].slice(0, 5).join(" | ") || "(nothing)"}`);
+    // Keep the answer that failed. Without this a failure is unverifiable after
+    // the fact — a run crowned the wrong client and the text was gone, so I
+    // could not tell a real defect from my own regex misfiring.
+    const dump = `${FAIL_DIR}/${c.name.replace(/\W+/g, "_").slice(0, 48)}-${runStamp}.txt`;
+    try {
+      fs.mkdirSync(FAIL_DIR, { recursive: true });
+      fs.writeFileSync(dump, `Q: ${c.ask}\n\nPROBLEMS:\n${problems.map((p) => "  · " + p).join("\n")}\n\nRETRIEVED:\n${[...new Set(sources)].join("\n")}\n\nANSWER:\n${text}\n`);
+      console.log(`      saved: ${dump}`);
+    } catch { /* a dump failure must not fail the eval */ }
   } else {
     console.log(`${ok("pass")}  ${c.name}`);
   }
 }
 
-console.log(`\n${CASES.length - failures}/${CASES.length} passed`);
+const ran = CASES.filter((c) => !ONLY || c.name.includes(ONLY)).length;
+console.log(`\n${ran - failures}/${ran} passed`);
 process.exit(failures ? 1 : 0);
