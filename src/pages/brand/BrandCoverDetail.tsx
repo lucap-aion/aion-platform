@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
+import { DEFAULT_MAX_COVERED_VALUE, coveredUpToLabel, isAboveCoverageCap } from "@/lib/coverage";
 
 const statusColors: Record<string, string> = {
   live: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -31,7 +32,7 @@ const BrandCoverDetail = () => {
       const { data, error } = await supabase
         .from("policies")
         .select(`
-          id, start_date, expiration_date, status, selling_price, recommended_retail_price, cogs, quantity,
+          id, start_date, expiration_date, status, selling_price, recommended_retail_price, covered_value, cogs, quantity,
           brand_sale_id, brand_row_id, brand_sub_order_row_code, purchase_receipt, notes, internal_notes, created_at,
           catalogues!insured_items_item_id_fkey ( id, name, picture, category, collection, sku ),
           profiles!insured_items_customer_id_fkey ( id, first_name, last_name, email, phone_number, avatar ),
@@ -169,6 +170,11 @@ const BrandCoverDetail = () => {
                 <div>
                   <p className="text-xs text-muted-foreground">RRP</p>
                   <p className="font-medium text-foreground">€{(cover.recommended_retail_price || 0).toLocaleString()}</p>
+                  {isAboveCoverageCap(cover, DEFAULT_MAX_COVERED_VALUE) && (
+                    <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800" title="Item above the coverage cap: COGS, premium and activation fee are computed on the covered value">
+                      {coveredUpToLabel(cover, DEFAULT_MAX_COVERED_VALUE)}
+                    </span>
+                  )}
                 </div>
                 {cover.quantity != null && (
                   <div>

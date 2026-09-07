@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import SearchableSelect from "@/components/SearchableSelect";
 import { parseError } from "@/utils/parseError";
+import { coveredCogs, coveredRetailValue, coveredUpToLabel, isAboveCoverageCap, resolveMaxCoveredValue } from "@/lib/coverage";
 
 const PAGE_SIZE = 25;
 type SortOption = "newest" | "oldest" | "expiry_asc" | "expiry_desc";
@@ -106,7 +107,7 @@ const BrandCovers = () => {
       let query = supabase
         .from("policies")
         .select(`
-          id, start_date, expiration_date, status, selling_price, customer_id, recommended_retail_price, brand_row_id, brand_sale_id, brand_sub_order_row_code, quantity, purchase_receipt, notes, internal_notes,
+          id, start_date, expiration_date, status, selling_price, customer_id, recommended_retail_price, covered_value, brand_row_id, brand_sale_id, brand_sub_order_row_code, quantity, purchase_receipt, notes, internal_notes,
           catalogues!insured_items_item_id_fkey ( id, name, picture ),
           profiles!insured_items_customer_id_fkey ( first_name, last_name, email ),
           shops!insured_items_shop_id_fkey ( name )
@@ -176,6 +177,22 @@ const BrandCovers = () => {
     enabled: modalOpen && !!profile?.brand_id,
   });
 
+  // Coverage ceiling of this brand (brands.max_covered_value, default EUR 100k)
+  const { data: brandCapRow } = useQuery({
+    queryKey: ["brand-max-covered-value", profile?.brand_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("brands")
+        .select("max_covered_value")
+        .eq("id", profile?.brand_id || -1)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!profile?.brand_id,
+  });
+  const brandCap = resolveMaxCoveredValue(brandCapRow);
+
   const { data: mfgCosts } = useQuery({
     queryKey: ["brand-mfg-costs", profile?.brand_id],
     queryFn: async () => {
@@ -234,10 +251,13 @@ const BrandCovers = () => {
   const mfgRate = selectedCatalogue?.category
     ? (mfgCosts || []).find((m) => m.category === selectedCatalogue.category)?.cost_pct
     : undefined;
+  // COGS only on the covered value (retail price capped at the brand ceiling)
   const computedCogs =
     mfgRate != null && form.rrp
-      ? Math.round(Number(form.rrp) * mfgRate * 100) / 100
+      ? coveredCogs(form.rrp, mfgRate, brandCap)
       : null;
+  const formCoveredValue = form.rrp ? coveredRetailValue(form.rrp, brandCap) : null;
+  const formAboveCap = form.rrp ? Number(form.rrp) > brandCap : false;
 
   const handleSave = async () => {
     if (!profile?.brand_id) return;
@@ -268,6 +288,7 @@ const BrandCovers = () => {
           expiration_date: form.expirationDate || null,
           selling_price: form.sellingPrice ? Number(form.sellingPrice) : null,
           recommended_retail_price: form.rrp ? Number(form.rrp) : null,
+          covered_value: formCoveredValue,
           quantity: form.quantity ? Number(form.quantity) : null,
           cogs: computedCogs,
           purchase_receipt: form.purchaseReceipt || null,
@@ -294,6 +315,7 @@ const BrandCovers = () => {
         expiration_date: form.expirationDate || null,
         selling_price: form.sellingPrice ? Number(form.sellingPrice) : null,
         recommended_retail_price: form.rrp ? Number(form.rrp) : null,
+        covered_value: formCoveredValue,
         quantity: form.quantity ? Number(form.quantity) : null,
         cogs: computedCogs,
         purchase_receipt: form.purchaseReceipt || null,
@@ -483,6 +505,11 @@ const BrandCovers = () => {
                       <span className="text-foreground font-medium">
                         €{(cover.recommended_retail_price || 0).toLocaleString()}
                       </span>
+                      {isAboveCoverageCap(cover, brandCap) && (
+                        <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                          {coveredUpToLabel(cover, brandCap)}
+                        </span>
+                      )}
                     </span>
                   </div>
                 </div>
@@ -502,7 +529,13 @@ const BrandCovers = () => {
                   <p className="text-sm text-foreground whitespace-nowrap">
                     €{(cover.recommended_retail_price || 0).toLocaleString()}
                   </p>
-                  <p className="text-xs text-muted-foreground">RRP</p>
+                  {isAboveCoverageCap(cover, brandCap) ? (
+                    <p className="text-[10px] font-medium text-amber-700 whitespace-nowrap" title="Item above the coverage cap">
+                      {coveredUpToLabel(cover, brandCap)}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">RRP</p>
+                  )}
                 </div>
                 <span
                   className={`shrink-0 w-[80px] text-center rounded-full px-3 py-1 text-xs font-medium ${
@@ -740,6 +773,11 @@ const BrandCovers = () => {
                       placeholder="0.00"
                       className={inputCls}
                     />
+                    {formAboveCap && formCoveredValue != null && (
+                      <p className="mt-1 text-xs text-amber-700">
+                        Covered up to €{formCoveredValue.toLocaleString()}: COGS and premium are computed on the covered value.
+                      </p>
+                    )}
                   </Field>
                   <Field label="COGS (auto)">
                     <div className="w-full rounded-lg border border-input bg-muted/50 px-4 py-2.5 text-sm text-muted-foreground">

@@ -72,6 +72,7 @@ const BRANDS_SCHEMA: ExportColumn[] = [
   { key: "activation_fee",        label: "Activation Fee" },
   { key: "insurance_premium",     label: "Insurance Premium" },
   { key: "aion_premium_fee",      label: "AION Premium Fee" },
+  { key: "max_covered_value",     label: "Max Covered Value" },
   { key: "enable_chubb_reporting",label: "Chubb Reporting" },
   { key: "chubb_policy_prefix",   label: "Chubb Policy Prefix" },
 ];
@@ -80,6 +81,7 @@ import BrandOnboarding from "./_components/BrandOnboarding";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, TextArea, SaveBar } from "./_components/FormField";
 import { ImageUpload } from "./_components/ImageUpload";
+import { DEFAULT_MAX_COVERED_VALUE } from "@/lib/coverage";
 
 interface Brand {
   id: number;
@@ -109,6 +111,7 @@ interface Brand {
   activation_fee: number | null;
   insurance_premium: number | null;
   aion_premium_fee: number | null;
+  max_covered_value: number | null;
 }
 
 type Mode = "view" | "edit" | "add";
@@ -125,7 +128,7 @@ const empty = (): Partial<Brand> => ({
   faq_en: null, faq_it: null,
   theme_settings: null,
   enable_chubb_reporting: false, chubb_policy_prefix: "",
-  activation_fee: null, insurance_premium: null, aion_premium_fee: null,
+  activation_fee: null, insurance_premium: null, aion_premium_fee: null, max_covered_value: null,
 });
 
 const toJsonStr = (v: any) => v ? JSON.stringify(v, null, 2) : "";
@@ -181,7 +184,7 @@ const AdminBrands = () => {
   const fetchFull = async (id: number): Promise<Partial<Brand> | null> => {
     const { data } = await supabase
       .from("brands")
-      .select("id, name, slug, description, email, website, hq_country, hq_address, hq_city, hq_postcode, status, logo_small, logo_big, auth_background_image, top_banner_image, theft_image, damage_image, faq_image, feedback_image, faq_en, faq_it, theme_settings, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee")
+      .select("id, name, slug, description, email, website, hq_country, hq_address, hq_city, hq_postcode, status, logo_small, logo_big, auth_background_image, top_banner_image, theft_image, damage_image, faq_image, feedback_image, faq_en, faq_it, theme_settings, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value")
       .eq("id", id)
       .single();
     return data as Partial<Brand> | null;
@@ -252,6 +255,7 @@ const AdminBrands = () => {
       activation_fee: editing.activation_fee ?? null,
       insurance_premium: editing.insurance_premium ?? null,
       aion_premium_fee: editing.aion_premium_fee ?? null,
+      max_covered_value: editing.max_covered_value ?? DEFAULT_MAX_COVERED_VALUE,
     };
     const { error } = mode === "add"
       ? await supabase.from("brands").insert(payload)
@@ -276,7 +280,7 @@ const AdminBrands = () => {
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
     let q = supabase
       .from("brands")
-      .select("id, name, slug, email, website, hq_country, status, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee")
+      .select("id, name, slug, email, website, hq_country, status, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value")
       .order(sortKey, { ascending: sortDir === "asc" })
       .limit(10000);
     if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%,slug.ilike.%${search}%,hq_country.ilike.%${search}%,website.ilike.%${search}%,status.ilike.%${search}%`);
@@ -566,7 +570,7 @@ const AdminBrands = () => {
           {/* Fee Rates */}
           <div className="border-t border-border pt-4">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Fee Rates</p>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-4 gap-3">
               <FormField label="Activation Fee" hint="e.g. 0.05 = 5%">
                 <Input type="number" step="0.0001" disabled={ro} value={editing.activation_fee ?? ""} onChange={(e) => set("activation_fee", e.target.value ? Number(e.target.value) : null)} />
               </FormField>
@@ -575,6 +579,9 @@ const AdminBrands = () => {
               </FormField>
               <FormField label="AION Premium Fee" hint="On net premium">
                 <Input type="number" step="0.0001" disabled={ro} value={editing.aion_premium_fee ?? ""} onChange={(e) => set("aion_premium_fee", e.target.value ? Number(e.target.value) : null)} />
+              </FormField>
+              <FormField label="Max Covered Value (€)" hint="Retail cap per item; new covers only">
+                <Input type="number" step="1" min="0" disabled={ro} value={editing.max_covered_value ?? ""} placeholder={String(DEFAULT_MAX_COVERED_VALUE)} onChange={(e) => set("max_covered_value", e.target.value ? Number(e.target.value) : null)} />
               </FormField>
             </div>
           </div>

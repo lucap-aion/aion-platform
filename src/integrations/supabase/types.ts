@@ -245,6 +245,7 @@ export type Database = {
         Row: {
           activation_fee: number | null
           aion_premium_fee: number | null
+          max_covered_value: number
           auth_background_image: string | null
           chubb_policy_prefix: string | null
           created_at: string
@@ -275,6 +276,7 @@ export type Database = {
         Insert: {
           activation_fee?: number | null
           aion_premium_fee?: number | null
+          max_covered_value?: number
           auth_background_image?: string | null
           chubb_policy_prefix?: string | null
           created_at?: string
@@ -305,6 +307,7 @@ export type Database = {
         Update: {
           activation_fee?: number | null
           aion_premium_fee?: number | null
+          max_covered_value?: number
           auth_background_image?: string | null
           chubb_policy_prefix?: string | null
           created_at?: string
@@ -629,6 +632,7 @@ export type Database = {
           brand_sub_order_row_code: string | null
           cancelled_at: string | null
           cogs: number | null
+          covered_value: number | null
           created_at: string
           customer_id: string | null
           expiration_date: string | null
@@ -659,6 +663,7 @@ export type Database = {
           brand_sub_order_row_code?: string | null
           cancelled_at?: string | null
           cogs?: number | null
+          covered_value?: number | null
           created_at?: string
           customer_id?: string | null
           expiration_date?: string | null
@@ -689,6 +694,7 @@ export type Database = {
           brand_sub_order_row_code?: string | null
           cancelled_at?: string | null
           cogs?: number | null
+          covered_value?: number | null
           created_at?: string
           customer_id?: string | null
           expiration_date?: string | null
