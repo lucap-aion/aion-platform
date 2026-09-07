@@ -505,12 +505,13 @@ const BrandCovers = () => {
                       <span className="text-foreground font-medium">
                         €{(cover.recommended_retail_price || 0).toLocaleString()}
                       </span>
-                      {isAboveCoverageCap(cover, brandCap) && (
-                        <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-                          {coveredUpToLabel(cover, brandCap)}
-                        </span>
-                      )}
                     </span>
+                    {isAboveCoverageCap(cover, brandCap) && (
+                      <span className="basis-full inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium leading-4 text-amber-800 w-fit">
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        {coveredUpToLabel(cover, brandCap)}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="hidden md:block text-center shrink-0 w-[100px]">
@@ -530,9 +531,10 @@ const BrandCovers = () => {
                     €{(cover.recommended_retail_price || 0).toLocaleString()}
                   </p>
                   {isAboveCoverageCap(cover, brandCap) ? (
-                    <p className="text-[10px] font-medium text-amber-700 whitespace-nowrap" title="Item above the coverage cap">
+                    <span className="mt-0.5 inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium leading-4 text-amber-800 whitespace-nowrap" title="Item above the coverage cap">
+                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
                       {coveredUpToLabel(cover, brandCap)}
-                    </p>
+                    </span>
                   ) : (
                     <p className="text-xs text-muted-foreground">RRP</p>
                   )}

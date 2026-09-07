@@ -405,10 +405,14 @@ const AdminCovers = () => {
               if (r.recommended_retail_price == null) return "—";
               const cap = resolveMaxCoveredValue(brands.find((b) => b.id === r.brand_id));
               return (
-                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                  {`€${r.recommended_retail_price.toLocaleString("en-EU", { minimumFractionDigits: 0 })}`}
+                <span className="inline-flex flex-col items-start gap-0.5">
+                  <span className="whitespace-nowrap">{`€${r.recommended_retail_price.toLocaleString("en-EU", { minimumFractionDigits: 0 })}`}</span>
                   {isAboveCoverageCap(r, cap) && (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800" title="Item above the coverage cap: COGS, premium and activation fee are computed on the covered value">
+                    <span
+                      className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium leading-4 text-amber-800 whitespace-nowrap"
+                      title="Item above the coverage cap: COGS, premium and activation fee are computed on the covered value"
+                    >
+                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
                       {coveredUpToLabel(r, cap)}
                     </span>
                   )}
