@@ -48,12 +48,12 @@ const getWeekRange = (year: number, week: number) => {
   return { from: monday.toISOString(), to: sunday.toISOString() };
 };
 
-interface Brand { id: number; name: string; slug: string | null; activation_fee: unknown; insurance_premium: unknown; aion_premium_fee: unknown; }
+interface Brand { id: number; name: string; slug: string | null; activation_fee: unknown; insurance_premium: unknown; aion_premium_fee: unknown; max_covered_value?: number | null; }
 interface Shop { id: number; name: string | null; brand_id: number | null; }
 
 interface Statistics {
   brands: number; customers: number; covers: number; claims: number; openClaims: number;
-  closedClaims: number; shops: number; rrpTotal: number; coveredValueTotal: number; sellingPriceTotal: number;
+  closedClaims: number; shops: number; rrpTotal: number; coveredValueTotal: number; coverageCap: number | null; sellingPriceTotal: number;
   cogsTotal: number; grossPremium: number; netPremium: number; aionActivationFee: number;
   aionPremiumFee: number; aionRevenue: number; effectivePremiumPct: number | null;
   effectiveActivationFeePct: number | null; effectiveAionPremiumFeePct: number | null;
@@ -64,7 +64,7 @@ interface Statistics {
 
 const emptyStats = (): Statistics => ({
   brands: 0, customers: 0, covers: 0, claims: 0, openClaims: 0, closedClaims: 0, shops: 0,
-  rrpTotal: 0, coveredValueTotal: 0, sellingPriceTotal: 0, cogsTotal: 0, grossPremium: 0, netPremium: 0,
+  rrpTotal: 0, coveredValueTotal: 0, coverageCap: null, sellingPriceTotal: 0, cogsTotal: 0, grossPremium: 0, netPremium: 0,
   aionActivationFee: 0, aionPremiumFee: 0, aionRevenue: 0,
   effectivePremiumPct: null, effectiveActivationFeePct: null, effectiveAionPremiumFeePct: null,
   latestActivation: "", claimRate: null, registrationRate: null,
@@ -115,6 +115,10 @@ const MetricCard = ({ icon: Icon, label, value, sub, href, accent = false }: {
   );
   return href ? <Link to={href} className="block h-full">{inner}</Link> : inner;
 };
+
+// "€100k" for whole thousands, full currency otherwise; "the brand max" when brands differ
+const fmtCap = (cap: number | null) =>
+  cap == null ? "the brand max" : cap % 1000 === 0 ? `€${(cap / 1000).toLocaleString("en-EU")}k` : `€${cap.toLocaleString("en-EU")}`;
 
 const FinRow = ({ label, value, sub, highlight }: { label: string; value: string; sub?: string; highlight?: boolean }) => (
   <div className={`flex items-center justify-between py-3 border-b border-border last:border-0 ${highlight ? "text-primary" : ""}`}>
@@ -227,6 +231,9 @@ export default function AdminDashboard() {
       for (const b of fetchedBrands) {
         if (brandIds.includes(b.id)) brandRates.set(b.id, { activation_fee: toPct(b.activation_fee), insurance_premium: toPct(b.insurance_premium), aion_premium_fee: toPct(b.aion_premium_fee) });
       }
+      // Coverage ceiling shown under "RRP Covered": only when every selected brand shares the same cap
+      const caps = new Set(fetchedBrands.filter((b) => brandIds.includes(b.id)).map((b) => Number(b.max_covered_value) || 100000));
+      result.coverageCap = caps.size === 1 ? [...caps][0] : null;
 
       if (eligibleIds !== null && eligibleIds.length === 0) {
         result.brands = fetchedBrands.length;
@@ -379,7 +386,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (allBrands.length > 0) return;
-    supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee").eq("status", "verified").order("name")
+    supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee, max_covered_value").eq("status", "verified").order("name")
       .then(({ data }) => setAllBrands((data as Brand[]) ?? []));
   }, []);
 
@@ -560,22 +567,22 @@ export default function AdminDashboard() {
           <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Financials</p>
           {loading ? (
             <>
-              <FinRowSkeleton label="Total RRP" />
-              <FinRowSkeleton label="Covered Value" />
               <FinRowSkeleton label="Total Selling Price" />
+              <FinRowSkeleton label="Total RRP" />
+              <FinRowSkeleton label="RRP Covered" />
               <FinRowSkeleton label="Total COGS" />
               <FinRowSkeleton label="Gross Premium" />
               <FinRowSkeleton label="Net Premium" />
             </>
           ) : (
             <>
+              <FinRow label="Total Selling Price" value={fmt(stats.sellingPriceTotal)} />
               <FinRow label="Total RRP" value={fmt(stats.rrpTotal)} />
               <FinRow
-                label="Covered Value"
+                label="RRP Covered"
                 value={fmt(stats.coveredValueTotal)}
-                sub={stats.coveredValueTotal < stats.rrpTotal ? `RRP capped at the brand max per item · ${fmt(stats.rrpTotal - stats.coveredValueTotal)} above cap` : "RRP capped at the brand max per item"}
+                sub={`Covered value capped at ${fmtCap(stats.coverageCap)} per item${stats.coveredValueTotal < stats.rrpTotal ? ` · ${fmt(stats.rrpTotal - stats.coveredValueTotal)} above cap` : ""}`}
               />
-              <FinRow label="Total Selling Price" value={fmt(stats.sellingPriceTotal)} />
               <FinRow label="Total COGS" value={fmt(stats.cogsTotal)} />
               <FinRow label="Gross Premium" value={fmt(stats.grossPremium)} sub={`${fmtPct(stats.effectivePremiumPct)} of COGS`} />
               <FinRow label="Net Premium" value={fmt(stats.netPremium)} sub={`After GVT ${(GVT_FEE * 100).toFixed(2)}%`} />
