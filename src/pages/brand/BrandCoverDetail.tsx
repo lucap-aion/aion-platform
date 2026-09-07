@@ -171,7 +171,8 @@ const BrandCoverDetail = () => {
                   <p className="text-xs text-muted-foreground">RRP</p>
                   <p className="font-medium text-foreground">€{(cover.recommended_retail_price || 0).toLocaleString()}</p>
                   {isAboveCoverageCap(cover, DEFAULT_MAX_COVERED_VALUE) && (
-                    <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800" title="Item above the coverage cap: COGS, premium and activation fee are computed on the covered value">
+                    <span className="mt-1 inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium leading-4 text-amber-800" title="Item above the coverage cap: COGS, premium and activation fee are computed on the covered value">
+                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
                       {coveredUpToLabel(cover, DEFAULT_MAX_COVERED_VALUE)}
                     </span>
                   )}
