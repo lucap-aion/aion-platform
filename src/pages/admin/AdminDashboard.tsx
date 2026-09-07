@@ -53,7 +53,7 @@ interface Shop { id: number; name: string | null; brand_id: number | null; }
 
 interface Statistics {
   brands: number; customers: number; covers: number; claims: number; openClaims: number;
-  closedClaims: number; shops: number; rrpTotal: number; sellingPriceTotal: number;
+  closedClaims: number; shops: number; rrpTotal: number; coveredValueTotal: number; sellingPriceTotal: number;
   cogsTotal: number; grossPremium: number; netPremium: number; aionActivationFee: number;
   aionPremiumFee: number; aionRevenue: number; effectivePremiumPct: number | null;
   effectiveActivationFeePct: number | null; effectiveAionPremiumFeePct: number | null;
@@ -64,7 +64,7 @@ interface Statistics {
 
 const emptyStats = (): Statistics => ({
   brands: 0, customers: 0, covers: 0, claims: 0, openClaims: 0, closedClaims: 0, shops: 0,
-  rrpTotal: 0, sellingPriceTotal: 0, cogsTotal: 0, grossPremium: 0, netPremium: 0,
+  rrpTotal: 0, coveredValueTotal: 0, sellingPriceTotal: 0, cogsTotal: 0, grossPremium: 0, netPremium: 0,
   aionActivationFee: 0, aionPremiumFee: 0, aionRevenue: 0,
   effectivePremiumPct: null, effectiveActivationFeePct: null, effectiveAionPremiumFeePct: null,
   latestActivation: "", claimRate: null, registrationRate: null,
@@ -250,7 +250,7 @@ export default function AdminDashboard() {
         pool_total?: number; pool_registered?: number;
         pool_profilation_started?: number; pool_profiled?: number; pool_with_feedback?: number;
         claims_total: number; claims_open: number; claims_closed: number;
-        policy_stats: Array<{ brand_id: number; covers: number; total_cogs: number; total_rrp: number; total_selling_price: number; latest_start_date: string | null }>;
+        policy_stats: Array<{ brand_id: number; covers: number; total_cogs: number; total_rrp: number; total_covered_value?: number; total_selling_price: number; latest_start_date: string | null }>;
       };
       // PostgREST may return the json scalar directly OR wrapped as [{col: value}]; handle both, plus string fallback.
       const rawAgg: unknown = aggRes.data;
@@ -329,15 +329,20 @@ export default function AdminDashboard() {
         const bid = Number(row.brand_id);
         const cogs = Number(row.total_cogs) || 0;
         const rrp = Number(row.total_rrp) || 0;
+        // Retail value actually covered (each item capped at the brand ceiling, frozen at
+        // sale in policies.covered_value): the base of the activation fee. Older RPC
+        // versions do not return it, so fall back to the raw RRP.
+        const covered = row.total_covered_value != null ? Number(row.total_covered_value) || 0 : rrp;
         const sp = Number(row.total_selling_price) || 0;
         result.covers += Number(row.covers) || 0;
         result.cogsTotal += cogs;
         result.rrpTotal += rrp;
+        result.coveredValueTotal += covered;
         result.sellingPriceTotal += sp;
         const rates = brandRates.get(bid);
         const grossPremium = cogs * (rates?.insurance_premium ?? 0);
         const netPremium = grossPremium * (1 - GVT_FEE);
-        const aionActivationFee = rrp * (rates?.activation_fee ?? 0);
+        const aionActivationFee = covered * (rates?.activation_fee ?? 0);
         const aionPremiumFee = netPremium * (rates?.aion_premium_fee ?? 0);
         result.grossPremium += grossPremium;
         result.netPremium += netPremium;
@@ -352,7 +357,7 @@ export default function AdminDashboard() {
       }
       result.aionRevenue = result.aionPremiumFee + result.aionActivationFee;
       result.effectivePremiumPct = result.cogsTotal > 0 ? result.grossPremium / result.cogsTotal : null;
-      result.effectiveActivationFeePct = result.rrpTotal > 0 ? result.aionActivationFee / result.rrpTotal : null;
+      result.effectiveActivationFeePct = result.coveredValueTotal > 0 ? result.aionActivationFee / result.coveredValueTotal : null;
       result.effectiveAionPremiumFeePct = result.netPremium > 0 ? result.aionPremiumFee / result.netPremium : null;
 
       result.claims = claimsCount;
@@ -556,6 +561,7 @@ export default function AdminDashboard() {
           {loading ? (
             <>
               <FinRowSkeleton label="Total RRP" />
+              <FinRowSkeleton label="Covered Value" />
               <FinRowSkeleton label="Total Selling Price" />
               <FinRowSkeleton label="Total COGS" />
               <FinRowSkeleton label="Gross Premium" />
@@ -564,6 +570,11 @@ export default function AdminDashboard() {
           ) : (
             <>
               <FinRow label="Total RRP" value={fmt(stats.rrpTotal)} />
+              <FinRow
+                label="Covered Value"
+                value={fmt(stats.coveredValueTotal)}
+                sub={stats.coveredValueTotal < stats.rrpTotal ? `RRP capped at the brand max per item · ${fmt(stats.rrpTotal - stats.coveredValueTotal)} above cap` : "RRP capped at the brand max per item"}
+              />
               <FinRow label="Total Selling Price" value={fmt(stats.sellingPriceTotal)} />
               <FinRow label="Total COGS" value={fmt(stats.cogsTotal)} />
               <FinRow label="Gross Premium" value={fmt(stats.grossPremium)} sub={`${fmtPct(stats.effectivePremiumPct)} of COGS`} />
@@ -603,7 +614,7 @@ export default function AdminDashboard() {
                 ? <div className="h-5 w-20 rounded bg-muted animate-pulse mt-1" />
                 : <p className="text-base font-bold text-foreground mt-0.5 tabular-nums">{fmt(stats.aionActivationFee)}</p>
               }
-              <p className="text-xs text-muted-foreground/70 mt-0.5">{loading ? "" : `${fmtPct(stats.effectiveActivationFeePct)} of RRP`}</p>
+              <p className="text-xs text-muted-foreground/70 mt-0.5">{loading ? "" : `${fmtPct(stats.effectiveActivationFeePct)} of covered value`}</p>
             </div>
             <div className="rounded-lg border border-primary/15 bg-background/50 p-3">
               <p className="text-xs text-muted-foreground">Premium Fee</p>
