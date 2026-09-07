@@ -1911,7 +1911,7 @@ function ProfitabilityTab({
         while (true) {
           const { data, error } = await supabase
             .from("policies")
-            .select("start_date, cogs, selling_price, shops(name), catalogues(category, collection)")
+            .select("start_date, cogs, selling_price, recommended_retail_price, covered_value, shops(name), catalogues(category, collection)")
             .eq("status", "live")
             .in("brand_id", brandIds)
             .range(from, from + PAGE - 1);
@@ -1923,9 +1923,18 @@ function ProfitabilityTab({
         }
 
         if (cancelled) return;
+        // policies.cogs is computed on the *covered* value (retail capped at the brand
+        // ceiling, see src/lib/coverage.ts). The brand's manufacturing cost for the margin
+        // is on the full retail price, so scale it back up for items above the cap.
+        const manufacturingCost = (p: { cogs?: number | null; recommended_retail_price?: number | null; covered_value?: number | null }) => {
+          const cogs = Number(p.cogs) || 0;
+          const rrp = Number(p.recommended_retail_price) || 0;
+          const covered = Number(p.covered_value) || 0;
+          return covered > 0 && rrp > covered ? (cogs * rrp) / covered : cogs;
+        };
         const mapped: GrossMarginPolicy[] = (all as any[]).map((p) => ({
           start_date: p.start_date,
-          cogs: Number(p.cogs) || 0,
+          cogs: manufacturingCost(p),
           selling_price: Number(p.selling_price) || 0,
           shop_name: p.shops?.name || "—",
           category: normalizeCategory(p.catalogues?.category || p.catalogues?.collection || "—"),

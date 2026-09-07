@@ -1,5 +1,6 @@
 import { supabaseClient } from './supabase.js';
 import { getErrorMessage, getYearsAfter, italyLocalToUtc, convertKeysToCamelCase } from './helpers.js';
+import { coveredRetailValue, resolveMaxCoveredValue } from './coverage.js';
 
 export type EplayCredential = { id: number; brand_id: number };
 
@@ -28,16 +29,19 @@ async function calculateCategoryCogs(
   category: any,
   recommendedRetailPrice: number,
   brandId: number
-): Promise<{ cogs: number }> {
-  const { data: manufacturingCosts } = await supabaseClient
-    .from('manufacturing_costs')
-    .select('category, cost_pct')
-    .eq('brand_id', brandId);
+): Promise<{ cogs: number; coveredValue: number }> {
+  const [{ data: manufacturingCosts }, { data: brand }] = await Promise.all([
+    supabaseClient.from('manufacturing_costs').select('category, cost_pct').eq('brand_id', brandId),
+    supabaseClient.from('brands').select('max_covered_value').eq('id', brandId).maybeSingle(),
+  ]);
 
   const costs = convertKeysToCamelCase(manufacturingCosts ?? []);
   const item = costs.find((c: any) => c.category.toUpperCase() === category.toUpperCase());
   const factor = item ? item.costPct || 0 : 0;
-  return { cogs: recommendedRetailPrice * factor };
+  // The brand covers an item only up to max_covered_value: COGS on the covered part of the
+  // price (a EUR 480k necklace is covered for EUR 100k -> COGS = 100k x pct, not 480k x pct).
+  const coveredValue = coveredRetailValue(recommendedRetailPrice, resolveMaxCoveredValue(brand));
+  return { cogs: coveredValue * factor, coveredValue };
 }
 
 export async function parseSaleFromEplay(sale: any, credential: EplayCredential): Promise<any> {
@@ -132,7 +136,7 @@ export async function parseSaleFromEplay(sale: any, credential: EplayCredential)
         .eq('brand_row_id', s.row_id);
 
       const policyStatus = s.item.recommended_retail_price > 999 ? 'live' : 'blocked';
-      const { cogs } = await calculateCategoryCogs(item.category.toUpperCase(), s.item.recommended_retail_price, credential.brand_id);
+      const { cogs, coveredValue } = await calculateCategoryCogs(item.category.toUpperCase(), s.item.recommended_retail_price, credential.brand_id);
 
       if (!existingPolicies || existingPolicies.length === 0) {
         const policyData = {
@@ -151,6 +155,7 @@ export async function parseSaleFromEplay(sale: any, credential: EplayCredential)
           recommended_retail_price: s.item.recommended_retail_price,
           selling_price: s.item.selling_price,
           cogs: cogs || 0,
+          covered_value: coveredValue || null, // retail value actually covered, frozen at sale
           status: policyStatus,
           source: 'eplay_api',
           original_brand_row_id: originalBrandRowId,

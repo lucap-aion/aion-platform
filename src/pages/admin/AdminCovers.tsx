@@ -21,6 +21,7 @@ const COVERS_SCHEMA: ExportColumn[] = [
   { key: "status",                     label: "Status" },
   { key: "selling_price",              label: "Selling Price" },
   { key: "recommended_retail_price",   label: "RRP" },
+  { key: "covered_value",              label: "Covered Value" },
   { key: "cogs",                       label: "COGS" },
   { key: "quantity",                   label: "Quantity" },
   { key: "start_date",                 label: "Start Date" },
@@ -38,6 +39,7 @@ import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, SaveBar } from "./_components/FormField";
 import { SearchableSelect } from "./_components/SearchableSelect";
 import { fmtDate } from "./_components/fmtDate";
+import { coveredCogs, coveredRetailValue, coveredUpToLabel, isAboveCoverageCap, resolveMaxCoveredValue } from "@/lib/coverage";
 
 interface Cover {
   id: number;
@@ -50,6 +52,7 @@ interface Cover {
   selling_price: number | null;
   cogs: number | null;
   recommended_retail_price: number | null;
+  covered_value?: number | null;
   quantity: number | null;
   brand_id: number | null;
   customer_id: string | null;
@@ -71,7 +74,7 @@ interface Cover {
   profiles_email_confirmed_at?: string | null;
 }
 
-interface BrandOption { id: number; name: string | null; }
+interface BrandOption { id: number; name: string | null; max_covered_value?: number | null; }
 interface CustomerOption { id: string; email: string; first_name: string | null; last_name: string | null; brand_id: number | null; }
 interface CatalogueOption { id: number; name: string | null; brand_id: number | null; category: string | null; }
 interface ManufacturingCost { category: string | null; cost_pct: number | null; brand_id: number | null; }
@@ -173,7 +176,7 @@ const AdminCovers = () => {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("brands").select("id, name").eq("status", "verified").order("name"),
+      supabase.from("brands").select("id, name, max_covered_value").eq("status", "verified").order("name"),
       supabase.from("profiles").select("id, email, first_name, last_name, brand_id").eq("role", "customer").order("email").limit(500),
       supabase.from("catalogues").select("id, name, brand_id, category").order("name"),
       supabase.from("manufacturing_costs").select("category, cost_pct, brand_id"),
@@ -202,6 +205,8 @@ const AdminCovers = () => {
       selling_price: editing.selling_price ?? null,
       cogs: editing.cogs ?? null,
       recommended_retail_price: editing.recommended_retail_price ?? null,
+      // frozen at write time: the part of the retail price the program actually covers
+      covered_value: editing.recommended_retail_price != null ? coveredRetailValue(editing.recommended_retail_price, editingBrandCap) : null,
       quantity: editing.quantity ?? null,
       brand_id: editing.brand_id ?? null,
       customer_id: editing.customer_id ?? null,
@@ -229,6 +234,10 @@ const AdminCovers = () => {
 
   const set = (k: keyof Cover, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
 
+  // Coverage ceiling of the brand being edited (brands.max_covered_value, default EUR 100k)
+  const editingBrandCap = resolveMaxCoveredValue(brands.find((b) => b.id === editing.brand_id));
+  const editingAboveCap = editing.recommended_retail_price != null && editing.recommended_retail_price > editingBrandCap;
+
   const handleStartDateChange = (val: string) => {
     set("start_date", val || null);
     if (val) set("expiration_date", addTwoYears(val));
@@ -244,12 +253,13 @@ const AdminCovers = () => {
         )
       : undefined;
     if (costEntry?.cost_pct != null && editing.recommended_retail_price != null) {
-      const cogs = Math.round(editing.recommended_retail_price * costEntry.cost_pct * 100) / 100;
+      // COGS only on the covered value (retail price capped at the brand ceiling)
+      const cogs = coveredCogs(editing.recommended_retail_price, costEntry.cost_pct, editingBrandCap);
       set("cogs", cogs);
     } else {
       set("cogs", null);
     }
-  }, [editing.item_id, editing.recommended_retail_price, editing.brand_id, catalogues, manufacturingCosts, mode]);
+  }, [editing.item_id, editing.recommended_retail_price, editing.brand_id, editingBrandCap, catalogues, manufacturingCosts, mode]);
 
   const ro = mode === "view";
 
@@ -390,7 +400,21 @@ const AdminCovers = () => {
           { key: "profiles_email_confirmed_at", label: "Email Confirmed", sortable: true, render: (row) => fmtDate((row as unknown as Cover).profiles_email_confirmed_at) },
           {
             key: "recommended_retail_price", label: "RRP", sortable: true,
-            render: (row) => { const r = row as unknown as Cover; return r.recommended_retail_price != null ? `€${r.recommended_retail_price.toLocaleString("en-EU", { minimumFractionDigits: 0 })}` : "—"; },
+            render: (row) => {
+              const r = row as unknown as Cover;
+              if (r.recommended_retail_price == null) return "—";
+              const cap = resolveMaxCoveredValue(brands.find((b) => b.id === r.brand_id));
+              return (
+                <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                  {`€${r.recommended_retail_price.toLocaleString("en-EU", { minimumFractionDigits: 0 })}`}
+                  {isAboveCoverageCap(r, cap) && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800" title="Item above the coverage cap: COGS, premium and activation fee are computed on the covered value">
+                      {coveredUpToLabel(r, cap)}
+                    </span>
+                  )}
+                </span>
+              );
+            },
           },
           {
             key: "selling_price", label: "Selling Price", sortable: true,
@@ -517,7 +541,7 @@ const AdminCovers = () => {
             <FormField label="Selling Price" required={!ro}>
               <Input type="number" step="0.01" disabled={ro} value={editing.selling_price ?? ""} onChange={(e) => set("selling_price", e.target.value ? Number(e.target.value) : null)} required={!ro} />
             </FormField>
-            <FormField label="RRP" required={!ro}>
+            <FormField label="RRP" required={!ro} hint={editingAboveCap ? `${coveredUpToLabel(editing, editingBrandCap)}: COGS and premium on the covered value` : undefined}>
               <Input type="number" step="0.01" disabled={ro} value={editing.recommended_retail_price ?? ""} onChange={(e) => set("recommended_retail_price", e.target.value ? Number(e.target.value) : null)} required={!ro} />
             </FormField>
             <FormField label="COGS (auto)">
