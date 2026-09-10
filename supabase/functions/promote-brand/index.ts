@@ -51,6 +51,11 @@ const BRAND_COLUMNS = [
   "faq_en", "faq_it",
   "enable_chubb_reporting", "chubb_policy_prefix",
   "activation_fee", "insurance_premium", "aion_premium_fee",
+  // Facts about the house, established during the cycle and still true afterwards.
+  "legal_name", "registered_address", "product_focus",
+  // is_prospect is deliberately NOT here. Promoting a brand into production is the moment
+  // it stops being a deal, and carrying `true` across would let demo clients and covers be
+  // fabricated in the live account — which is the one thing the gate exists to prevent.
 ];
 
 Deno.serve(async (req: Request) => {

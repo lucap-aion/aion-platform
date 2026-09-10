@@ -104,6 +104,13 @@ export interface Brand {
   aion_premium_fee: number | null;
   max_covered_value: number | null;
   min_covered_value: number | null;
+  // The commercial cycle writes these three from step 2. They are on the record as well,
+  // because a legal entity and a pilot perimeter are facts about the house, not about the
+  // screen that happened to ask for them.
+  legal_name: string | null;
+  registered_address: string | null;
+  product_focus: string | null;
+  is_prospect: boolean | null;
 }
 
 export type Mode = "view" | "edit" | "add";
@@ -120,6 +127,7 @@ export const empty = (): Partial<Brand> => ({
   enable_chubb_reporting: false, chubb_policy_prefix: "",
   activation_fee: null, insurance_premium: null, aion_premium_fee: null,
   max_covered_value: null, min_covered_value: null,
+  legal_name: "", registered_address: "", product_focus: "", is_prospect: true,
 });
 
 const toJsonStr = (v: any) => v ? JSON.stringify(v, null, 2) : "";
@@ -150,7 +158,7 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
     setLoading(true);
     void (async () => {
       const { data } = await supabase.from("brands")
-        .select("id, name, slug, description, email, website, hq_country, hq_address, hq_city, hq_postcode, status, logo_small, logo_big, auth_background_image, top_banner_image, theft_image, damage_image, faq_image, feedback_image, faq_en, faq_it, theme_settings, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value, min_covered_value")
+        .select("id, name, slug, description, email, website, hq_country, hq_address, hq_city, hq_postcode, status, logo_small, logo_big, auth_background_image, top_banner_image, theft_image, damage_image, faq_image, feedback_image, faq_en, faq_it, theme_settings, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value, min_covered_value, legal_name, registered_address, product_focus, is_prospect")
         .eq("id", brandId).maybeSingle();
       const b = (data ?? empty()) as Partial<Brand>;
       setEditing(b); setFaqEnStr(toJsonStr(b.faq_en)); setFaqItStr(toJsonStr(b.faq_it));
@@ -208,6 +216,10 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
       aion_premium_fee: editing.aion_premium_fee ?? null,
       max_covered_value: editing.max_covered_value ?? DEFAULT_MAX_COVERED_VALUE,
       min_covered_value: editing.min_covered_value ?? DEFAULT_MIN_COVERED_VALUE,
+      legal_name: editing.legal_name || null,
+      registered_address: editing.registered_address || null,
+      product_focus: editing.product_focus || null,
+      is_prospect: editing.is_prospect ?? false,
     };
     const { error } = mode === "add"
       ? await supabase.from("brands").insert(payload)
@@ -250,6 +262,37 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
                 </Select>
               )}
             </FormField>
+            {/* A deal or a live programme. It filters the brands list, and it is one of the
+                two things that decide whether demo clients and covers may be fabricated in
+                this account — the other being that the status is not yet verified. */}
+            <FormField label="Kind" hint="A prospect's account may hold demo data; a client's may not">
+              {ro ? <Input disabled value={editing.is_prospect ? "Prospect" : "Client"} /> : (
+                <Select value={editing.is_prospect ? "prospect" : "client"}
+                  onChange={(e) => set("is_prospect", e.target.value === "prospect")}>
+                  <option value="prospect">Prospect</option>
+                  <option value="client">Client</option>
+                </Select>
+              )}
+            </FormField>
+          </div>
+
+          {/* What the data request goes out saying. Edited here or in step 2 of the cycle —
+              the same three columns either way, so neither screen loses the other's work. */}
+          <div className="border-t border-border pt-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Commercial</p>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label="Legal entity" hint="The entity the programme is contracted with, if not the trading name">
+                <Input disabled={ro} value={editing.legal_name ?? ""} onChange={(e) => set("legal_name", e.target.value)} placeholder="Pasquale Bruni S.p.A." />
+              </FormField>
+              <FormField label="Product focus" hint="Categories in scope for the pilot">
+                <Input disabled={ro} value={editing.product_focus ?? ""} onChange={(e) => set("product_focus", e.target.value)} placeholder="High jewellery, EU boutiques" />
+              </FormField>
+            </div>
+            <div className="mt-3">
+              <FormField label="Registered address" hint="Only when it differs from the headquarters below">
+                <Input disabled={ro} value={editing.registered_address ?? ""} onChange={(e) => set("registered_address", e.target.value)} />
+              </FormField>
+            </div>
           </div>
 
           {/* HQ Address */}

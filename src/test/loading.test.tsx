@@ -96,12 +96,23 @@ describe("nothing claims a fact it has not loaded", () => {
     expect(skeletons(container)).toBeGreaterThan(0);
   });
 
-  it("the onboarding panel does not present every stage as never run", async () => {
-    const { default: BrandOnboarding } = await import("@/pages/admin/_components/BrandOnboarding");
-    const { container } = wrap(
-      <BrandOnboarding brandId={18} brandName="Pasquale Bruni" website="https://www.pasqualebruni.com" />);
-    expect(screen.getByText("Brand identity")).toBeTruthy();
-    // "Not demo ready yet" is a verdict, and it needs the counts to reach it.
+  it("the pipeline panel does not report a state it has not read", async () => {
+    const { default: PipelinePanel } = await import("@/pages/admin/_components/PipelinePanel");
+    // `undefined` is "the overview has not come back", which is NOT the same as `{}`,
+    // "the overview came back and no stage has ever run".
+    const { container } = wrap(<PipelinePanel brandId={18} brandName="Pasquale Bruni"
+      website="https://www.pasqualebruni.com" stages={undefined} demoAllowed onQueued={() => {}} />);
+    expect(screen.queryByText(/nothing has run for this brand yet/i)).toBeNull();
+    expect(screen.queryByText(/idle/i)).toBeNull();
+    expect(screen.queryByText(/0 of/i)).toBeNull();
+    expect(skeletons(container)).toBeGreaterThan(0);
+  });
+
+  it("the demo panel does not deliver a verdict before the counts arrive", async () => {
+    const { default: DemoPanel } = await import("@/pages/admin/_components/DemoPanel");
+    const { container } = wrap(<DemoPanel brandId={18} brandName="Pasquale Bruni"
+      stages={{}} counts={undefined} demoAllowed onChanged={() => {}} />);
+    // "Not demo ready yet" needs the counts to reach it.
     expect(screen.queryByText(/Not demo ready yet/i)).toBeNull();
     expect(screen.queryByText(/Demo ready/i)).toBeNull();
     expect(skeletons(container)).toBeGreaterThan(0);

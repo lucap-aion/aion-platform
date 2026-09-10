@@ -21,7 +21,10 @@
 //         stages?: string[], options?: { customers, policies, avg_ticket } }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { demoToolsEnabled, demoToolsBlockedReason, isNonProduction } from "../_shared/environment.ts";
+import {
+  demoToolsEnabled, isNonProduction,
+  demoAllowedForBrand, demoBlockedForBrandReason,
+} from "../_shared/environment.ts";
 import { harvestBrandIdentity } from "../_shared/brand-identity.ts";
 import { extractProducts } from "../_shared/product-extract.ts";
 import { enrichFromWikidata } from "../_shared/brand-enrich.ts";
@@ -47,7 +50,9 @@ const ALL_STAGES = [
   "demo_data", "demo_users", "documents", "assistant",
   "ops_deck", "data_request",
 ] as const;
-// Stages that invent data — never run outside a non-production project.
+// Stages that invent data. They run on a non-production project, or for a brand
+// explicitly flagged as a prospect — see demoAllowedForBrand: a house that has
+// signed nothing has an empty account, and the demo is the whole point of it.
 const DEMO_STAGES = ["demo_data", "demo_users"] as const;
 type Stage = (typeof ALL_STAGES)[number];
 
@@ -138,7 +143,17 @@ Deno.serve(async (req: Request) => {
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
 
   const action = String(body.action ?? "run");
-  if (action === "status") return json({ ...await status(admin, brandId), demo_tools_enabled: demoToolsEnabled() });
+  // demo_tools_enabled is about the ENVIRONMENT, demo_allowed is about this brand.
+  // The panel needs the second one; the first is kept so a caller can still tell
+  // why the answer is what it is.
+  if (action === "status") {
+    return json({
+      ...await status(admin, brandId),
+      demo_tools_enabled: demoToolsEnabled(),
+      demo_allowed: demoAllowedForBrand(brand),
+      demo_blocked_reason: demoAllowedForBrand(brand) ? null : demoBlockedForBrandReason(brand),
+    });
+  }
 
   // Queue and return. The browser is not the runner: a cron tick advances one
   // stage a minute, so closing the tab, refreshing, or handing the brand to a
@@ -147,10 +162,11 @@ Deno.serve(async (req: Request) => {
     const wanted = (Array.isArray(body.stages) && body.stages.length
       ? (body.stages as string[]).filter((s) => (ALL_STAGES as readonly string[]).includes(s))
       : [...ALL_STAGES]) as Stage[];
-    const runnable = wanted.filter((s) => demoToolsEnabled() || !(DEMO_STAGES as readonly string[]).includes(s));
+    const demoOk = demoAllowedForBrand(brand);
+    const runnable = wanted.filter((s) => demoOk || !(DEMO_STAGES as readonly string[]).includes(s));
     const skipped = wanted.filter((s) => !(runnable as string[]).includes(s));
     for (const s of skipped) {
-      await setStage(admin, brandId, s, "skipped", { blocked: true, reason: demoToolsBlockedReason() });
+      await setStage(admin, brandId, s, "skipped", { blocked: true, reason: demoBlockedForBrandReason(brand) });
     }
     const { error } = await admin.rpc("queue_onboarding_stages", { p_brand_id: brandId, p_stages: runnable });
     if (error) return json({ error: error.message }, 500);
@@ -232,9 +248,10 @@ Deno.serve(async (req: Request) => {
 
   const results: Record<string, unknown> = {};
   for (const stage of requested) {
-    if ((DEMO_STAGES as readonly string[]).includes(stage) && !demoToolsEnabled()) {
-      await setStage(admin, brandId, stage, "skipped", { blocked: true, reason: demoToolsBlockedReason() });
-      results[stage] = { ok: true, skipped: true, reason: demoToolsBlockedReason() };
+    if ((DEMO_STAGES as readonly string[]).includes(stage) && !demoAllowedForBrand(brand)) {
+      const reason = demoBlockedForBrandReason(brand);
+      await setStage(admin, brandId, stage, "skipped", { blocked: true, reason });
+      results[stage] = { ok: true, skipped: true, reason };
       continue;
     }
     await setStage(admin, brandId, stage, "running");
@@ -270,6 +287,7 @@ Deno.serve(async (req: Request) => {
   return json({
     ok: true, brand_id: brandId, ran: results,
     demo_tools_enabled: demoToolsEnabled(),
+    demo_allowed: demoAllowedForBrand(brand),
     status: await status(admin, brandId),
   });
 });
@@ -473,7 +491,9 @@ async function runStage(
   }
 
   if (stage === "demo_data") {
-    if (!demoToolsEnabled()) return { ok: true, skipped: true, reason: demoToolsBlockedReason() };
+    // Re-checked here, not only at the door: run_queued reaches this from the cron
+    // tick with a stage row that was queued before anything was flagged.
+    if (!demoAllowedForBrand(brand)) return { ok: true, skipped: true, reason: demoBlockedForBrandReason(brand) };
     const { data, error } = await admin.rpc("generate_brand_demo_data", {
       p_brand_id: brandId,
       p_customers: options.customers ?? 40,
@@ -491,7 +511,7 @@ async function runStage(
   }
 
   if (stage === "demo_users") {
-    if (!demoToolsEnabled()) return { ok: true, skipped: true, reason: demoToolsBlockedReason() };
+    if (!demoAllowedForBrand(brand)) return { ok: true, skipped: true, reason: demoBlockedForBrandReason(brand) };
     return await createDemoUsers(admin, brand);
   }
 

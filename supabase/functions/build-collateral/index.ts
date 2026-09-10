@@ -2,6 +2,9 @@
 //
 //   data_request  — the pilot data-request workbook, with the prospect's legal
 //                   entity, address and product focus in place of Ferragamo's
+//   read_data_request
+//                 — the SAME workbook, filled in and sent back, read into a
+//                   pricing perimeter instead of retyped by hand
 //   business_case — the pricing model as slides: perimeter, premium, AION fees,
 //                   cost per product, and the provenance of every rate used
 //   operations    — the ops booklet as a deck, in the intro deck's own style
@@ -11,10 +14,12 @@
 // look like the intro deck rather than like PowerPoint's defaults.
 //
 // Auth: AION admin, or batch.
-// Body: { brand_id, kind, segments?, months?, legal_name?, address?, focus? }
+// Body: { brand_id, kind, segments?, months?, legal_name?, address?, focus?,
+//         file_base64?, file_name? }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import JSZip from "npm:jszip@3.10.1";
+import { sharedStrings, sheetGrid, extractPerimeter, decodeXml, type Sheet } from "../_shared/xlsx-grid.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -57,7 +62,8 @@ Deno.serve(async (req: Request) => {
   if (!brandId) return json({ error: "brand_id required" }, 400);
 
   const { data: brand } = await admin.from("brands")
-    .select("id, name, slug, hq_address, hq_city, hq_country, hq_postcode").eq("id", brandId).maybeSingle();
+    .select("id, name, slug, hq_address, hq_city, hq_country, hq_postcode, legal_name, registered_address, product_focus")
+    .eq("id", brandId).maybeSingle();
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
 
   try {
@@ -69,7 +75,8 @@ Deno.serve(async (req: Request) => {
     if (kind === "data_request") return json(await buildDataRequest(admin, brand, body));
     if (kind === "business_case") return json(await buildBusinessCase(admin, brand, body));
     if (kind === "operations") return json(await buildOperations(admin, brand));
-    return json({ error: "kind must be list | data_request | business_case | operations" }, 400);
+    if (kind === "read_data_request") return json(await readDataRequest(admin, brand, body));
+    return json({ error: "kind must be list | data_request | read_data_request | business_case | operations" }, 400);
   } catch (e) {
     console.error("[build-collateral]", e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
@@ -123,10 +130,17 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
     );
   }
 
-  const address = [brand.hq_address, brand.hq_postcode, brand.hq_city, brand.hq_country].filter(Boolean).join(", ");
-  const legalName = String(body.legal_name ?? brand.name ?? "").trim();
-  const brandAddress = String(body.address ?? address ?? "").trim();
-  const focus = String(body.focus ?? "").trim();
+  // The record first, the request second, and NOTHING falls back to the trading
+  // name. It used to: `legal_name ?? brand.name` meant the workbook always had an
+  // answer in its most important cell, the "no legal entity" warning could never
+  // fire, and every client received a data request contracted to "Pomellato"
+  // rather than to whatever Pomellato's entity is actually called.
+  const composed = [brand.hq_address, brand.hq_postcode, brand.hq_city, brand.hq_country].filter(Boolean).join(", ");
+  const pick = (fromBody: unknown, fromRecord: unknown) =>
+    String(fromBody ?? fromRecord ?? "").trim();
+  const legalName = pick(body.legal_name, brand.legal_name);
+  const brandAddress = pick(body.address, brand.registered_address) || composed;
+  const focus = pick(body.focus, brand.product_focus);
   const values: Record<string, string> = {
     "{{BRAND_LEGAL_NAME}}": legalName,
     "{{BRAND_ADDRESS}}": brandAddress,
@@ -169,6 +183,106 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
         ...(missed.length ? [`${missed.length} template slot${missed.length === 1 ? "" : "s"} did not match the workbook — it has been revised since the template was mapped, so check those cells by hand.`] : []),
       ],
     });
+}
+
+// ── 1b. The same workbook, filled in and sent back ──────────────────────────
+// The client returns the data request and somebody retypes it into the business
+// case: eight fields per segment, from a file AION generated in the first place.
+// That is where the two hours in step 4 go.
+//
+// This reads it instead. It proposes a perimeter and says, per figure, where it
+// came from and what it had to assume — it does NOT price anything and it does
+// not save anything. The admin looks at the segments, fixes what is wrong, and
+// presses Calculate as before. A workbook read wrongly and priced silently would
+// be far worse than one nobody read at all.
+const MAX_WORKBOOK_BYTES = 12 * 1024 * 1024;
+
+async function readDataRequest(
+  admin: ReturnType<typeof createClient>, brand: Record<string, unknown>, body: Record<string, unknown>,
+) {
+  const b64 = String(body.file_base64 ?? "").replace(/^data:[^;]*;base64,/, "");
+  if (!b64) return { ok: false, reason: "attach the workbook the client returned" };
+
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(b64);
+    if (binary.length > MAX_WORKBOOK_BYTES) {
+      return { ok: false, reason: `that file is ${Math.round(binary.length / 1024 / 1024)}MB — the reader takes up to 12MB` };
+    }
+    bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  } catch {
+    return { ok: false, reason: "could not decode the upload" };
+  }
+
+  const zip = await JSZip.loadAsync(bytes).catch(() => null);
+  if (!zip) return { ok: false, reason: "that is not a .xlsx workbook — an .xls or a PDF cannot be read" };
+  if (!zip.file("xl/workbook.xml")) {
+    return { ok: false, reason: "that is not a .xlsx workbook — it has no xl/workbook.xml" };
+  }
+
+  const sheets = await readSheets(zip);
+  if (!sheets.length) return { ok: false, reason: "the workbook has no readable sheets" };
+
+  const extraction = extractPerimeter(sheets);
+
+  // Keep what the client sent, whatever came of reading it. Six weeks later,
+  // "what did they actually declare" is a question about the file, not about the
+  // numbers somebody typed from it.
+  const fileName = String(body.file_name ?? "data request returned.xlsx");
+  let stored: Record<string, unknown> | null = null;
+  try {
+    stored = await store(admin, brand, "data_request_returned", "xlsx", bytes,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      { received_as: fileName });
+  } catch (e) {
+    // The reading is the point; failing to archive it must not lose the result.
+    extraction.notes.push(`The workbook could not be attached to the brand (${e instanceof Error ? e.message : "unknown error"}), but it was read.`);
+  }
+
+  return {
+    ok: true,
+    kind: "read_data_request",
+    brand: brand.name,
+    received_as: fileName,
+    segments: extraction.segments,
+    notes: extraction.notes,
+    sheets: extraction.scanned,
+    stored_as: stored?.storage_path ?? null,
+    download_url: stored?.download_url ?? null,
+  };
+}
+
+// Sheets in the order the workbook presents them, resolved through the
+// relationship ids — sheet1.xml is not reliably the first tab.
+// Structural, not `JSZip`: the only thing needed from the archive is "give me this entry as
+// a string", and naming that avoids depending on how the npm types happen to be exported.
+type ZipLike = { file(path: string): { async(type: "string"): Promise<string> } | null };
+
+async function readSheets(zip: ZipLike): Promise<Sheet[]> {
+  const workbookXml = (await zip.file("xl/workbook.xml")?.async("string")) ?? "";
+  const relsXml = (await zip.file("xl/_rels/workbook.xml.rels")?.async("string")) ?? "";
+
+  const targets = new Map<string, string>();
+  for (const m of relsXml.matchAll(/<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"[^>]*\/?>/g)) {
+    targets.set(m[1], m[2].replace(/^\/?xl\//, "").replace(/^\.\//, ""));
+  }
+
+  const sharedXml = (await zip.file("xl/sharedStrings.xml")?.async("string")) ?? "";
+  const shared = sharedXml ? sharedStrings(sharedXml) : [];
+
+  const sheets: Sheet[] = [];
+  for (const m of workbookXml.matchAll(/<sheet\s([^>]*?)\/?>/g)) {
+    const attrs = m[1] ?? "";
+    const name = /\bname="([^"]*)"/.exec(attrs)?.[1] ?? `Sheet ${sheets.length + 1}`;
+    const rid = /\br:id="([^"]+)"/.exec(attrs)?.[1] ?? "";
+    const target = targets.get(rid) ?? `worksheets/sheet${sheets.length + 1}.xml`;
+    const xml = await zip.file(`xl/${target}`)?.async("string");
+    if (!xml) continue;
+    sheets.push({ name: decodeXml(name), grid: sheetGrid(xml, shared) });
+    // A perimeter is never on the twelfth tab, and each one is a full parse.
+    if (sheets.length >= 12) break;
+  }
+  return sheets;
 }
 
 // ── 2. Business case deck ───────────────────────────────────────────────────

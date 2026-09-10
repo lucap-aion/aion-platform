@@ -6,7 +6,7 @@ import { untyped } from "@/integrations/supabase/untyped";
 // every render — which for a fetcher that sets a loading flag is an infinite
 // loop that never leaves the spinner. This one is module-scoped and stable.
 import { toast } from "@/hooks/use-toast";
-import { Loader2, Plus, Trash2, Download, AlertTriangle, Calculator, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, Plus, Trash2, Download, AlertTriangle, Calculator, ChevronDown, ChevronRight, Upload, FileSpreadsheet } from "lucide-react";
 import InsurerQuotes from "./InsurerQuotes";
 import { CATEGORIES, COVERAGES, DAMAGE_SCOPES, type BusinessCase, type Quote, type RateUsed } from "./pricing-model";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -49,6 +49,88 @@ const emptySegment = (): Segment => ({
   revenues: "", cogs_ratio: "0.30", avg_price: "", start_month: "1",
 });
 
+// ── The perimeter, kept ─────────────────────────────────────────────────────
+// It used to be component state and nothing else, so leaving the tab lost it. A formal
+// Chubb quotation takes one to two months; the perimeter it applies to has to still be
+// there when it lands, and the person who opens it may not be the one who typed it.
+//
+// Stored in the MODEL's shape — numbers and nulls, exactly what compute_business_case
+// takes — rather than in the form's shape of strings, so the row is meaningful to anything
+// that reads it later. The two conversions below are the whole cost of that.
+export type StoredSegment = {
+  name: string | null; category: string | null; coverage: string | null; damage_scope: string | null;
+  revenues: number | null; cogs_ratio: number | null; avg_price: number | null; start_month: number | null;
+};
+export type StoredBusinessCase = {
+  months: number | null;
+  setup_discounted: boolean | null;
+  include_api: boolean | null;
+  segments: StoredSegment[] | null;
+  imported_from: string | null;
+  imported_at: string | null;
+  updated_at: string | null;
+};
+
+const numOrNull = (v: string): number | null => {
+  const n = Number(String(v).trim());
+  return String(v).trim() !== "" && Number.isFinite(n) ? n : null;
+};
+
+const toStored = (s: Segment): StoredSegment => ({
+  name: s.name.trim() || null,
+  category: s.category,
+  coverage: s.coverage,
+  damage_scope: s.damage_scope || null,
+  revenues: numOrNull(s.revenues),
+  cogs_ratio: numOrNull(s.cogs_ratio),
+  avg_price: numOrNull(s.avg_price),
+  start_month: numOrNull(s.start_month) ?? 1,
+});
+
+const fromStored = (r: StoredSegment): Segment => ({
+  name: r.name ?? "",
+  category: r.category ?? "jewellery",
+  coverage: r.coverage ?? "theft_and_damage",
+  damage_scope: r.damage_scope ?? "",
+  revenues: r.revenues != null ? String(r.revenues) : "",
+  cogs_ratio: r.cogs_ratio != null ? String(r.cogs_ratio) : "0.30",
+  avg_price: r.avg_price != null ? String(r.avg_price) : "",
+  start_month: String(r.start_month ?? 1),
+});
+
+/** A wholly untouched row is not worth a database round trip. */
+const isEmptySegment = (s: Segment) =>
+  !s.name.trim() && !s.revenues.trim() && !s.avg_price.trim();
+
+/** An extracted row arrives in the model's shape already, so it reuses one conversion. */
+const fromExtracted = (r: {
+  name: string; category: string; coverage: string; damage_scope: string;
+  revenues: number; cogs_ratio: number | null; avg_price: number | null; start_month: number;
+}): Segment => fromStored({
+  name: r.name, category: r.category, coverage: r.coverage,
+  damage_scope: r.damage_scope || null,
+  revenues: r.revenues, cogs_ratio: r.cogs_ratio, avg_price: r.avg_price,
+  start_month: r.start_month,
+});
+
+const fileToBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result ?? "").replace(/^data:[^;]*;base64,/, ""));
+  reader.onerror = () => reject(new Error("could not read that file"));
+  reader.readAsDataURL(file);
+});
+
+// What build-collateral makes of the client's returned workbook.
+type ReadWorkbook = {
+  ok?: boolean; reason?: string;
+  segments?: { name: string; category: string; coverage: string; damage_scope: string;
+               revenues: number; cogs_ratio: number | null; avg_price: number | null;
+               start_month: number; source: string }[];
+  notes?: string[];
+  sheets?: string[];
+  received_as?: string;
+};
+
 const eur = (n: unknown) =>
   typeof n === "number" ? `€${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n)}` : "—";
 const eur2 = (n: unknown) =>
@@ -56,9 +138,11 @@ const eur2 = (n: unknown) =>
 const pct = (n: unknown, digits = 2) =>
   typeof n === "number" ? `${(n * 100).toFixed(digits)}%` : "—";
 
-export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
+export default function BusinessCasePanel({ brandId, brands, stored, onArtifact }: {
   brandId: number | null;
   brands: { id: number; name: string | null }[];
+  /** The perimeter as last saved, from the cycle overview. Null before anyone declared one. */
+  stored?: StoredBusinessCase | null;
   onArtifact?: () => void;
 }) {
   const [months, setMonths] = useState("36");
@@ -69,6 +153,11 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
   const [result, setResult] = useState<BusinessCase | null>(null);
   const [deck, setDeck] = useState<{ url: string; name: string } | null>(null);
   const [showQuotes, setShowQuotes] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importNotes, setImportNotes] = useState<string[] | null>(null);
+  const [importedFrom, setImportedFrom] = useState<string | null>(null);
+  const [importedAt, setImportedAt] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loadingRefs, setLoadingRefs] = useState(true);
   // The assumptions behind every figure on this screen. They were invisible —
@@ -95,6 +184,119 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
       setLoadingRefs(false);
     })();
   }, []);
+
+  // ── The perimeter survives the tab ────────────────────────────────────────
+  // Seeded once per brand from what was last saved, then written back as it is edited.
+  // Everything below used to be component state and nothing else: eight fields per segment,
+  // gone the moment you navigated away, retyped when the client came back with a question.
+  const seededFor = useRef<number | null>(null);
+  const [serverSig, setServerSig] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (brandId == null || seededFor.current === brandId) return;
+    seededFor.current = brandId;
+    const rows = (stored?.segments ?? []).map(fromStored);
+    setMonths(String(stored?.months ?? 36));
+    setSetupDiscount(stored?.setup_discounted !== false);
+    setIncludeApi(stored?.include_api === true);
+    setSegments(rows.length ? rows : [emptySegment()]);
+    setImportedFrom(stored?.imported_from ?? null);
+    setImportedAt(stored?.imported_at ?? null);
+    setServerSig(JSON.stringify({
+      months: stored?.months ?? 36,
+      setup_discounted: stored?.setup_discounted !== false,
+      include_api: stored?.include_api === true,
+      segments: rows.filter((r) => !isEmptySegment(r)).map(toStored),
+    }));
+  }, [brandId, stored]);
+
+  const perimeterSig = useMemo(() => JSON.stringify({
+    months: Number(months),
+    setup_discounted: setupDiscount,
+    include_api: includeApi,
+    segments: segments.filter((r) => !isEmptySegment(r)).map(toStored),
+  }), [months, setupDiscount, includeApi, segments]);
+
+  const monthsValid = /^\d+$/.test(months.trim()) && Number(months) >= 1 && Number(months) <= 120;
+
+  // Debounced, and only when something actually differs from what the server holds — a save
+  // per keystroke on a form this size is a write storm, and re-saving the seed on mount
+  // would touch every brand you merely looked at.
+  useEffect(() => {
+    if (brandId == null || serverSig === null || perimeterSig === serverSig) return;
+    // A months box mid-edit ("3" on the way to "36") is not worth persisting, and the
+    // column is constrained to 1–120 so an out-of-range value would be rejected anyway.
+    if (!monthsValid) return;
+    const t = setTimeout(() => {
+      void (async () => {
+        const payload = JSON.parse(perimeterSig) as Record<string, unknown>;
+        const { error } = await untyped.from("brand_business_case").upsert({
+          brand_id: brandId, ...payload,
+          imported_from: importedFrom, imported_at: importedAt,
+          updated_at: new Date().toISOString(),
+        } as never, { onConflict: "brand_id" });
+        if (error) {
+          toast({ title: "The perimeter could not be saved", description: error.message, variant: "destructive" });
+          return;
+        }
+        setServerSig(perimeterSig);
+      })();
+    }, 900);
+    return () => clearTimeout(t);
+  }, [brandId, perimeterSig, serverSig, monthsValid, importedFrom, importedAt]);
+
+  // ── Reading it out of the client's own workbook ───────────────────────────
+  // The workbook AION generated, filled in and sent back. Retyping it is where the two
+  // hours in this step actually go.
+  const onWorkbook = async (file: File) => {
+    if (brandId == null) return;
+    if (file.size > 12 * 1024 * 1024) {
+      toast({ title: "That file is too large", description: "The reader takes workbooks up to 12MB.", variant: "destructive" });
+      return;
+    }
+    setImporting(true);
+    setImportNotes(null);
+    try {
+      const b64 = await fileToBase64(file);
+      const { data, error } = await supabase.functions.invoke("build-collateral", {
+        body: { brand_id: brandId, kind: "read_data_request", file_base64: b64, file_name: file.name },
+      });
+      if (error) throw new Error(error.message);
+      const d = (data ?? {}) as ReadWorkbook & { error?: string };
+      if (d.error) throw new Error(d.error);
+      if (d.ok === false) {
+        toast({ title: "Could not read that workbook", description: d.reason, variant: "destructive" });
+        return;
+      }
+      const rows = (d.segments ?? []).map(fromExtracted);
+      setImportNotes(d.notes ?? []);
+      if (rows.length) {
+        // REPLACES the perimeter rather than appending to it: importing twice should not
+        // silently double what is being priced.
+        setSegments(rows);
+        setImportedFrom(d.received_as ?? file.name);
+        setImportedAt(new Date().toISOString());
+        toast({
+          title: `${rows.length} segment${rows.length === 1 ? "" : "s"} read from the workbook`,
+          description: "Nothing has been priced. Check every figure against what they meant, then calculate.",
+        });
+      } else {
+        toast({
+          title: "No perimeter in that workbook",
+          description: "It is attached to the brand either way — see the notes below.",
+          variant: "destructive",
+        });
+      }
+      // The returned workbook is an artifact now, so the cycle should re-sign its links.
+      onArtifact?.();
+    } catch (e) {
+      toast({ title: "Could not read the workbook", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
+    } finally {
+      setImporting(false);
+      // Clear the input, or picking the SAME file again fires no change event.
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
 
   // Any change to the inputs invalidates what is on screen. Keeping stale
   // figures visible next to edited inputs is how a wrong number gets read out.
@@ -129,8 +331,6 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
     loadingRefs ? [] : payloadSegments.filter((s) =>
       !quotes.some((q) => q.category === s.category && q.coverage === s.coverage)),
   [payloadSegments, quotes, loadingRefs]);
-
-  const monthsValid = /^\d+$/.test(months.trim()) && Number(months) >= 1 && Number(months) <= 120;
 
   const call = async (extra: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("build-collateral", {
@@ -214,13 +414,54 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
       </div>
 
       <div className="space-y-3 rounded-xl border border-border p-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">Perimeter</h3>
-          <button onClick={() => setSegments((p) => [...p, emptySegment()])}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs">
-            <Plus className="h-3.5 w-3.5" /> Add segment
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Perimeter</h3>
+            {importedFrom && (
+              <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <FileSpreadsheet className="h-3 w-3" />
+                Read from {importedFrom}
+                {importedAt ? ` on ${new Date(importedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* The workbook AION generated, filled in and sent back. Reading it is the
+                difference between checking eight fields per segment and typing them. */}
+            <label className={`inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs ${
+              importing || brandId == null ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-muted"}`}>
+              {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {importing ? "Reading…" : "Import returned workbook"}
+              <input
+                ref={fileRef} type="file" className="sr-only"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                disabled={importing || brandId == null}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void onWorkbook(f); }}
+              />
+            </label>
+            <button onClick={() => setSegments((p) => [...p, emptySegment()])}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs">
+              <Plus className="h-3.5 w-3.5" /> Add segment
+            </button>
+          </div>
         </div>
+
+        {/* What the reader had to assume. Shown next to the fields it filled, because a
+            figure that came out of a guess and a figure the client declared look identical
+            once they are both in a box. */}
+        {importNotes && importNotes.length > 0 && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-400">What the reader did with their workbook</p>
+              <button onClick={() => setImportNotes(null)} className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground">
+                Dismiss
+              </button>
+            </div>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+              {importNotes.map((n) => <li key={n}>{n}</li>)}
+            </ul>
+          </div>
+        )}
 
         {segments.map((s, i) => (
           <div key={i} className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">

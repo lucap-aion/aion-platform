@@ -66,16 +66,31 @@ describe("pages mount", () => {
     expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
   });
 
-  it("the onboarding panel renders for a brand with no run yet", async () => {
-    const { default: BrandOnboarding } = await import("@/pages/admin/_components/BrandOnboarding");
-    wrap(<BrandOnboarding brandId={18} brandName="Pasquale Bruni" website="https://www.pasqualebruni.com" />);
-    expect(screen.getByText(/Brand identity/i)).toBeTruthy();
+  it("the pipeline panel lists every stage once, from the shared definition", async () => {
+    const { default: PipelinePanel } = await import("@/pages/admin/_components/PipelinePanel");
+    wrap(<PipelinePanel brandId={18} brandName="Pasquale Bruni" website="https://www.pasqualebruni.com"
+      stages={{}} demoAllowed onQueued={() => {}} />);
+    // One chip per stage — and exactly one. Two components used to draw overlapping copies
+    // of this list, so a duplicate label here is the regression worth catching.
+    for (const label of ["Brand identity", "Catalogue", "Intro deck", "Ops deck"]) {
+      expect(screen.getAllByText(label)).toHaveLength(1);
+    }
   });
 
-  it("the onboarding panel warns when the brand has no website", async () => {
-    const { default: BrandOnboarding } = await import("@/pages/admin/_components/BrandOnboarding");
-    wrap(<BrandOnboarding brandId={99} brandName="No Site" website={null} />);
-    expect(screen.getByText(/no website yet/i)).toBeTruthy();
+  it("the pipeline panel hides the demo stages where they cannot run", async () => {
+    const { default: PipelinePanel } = await import("@/pages/admin/_components/PipelinePanel");
+    wrap(<PipelinePanel brandId={18} brandName="Client Ltd" website="https://example.com"
+      stages={{}} demoAllowed={false} demoBlockedReason="not a prospect" onQueued={() => {}} />);
+    expect(screen.queryByText("Demo book of business")).toBeNull();
+    expect(screen.queryByText("Demo logins")).toBeNull();
+    expect(screen.getByText(/not a prospect/i)).toBeTruthy();
+  });
+
+  it("the pipeline panel will not queue work for a brand with no website", async () => {
+    const { default: PipelinePanel } = await import("@/pages/admin/_components/PipelinePanel");
+    wrap(<PipelinePanel brandId={99} brandName="No Site" website={null}
+      stages={{}} demoAllowed onQueued={() => {}} />);
+    expect(screen.getByRole("button", { name: /Run everything/i })).toHaveProperty("disabled", true);
   });
 
   it("knowledge is a tab on the brand, with no picker to point at the wrong one", async () => {

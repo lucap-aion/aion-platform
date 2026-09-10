@@ -107,7 +107,11 @@ export default function NewBrand() {
     setBusy(true);
     try {
       const { data, error } = await supabase.from("brands")
-        .insert({ name: name.trim(), slug: effectiveSlug, website: url, status: "pending" })
+        // A brand created here is a deal, not a client: it is what puts the house in the
+        // prospect list, and it is what lets a demo be built in an account that holds
+        // nothing. Cleared by hand on the Record tab when the house goes live — not
+        // automatically by the demo purge, which is also how you rebuild a demo.
+        .insert({ name: name.trim(), slug: effectiveSlug, website: url, status: "pending", is_prospect: true })
         .select("id").single();
 
       if (error) {

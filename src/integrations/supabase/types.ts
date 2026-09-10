@@ -247,6 +247,10 @@ export type Database = {
           aion_premium_fee: number | null
           max_covered_value: number
           min_covered_value: number
+          legal_name: string | null
+          registered_address: string | null
+          product_focus: string | null
+          is_prospect: boolean
           auth_background_image: string | null
           chubb_policy_prefix: string | null
           created_at: string
@@ -279,6 +283,10 @@ export type Database = {
           aion_premium_fee?: number | null
           max_covered_value?: number
           min_covered_value?: number
+          legal_name?: string | null
+          registered_address?: string | null
+          product_focus?: string | null
+          is_prospect?: boolean
           auth_background_image?: string | null
           chubb_policy_prefix?: string | null
           created_at?: string
@@ -311,6 +319,10 @@ export type Database = {
           aion_premium_fee?: number | null
           max_covered_value?: number
           min_covered_value?: number
+          legal_name?: string | null
+          registered_address?: string | null
+          product_focus?: string | null
+          is_prospect?: boolean
           auth_background_image?: string | null
           chubb_policy_prefix?: string | null
           created_at?: string
