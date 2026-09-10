@@ -51,6 +51,7 @@ import AdminShops from "./pages/admin/AdminShops";
 import AdminKnowledge from "./pages/admin/AdminKnowledge";
 import AdminBusinessCase from "./pages/admin/AdminBusinessCase";
 import AdminCommercial from "./pages/admin/AdminCommercial";
+import AdminBrandDetail from "./pages/admin/AdminBrandDetail";
 import AdminShopAssistants from "./pages/admin/AdminShopAssistants";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminForgotPassword from "./pages/admin/AdminForgotPassword";
@@ -248,6 +249,7 @@ const App = () => (
               <Route path="/admin/claims" element={<AdminClaims />} />
               <Route path="/admin/stores" element={<AdminShops />} />
               <Route path="/admin/knowledge" element={<AdminKnowledge />} />
+              <Route path="/admin/brands/:brandId" element={<AdminBrandDetail />} />
               <Route path="/admin/commercial" element={<AdminCommercial />} />
               <Route path="/admin/business-case" element={<AdminBusinessCase />} />
               <Route path="/admin/shop-assistants" element={<AdminShopAssistants />} />

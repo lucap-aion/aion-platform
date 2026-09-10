@@ -100,8 +100,10 @@ describe("nothing claims a fact it has not loaded", () => {
   });
 
   it("the cycle screen does not report zero products or zero steps done", async () => {
-    const { default: AdminCommercial } = await import("@/pages/admin/AdminCommercial");
-    const { container } = wrap(<AdminCommercial />);
+    const { default: CommercialCycle } = await import("@/pages/admin/_components/CommercialCycle");
+    const { container } = wrap(<CommercialCycle
+      brand={{ id: 18, name: "Pasquale Bruni", website: null, slug: "pb", logo_small: null, logo_big: null }}
+      brands={[]} />);
     expect(screen.queryByText(/0 products/i)).toBeNull();
     expect(screen.queryByText(/0\/5 steps done/i)).toBeNull();
     // Its replacement must not claim "not started" before it has read anything either.

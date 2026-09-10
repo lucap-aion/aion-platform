@@ -48,6 +48,9 @@ vi.mock("@/contexts/TenantContext", () => ({
 vi.mock("@/hooks/useAuthSlug", () => ({ useAuthSlug: () => "/lb" }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }), toast: vi.fn() }));
 
+const BRAND = { id: 18, name: "Pasquale Bruni", website: "https://www.pasqualebruni.com",
+                slug: "pb", logo_small: null, logo_big: null };
+
 const wrap = (ui: React.ReactElement) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={qc}><MemoryRouter>{ui}</MemoryRouter></QueryClientProvider>);
@@ -83,8 +86,8 @@ describe("pages mount", () => {
   });
 
   it("the commercial cycle lists all five steps", async () => {
-    const { default: AdminCommercial } = await import("@/pages/admin/AdminCommercial");
-    wrap(<AdminCommercial />);
+    const { default: CommercialCycle } = await import("@/pages/admin/_components/CommercialCycle");
+    wrap(<CommercialCycle brand={BRAND} brands={[]} />);
     for (const title of ["First meeting", "NDA & data request", "Platform demo", "Pricing", "Operations review"]) {
       expect(await screen.findByText(title)).toBeTruthy();
     }
@@ -100,21 +103,39 @@ describe("pages mount", () => {
 
   it("the old business-case route lands on step 4, keeping the brand", async () => {
     const { default: AdminBusinessCase } = await import("@/pages/admin/AdminBusinessCase");
-    const { default: AdminCommercial } = await import("@/pages/admin/AdminCommercial");
+    const { default: AdminBrandDetail } = await import("@/pages/admin/AdminBrandDetail");
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={qc}>
         <MemoryRouter initialEntries={["/admin/business-case?brand=18"]}>
           <Routes>
             <Route path="/admin/business-case" element={<AdminBusinessCase />} />
-            <Route path="/admin/commercial" element={<AdminCommercial />} />
+            <Route path="/admin/brands/:brandId" element={<AdminBrandDetail />} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>,
     );
     // It was a sidebar item for months, so the URL is bookmarked — it has to
-    // land somewhere real rather than 404.
+    // land on that brand's own cycle rather than 404.
     expect(await screen.findByText("Pricing")).toBeTruthy();
+  });
+
+  it("a brand is one page with record, cycle and documents on it", async () => {
+    const { default: AdminBrandDetail } = await import("@/pages/admin/AdminBrandDetail");
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/admin/brands/18?tab=cycle"]}>
+          <Routes><Route path="/admin/brands/:brandId" element={<AdminBrandDetail />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    // All three reachable from the one place, and ?tab= decides which is shown.
+    expect(await screen.findByRole("button", { name: "Record" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Commercial cycle" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Documents" })).toBeTruthy();
+    expect(await screen.findByText("First meeting")).toBeTruthy();
+    rerender(<span />);
   });
 
   it("brand documents name every kind, drafted or not", async () => {
