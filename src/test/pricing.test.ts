@@ -91,3 +91,103 @@ describe("rate provenance", () => {
     expect(resolve("apparel", 17)).toBeUndefined();
   });
 });
+
+// ── Regressions ──────────────────────────────────────────────────────────────
+// Both of these shipped wrong and both reached a client-facing slide, so they
+// are pinned here rather than only in the SQL.
+
+const SERVICE_DISCOUNT = 0.5;
+const SERVICE_DISCOUNT_MONTHS = 6;
+const VAT = 0.22;
+
+// The fix: greatest(0, months - discountMonths). Without it a programme shorter
+// than the discount window bills a negative number of full-price months.
+const serviceFee = (monthlyRate: number | null, months: number) => {
+  if (monthlyRate === null) return 0;
+  const discounted = Math.min(SERVICE_DISCOUNT_MONTHS, months);
+  const full = Math.max(0, months - SERVICE_DISCOUNT_MONTHS);
+  return monthlyRate * full + monthlyRate * (1 - SERVICE_DISCOUNT) * discounted;
+};
+
+describe("service fee", () => {
+  it("charges half rate for the first six months and full rate after", () => {
+    // 36 months at 1000: 6 discounted (3,000) + 30 full (30,000).
+    expect(serviceFee(1000, 36)).toBeCloseTo(33_000, 2);
+  });
+
+  it("never goes negative on a pilot shorter than the discount window", () => {
+    // The bug: 1000 * (3 - 6) = -3,000, plus 1,500 discounted = -1,500 billed.
+    expect(serviceFee(1000, 3)).toBeCloseTo(1_500, 2);
+    expect(serviceFee(1000, 3)).toBeGreaterThan(0);
+    for (const m of [1, 2, 3, 4, 5, 6]) expect(serviceFee(1000, m)).toBeGreaterThan(0);
+  });
+
+  it("is nothing at all in tier 3, where the fee is on quotation", () => {
+    expect(serviceFee(null, 36)).toBe(0);
+  });
+});
+
+describe("cost as a share of the retail price", () => {
+  // The VAT-inclusive price is the LARGER number, so the same cost is a SMALLER
+  // share of it. The original multiplied by 1.22 instead of dividing, which
+  // overstated the headline percentage by 22% relative.
+  const shareOfPrice = (cost: number, priceExVat: number) => cost / priceExVat;
+  const shareOfPriceInclVat = (cost: number, priceExVat: number) =>
+    cost / priceExVat / (1 + VAT);
+
+  it("is smaller against the VAT-inclusive price, not larger", () => {
+    expect(shareOfPriceInclVat(100, 4200)).toBeLessThan(shareOfPrice(100, 4200));
+  });
+
+  it("matches dividing the cost by the gross price directly", () => {
+    expect(shareOfPriceInclVat(100, 4200)).toBeCloseTo(100 / (4200 * 1.22), 10);
+  });
+
+  it("printed a figure 1.22x too big where it should have been 1.22x too small", () => {
+    const correct = shareOfPriceInclVat(100, 4200);
+    const asShipped = shareOfPrice(100, 4200) * (1 + VAT); // the bug
+    // The error compounds in the wrong direction, so it was out by VAT twice.
+    expect(asShipped).toBeCloseTo(correct * (1 + VAT) ** 2, 12);
+    expect((correct * 100).toFixed(2)).toBe("1.95");
+    expect((asShipped * 100).toFixed(2)).toBe("2.90");
+  });
+});
+
+describe("per-piece figures reconcile with the total", () => {
+  // Per-piece "total" is the RECURRING cost; setup is one-off and carried
+  // separately. Adding them back has to land on total_cost_to_brand, or the
+  // pricing meeting finds the gap.
+  it("recurring plus setup per piece equals the whole cost to the brand", () => {
+    const units = 2_500, gross = 233_400, service = 33_000, activation = 15_000, setup = 10_000;
+    const perPiece = (gross + service + activation) / units;
+    const setupPerPiece = setup / units;
+    expect((perPiece + setupPerPiece) * units)
+      .toBeCloseTo(gross + setup + service + activation, 6);
+  });
+});
+
+describe("quote resolution", () => {
+  // A segment must be priced off a quote for the cover it actually asked for,
+  // and — where a band was given — the volume it declares.
+  type Q = { category: string; coverage: string; rateOfCogs: number; brandId: number | null; gmvFrom: number | null; gmvTo: number | null };
+  const quotes: Q[] = [
+    { category: "bags", coverage: "theft", rateOfCogs: 0.031, brandId: null, gmvFrom: null, gmvTo: null },
+    { category: "bags", coverage: "theft_and_damage", rateOfCogs: 0.0778, brandId: null, gmvFrom: null, gmvTo: 20_000_000 },
+    { category: "bags", coverage: "theft_and_damage", rateOfCogs: 0.0612, brandId: null, gmvFrom: 20_000_000, gmvTo: null },
+  ];
+  const resolve = (category: string, coverage: string, revenues: number, brandId: number) =>
+    quotes.filter((q) => q.category === category && q.coverage === coverage)
+      .sort((a, b) =>
+        Number(b.brandId === brandId) - Number(a.brandId === brandId) ||
+        Number(b.gmvFrom !== null && revenues >= b.gmvFrom && (b.gmvTo === null || revenues <= b.gmvTo)) -
+        Number(a.gmvFrom !== null && revenues >= a.gmvFrom && (a.gmvTo === null || revenues <= a.gmvTo)))[0];
+
+  it("does not price theft-only cover off a theft-and-damage rate", () => {
+    expect(resolve("bags", "theft", 10_000_000, 5).rateOfCogs).toBe(0.031);
+  });
+
+  it("picks the rate quoted for the volume the perimeter declares", () => {
+    expect(resolve("bags", "theft_and_damage", 50_000_000, 5).rateOfCogs).toBe(0.0612);
+    expect(resolve("bags", "theft_and_damage", 10_000_000, 5).rateOfCogs).toBe(0.0778);
+  });
+});

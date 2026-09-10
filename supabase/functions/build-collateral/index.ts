@@ -61,31 +61,76 @@ Deno.serve(async (req: Request) => {
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
 
   try {
+    // Everything already built for this brand, with FRESH links. A signed URL
+    // lasts a week, so the one returned at generation time is dead by the time
+    // the deal comes back round — and the old panel had no way to get another
+    // one except by regenerating the file.
+    if (kind === "list") return json(await listArtifacts(admin, brand));
     if (kind === "data_request") return json(await buildDataRequest(admin, brand, body));
     if (kind === "business_case") return json(await buildBusinessCase(admin, brand, body));
     if (kind === "operations") return json(await buildOperations(admin, brand));
-    return json({ error: "kind must be data_request | business_case | operations" }, 400);
+    return json({ error: "kind must be list | data_request | business_case | operations" }, 400);
   } catch (e) {
     console.error("[build-collateral]", e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 
+// ── 0. What already exists, with links that still work ──────────────────────
+async function listArtifacts(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>) {
+  const { data: rows } = await admin.from("brand_deck_outputs")
+    .select("template_key, storage_path, generated_at, slots_filled")
+    .eq("brand_id", brand.id).order("generated_at", { ascending: false });
+
+  const artifacts = [];
+  for (const r of (rows ?? []) as { template_key: string; storage_path: string; generated_at: string; slots_filled: unknown[] }[]) {
+    const ext = r.storage_path.split(".").pop() ?? "pptx";
+    const fileName = `AION x ${brand.name} — ${r.template_key.replace(/_/g, " ")}.${ext}`;
+    const { data: signed } = await admin.storage.from(BUCKET)
+      .createSignedUrl(r.storage_path, 60 * 60 * 24 * 7, { download: fileName });
+    artifacts.push({
+      kind: r.template_key, file_name: fileName, generated_at: r.generated_at,
+      slots_filled: Array.isArray(r.slots_filled) ? r.slots_filled.length : 0,
+      storage_path: r.storage_path,
+      // A row whose file was deleted from storage signs fine but 404s on click.
+      download_url: signed?.signedUrl ?? null,
+    });
+  }
+  return { ok: true, brand: brand.name, artifacts };
+}
+
 // ── 1. Data request workbook ────────────────────────────────────────────────
 // A .xlsx keeps its text in xl/sharedStrings.xml, so branding it is a string
 // swap — the questions, structure and formatting are untouched.
 async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>, body: Record<string, unknown>) {
   const { data: tpl } = await admin.from("deck_templates").select("*").eq("key", "data_request").maybeSingle();
-  if (!tpl) throw new Error("data_request template not registered");
+  // Both of these used to surface as one unhelpful line. They are different
+  // problems with different fixes, so say which one it is and where the file
+  // belongs — this button failed on every brand for weeks because nothing ever
+  // registered the template and the error did not say so.
+  if (!tpl) {
+    throw new Error(
+      "the data-request template is not registered — run the commercial-cycle migration, " +
+      "then upload the workbook to the 'decks' bucket at the path that row names.",
+    );
+  }
 
   const { data: file, error } = await admin.storage.from(BUCKET).download(tpl.storage_path);
-  if (error || !file) throw new Error(`template not readable: ${error?.message}`);
+  if (error || !file) {
+    throw new Error(
+      `the data-request workbook is not in storage — upload it to the '${BUCKET}' bucket at ` +
+      `${tpl.storage_path} (${error?.message ?? "not found"})`,
+    );
+  }
 
   const address = [brand.hq_address, brand.hq_postcode, brand.hq_city, brand.hq_country].filter(Boolean).join(", ");
+  const legalName = String(body.legal_name ?? brand.name ?? "").trim();
+  const brandAddress = String(body.address ?? address ?? "").trim();
+  const focus = String(body.focus ?? "").trim();
   const values: Record<string, string> = {
-    "{{BRAND_LEGAL_NAME}}": String(body.legal_name ?? brand.name ?? ""),
-    "{{BRAND_ADDRESS}}": String(body.address ?? address ?? ""),
-    "{{BRAND_FOCUS}}": String(body.focus ?? ""),
+    "{{BRAND_LEGAL_NAME}}": legalName,
+    "{{BRAND_ADDRESS}}": brandAddress,
+    "{{BRAND_FOCUS}}": focus,
   };
 
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
@@ -94,6 +139,7 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
   if (!xml) throw new Error("workbook has no shared strings");
 
   const applied: string[] = [];
+  const missed: string[] = [];
   for (const slot of (tpl.text_slots ?? []) as { find: string; replace_with: string }[]) {
     const to = values[slot.replace_with] ?? slot.replace_with;
     // An unanswered field is left blank rather than carrying another client's
@@ -101,6 +147,11 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
     if (xml.includes(slot.find)) {
       xml = xml.replaceAll(slot.find, escapeXml(to));
       applied.push(`${slot.find} → ${to || "(blank)"}`);
+    } else {
+      // A slot that never matched means the workbook was revised and the
+      // template map is stale. Silently shipping the previous client's text is
+      // the failure this has to be loud about.
+      missed.push(slot.find);
     }
   }
   zip.file(path, xml);
@@ -108,7 +159,16 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
   const out = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
   return await store(admin, brand, "data_request", "xlsx", out,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    { replacements: applied, review: ["Confirm the legal entity and address with the client before sending.", "Set the product focus for the pilot if it was left blank."] });
+    {
+      replacements: applied,
+      unmatched: missed,
+      review: [
+        legalName ? `Confirm "${legalName}" is the entity the pilot is contracted with.` : "No legal entity set — the workbook went out blank there.",
+        brandAddress ? "Check the registered address against the client's own records." : "No registered address set — fill it on the brand record or in the field above.",
+        focus ? `Product focus: ${focus}.` : "No product focus set — the client will not know which categories the pilot covers.",
+        ...(missed.length ? [`${missed.length} template slot${missed.length === 1 ? "" : "s"} did not match the workbook — it has been revised since the template was mapped, so check those cells by hand.`] : []),
+      ],
+    });
 }
 
 // ── 2. Business case deck ───────────────────────────────────────────────────
@@ -159,28 +219,43 @@ async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: 
 
     { title: "AION fees", bullets: [
       `Tier ${fees.tier} on covered GMV`,
-      `Setup ${eur(fees.setup)}`,
-      fees.service_fee_month ? `Service ${eur(fees.service_fee_month)}/month → ${eur(fees.service)} over the period` : `Service fee: ${fees.service_note ?? "on quotation"}`,
+      `Setup ${eur(fees.setup)} — one-off`,
+      fees.service_fee_month
+        ? `Service ${eur(fees.service_fee_month)}/month → ${eur(fees.service)} over the period (${fees.service_months_discounted ?? 0} months discounted, ${fees.service_months_full ?? 0} at full rate)`
+        : `Service fee: ${fees.service_note ?? "on quotation"}`,
       `Activation ${eur(fees.activation)}`,
       `Total AION fees ${eur(fees.total)}`,
     ] },
 
+    // Per piece is the RECURRING cost. Setup is one-off and is shown on its own
+    // line, so this slide reconciles with "total cost to the brand" when someone
+    // multiplies it out in the meeting.
     { title: "Cost per piece", bullets: pp.total ? [
       `Insurer ${eur(pp.insurer_fee)} per piece`,
       `AION ${eur(pp.aion_fee)} per piece`,
-      `Total ${eur(pp.total)} per piece`,
-      `${pct(pp.total_pct_of_price)} of retail price (${pct(pp.total_pct_of_price_incl_vat)} incl. VAT)`,
-    ] : ["Average price not supplied — add avg_price per segment for per-piece figures"] },
+      `Recurring total ${eur(pp.total)} per piece`,
+      `${pct(pp.total_pct_of_price)} of the retail price, ${pct(pp.total_pct_of_price_incl_vat)} of the price including VAT`,
+      `Setup spread over the perimeter adds ${eur(pp.setup)} per piece → ${eur(pp.total_with_setup)} all-in`,
+    ] : ["Average price not supplied — add an average price per segment for per-piece figures"] },
 
     { title: "Summary", bullets: [
       `Total cost to ${brand.name}: ${eur(c.total_cost_to_brand)}`,
       `of which insurance ${eur(c.gross_premium)} and AION ${eur(fees.total)}`,
       `AION revenue over the period ${eur(c.aion_total_revenue)}`,
+      ...(c.volume_band_mismatch ? ["Rates were quoted at a different volume than this perimeter declares"] : []),
       "Figures are a model, not an offer — the formal insurer quotation governs",
     ] },
 
-    { title: "Where these rates come from", bullets: (c.rates_used ?? []).map((r: any) =>
-      `${r.category}: ${pct(r.rate_of_cogs)} of COGS — ${r.insurer}, quoted for ${r.quoted_for ?? "—"}${r.quoted_at ? ` (${r.quoted_at})` : ""}${r.own_quote ? "" : " — INDICATIVE"}`) },
+    // Provenance is the slide that keeps this honest: what the rate covers, who
+    // it was quoted for, and at what volume.
+    { title: "Where these rates come from", bullets: (c.rates_used ?? []).map((r: any) => {
+      const cover = r.coverage === "theft" ? "theft only"
+        : `theft + accidental damage${r.damage_scope ? ` (${r.damage_scope})` : ""}`;
+      const band = r.gmv_from != null
+        ? `, quoted at ${eur(r.gmv_from)}–${r.gmv_to != null ? eur(r.gmv_to) : "no cap"} volume` : "";
+      return `${r.category} — ${cover}: ${pct(r.rate_of_cogs)} of COGS. ${r.insurer}, quoted for ${r.quoted_for ?? "—"}` +
+        `${r.quoted_at ? ` (${r.quoted_at})` : ""}${band}${r.own_quote ? "" : " — INDICATIVE"}`;
+    }) },
   ];
 
   const out = await renderDeck(admin, slides);
@@ -193,6 +268,7 @@ async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: 
         c.indicative
           ? "These rates were quoted for another house. Decide deliberately whether to show them, and keep the 'indicative' wording on the slide."
           : "Rates are this brand's own quote.",
+        ...((c.notes ?? []) as string[]),
         "Check the perimeter against what the client actually declared in the data request.",
         "A formal Chubb quotation takes 1–2 months and supersedes this.",
       ],
@@ -270,7 +346,12 @@ async function buildOperations(admin: ReturnType<typeof createClient>, brand: Re
 // intro deck instead of like default PowerPoint.
 async function renderDeck(admin: ReturnType<typeof createClient>, slides: SlideSpec[]): Promise<Uint8Array> {
   const { data: file, error } = await admin.storage.from(BUCKET).download(STYLE_TEMPLATE);
-  if (error || !file) throw new Error(`style template not readable: ${error?.message}`);
+  if (error || !file) {
+    throw new Error(
+      `the AION teaser is not in storage, and both decks are generated into it for their styling — ` +
+      `upload it to the '${BUCKET}' bucket at ${STYLE_TEMPLATE} (${error?.message ?? "not found"})`,
+    );
+  }
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
 
   // Drop the teaser's own slides — and its speaker notes with them. A notesSlide
