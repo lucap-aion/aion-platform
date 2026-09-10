@@ -39,7 +39,10 @@ const UPLOAD_BUCKET = "brand-knowledge-uploads";
 // One page of the document list. The totals above it come from a count, so a
 // brand with thousands of documents sees the real number even though the list
 // shows the most recent slice.
-const LIST_PAGE_SIZE = 500;
+// A page you can actually page through. It used to be 500 with no controls,
+// which for Luisa Beccaria's 3,782 documents meant seeing 13% of the base and
+// having no way to reach the rest — and paying for 500 rows on every keystroke.
+const LIST_PAGE_SIZE = 50;
 
 // Why a page didn't make it in.
 //
@@ -150,6 +153,11 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   const [retrying, setRetrying] = useState(false);
   const [editDoc, setEditDoc] = useState<Doc | null>(null);
   const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
+  const [page, setPage] = useState(0);
+
+  // Any change to what is being asked for starts again at the first page —
+  // otherwise a search from page 12 returns nothing and reads as "no matches".
+  useEffect(() => { setPage(0); }, [debouncedSearch, categoryFilter, sourceFilter, brandId]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -163,122 +171,120 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   // term that has 7. Only the newest request may touch state.
   const requestSeq = useRef(0);
 
-  const refresh = useCallback(async () => {
+  // Two loaders, because the old single one made NINE sequential round trips on
+  // every keystroke — the list, the deleted list, an exact count, a totals RPC,
+  // a queue count, the sources, the crawl failures, the gaps and the downvotes —
+  // when only two of the nine depend on what was typed. On a brand with 3,782
+  // documents that is a full-text scan and eight pointless queries per search,
+  // in series.
+  //
+  // loadDocs  — the list and its count. Re-runs on search, filter and page.
+  // loadMeta  — everything about the base as a whole. Re-runs per brand, on the
+  //             crawl poll, and after an action that changes it.
+  const loadDocs = useCallback(async () => {
     if (!brandId) return;
     const seq = ++requestSeq.current;
     const isStale = () => seq !== requestSeq.current;
     setLoading(true);
+
+    // Applied to both the page and the count, or "showing 50 of 3,782" would be
+    // a lie while a search is active. Title first, then the body — a brand
+    // looking for "Zafferano" wants the document called Zafferano, but one
+    // looking for "ATA Carnet" may only know it appears inside one.
+    const safe = debouncedSearch ? ilikeTerm(debouncedSearch) : "";
+
     let listQuery = supabase
       .from("brand_knowledge_docs" as never)
       .select("id, title, category, source_type, source_url, status, error, char_count, chunk_count, updated_at")
       .eq("brand_id", brandId)
-      // Deleted documents are hidden here and unreachable by the assistant;
-      // they stay in the table for 30 days so a mistake can be undone.
+      // Deleted documents are hidden here and unreachable by the assistant; they
+      // stay in the table for 30 days so a mistake can be undone.
       .is("deleted_at", null);
-
-    // Title first, then the body — a brand looking for "Zafferano" wants the
-    // document called Zafferano, but a brand looking for "ATA Carnet" may only
-    // know it appears somewhere inside one.
-    if (debouncedSearch) {
-      const safe = ilikeTerm(debouncedSearch);
-      if (safe) listQuery = listQuery.or(`title.ilike.${safe},content.ilike.${safe}`);
-    }
-    if (categoryFilter) listQuery = listQuery.eq("category", categoryFilter);
-    if (sourceFilter) listQuery = listQuery.eq("source_type", sourceFilter);
-
-    const { data, error } = await listQuery
-      // PostgREST caps an unbounded select at 1000 rows. Luisa Beccaria has
-      // 3,759 documents, so the page was showing a third of them and reporting
-      // "1,000 DOCUMENTS" as if that were the total — the brand could not see,
-      // let alone manage, most of its own knowledge base. Ask for an explicit
-      // page and take the totals from a real count.
-      .order("updated_at", { ascending: false })
-      .range(0, LIST_PAGE_SIZE - 1);
-
-    const { data: deletedData } = await supabase
-      .from("brand_knowledge_docs" as never)
-      .select("id, title, category, source_type, source_url, status, error, char_count, chunk_count, updated_at")
-      .eq("brand_id", brandId)
-      .not("deleted_at", "is", null)
-      .order("updated_at", { ascending: false })
-      .limit(50);
-
-    // The same filters, or "showing 500 of 3,759" would be a lie while a search
-    // is active.
     let countQuery = supabase
       .from("brand_knowledge_docs" as never)
       .select("id", { count: "exact", head: true })
       .eq("brand_id", brandId)
       .is("deleted_at", null);
-    if (debouncedSearch) {
-      const safe = ilikeTerm(debouncedSearch);
-      if (safe) countQuery = countQuery.or(`title.ilike.${safe},content.ilike.${safe}`);
+
+    if (safe) {
+      listQuery = listQuery.or(`title.ilike.${safe},content.ilike.${safe}`);
+      countQuery = countQuery.or(`title.ilike.${safe},content.ilike.${safe}`);
     }
-    if (categoryFilter) countQuery = countQuery.eq("category", categoryFilter);
-    if (sourceFilter) countQuery = countQuery.eq("source_type", sourceFilter);
-    const { count: docTotal } = await countQuery;
+    if (categoryFilter) {
+      listQuery = listQuery.eq("category", categoryFilter);
+      countQuery = countQuery.eq("category", categoryFilter);
+    }
+    if (sourceFilter) {
+      listQuery = listQuery.eq("source_type", sourceFilter);
+      countQuery = countQuery.eq("source_type", sourceFilter);
+    }
 
-    const { data: chunkTotalRow } = await supabase
-      .rpc("brand_knowledge_totals" as never, { p_brand_id: brandId } as never);
+    const [{ data, error }, { count: docTotal }] = await Promise.all([
+      listQuery
+        .order("updated_at", { ascending: false })
+        .range(page * LIST_PAGE_SIZE, page * LIST_PAGE_SIZE + LIST_PAGE_SIZE - 1),
+      countQuery,
+    ]);
 
-    const { count } = await supabase
-      .from("knowledge_crawl_queue" as never)
-      .select("id", { count: "exact", head: true })
-      .eq("brand_id", brandId)
-      .eq("status", "pending");
-    const { data: srcData } = await supabase
-      .from("knowledge_sources" as never)
-      .select("kind, enabled, target, last_seeded_at, config")
-      .eq("brand_id", brandId);
-    const { data: failData } = await supabase
-      .from("knowledge_crawl_queue" as never)
-      .select("id, url, error")
-      .eq("brand_id", brandId)
-      .eq("status", "error")
-      .limit(100);
-    const { data: gapData } = await supabase
-      .from("knowledge_gaps" as never)
-      .select("id, query, hits, last_seen")
-      .eq("brand_id", brandId)
-      .eq("dismissed", false)
-      .order("hits", { ascending: false })
-      .limit(20);
-    const { data: dvData } = await supabase
-      .from("assistant_feedback" as never)
-      .select("id, question, created_at")
-      .eq("brand_id", brandId)
-      .eq("rating", -1)
-      .order("created_at", { ascending: false })
-      .limit(10);
     if (isStale()) return;
-
     setLoading(false);
-    setPending(count ?? 0);
     setDocTotalCount(docTotal ?? null);
-    setDeletedDocs((deletedData as unknown as Doc[]) ?? []);
-    // A set-returning RPC comes back as an ARRAY of rows. Reading .chunks off
-    // the array yielded undefined, and the fallback quietly summed only the 500
-    // documents we had loaded — 2,914 instead of 6,173. A wrong number is worse
-    // than an obviously missing one, so this falls back to null, not a partial.
-    const totals = chunkTotalRow as unknown;
-    const totalsRow = Array.isArray(totals) ? totals[0] : totals;
-    const chunkTotal = (totalsRow as { chunks?: number } | null)?.chunks;
-    setChunkTotalCount(typeof chunkTotal === "number" ? chunkTotal : null);
-    setSources((srcData as unknown as SourceRow[]) ?? []);
-    setFailed((failData as unknown as FailedItem[]) ?? []);
-    setGaps((gapData as unknown as GapRow[]) ?? []);
-    setDownvotes((dvData as unknown as DownvoteRow[]) ?? []);
     if (error) {
       console.error("[knowledge list]", error);
       toast.error(tt(locale, "Couldn't load the knowledge base.", "Impossibile caricare la knowledge base."));
       return;
     }
     setDocs((data as unknown as Doc[]) ?? []);
-  }, [brandId, locale, debouncedSearch, categoryFilter, sourceFilter]);
+  }, [brandId, locale, debouncedSearch, categoryFilter, sourceFilter, page]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  const loadMeta = useCallback(async () => {
+    if (!brandId) return;
+    const [deleted, totals, queued, srcs, fails, gapRows, dvRows] = await Promise.all([
+      supabase.from("brand_knowledge_docs" as never)
+        .select("id, title, category, source_type, source_url, status, error, char_count, chunk_count, updated_at")
+        .eq("brand_id", brandId).not("deleted_at", "is", null)
+        .order("updated_at", { ascending: false }).limit(50),
+      supabase.rpc("brand_knowledge_totals" as never, { p_brand_id: brandId } as never),
+      supabase.from("knowledge_crawl_queue" as never)
+        .select("id", { count: "exact", head: true }).eq("brand_id", brandId).eq("status", "pending"),
+      supabase.from("knowledge_sources" as never)
+        .select("kind, enabled, target, last_seeded_at, config").eq("brand_id", brandId),
+      supabase.from("knowledge_crawl_queue" as never)
+        .select("id, url, error").eq("brand_id", brandId).eq("status", "error").limit(100),
+      supabase.from("knowledge_gaps" as never)
+        .select("id, query, hits, last_seen").eq("brand_id", brandId).eq("dismissed", false)
+        .order("hits", { ascending: false }).limit(20),
+      supabase.from("assistant_feedback" as never)
+        .select("id, question, created_at").eq("brand_id", brandId).eq("rating", -1)
+        .order("created_at", { ascending: false }).limit(10),
+    ]);
 
-  // Poll while a background crawl is draining the queue.
+    setPending(queued.count ?? 0);
+    setDeletedDocs((deleted.data as unknown as Doc[]) ?? []);
+    // A set-returning RPC comes back as an ARRAY of rows. Reading .chunks off
+    // the array yielded undefined, and the fallback quietly summed only the 500
+    // documents we had loaded — 2,914 instead of 6,173. A wrong number is worse
+    // than an obviously missing one, so this falls back to null, not a partial.
+    const t = totals.data as unknown;
+    const row = Array.isArray(t) ? t[0] : t;
+    const chunkTotal = (row as { chunks?: number } | null)?.chunks;
+    setChunkTotalCount(typeof chunkTotal === "number" ? chunkTotal : null);
+    setSources((srcs.data as unknown as SourceRow[]) ?? []);
+    setFailed((fails.data as unknown as FailedItem[]) ?? []);
+    setGaps((gapRows.data as unknown as GapRow[]) ?? []);
+    setDownvotes((dvRows.data as unknown as DownvoteRow[]) ?? []);
+  }, [brandId]);
+
+  // Anything that used to call refresh() wants both.
+  const refresh = useCallback(async () => {
+    await Promise.all([loadDocs(), loadMeta()]);
+  }, [loadDocs, loadMeta]);
+
+  useEffect(() => { void loadDocs(); }, [loadDocs]);
+  useEffect(() => { void loadMeta(); }, [loadMeta]);
+
+  // Poll while a background crawl is draining the queue. Both, because a crawl
+  // adds documents to the list as well as moving the counters.
   useEffect(() => {
     if (pending <= 0) return;
     const t = setTimeout(() => void refresh(), 15000);
@@ -406,6 +412,9 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
 
   // Never derive a total from the rows we happened to load.
   const totalDocs = docTotalCount ?? docs.length;
+  const pageCount = Math.max(1, Math.ceil(totalDocs / LIST_PAGE_SIZE));
+  const firstOnPage = totalDocs === 0 ? 0 : page * LIST_PAGE_SIZE + 1;
+  const lastOnPage = page * LIST_PAGE_SIZE + docs.length;
   const totalChunks = chunkTotalCount ?? docs.reduce((s, d) => s + (d.chunk_count ?? 0), 0);
   const chunksArePartial = chunkTotalCount === null && totalDocs > docs.length;
   const isFiltered = !!(debouncedSearch || categoryFilter || sourceFilter);
@@ -727,15 +736,34 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
 
       {/* List */}
       <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
-        {!loading && (totalDocs > docs.length || isFiltered) && (
-          <div className="border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-            {isFiltered
-              ? tt(locale,
-                  `${totalDocs.toLocaleString()} document${totalDocs === 1 ? "" : "s"} match${totalDocs === 1 ? "es" : ""}${totalDocs > docs.length ? ` — showing the first ${docs.length.toLocaleString()}` : ""}.`,
-                  `${totalDocs.toLocaleString()} documenti corrispondono${totalDocs > docs.length ? ` — mostrati i primi ${docs.length.toLocaleString()}` : ""}.`)
-              : tt(locale,
-                  `Showing the ${docs.length.toLocaleString()} most recently updated of ${totalDocs.toLocaleString()} documents.`,
-                  `Mostrati i ${docs.length.toLocaleString()} documenti aggiornati più di recente su ${totalDocs.toLocaleString()}.`)}
+        {!loading && (totalDocs > 0 || isFiltered) && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+            <span>
+              {isFiltered
+                ? tt(locale,
+                    `${firstOnPage.toLocaleString()}–${lastOnPage.toLocaleString()} of ${totalDocs.toLocaleString()} matching`,
+                    `${firstOnPage.toLocaleString()}–${lastOnPage.toLocaleString()} di ${totalDocs.toLocaleString()} corrispondenti`)
+                : tt(locale,
+                    `${firstOnPage.toLocaleString()}–${lastOnPage.toLocaleString()} of ${totalDocs.toLocaleString()} documents`,
+                    `${firstOnPage.toLocaleString()}–${lastOnPage.toLocaleString()} di ${totalDocs.toLocaleString()} documenti`)}
+            </span>
+            {pageCount > 1 && (
+              <span className="ml-auto flex items-center gap-1">
+                <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}
+                  className="rounded-md border border-border px-2 py-1 disabled:opacity-40">
+                  {tt(locale, "Previous", "Precedente")}
+                </button>
+                <span className="px-1 tabular-nums">
+                  {tt(locale, `Page ${page + 1} of ${pageCount.toLocaleString()}`,
+                              `Pagina ${page + 1} di ${pageCount.toLocaleString()}`)}
+                </span>
+                <button type="button" onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                  disabled={page >= pageCount - 1}
+                  className="rounded-md border border-border px-2 py-1 disabled:opacity-40">
+                  {tt(locale, "Next", "Successiva")}
+                </button>
+              </span>
+            )}
           </div>
         )}
         {loading ? (

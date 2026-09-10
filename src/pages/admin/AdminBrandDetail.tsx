@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import BrandRecordForm, { type Brand } from "./_components/BrandRecordForm";
 import CommercialCycle from "./_components/CommercialCycle";
 import BrandDocuments from "./_components/BrandDocuments";
+import BrandKnowledge from "@/pages/brand/BrandKnowledge";
 import { StatusBadge } from "./_components/AdminTable";
 
 // Everything about one brand, in one place.
@@ -22,12 +23,13 @@ import { StatusBadge } from "./_components/AdminTable";
 // reach step 1. The tab is in the URL, so /admin/brands/18?tab=cycle is a link
 // you can send someone.
 
-type Tab = "record" | "cycle" | "documents";
+type Tab = "record" | "cycle" | "documents" | "knowledge";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "record", label: "Record" },
   { key: "cycle", label: "Commercial cycle" },
   { key: "documents", label: "Documents" },
+  { key: "knowledge", label: "Knowledge" },
 ];
 
 export default function AdminBrandDetail() {
@@ -162,6 +164,14 @@ export default function AdminBrandDetail() {
       {tab === "cycle" && <CommercialCycle brand={brand} brands={brands} />}
       {tab === "documents" && (
         <BrandDocuments brandId={brand.id} brandName={brand.name ?? "the brand"} />
+      )}
+      {/* Knowledge was its own page with a brand picker that REMEMBERED your last
+          choice in localStorage. Open it, upload a contract, and it went to
+          whichever house you happened to be looking at yesterday — the database
+          isolates brands properly, but nothing stopped you filing Pomellato's
+          document under Luisa Beccaria. Here the brand is the page you are on. */}
+      {tab === "knowledge" && (
+        <BrandKnowledge key={brand.id} brandIdOverride={brand.id} canWriteOverride />
       )}
     </div>
   );

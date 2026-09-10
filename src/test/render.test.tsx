@@ -78,11 +78,20 @@ describe("pages mount", () => {
     expect(screen.getByText(/no website yet/i)).toBeTruthy();
   });
 
-  it("admin knowledge renders its brand picker", async () => {
-    const { default: AdminKnowledge } = await import("@/pages/admin/AdminKnowledge");
-    wrap(<AdminKnowledge />);
-    // The picker's own label, not any of the several other "brand" strings.
-    expect(screen.getByText(/Uploads and edits here belong to the selected brand/i)).toBeTruthy();
+  it("knowledge is a tab on the brand, with no picker to point at the wrong one", async () => {
+    const { default: AdminBrandDetail } = await import("@/pages/admin/AdminBrandDetail");
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/admin/brands/18?tab=knowledge"]}>
+          <Routes><Route path="/admin/brands/:brandId" element={<AdminBrandDetail />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Knowledge" })).toBeTruthy();
+    // The old page carried a brand <select> whose choice was remembered across
+    // sessions; the brand is the page now, so there is nothing to mis-select.
+    expect(screen.queryByText(/Uploads and edits here belong to the selected brand/i)).toBeNull();
   });
 
   it("the commercial cycle lists all five steps", async () => {

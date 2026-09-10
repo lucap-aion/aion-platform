@@ -236,7 +236,7 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
           <button onClick={() => void load()} className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
             <RefreshCw className="h-3 w-3" /> Refresh
           </button>
-          <Link to="/admin/knowledge" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+          <Link to={`/admin/brands/${brandId}?tab=knowledge`} className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
             Knowledge <ArrowUpRight className="h-3 w-3" />
           </Link>
           {brand?.website && (

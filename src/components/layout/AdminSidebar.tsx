@@ -35,7 +35,6 @@ const adminLinks = [
   { path: "/admin/customers", icon: Users, label: "Customers" },
   { path: "/admin/feedback", icon: Star, label: "Feedback" },
   { path: "/admin/insights", icon: LineChart, label: "Insights" },
-  { path: "/admin/knowledge", icon: BookOpen, label: "Knowledge" },
   { path: "/admin/reports", icon: TrendingUp, label: "Reports" },
   { path: "/admin/stores", icon: Store, label: "Stores" },
 ];
