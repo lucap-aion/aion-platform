@@ -1,3 +1,11 @@
+// NOTE: this file mocks @/integrations/supabase/client with promises that NEVER
+// resolve, while knowledge-paging.test.tsx mocks the same module with promises
+// that always do. Contradictory per-file mocks are legal under vitest's default
+// threads pool, which gives each file its own module registry — they are not
+// under a shared registry (`--pool=forks --poolOptions.forks.singleFork`), where
+// whichever mock is registered last wins and one of the two files fails. If you
+// ever turn file isolation off, that is why.
+
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";

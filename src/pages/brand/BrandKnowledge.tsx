@@ -43,6 +43,7 @@ const UPLOAD_BUCKET = "brand-knowledge-uploads";
 // which for Luisa Beccaria's 3,782 documents meant seeing 13% of the base and
 // having no way to reach the rest — and paying for 500 rows on every keystroke.
 const LIST_PAGE_SIZE = 50;
+const DELETED_PAGE_SIZE = 25;
 
 // Why a page didn't make it in.
 //
@@ -137,6 +138,11 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   // table. This is where it can actually be found and put back.
   const [deletedDocs, setDeletedDocs] = useState<Doc[]>([]);
   const [showDeleted, setShowDeleted] = useState(false);
+  // Its own count and its own page. The panel used to report deletedDocs.length,
+  // which was the LIMIT, not the total — a brand with 391 deleted documents was
+  // told it had 50, and could reach exactly those 50 to restore.
+  const [deletedTotal, setDeletedTotal] = useState(0);
+  const [deletedPage, setDeletedPage] = useState(0);
   const [chunkTotalCount, setChunkTotalCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState(false);
@@ -239,11 +245,15 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
 
   const loadMeta = useCallback(async () => {
     if (!brandId) return;
-    const [deleted, totals, queued, srcs, fails, gapRows, dvRows] = await Promise.all([
+    const [deleted, deletedCount, totals, queued, srcs, fails, gapRows, dvRows] = await Promise.all([
       supabase.from("brand_knowledge_docs" as never)
         .select("id, title, category, source_type, source_url, status, error, char_count, chunk_count, updated_at")
         .eq("brand_id", brandId).not("deleted_at", "is", null)
-        .order("updated_at", { ascending: false }).limit(50),
+        .order("updated_at", { ascending: false })
+        .range(deletedPage * DELETED_PAGE_SIZE, deletedPage * DELETED_PAGE_SIZE + DELETED_PAGE_SIZE - 1),
+      supabase.from("brand_knowledge_docs" as never)
+        .select("id", { count: "exact", head: true })
+        .eq("brand_id", brandId).not("deleted_at", "is", null),
       supabase.rpc("brand_knowledge_totals" as never, { p_brand_id: brandId } as never),
       supabase.from("knowledge_crawl_queue" as never)
         .select("id", { count: "exact", head: true }).eq("brand_id", brandId).eq("status", "pending"),
@@ -261,6 +271,7 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
 
     setPending(queued.count ?? 0);
     setDeletedDocs((deleted.data as unknown as Doc[]) ?? []);
+    setDeletedTotal(deletedCount.count ?? 0);
     // A set-returning RPC comes back as an ARRAY of rows. Reading .chunks off
     // the array yielded undefined, and the fallback quietly summed only the 500
     // documents we had loaded — 2,914 instead of 6,173. A wrong number is worse
@@ -273,7 +284,7 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
     setFailed((fails.data as unknown as FailedItem[]) ?? []);
     setGaps((gapRows.data as unknown as GapRow[]) ?? []);
     setDownvotes((dvRows.data as unknown as DownvoteRow[]) ?? []);
-  }, [brandId]);
+  }, [brandId, deletedPage]);
 
   // Anything that used to call refresh() wants both.
   const refresh = useCallback(async () => {
@@ -589,7 +600,7 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
       )}
 
       {/* Recently deleted — the real recovery path for a soft delete. */}
-      {canWrite && deletedDocs.length > 0 && (
+      {canWrite && deletedTotal > 0 && (
         <div className="rounded-xl border border-border">
           <button
             type="button"
@@ -600,11 +611,32 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
             <span className="font-medium text-foreground">{tt(locale, "Recently deleted", "Eliminati di recente")}</span>
             <span className="text-xs text-muted-foreground">
               {tt(locale,
-                `${deletedDocs.length} — restorable for 30 days, then removed for good`,
-                `${deletedDocs.length} — ripristinabili per 30 giorni, poi eliminati definitivamente`)}
+                `${deletedTotal.toLocaleString()} — restorable for 30 days, then removed for good`,
+                `${deletedTotal.toLocaleString()} — ripristinabili per 30 giorni, poi eliminati definitivamente`)}
             </span>
             <ChevronDown className={`ml-auto h-4 w-4 text-muted-foreground transition-transform ${showDeleted ? "rotate-180" : ""}`} />
           </button>
+          {showDeleted && deletedTotal > DELETED_PAGE_SIZE && (
+            <div className="flex items-center gap-2 border-t border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+              <span>
+                {tt(locale,
+                  `${(deletedPage * DELETED_PAGE_SIZE + 1).toLocaleString()}–${(deletedPage * DELETED_PAGE_SIZE + deletedDocs.length).toLocaleString()} of ${deletedTotal.toLocaleString()}`,
+                  `${(deletedPage * DELETED_PAGE_SIZE + 1).toLocaleString()}–${(deletedPage * DELETED_PAGE_SIZE + deletedDocs.length).toLocaleString()} di ${deletedTotal.toLocaleString()}`)}
+              </span>
+              <span className="ml-auto flex items-center gap-1">
+                <button type="button" onClick={() => setDeletedPage((p) => Math.max(0, p - 1))}
+                  disabled={deletedPage === 0} className="rounded-md border border-border px-2 py-1 disabled:opacity-40">
+                  {tt(locale, "Previous", "Precedente")}
+                </button>
+                <button type="button"
+                  onClick={() => setDeletedPage((p) => (p + 1) * DELETED_PAGE_SIZE < deletedTotal ? p + 1 : p)}
+                  disabled={(deletedPage + 1) * DELETED_PAGE_SIZE >= deletedTotal}
+                  className="rounded-md border border-border px-2 py-1 disabled:opacity-40">
+                  {tt(locale, "Next", "Successiva")}
+                </button>
+              </span>
+            </div>
+          )}
           {showDeleted && (
             <ul className="divide-y divide-border border-t border-border">
               {deletedDocs.map((d) => (
@@ -736,7 +768,12 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
 
       {/* List */}
       <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
-        {!loading && (totalDocs > 0 || isFiltered) && (
+        {/* Deliberately NOT gated on `loading`: hiding the pager while the next
+            page is in flight makes the controls disappear under the cursor on
+            every click, and the list jump. The row area shows the loading state
+            instead, and the request-sequence guard already discards anything
+            that arrives out of order. */}
+        {(totalDocs > 0 || isFiltered) && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
             <span>
               {isFiltered
