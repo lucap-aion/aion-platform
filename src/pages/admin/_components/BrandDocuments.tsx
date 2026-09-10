@@ -82,6 +82,11 @@ export default function BrandDocuments({ brandId, brandName }: { brandId: number
 
   const generate = async (kinds: string[], locales: string[], label: string) => {
     setBusy(label);
+    // One LLM call per document, run in series — five of them is a couple of
+    // minutes. Saying so beats a spinner that looks hung.
+    if (kinds.length > 1) {
+      toast({ title: `Drafting ${kinds.length} documents`, description: "One model call each, so give it a minute or two." });
+    }
     try {
       const { data, error } = await supabase.functions.invoke("generate-brand-docs", {
         body: { brand_id: brandId, kinds, locales, force: true },
