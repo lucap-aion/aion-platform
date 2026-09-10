@@ -138,7 +138,8 @@ export type StageState = {
   started_at?: string | null;
 };
 
-export type StageDisplayState = "done" | "failed" | "skipped" | "running" | "stalled" | "queued" | "pending";
+export type StageDisplayState =
+  | "done" | "failed" | "skipped" | "needs_input" | "running" | "stalled" | "queued" | "pending";
 
 // How long a stage may claim to be running before nobody believes it.
 //
@@ -159,7 +160,9 @@ export function stageDisplayState(state: StageState | null | undefined, optimist
   if (state.queued === true) return "queued";
   if (state.status === "pending") return "pending";
   if (state.status === "running") return isStalled(state) ? "stalled" : "running";
-  if (state.status === "done" || state.status === "failed" || state.status === "skipped") return state.status;
+  // A stage that stopped to ask a question is not the same as one that was passed over.
+  if (state.status === "skipped") return state.detail?.needs ? "needs_input" : "skipped";
+  if (state.status === "done" || state.status === "failed") return state.status;
   return "pending";
 }
 
@@ -183,6 +186,8 @@ export type PipelineSummary = {
   total: number;
   done: number;
   failed: PipelineStage[];
+  /** Stopped to ask something a person has to answer. Not a failure. */
+  asking: PipelineStage[];
   running: PipelineStage | null;
   queued: number;
   active: boolean;
@@ -205,8 +210,11 @@ export function summarisePipeline(
   const queued = known.filter((s) => at(s) === "queued").length;
   return {
     total: known.length,
-    done: known.filter((s) => at(s) === "done").length,
+    // A stage that was passed over, or that cannot ever run here, is settled — counting it
+    // as outstanding leaves a healthy brand stuck at "7 of 10" for good.
+    done: known.filter((s) => ["done", "skipped"].includes(at(s))).length,
     failed: known.filter((s) => at(s) === "failed"),
+    asking: known.filter((s) => at(s) === "needs_input"),
     running,
     queued,
     active: !!running || queued > 0,

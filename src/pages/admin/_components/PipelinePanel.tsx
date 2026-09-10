@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { AlertCircle, Check, Circle, Clock, Loader2, Play, SkipForward } from "lucide-react";
+import { AlertCircle, Check, Circle, Clock, HelpCircle, Loader2, Play, SkipForward } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   PIPELINE_STAGES, type PipelineStage, type StageState,
@@ -37,6 +37,7 @@ const ICON: Record<string, React.ReactNode> = {
   done: <Check className="h-3 w-3" />,
   running: <Loader2 className="h-3 w-3 animate-spin" />,
   stalled: <AlertCircle className="h-3 w-3" />,
+  needs_input: <HelpCircle className="h-3 w-3" />,
   failed: <AlertCircle className="h-3 w-3" />,
   queued: <Clock className="h-3 w-3" />,
   skipped: <SkipForward className="h-3 w-3" />,
@@ -47,6 +48,7 @@ const CHIP: Record<string, string> = {
   done: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   running: "border-primary/50 bg-primary/10 text-primary",
   stalled: "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-500",
+  needs_input: "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-500",
   failed: "border-destructive/40 bg-destructive/5 text-destructive",
   queued: "border-primary/40 bg-primary/5 text-primary",
   skipped: "border-border text-muted-foreground/60",
@@ -71,7 +73,7 @@ export default function PipelinePanel({
   // render, so depending on it would re-run this effect on every render for the whole life
   // of the panel.
   const stalled = visible.filter((s) => at(s) === "stalled");
-  const wantsAttention = stalled[0]?.key ?? summary.failed[0]?.key ?? summary.running?.key ?? null;
+  const wantsAttention = stalled[0]?.key ?? summary.failed[0]?.key ?? summary.asking[0]?.key ?? summary.running?.key ?? null;
   useEffect(() => {
     if (open || !wantsAttention) return;
     setOpen(wantsAttention);
@@ -113,12 +115,15 @@ export default function PipelinePanel({
     <div className={`overflow-hidden rounded-xl border ${
       summary.active ? "border-primary/30 bg-primary/5"
         : summary.failed.length ? "border-destructive/30 bg-destructive/5"
+        : summary.asking.length ? "border-amber-500/30 bg-amber-500/5"
         : "border-border"}`}>
       <div className="flex flex-wrap items-center gap-3 p-4 pb-3">
         {summary.active
           ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
           : summary.failed.length
           ? <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
+          : summary.asking.length
+          ? <HelpCircle className="h-4 w-4 shrink-0 text-amber-600" />
           : <Check className="h-4 w-4 shrink-0 text-muted-foreground" />}
 
         <p className="text-sm font-medium text-foreground">
@@ -133,6 +138,8 @@ export default function PipelinePanel({
             ? `${stalled.length === 1 ? "One stage" : `${stalled.length} stages`} stopped reporting`
             : summary.failed.length
             ? `${summary.failed.length === 1 ? "One stage" : `${summary.failed.length} stages`} could not complete`
+            : summary.asking.length
+            ? `${summary.asking.length === 1 ? "One stage needs" : `${summary.asking.length} stages need`} an answer from you`
             : summary.total === 0
             ? "nothing has run for this brand yet"
             : "idle"}
@@ -159,7 +166,8 @@ export default function PipelinePanel({
       {summary.total > 0 && (
         <div className="mx-4 h-1 overflow-hidden rounded-full bg-primary/15">
           <div
-            className={`h-full rounded-full transition-all duration-700 ${summary.failed.length ? "bg-destructive/60" : "bg-primary/70"}`}
+            className={`h-full rounded-full transition-all duration-700 ${
+              summary.failed.length ? "bg-destructive/60" : summary.asking.length ? "bg-amber-500/60" : "bg-primary/70"}`}
             style={{ width: `${Math.max(4, (summary.done / Math.max(1, summary.total)) * 100)}%` }}
           />
         </div>
@@ -195,6 +203,10 @@ export default function PipelinePanel({
                   ? "Running now. It will land here when it finishes; you can leave the page."
                   : openAt === "stalled"
                   ? "This claimed to be running and then stopped reporting — the run was killed before it could finish. The server retries it on its own; pressing Run does it now."
+                  : openAt === "needs_input"
+                  ? `${String(openState?.detail?.reason ?? "This stopped to ask you something.")} Answer it in step 3 below and it runs again on its own.`
+                  : openAt === "skipped"
+                  ? String(openState?.detail?.reason ?? openState?.error ?? "Nothing for this stage to do on this brand.")
                   : openState?.error ?? detailLine(openStage.key, openState) ?? openStage.hint}
               </p>
               {(openState?.attempts ?? 0) > 0 && openAt !== "done" && (
@@ -214,6 +226,7 @@ export default function PipelinePanel({
                 : openAt === "queued" ? "Queued"
                 : openAt === "running" ? "Running"
                 : openAt === "stalled" ? "Run it again"
+                : openAt === "needs_input" ? "Run anyway"
                 : openAt === "failed" ? "Try again"
                 : "Run"}
             </button>

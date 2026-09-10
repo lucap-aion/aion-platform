@@ -92,6 +92,41 @@ describe("a stage that stopped reporting", () => {
   });
 });
 
+describe("not everything unfinished is broken", () => {
+  it("tells a stage that asked a question from one that broke", () => {
+    // The demo book stops to ask for a typical retail price when a site renders its prices
+    // in JavaScript. That is a question for the admin, and showing it as a failure puts a
+    // red mark on a healthy brand and sends someone to fix a site with nothing wrong.
+    expect(stageDisplayState({ status: "skipped", detail: { needs: "avg_ticket" } })).toBe("needs_input");
+    expect(stageDisplayState({ status: "skipped", detail: {} })).toBe("skipped");
+    expect(stageDisplayState({ status: "failed", error: "boom" })).toBe("failed");
+  });
+
+  it("counts a settled stage as settled, not as outstanding", () => {
+    // ferragamo.com publishes no catalogue, so its intro deck can never be built. Leaving it
+    // outstanding pins the brand at "7 of 10 done" for ever.
+    const summary = summarisePipeline({
+      branding: { status: "done" },
+      sources: { status: "done" },
+      intro_deck: { status: "skipped", detail: { reason: "no catalogue on this site" } },
+    });
+    expect(summary.done).toBe(3);
+    expect(summary.total).toBe(3);
+    expect(summary.failed).toEqual([]);
+  });
+
+  it("keeps a question out of the failure count and in its own", () => {
+    const summary = summarisePipeline({
+      demo_data: { status: "skipped", detail: { needs: "avg_ticket" } },
+      storefront: { status: "failed", error: "timed out" },
+    });
+    expect(summary.asking.map((s) => s.key)).toEqual(["demo_data"]);
+    expect(summary.failed.map((s) => s.key)).toEqual(["storefront"]);
+    // A question is not progress either — it is not counted as done.
+    expect(summary.done).toBe(0);
+  });
+});
+
 describe("summarising the pipeline", () => {
   it("counts only the stages that have actually got a row", () => {
     // A brand onboarded before the pipeline existed has no stage rows at all — Luisa

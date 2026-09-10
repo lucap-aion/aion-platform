@@ -73,14 +73,30 @@ const CORS = {
 // Beccaria has 1,013 products and no storefront row — so gating on stage status
 // would block them forever. Same principle as the status endpoint: ask the
 // tables what is true, don't trust a status column's opinion.
+//
+// It also has to say whether the thing it is waiting for is COMING or is simply not there.
+// "No catalogue yet" while the storefront stage is still to run is a wait. The same sentence
+// after that stage has finished and reported no product feed is the end of the matter — and
+// reporting it as a failure paints a red mark on a perfectly healthy brand and asks somebody
+// to go and fix a site that has nothing wrong with it. Ferragamo publishes no machine-
+// readable catalogue; its intro deck is not broken, it is impossible.
+type Unmet = { reason: string; terminal: boolean };
+
 async function unmetRequirements(
   admin: ReturnType<typeof createClient>, brandId: number, stage: Stage,
-): Promise<string | null> {
+): Promise<Unmet | null> {
   const has = async (table: string, extra?: (q: any) => any) => {
     let q = admin.from(table).select("id", { count: "exact", head: true }).eq("brand_id", brandId);
     if (extra) q = extra(q);
     const { count } = await q;
     return (count ?? 0) > 0;
+  };
+  // A prerequisite stage that has FINISHED and produced nothing will not produce anything
+  // on its own; anything else may still deliver.
+  const settled = async (prerequisite: Stage) => {
+    const { data } = await admin.from("brand_onboarding")
+      .select("status").eq("brand_id", brandId).eq("stage", prerequisite).maybeSingle();
+    return (data as { status?: string } | null)?.status === "done";
   };
 
   if (stage === "demo_data") {
@@ -92,7 +108,10 @@ async function unmetRequirements(
       has("brand_knowledge_docs", (q: any) => q.eq("category", "product")),
     ]);
     if (!products && !productPages) {
-      return "no catalogue yet — run the storefront stage (or let the crawl index the product pages) so the demo is built from real pieces";
+      return {
+        reason: "no catalogue yet — run the storefront stage (or let the crawl index the product pages) so the demo is built from real pieces",
+        terminal: await settled("storefront") && await settled("sources"),
+      };
     }
   }
 
@@ -100,13 +119,24 @@ async function unmetRequirements(
     // The deck swaps in the brand's own pieces; with no catalogue it would just
     // re-emit AION's stock imagery under the brand's name.
     if (!(await has("storefront_products"))) {
-      return "no catalogue yet — the deck is built from the brand's own pieces, so the storefront stage has to land first";
+      return await settled("storefront")
+        ? {
+          reason: "this site publishes no product feed and no structured product data, so there are no pieces to put in a deck — the catalogue stage looked and found none",
+          terminal: true,
+        }
+        : {
+          reason: "no catalogue yet — the deck is built from the brand's own pieces, so the storefront stage has to land first",
+          terminal: false,
+        };
     }
   }
 
   if (stage === "documents" || stage === "assistant") {
     if (!(await has("brand_knowledge_chunks"))) {
-      return "nothing indexed yet — the crawl has to run first, or there is nothing to write from";
+      return {
+        reason: "nothing indexed yet — the crawl has to run first, or there is nothing to write from",
+        terminal: await settled("sources"),
+      };
     }
   }
 
@@ -197,7 +227,7 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true, stage, continuing: true, result: out });
       }
 
-      await setStage(admin, brandId, stage, ok ? "done" : "failed", out,
+      await setStage(admin, brandId, stage, outcomeOf(out, ok), out,
         ok ? null : String((out as { reason?: string }).reason ?? "stage did not complete"));
       // Cancel only what actually needed this stage. Everything else keeps its place in
       // the queue: a house with no product feed should still get its documents, its
@@ -283,7 +313,7 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true, stage, continuing: true, result: out });
       }
 
-      await setStage(admin, brandId, stage, ok ? "done" : "failed", out,
+      await setStage(admin, brandId, stage, outcomeOf(out, ok), out,
         ok ? null : String((out as { reason?: string }).reason ?? "stage did not complete"));
       results[stage] = out;
       // Skip what needed this one, and carry on with everything that did not. Stopping the
@@ -305,6 +335,19 @@ Deno.serve(async (req: Request) => {
   });
 });
 
+// Not everything that did not finish is a failure.
+//
+// A stage that is waiting for an ANSWER — the demo book asking for a typical retail price,
+// because the site renders its prices in JavaScript — is a question, not a breakage. And a
+// stage that cannot run because the thing it needs genuinely does not exist is finished
+// with, not broken. Marking either "failed" paints a red mark on a healthy brand and sends
+// somebody to fix a site that has nothing wrong with it.
+function outcomeOf(out: unknown, ok: boolean): "done" | "failed" | "skipped" {
+  if (ok) return "done";
+  const d = (out ?? {}) as { needs?: string; terminal?: boolean };
+  return d.needs || d.terminal === true ? "skipped" : "failed";
+}
+
 // ── Stages ───────────────────────────────────────────────────────────────────
 
 async function runStage(
@@ -317,7 +360,7 @@ async function runStage(
   const force = options.force === true;
 
   const unmet = await unmetRequirements(admin, brandId, stage);
-  if (unmet) return { ok: false, reason: unmet };
+  if (unmet) return { ok: false, reason: unmet.reason, terminal: unmet.terminal };
 
   if (stage === "branding") {
     const website = String(brand.website ?? "").trim();
