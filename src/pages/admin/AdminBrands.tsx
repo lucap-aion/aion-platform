@@ -77,7 +77,6 @@ const BRANDS_SCHEMA: ExportColumn[] = [
   { key: "chubb_policy_prefix",   label: "Chubb Policy Prefix" },
 ];
 import AdminDrawer from "./_components/AdminDrawer";
-import BrandOnboarding from "./_components/BrandOnboarding";
 import { Link } from "react-router-dom";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, TextArea, SaveBar } from "./_components/FormField";
@@ -153,7 +152,6 @@ const AdminBrands = () => {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Brand | null>(null);
   // Brand whose demo-preparation panel is open (lead → demo, in one place).
-  const [onboarding, setOnboarding] = useState<Brand | null>(null);
   const [deleting, setDeleting] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -316,25 +314,17 @@ const AdminBrands = () => {
         extraRowAction={(row) => {
           const r = row as unknown as Brand;
           return (
-            <div className="flex items-center gap-1">
-              {/* The demo is one step of five. The cycle screen is where the
-                  deck, the data request, the pricing and the ops deck live. */}
-              <Link
-                to={`/admin/commercial?brand=${r.id}`}
-                onClick={(e) => e.stopPropagation()}
-                title="The commercial cycle for this brand"
-                className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
-              >
-                Cycle
-              </Link>
-              <button
-                onClick={(e) => { e.stopPropagation(); setOnboarding(r); }}
-                title="Prepare this brand for a demo"
-                className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
-              >
-                Demo
-              </button>
-            </div>
+            /* One door. Demo prep is step 3 of the cycle, and it used to open in
+               a drawer here as well — the same panel in two places, with only
+               one of them able to show what else had been done for the brand. */
+            <Link
+              to={`/admin/commercial?brand=${r.id}`}
+              onClick={(e) => e.stopPropagation()}
+              title="The commercial cycle for this brand — deck, data request, demo, pricing, ops"
+              className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Cycle
+            </Link>
           );
         }}
         filters={[
@@ -373,20 +363,6 @@ const AdminBrands = () => {
           },
         ]}
       />
-
-      <AdminDrawer
-        open={onboarding !== null}
-        onClose={() => setOnboarding(null)}
-        title={onboarding ? `Prepare demo: ${onboarding.name ?? ""}` : ""}
-      >
-        {onboarding && (
-          <BrandOnboarding
-            brandId={onboarding.id!}
-            brandName={onboarding.name ?? ""}
-            website={onboarding.website ?? null}
-          />
-        )}
-      </AdminDrawer>
 
       <AdminDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={drawerTitle}>
         <form onSubmit={handleSave} className="space-y-4">

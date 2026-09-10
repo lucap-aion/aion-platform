@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { untyped } from "@/integrations/supabase/untyped";
 // The standalone `toast`, not `useToast().toast`: the hook returns a fresh
@@ -9,7 +9,7 @@ import { untyped } from "@/integrations/supabase/untyped";
 import { toast } from "@/hooks/use-toast";
 import {
   Loader2, Download, FileText, ChevronDown, ChevronRight, Check, Circle,
-  CircleDot, SkipForward, AlertCircle, RefreshCw, ExternalLink,
+  CircleDot, SkipForward, AlertCircle, RefreshCw, ExternalLink, ArrowUpRight,
 } from "lucide-react";
 import BrandOnboarding from "./_components/BrandOnboarding";
 import BrandDocuments from "./_components/BrandDocuments";
@@ -31,7 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 // anything. Each step says what it needs, what it produces, and where this
 // prospect got to; the order is a default, not a rule.
 
-type Brand = { id: number; name: string | null; website: string | null; slug: string | null; logo_small: string | null };
+type Brand = { id: number; name: string | null; website: string | null; slug: string | null; logo_small: string | null; logo_big: string | null };
 type Artifact = { kind: string; file_name: string; generated_at: string; slots_filled: number; download_url: string | null };
 type ProgressRow = { state: string; note: string | null; happened_on: string | null; updated_at: string };
 type Overview = {
@@ -104,7 +104,7 @@ export default function AdminCommercial() {
 
   useEffect(() => {
     void (async () => {
-      const { data } = await supabase.from("brands").select("id, name, website, slug, logo_small").order("name");
+      const { data } = await supabase.from("brands").select("id, name, website, slug, logo_small, logo_big").order("name");
       const list = (data ?? []) as Brand[];
       setBrands(list);
       const fromUrl = Number(params.get("brand"));
@@ -147,11 +147,30 @@ export default function AdminCommercial() {
   useEffect(() => {
     if (!overview || !brandId || autoOpened.current === brandId) return;
     autoOpened.current = brandId;
+    // An explicit ?step= wins: somebody followed a link that meant a step.
+    const asked = Number(params.get("step"));
+    if (asked >= 1 && asked <= STEPS.length) { setOpen(asked); return; }
     const next = STEPS.find((s) => overview.progress?.[String(s.n)]?.state !== "done");
     setOpen(next?.n ?? 1);
+    // params is read once per brand on purpose — re-running when the URL changes
+    // would fight the accordion, which itself writes to the URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overview, brandId]);
 
+  // Opening a step is a navigation, so it is bookmarkable and shareable: "the
+  // pricing for Pasquale Bruni" is one URL, which is what lets this screen
+  // replace the separate pages rather than sit alongside them.
+  const openStep = useCallback((n: number | null) => {
+    setOpen(n);
+    const next: Record<string, string> = {};
+    if (brandId) next.brand = String(brandId);
+    if (n) next.step = String(n);
+    setParams(next, { replace: true });
+  }, [brandId, setParams]);
+
   const brand = brands.find((b) => b.id === brandId) ?? null;
+  const isRaster = (u: string | null | undefined) => !!u && !/\.svg(\?|$)/i.test(u);
+  const hasRasterLogo = isRaster(brand?.logo_big) || isRaster(brand?.logo_small);
   const artifactFor = (n: number) => {
     const kind = ARTIFACT_FOR[n];
     return kind ? artifacts.find((a) => a.kind === kind) ?? null : null;
@@ -159,7 +178,7 @@ export default function AdminCommercial() {
 
   const pickBrand = (id: number) => {
     setBrandId(id);
-    setParams({ brand: String(id) }, { replace: true });
+    setParams({ brand: String(id), ...(open ? { step: String(open) } : {}) }, { replace: true });
     setOverview(null); setArtifacts([]); setReview({});
     setLegalName(""); setAddress(""); setFocus("");
   };
@@ -258,20 +277,32 @@ export default function AdminCommercial() {
           </div>
         ) : (
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <CycleProgress progress={overview?.progress} onJump={setOpen} />
+            <CycleProgress progress={overview?.progress} onJump={openStep} />
             <span>{c.products ?? 0} products</span>
             <span>{c.knowledge_chunks ?? 0} chunks indexed</span>
             <span>{c.policies ?? 0} covers</span>
             <span>{c.brand_users ?? 0} logins</span>
           </div>
         )}
-        {brand?.website && (
-          <a href={brand.website.startsWith("http") ? brand.website : `https://${brand.website}`}
-            target="_blank" rel="noreferrer"
-            className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-            {brand.website} <ExternalLink className="h-3 w-3" />
-          </a>
-        )}
+        {/* The inputs this screen runs on but does not own. Every one of them
+            used to be a hunt through the sidebar: which brand record has the
+            address the data request needs, where the crawl that the documents
+            wait on is up to. */}
+        <div className="ml-auto flex flex-wrap items-center gap-3 text-xs">
+          <Link to="/admin/brands" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+            Brand record <ArrowUpRight className="h-3 w-3" />
+          </Link>
+          <Link to="/admin/knowledge" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+            Knowledge <ArrowUpRight className="h-3 w-3" />
+          </Link>
+          {brand?.website && (
+            <a href={brand.website.startsWith("http") ? brand.website : `https://${brand.website}`}
+              target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
+              {brand.website} <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </div>
       </div>
 
       {!brand?.website && brand && (
@@ -289,7 +320,7 @@ export default function AdminCommercial() {
           const isOpen = open === step.n;
           return (
             <div key={step.n} className={`rounded-xl border ${!loadingBrand && state === "done" ? "border-emerald-500/40" : "border-border"}`}>
-              <button onClick={() => setOpen(isOpen ? null : step.n)}
+              <button onClick={() => openStep(isOpen ? null : step.n)}
                 className="flex w-full items-start gap-3 p-4 text-left">
                 <span className="mt-0.5 shrink-0">
                   {loadingBrand ? <Skeleton className="h-5 w-5 rounded-full" />
@@ -339,6 +370,8 @@ export default function AdminCommercial() {
                       review={review[1]}
                       warning={(c.products ?? 0) === 0
                         ? "No catalogue yet, so there are no pieces to swap into the deck. Run the Catalogue stage in step 3 first."
+                        : !hasRasterLogo
+                        ? `${c.products} products available, but no PNG or JPEG logo on the brand record — the deck will carry only AION's mark, which is most of what makes one look generic. A vector logo cannot be embedded.`
                         : `${c.products} products available — the most valuable ones go into the deck.`}
                     />
                   )}

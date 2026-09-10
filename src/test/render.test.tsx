@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // Smoke tests: do the pages we changed today actually mount?
@@ -96,6 +96,25 @@ describe("pages mount", () => {
     expect(screen.getByText(/Perimeter/i)).toBeTruthy();
     // Build deck stays disabled until Calculate has produced figures to build from.
     expect(screen.getByRole("button", { name: /Build deck/i }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("the old business-case route lands on step 4, keeping the brand", async () => {
+    const { default: AdminBusinessCase } = await import("@/pages/admin/AdminBusinessCase");
+    const { default: AdminCommercial } = await import("@/pages/admin/AdminCommercial");
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/admin/business-case?brand=18"]}>
+          <Routes>
+            <Route path="/admin/business-case" element={<AdminBusinessCase />} />
+            <Route path="/admin/commercial" element={<AdminCommercial />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    // It was a sidebar item for months, so the URL is bookmarked — it has to
+    // land somewhere real rather than 404.
+    expect(await screen.findByText("Pricing")).toBeTruthy();
   });
 
   it("brand documents name every kind, drafted or not", async () => {
