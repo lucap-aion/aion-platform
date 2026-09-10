@@ -17,6 +17,31 @@
 // already publishes for search engines. Pure and synchronous, so it can be
 // tested against real captured pages rather than mocked ones.
 
+/**
+ * Every JSON-LD node a page publishes, flattened.
+ *
+ * Shared with the brand-identity harvester, which needs Organization rather than
+ * Product but has exactly the same problem: the answer is in the structured data
+ * the site publishes for Google, not in the markup.
+ */
+export function jsonLdNodes(html: string): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const push = (node: unknown, depth = 0) => {
+    if (depth > 6 || node == null) return;
+    if (Array.isArray(node)) { for (const c of node) push(c, depth + 1); return; }
+    if (typeof node !== "object") return;
+    const obj = node as Record<string, unknown>;
+    out.push(obj);
+    for (const key of ["@graph", "itemListElement", "item", "mainEntity", "publisher", "brand", "hasPart"]) {
+      if (key in obj) push(obj[key], depth + 1);
+    }
+  };
+  for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try { push(JSON.parse(m[1].trim())); } catch { /* one bad block must not lose the page */ }
+  }
+  return out;
+}
+
 export type ExtractedProduct = {
   name: string;
   product_url: string | null;

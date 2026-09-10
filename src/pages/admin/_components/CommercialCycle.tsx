@@ -53,6 +53,21 @@ type Overview = {
   quotes: { category: string; coverage: string; own_quote: boolean }[];
 };
 
+// Every stage the pipeline runs, in queue order, with a name a person would
+// use. The panel below narrates these while they run.
+const PIPELINE: { key: string; label: string }[] = [
+  { key: "branding", label: "Brand identity" },
+  { key: "sources", label: "Website & news" },
+  { key: "storefront", label: "Catalogue" },
+  { key: "intro_deck", label: "Intro deck" },
+  { key: "demo_data", label: "Demo book of business" },
+  { key: "demo_users", label: "Demo logins" },
+  { key: "documents", label: "Client documents" },
+  { key: "assistant", label: "Assistant" },
+  { key: "ops_deck", label: "Ops deck" },
+  { key: "data_request", label: "Data request" },
+];
+
 const STEPS = [
   {
     n: 1, title: "First meeting",
@@ -139,6 +154,25 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
   }, [brandId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // What the pipeline is doing, right now.
+  const stageList = PIPELINE.map((p) => ({ ...p, state: overview?.stages?.[p.key] }))
+    .filter((p) => p.state);
+  const running = stageList.find((p) => p.state!.status === "running");
+  const queuedCount = stageList.filter((p) => p.state!.queued).length;
+  const doneCount = stageList.filter((p) => p.state!.status === "done").length;
+  const failedStages = stageList.filter((p) => p.state!.status === "failed");
+  const pipelineActive = !!running || queuedCount > 0;
+
+  // The screen showed "not started · 0 products" while nine stages were queued
+  // and one had already finished, because nothing here polled — only the panel
+  // buried inside step 3 did. A background pipeline you cannot see is
+  // indistinguishable from one that never started.
+  useEffect(() => {
+    if (!pipelineActive) return;
+    const t = setInterval(() => { void load(); }, 6000);
+    return () => clearInterval(t);
+  }, [pipelineActive, load]);
 
   // Opening on the first step that is not finished is what an admin picking a
   // deal back up actually wants to see — but ONCE per brand, not on every
@@ -234,6 +268,67 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
         The five steps from first meeting to operations review, and everything they produce.
         The order is a default — steps swap around, and nothing here stops you doing them out of sequence.
       </p>
+
+      {pipelineActive && (
+        <div className="overflow-hidden rounded-xl border border-primary/30 bg-primary/5">
+          <div className="flex flex-wrap items-center gap-3 p-4 pb-3">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+            <p className="text-sm font-medium text-foreground">
+              Setting {brand.name ?? "this brand"} up
+            </p>
+            <span className="text-xs text-muted-foreground">
+              {running
+                ? `${running.label} — in progress`
+                : `${queuedCount} step${queuedCount === 1 ? "" : "s"} waiting to start`}
+            </span>
+            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+              {doneCount} of {stageList.length} done
+            </span>
+          </div>
+
+          {/* Indeterminate on purpose: the stages take wildly different times —
+              a crawl is minutes, a deck is seconds — so a percentage would be a
+              lie that appears to stall. */}
+          <div className="mx-4 h-1 overflow-hidden rounded-full bg-primary/15">
+            <div className="h-full rounded-full bg-primary/70 transition-all duration-700"
+              style={{ width: `${Math.max(4, (doneCount / Math.max(1, stageList.length)) * 100)}%` }} />
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 p-4 pt-3">
+            {stageList.map((p) => (
+              <span key={p.key}
+                title={p.state!.error ?? p.label}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
+                  p.state!.status === "done" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  : p.state!.status === "running" ? "border-primary/50 bg-primary/10 text-primary"
+                  : p.state!.status === "failed" ? "border-destructive/40 bg-destructive/5 text-destructive"
+                  : p.state!.status === "skipped" ? "border-border text-muted-foreground/60"
+                  : "border-border text-muted-foreground"}`}>
+                {p.state!.status === "done" ? <Check className="h-3 w-3" />
+                  : p.state!.status === "running" ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : p.state!.status === "failed" ? <AlertCircle className="h-3 w-3" />
+                  : <Circle className="h-3 w-3 opacity-40" />}
+                {p.label}
+              </span>
+            ))}
+          </div>
+
+          <p className="border-t border-primary/20 px-4 py-2 text-xs text-muted-foreground">
+            This runs on the server — you can leave this page and come back. Steps below stay
+            unavailable until the work they need has landed.
+          </p>
+        </div>
+      )}
+
+      {!pipelineActive && failedStages.length > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <span>
+            {failedStages.length === 1 ? "One step" : `${failedStages.length} steps`} could not complete:{" "}
+            {failedStages.map((f) => f.label).join(", ")}. Open the step below to see why and run it again.
+          </span>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-4 rounded-xl border border-border p-4">
         {loadingBrand ? (
@@ -528,6 +623,11 @@ function StepAction({ produces, busy, disabled, label, onRun, artifact, review, 
   const running = stage?.status === "running";
   const queued = stage?.queued === true;
   const failed = stage?.status === "failed";
+  // While the pipeline owns this step, it owns it completely. The old screen
+  // showed "Queued — you do not need to press anything" directly above "Run the
+  // Catalogue stage in step 3 first" and an enabled build button that would have
+  // failed on the missing catalogue: three messages, two of them wrong.
+  const pipelineOwnsIt = running || queued;
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">{produces}</p>
@@ -551,17 +651,21 @@ function StepAction({ produces, busy, disabled, label, onRun, artifact, review, 
           </span>
         </div>
       )}
-      {warning && (
+      {warning && !pipelineOwnsIt && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
           <span>{warning}</span>
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={onRun} disabled={busy || disabled}
+        {/* Disabled while the pipeline has it: pressing it would either race the
+            background run or fail on the prerequisite the pipeline is still
+            fetching. */}
+        <button onClick={onRun} disabled={busy || disabled || pipelineOwnsIt}
+          title={pipelineOwnsIt ? "The pipeline is handling this — no need to press anything" : undefined}
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-          {artifact ? `Rebuild ${label.replace(/^Build /, "")}` : label}
+          {busy || running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          {running ? "Building…" : queued ? "Waiting to start" : artifact ? `Rebuild ${label.replace(/^Build /, "")}` : label}
         </button>
         {/* The link is signed afresh on every load, so a deal picked back up a
             month later still downloads instead of 404ing on an expired URL. */}

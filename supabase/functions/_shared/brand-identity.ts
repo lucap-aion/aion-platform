@@ -1,3 +1,4 @@
+import { jsonLdNodes } from "./product-extract.ts";
 // Harvest a brand's visual identity from its own website.
 //
 // A brand record starts almost empty: name, website, maybe a country. Everything
@@ -36,8 +37,27 @@ export async function harvestBrandIdentity(website: string): Promise<BrandIdenti
   };
 
   // ── Copy ──────────────────────────────────────────────────────────────────
-  const description = meta(html, "og:description") ?? meta(html, "description");
-  if (description) { out.description = clean(description).slice(0, 600); out.found.push("description"); }
+  // Organization.description first. og:description and <meta name=description>
+  // are written for search results — Ferragamo's is "Shop the latest Ferragamo
+  // collection for women & men at Ferragamo.com", which is shop copy, not a
+  // description of the house.
+  const declaredDesc = jsonLdNodes(html)
+    .filter((n) => {
+      const t = n["@type"];
+      const types = Array.isArray(t) ? t.map(String) : [String(t)];
+      return types.some((x) => ["Organization", "Corporation", "Brand", "WebSite", "OnlineStore"].includes(x));
+    })
+    .map((n) => (typeof n.description === "string" ? n.description : undefined))
+    .find((d) => d && d.trim().length > 30);
+
+  const description = declaredDesc ?? meta(html, "og:description") ?? meta(html, "description");
+  if (description) {
+    out.description = clean(description).slice(0, 600);
+    out.found.push(declaredDesc ? "description (declared)" : "description (SEO metadata)");
+    if (!declaredDesc) {
+      out.notes.push("the description came from the page's SEO metadata, which is written for search results rather than about the house — worth rewriting");
+    }
+  }
 
   // A contact address the brand publishes itself. Skip the obvious noise.
   const emails = [...html.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]{2,}/g)].map((m) => m[0].toLowerCase())
@@ -55,19 +75,54 @@ export async function harvestBrandIdentity(website: string): Promise<BrandIdenti
     out.found.push("hero image");
   }
 
-  const iconHref =
-    attr(html, /<link[^>]+rel=["'][^"']*apple-touch-icon[^"']*["'][^>]*>/i, "href") ??
-    attr(html, /<link[^>]+rel=["'][^"']*(?:shortcut )?icon[^"']*["'][^>]*>/i, "href");
-  const icon = abs(iconHref);
-  if (icon) { out.logo_small = icon; out.found.push("icon"); }
+  // LARGEST icon, not the first one in the document. Ferragamo lists 57x57
+  // before 114x114, so taking the first gave a 57px favicon — which then went
+  // into the brand tile AND, once the deck learned to co-brand, onto nine slides.
+  const icons = [...html.matchAll(/<link[^>]+rel=["'][^"']*(?:apple-touch-)?icon[^"']*["'][^>]*>/gi)]
+    .map((m) => m[0])
+    .map((tag) => ({
+      href: getAttr(tag, "href"),
+      size: Number((getAttr(tag, "sizes") ?? "").split("x")[0]) || 0,
+    }))
+    .filter((i) => i.href)
+    .sort((a, b) => b.size - a.size);
+  const icon = abs(icons[0]?.href);
+  if (icon) {
+    out.logo_small = icon;
+    out.found.push(icons[0].size ? `icon ${icons[0].size}px` : "icon");
+    if (icons[0].size && icons[0].size < 120) {
+      out.notes.push(`the largest icon this site declares is only ${icons[0].size}px — fine for a browser tab, too small for a deck, so set the full logo by hand`);
+    }
+  }
 
-  // A logo in the markup: an <img> whose class, id, alt or filename says so.
+  // The logo the site DECLARES, before the logo we go looking for. schema.org
+  // Organization.logo is the canonical answer and is what Google reads; the
+  // markup search below only ever found logos that happened to be <img> tags
+  // with a helpful class, which missed every site using a CSS background or an
+  // inline SVG. Ferragamo publishes it and we were ignoring it.
+  const declaredLogo = abs(
+    jsonLdNodes(html)
+      .filter((n) => {
+        const t = n["@type"];
+        const types = Array.isArray(t) ? t.map(String) : [String(t)];
+        return types.some((x) => ["Organization", "Corporation", "Brand", "WebSite", "OnlineStore"].includes(x));
+      })
+      .map((n) => {
+        const l = n.logo as unknown;
+        if (typeof l === "string") return l;
+        if (l && typeof l === "object") return (l as Record<string, unknown>).url as string | undefined;
+        return undefined;
+      })
+      .find(Boolean),
+  );
+
+  // Failing that, an <img> whose class, id, alt or filename says logo.
   const logoImg = [...html.matchAll(/<img\b[^>]*>/gi)]
     .map((m) => m[0])
     .find((tag) => /logo|brand-?mark|wordmark/i.test(tag) && !/sprite|placeholder|payment|card/i.test(tag));
-  const logo = abs(logoImg ? (getAttr(logoImg, "src") ?? getAttr(logoImg, "data-src")) : undefined);
-  if (logo) { out.logo_big = logo; out.found.push("logo"); }
-  else if (ogImage) { out.notes.push("no logo found in the markup — set it by hand"); }
+  const logo = declaredLogo ?? abs(logoImg ? (getAttr(logoImg, "src") ?? getAttr(logoImg, "data-src")) : undefined);
+  if (logo) { out.logo_big = logo; out.found.push(declaredLogo ? "logo (declared)" : "logo (markup)"); }
+  else { out.notes.push("no logo found — the deck will carry only AION's mark until one is set on the record"); }
 
   // ── Colour ────────────────────────────────────────────────────────────────
   // theme-color is the one colour a site declares about itself. Anything more

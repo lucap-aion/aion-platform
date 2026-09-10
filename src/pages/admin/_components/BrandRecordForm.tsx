@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { DEFAULT_MAX_COVERED_VALUE } from "@/lib/coverage";
+import { DEFAULT_MAX_COVERED_VALUE, DEFAULT_MIN_COVERED_VALUE } from "@/lib/coverage";
 import type { ThemeColors, ThemeFonts } from "@/contexts/TenantContext";
 import { FormField, Input, Select, TextArea, SaveBar } from "./FormField";
 import { ImageUpload } from "./ImageUpload";
@@ -103,6 +103,7 @@ export interface Brand {
   insurance_premium: number | null;
   aion_premium_fee: number | null;
   max_covered_value: number | null;
+  min_covered_value: number | null;
 }
 
 export type Mode = "view" | "edit" | "add";
@@ -117,7 +118,8 @@ export const empty = (): Partial<Brand> => ({
   faq_en: null, faq_it: null,
   theme_settings: null,
   enable_chubb_reporting: false, chubb_policy_prefix: "",
-  activation_fee: null, insurance_premium: null, aion_premium_fee: null, max_covered_value: null,
+  activation_fee: null, insurance_premium: null, aion_premium_fee: null,
+  max_covered_value: null, min_covered_value: null,
 });
 
 const toJsonStr = (v: any) => v ? JSON.stringify(v, null, 2) : "";
@@ -148,7 +150,7 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
     setLoading(true);
     void (async () => {
       const { data } = await supabase.from("brands")
-        .select("id, name, slug, description, email, website, hq_country, hq_address, hq_city, hq_postcode, status, logo_small, logo_big, auth_background_image, top_banner_image, theft_image, damage_image, faq_image, feedback_image, faq_en, faq_it, theme_settings, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value")
+        .select("id, name, slug, description, email, website, hq_country, hq_address, hq_city, hq_postcode, status, logo_small, logo_big, auth_background_image, top_banner_image, theft_image, damage_image, faq_image, feedback_image, faq_en, faq_it, theme_settings, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value, min_covered_value")
         .eq("id", brandId).maybeSingle();
       const b = (data ?? empty()) as Partial<Brand>;
       setEditing(b); setFaqEnStr(toJsonStr(b.faq_en)); setFaqItStr(toJsonStr(b.faq_it));
@@ -158,6 +160,18 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    // The database enforces this too, but a check constraint surfaces as a raw Postgres
+    // error in a toast. Say it in words instead, before the round trip.
+    const floor = editing.min_covered_value ?? DEFAULT_MIN_COVERED_VALUE;
+    const ceiling = editing.max_covered_value ?? DEFAULT_MAX_COVERED_VALUE;
+    if (floor >= ceiling) {
+      toast({
+        title: "Covered value range is inverted",
+        description: `The activation floor (€${floor.toLocaleString()}) has to be below the ceiling (€${ceiling.toLocaleString()}), otherwise every cover is recorded blocked.`,
+        variant: "destructive",
+      });
+      return;
+    }
     setSaving(true);
     // Build theme_settings: only store non-default values to keep it clean
     const ts = editing.theme_settings;
@@ -193,6 +207,7 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
       insurance_premium: editing.insurance_premium ?? null,
       aion_premium_fee: editing.aion_premium_fee ?? null,
       max_covered_value: editing.max_covered_value ?? DEFAULT_MAX_COVERED_VALUE,
+      min_covered_value: editing.min_covered_value ?? DEFAULT_MIN_COVERED_VALUE,
     };
     const { error } = mode === "add"
       ? await supabase.from("brands").insert(payload)
@@ -419,6 +434,9 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
               </FormField>
               <FormField label="Max Covered Value (€)" hint="Retail cap per item; new covers only">
                 <Input type="number" step="1" min="0" disabled={ro} value={editing.max_covered_value ?? ""} placeholder={String(DEFAULT_MAX_COVERED_VALUE)} onChange={(e) => set("max_covered_value", e.target.value ? Number(e.target.value) : null)} />
+              </FormField>
+              <FormField label="Min Covered Value (€)" hint="At or below this retail price a cover is recorded but not activated">
+                <Input type="number" step="1" min="0" disabled={ro} value={editing.min_covered_value ?? ""} placeholder={String(DEFAULT_MIN_COVERED_VALUE)} onChange={(e) => set("min_covered_value", e.target.value !== "" ? Number(e.target.value) : null)} />
               </FormField>
             </div>
           </div>
