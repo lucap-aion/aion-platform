@@ -254,7 +254,8 @@ function detailLine(stage: string, st: StageState | undefined): string | null {
     }
     case "assistant": {
       const left = n("pages_still_crawling") ?? 0;
-      return `${n("knowledge_chunks") ?? 0} chunks indexed${left ? ` · ${left} pages still crawling` : ""}`;
+      return `${n("knowledge_chunks") ?? 0} chunks indexed${left ? ` · ${left} pages still crawling` : ""}` +
+        (d.legal_requeued ? " · sent Brand identity back for the legal entity and registered office, now the site is indexed" : "");
     }
     case "intro_deck":
     case "ops_deck":

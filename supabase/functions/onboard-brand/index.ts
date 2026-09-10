@@ -2,7 +2,8 @@
 //
 // An AION admin creates the brand with its website; this runs everything after
 // it and reports where it got to:
-//   branding    — logo, colours, description and hero imagery, from their own site
+//   branding    — logo, colours, description and hero imagery, from their own site,
+//                 plus the legal entity and registered office from their own legal pages
 //   sources     — register the site + news as knowledge sources and kick the crawl
 //   storefront  — detect an e-commerce feed, register it, pull the catalogue
 //   demo_data   — a believable book of business built from the brand's own pieces
@@ -28,6 +29,7 @@ import {
 import { harvestBrandIdentity } from "../_shared/brand-identity.ts";
 import { extractProducts } from "../_shared/product-extract.ts";
 import { enrichFromWikidata } from "../_shared/brand-enrich.ts";
+import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } from "../_shared/brand-legal.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -331,6 +333,34 @@ async function runStage(
       if (wiki.logo && !id.logo_big) id.logo_big = wiki.logo;
       id.notes.push(`matched ${wiki.entity} on ${wiki.matched_on} (${wiki.source})`);
     }
+    // The house's own legal text, which is the only place a registered office actually
+    // appears: no encyclopaedia carries a street address, and Wikidata's label for this
+    // company is the trading name. A privacy policy states both — "Salvatore Ferragamo
+    // S.p.A. with registered offices at Via de' Tornabuoni 2, 50123, Firenze" — and the
+    // crawl has already indexed it.
+    //
+    // On a brand created minutes ago the crawl has NOT run yet, because branding is queued
+    // ahead of it. That is worth saying rather than silently returning nothing: running
+    // this stage again once the site is indexed is what fills these two fields.
+    const siteLegal = await readLegalPages(admin, brandId);
+    const office = registeredOfficeFrom(siteLegal);
+    const legalName = legalNameFromDescription(id.description);
+
+    if (!siteLegal) {
+      id.notes.push("no indexed pages yet — the registered office is read from the site's own legal text, so run this again once the crawl has landed");
+    } else if (office) {
+      id.notes.push(`registered office, from the site's own legal text: ${office.raw}`);
+    } else {
+      id.notes.push("the indexed pages do not state a registered office — the data request needs one, so set it by hand on the record");
+    }
+    if (legalName) {
+      id.notes.push(nameIsConfirmedBy(legalName, siteLegal)
+        ? `legal entity "${legalName}", confirmed word for word on the brand's own site`
+        : `legal entity "${legalName}" — NOT found on the brand's own site, so check it before it goes on a contract`);
+    } else {
+      id.notes.push("no legal entity could be established — the trading name is not one, so the data request needs it filled by hand");
+    }
+
     // Only fill what is EMPTY. A logo or colour an admin chose deliberately
     // outranks anything scraped, and overwriting it silently would be worse
     // than finding nothing.
@@ -338,7 +368,13 @@ async function runStage(
     const fillable: [string, unknown][] = [
       // The data request needs the registered address, and it was going out
       // blank because nothing ever filled it.
-      ["hq_city", wiki?.hq_city], ["hq_country", wiki?.hq_country],
+      //
+      // The site's city wins over the encyclopaedia's when the site states an office: the
+      // address has to be internally consistent, and "Via de' Tornabuoni 2, 50123,
+      // Florence" is a street in Firenze with an English city bolted on.
+      ["legal_name", legalName],
+      ["hq_address", office?.street], ["hq_postcode", office?.postcode],
+      ["hq_city", office?.city ?? wiki?.hq_city], ["hq_country", wiki?.hq_country],
       ["description", id.description], ["email", id.email],
       ["logo_big", id.logo_big], ["logo_small", id.logo_small],
       ["top_banner_image", id.top_banner_image], ["auth_background_image", id.auth_background_image],
@@ -366,6 +402,7 @@ async function runStage(
       found: id.found,
       notes: id.notes,
       enriched_from: wiki ? { entity: wiki.entity, source: wiki.source, founded: wiki.founded } : null,
+      legal: { name: legalName, office: office?.raw ?? null, read_pages: siteLegal.length > 0 },
     };
   }
 
@@ -580,12 +617,37 @@ async function runStage(
     .select("id", { count: "exact", head: true })
     .eq("brand_id", brandId).in("status", ["pending", "processing"]);
 
+  // The legal entity and the registered office are read from the site's OWN legal pages,
+  // and `branding` is queued before the crawl — so on a brand's first pass those pages did
+  // not exist yet and the two fields the data-request workbook needs came back empty.
+  // Ferragamo sat like that: no legal name, no street, no postcode, while
+  // "Salvatore Ferragamo S.p.A. with registered offices at Via de' Tornabuoni 2, 50123,
+  // Firenze" was in its indexed privacy policy the whole time.
+  //
+  // The site is indexed by the time this line runs, so send branding back for them. It is
+  // guarded on the fields still being empty and this stage no longer re-queueing itself,
+  // which is what keeps it a single extra pass rather than a loop — and branding without
+  // `force` fills only what is blank, so nothing an admin set by hand is touched.
+  const crawlDone = (pending ?? 0) === 0;
+  const legalMissing = !String(brand.legal_name ?? "").trim() || !String(brand.hq_address ?? "").trim();
+  let legal_requeued = false;
+  if (crawlDone && legalMissing) {
+    const { error } = await admin.rpc("queue_onboarding_stages", {
+      p_brand_id: brandId, p_stages: ["branding"],
+    });
+    // Not a failure of this stage: the assistant is fine either way, and the fields can
+    // still be filled by hand or by re-running branding from the panel.
+    if (error) console.error("[onboard-brand] could not re-queue branding", error.message);
+    else legal_requeued = true;
+  }
+
   return {
     ok: true,
     knowledge_chunks: chunks,
     products: products ?? 0,
     customers: customers ?? 0,
     pages_still_crawling: pending ?? 0,
+    legal_requeued,
     continue: (pending ?? 0) > 0,
   };
 }
@@ -806,6 +868,42 @@ function normaliseBase(website: string): string | null {
 }
 
 // ── Status: derived from the real tables, not from a status column ───────────
+// The pages where a company states its own legal identity: the privacy policy, the legal
+// notice, the terms. Read out of what the crawl already indexed rather than fetched again —
+// the crawl has been over the whole site and these pages are always in it.
+//
+// The phrases are the fixed forms these houses publish in. Values are QUOTED because
+// PostgREST splits or() on commas BEFORE unescaping, so an unquoted value containing one
+// does not error — it silently becomes two broken filters. None of these carry a comma
+// today; quoting them means the next phrase added cannot reintroduce the bug.
+const LEGAL_PHRASES = [
+  "registered office", "sede legale", "siège social", "domicilio social", "Geschäftsanschrift",
+];
+
+async function readLegalPages(admin: ReturnType<typeof createClient>, brandId: number): Promise<string> {
+  const clauses = LEGAL_PHRASES
+    .map((phrase) => `content.ilike."%${phrase.replace(/["\\]/g, (ch) => `\\${ch}`)}%"`)
+    .join(",");
+
+  const { data, error } = await admin
+    .from("brand_knowledge_chunks")
+    // Joined through the DOCUMENT: a soft delete sets deleted_at there and leaves the chunks
+    // in place, so querying chunks alone lets a page somebody deleted keep answering.
+    .select("content, brand_knowledge_docs!inner(deleted_at)")
+    .eq("brand_id", brandId)
+    .is("brand_knowledge_docs.deleted_at", null)
+    .or(clauses)
+    .limit(12);
+
+  // An error is not "the brand has no legal pages". Returning "" either way would turn a
+  // permission problem into a confident "this house does not state a registered office".
+  if (error) {
+    console.error("[onboard-brand] legal pages", error.message);
+    return "";
+  }
+  return ((data ?? []) as { content: string | null }[]).map((r) => r.content ?? "").join("\n\n");
+}
+
 async function status(admin: ReturnType<typeof createClient>, brandId: number) {
   const [stages, chunks, docs, queued, products, customers, policies, shops, users, src] = await Promise.all([
     // queued_at is what tells a caller the difference between "never run" and
