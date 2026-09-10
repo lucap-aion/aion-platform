@@ -31,6 +31,13 @@ type CollateralResponse = {
   download_url?: string; file_name?: string;
 };
 
+type Terms = {
+  key: string; setup_fee: number; setup_discount: number; api_fee: number;
+  service_discount: number; service_discount_months: number;
+  gvt_fee: number; aion_premium_share: number; vat: number; note: string | null;
+  tiers: { tier: number; gmv_up_to: number | null; activation_fee_pct: number; service_fee_month: number | null }[];
+};
+
 type Segment = {
   name: string; category: string; coverage: string; damage_scope: string;
   revenues: string; cogs_ratio: string; avg_price: string; start_month: string;
@@ -62,6 +69,11 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
   const [deck, setDeck] = useState<{ url: string; name: string } | null>(null);
   const [showQuotes, setShowQuotes] = useState(false);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  // The assumptions behind every figure on this screen. They were invisible —
+  // the GVT fee, AION's share of the net premium, the setup fee and the tier
+  // table all live in one row of aion_pricing_terms, and nothing showed you
+  // which row was being applied or what was in it.
+  const [terms, setTerms] = useState<Terms | null>(null);
 
   // Which categories can actually be priced, so the answer arrives before the
   // Calculate button rather than as a failure out of it.
@@ -72,6 +84,14 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
     setQuotes((data ?? []) as unknown as Quote[]);
   }, []);
   useEffect(() => { void loadQuotes(); }, [loadQuotes]);
+
+  useEffect(() => {
+    void (async () => {
+      const { data } = await untyped.from("aion_pricing_terms")
+        .select("*").eq("key", "standard_2026").maybeSingle();
+      setTerms((data ?? null) as Terms | null);
+    })();
+  }, []);
 
   // Any change to the inputs invalidates what is on screen. Keeping stale
   // figures visible next to edited inputs is how a wrong number gets read out.
@@ -367,6 +387,30 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
               ))}
             </ul>
           </div>
+        </div>
+      )}
+
+      {terms && (
+        <div className="rounded-xl border border-border p-4">
+          <h3 className="mb-2 text-sm font-semibold text-foreground">The terms these figures apply</h3>
+          <div className="grid gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
+            <span>Setup <span className="text-foreground">{eur(terms.setup_fee)}</span>, discounted {pct(terms.setup_discount, 0)}</span>
+            <span>GVT fee <span className="text-foreground">{pct(terms.gvt_fee)}</span> between gross and net premium</span>
+            <span>API fee <span className="text-foreground">{eur(terms.api_fee)}</span> when included</span>
+            <span>AION takes <span className="text-foreground">{pct(terms.aion_premium_share, 0)}</span> of the net premium</span>
+            <span>Service discounted {pct(terms.service_discount, 0)} for the first {terms.service_discount_months} months</span>
+            <span>VAT <span className="text-foreground">{pct(terms.vat, 0)}</span></span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            {(terms.tiers ?? []).map((t) => (
+              <span key={t.tier}>
+                <span className="text-foreground">Tier {t.tier}</span>
+                {" "}to {t.gmv_up_to == null ? "no cap" : eur(t.gmv_up_to)} · {pct(t.activation_fee_pct, 2)} activation ·{" "}
+                {t.service_fee_month == null ? "service on quotation" : `${eur(t.service_fee_month)}/mo service`}
+              </span>
+            ))}
+          </div>
+          {terms.note && <p className="mt-2 text-[11px] text-muted-foreground">{terms.note}</p>}
         </div>
       )}
 

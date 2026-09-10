@@ -98,6 +98,23 @@ describe("pages mount", () => {
     expect(screen.getByRole("button", { name: /Build deck/i }).hasAttribute("disabled")).toBe(true);
   });
 
+  it("brand documents name every kind, drafted or not", async () => {
+    const { default: BrandDocuments } = await import("@/pages/admin/_components/BrandDocuments");
+    wrap(<BrandDocuments brandId={18} brandName="Pasquale Bruni" />);
+    // All five are listed even with nothing drafted, so a missing one is visible
+    // rather than absent — which is how they went unnoticed for two months.
+    for (const label of ["Customer FAQ", "Sales-floor one-pager", "Cover summary",
+                         "Activation email", "Partnership proposal"]) {
+      expect(await screen.findByText(label)).toBeTruthy();
+    }
+  });
+
+  it("the catalogue source says why an empty catalogue matters", async () => {
+    const { default: CatalogueSource } = await import("@/pages/admin/_components/CatalogueSource");
+    wrap(<CatalogueSource brandId={18} products={0} />);
+    expect(await screen.findByText(/No catalogue source registered/i)).toBeTruthy();
+  });
+
   it("the insurer quote editor says plainly when nothing can be priced", async () => {
     const { default: InsurerQuotes } = await import("@/pages/admin/_components/InsurerQuotes");
     wrap(<InsurerQuotes brands={[{ id: 18, name: "Pasquale Bruni" }]} />);

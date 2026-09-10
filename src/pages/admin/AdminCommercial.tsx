@@ -12,6 +12,8 @@ import {
   CircleDot, SkipForward, AlertCircle, RefreshCw, ExternalLink,
 } from "lucide-react";
 import BrandOnboarding from "./_components/BrandOnboarding";
+import BrandDocuments from "./_components/BrandDocuments";
+import CatalogueSource from "./_components/CatalogueSource";
 import BusinessCasePanel from "./_components/BusinessCasePanel";
 
 // The commercial cycle, on one screen.
@@ -355,7 +357,18 @@ export default function AdminCommercial() {
                   )}
 
                   {step.n === 3 && brand && (
-                    <BrandOnboarding brandId={brand.id} brandName={brand.name ?? ""} website={brand.website} />
+                    <div className="space-y-6">
+                      <BrandOnboarding brandId={brand.id} brandName={brand.name ?? ""} website={brand.website} />
+
+                      {/* Where the catalogue comes from — the input the two
+                          stages above depend on, and the one that had no field. */}
+                      <CatalogueSource brandId={brand.id} products={c.products ?? 0} onSaved={() => void load()} />
+
+                      <div>
+                        <h3 className="mb-2 text-sm font-semibold text-foreground">Brand documents</h3>
+                        <BrandDocuments brandId={brand.id} brandName={brand.name ?? "the brand"} />
+                      </div>
+                    </div>
                   )}
 
                   {step.n === 4 && (
