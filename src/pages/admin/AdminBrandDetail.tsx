@@ -7,6 +7,7 @@ import BrandRecordForm, { type Brand } from "./_components/BrandRecordForm";
 import NewBrand from "./_components/NewBrand";
 import CommercialCycle from "./_components/CommercialCycle";
 import BrandDocuments from "./_components/BrandDocuments";
+import GoLiveChecklist from "./_components/GoLiveChecklist";
 import BrandKnowledge from "@/pages/brand/BrandKnowledge";
 import { StatusBadge } from "./_components/AdminTable";
 
@@ -24,13 +25,16 @@ import { StatusBadge } from "./_components/AdminTable";
 // reach step 1. The tab is in the URL, so /admin/brands/18?tab=cycle is a link
 // you can send someone.
 
-type Tab = "record" | "cycle" | "documents" | "knowledge";
+type Tab = "record" | "cycle" | "golive" | "documents" | "knowledge";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "record", label: "Record" },
-  // Go-live sits right after the record because it is the thing you check when you
-  // open a brand: what is still missing before it can issue a real cover.
   { key: "cycle", label: "Commercial cycle" },
+  // Go-live comes after the cycle because that is the order the work happens in: the cycle
+  // is how a house becomes a client, this is what has to be true before it can issue a real
+  // cover. It was written, tested and migrated, and then imported nowhere — a comment on
+  // this list claimed it was here while the tab itself was missing.
+  { key: "golive", label: "Go-live" },
   { key: "documents", label: "Documents" },
   { key: "knowledge", label: "Knowledge" },
 ];
@@ -165,6 +169,7 @@ export default function AdminBrandDetail() {
         <BrandRecordForm brandId={brand.id} embedded onSaved={() => void load()} />
       )}
       {tab === "cycle" && <CommercialCycle brand={brand} brands={brands} />}
+      {tab === "golive" && <GoLiveChecklist brandId={brand.id} brandName={brand.name} />}
       {tab === "documents" && (
         <BrandDocuments brandId={brand.id} brandName={brand.name ?? "the brand"} />
       )}
