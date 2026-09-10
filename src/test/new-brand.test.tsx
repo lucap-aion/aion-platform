@@ -13,9 +13,18 @@ import { MemoryRouter } from "react-router-dom";
 const invoked: { name: string; body: Record<string, unknown> }[] = [];
 const inserted: Record<string, unknown>[] = [];
 
+// The four brands already on dev, so duplicate detection has something real to
+// catch. Roberto Coin's slug is "rc", not "roberto-coin" — slugs are chosen, not
+// derived, which is why the field is on the form.
+const EXISTING = [
+  { id: 2, name: "Roberto Coin", slug: "rc", website: "https://robertocoin.com" },
+  { id: 16, name: "Pomellato", slug: "pomellato", website: "https://www.pomellato.com" },
+];
+
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     from: () => ({
+      select: () => ({ order: async () => ({ data: EXISTING, error: null }) }),
       insert: (row: Record<string, unknown>) => {
         inserted.push(row);
         return { select: () => ({ single: async () => ({ data: { id: 42 }, error: null }) }) };
@@ -48,6 +57,7 @@ const fill = (name: string, site: string) => {
   fireEvent.change(screen.getByPlaceholderText("Pasquale Bruni"), { target: { value: name } });
   fireEvent.change(screen.getByPlaceholderText("pasqualebruni.com"), { target: { value: site } });
 };
+const submit = () => fireEvent.click(screen.getByRole("button", { name: /Create and start/i }));
 
 describe("a new brand starts itself", () => {
   it("queues the onboarding pipeline as soon as the brand exists", async () => {
@@ -58,6 +68,59 @@ describe("a new brand starts itself", () => {
     await waitFor(() => expect(invoked).toHaveLength(1));
     expect(invoked[0].name).toBe("onboard-brand");
     expect(invoked[0].body).toEqual({ brand_id: 42, action: "start" });
+  });
+
+  it("refuses a website an existing brand already owns, www or not", async () => {
+    await mount();
+    // Typed without www; Pomellato is stored WITH it. Same house.
+    fill("Pomellato Milano", "pomellato.com");
+    expect(await screen.findByText(/already uses that website/i)).toBeTruthy();
+    submit();
+    await waitFor(() => expect(inserted).toHaveLength(0));
+  });
+
+  it("refuses an address another brand already answers on", async () => {
+    await mount();
+    fill("RC Jewels", "rcjewels.example.com");
+    fireEvent.change(screen.getByPlaceholderText("pasquale-bruni"), { target: { value: "rc" } });
+    expect(await screen.findByText(/already uses that slug/i)).toBeTruthy();
+    submit();
+    await waitFor(() => expect(inserted).toHaveLength(0));
+  });
+
+  it("keeps only the origin when a deep link is pasted", async () => {
+    await mount();
+    fill("Pasquale Bruni", "https://www.pasqualebruni.com/en-gb/collections/fall?utm_source=x");
+    submit();
+    await waitFor(() => expect(inserted).toHaveLength(1));
+    // Otherwise every crawl would start from a category page.
+    expect(inserted[0].website).toBe("https://www.pasqualebruni.com");
+  });
+
+  it("does not create the brand twice when Enter fires more than once", async () => {
+    await mount();
+    fill("Pasquale Bruni", "pasqualebruni.com");
+    const nameField = screen.getByPlaceholderText("Pasquale Bruni");
+    fireEvent.keyDown(nameField, { key: "Enter" });
+    fireEvent.keyDown(nameField, { key: "Enter" });
+    fireEvent.keyDown(nameField, { key: "Enter" });
+    await waitFor(() => expect(invoked.length).toBeGreaterThan(0));
+    // Two rows would mean two pipelines crawling the same site.
+    expect(inserted).toHaveLength(1);
+    expect(invoked).toHaveLength(1);
+  });
+
+  it("lets the address be edited without the name overwriting it again", async () => {
+    await mount();
+    fill("Roberto Coin Milano", "rcmilano.example.com");
+    const slugField = screen.getByPlaceholderText("pasquale-bruni") as HTMLInputElement;
+    expect(slugField.value).toBe("roberto-coin-milano");
+    fireEvent.change(slugField, { target: { value: "rcm" } });
+    fireEvent.change(screen.getByPlaceholderText("Pasquale Bruni"), { target: { value: "Roberto Coin Milano SpA" } });
+    expect(slugField.value).toBe("rcm");
+    submit();
+    await waitFor(() => expect(inserted).toHaveLength(1));
+    expect(inserted[0].slug).toBe("rcm");
   });
 
   it("derives the slug and normalises a bare domain to https", async () => {
