@@ -30,6 +30,8 @@ import { harvestBrandIdentity } from "../_shared/brand-identity.ts";
 import { extractProducts } from "../_shared/product-extract.ts";
 import { enrichFromWikidata } from "../_shared/brand-enrich.ts";
 import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } from "../_shared/brand-legal.ts";
+// What a failure actually stops, and why it is not "everything queued behind it".
+import { blockedBy } from "../_shared/stage-graph.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -197,12 +199,15 @@ Deno.serve(async (req: Request) => {
 
       await setStage(admin, brandId, stage, ok ? "done" : "failed", out,
         ok ? null : String((out as { reason?: string }).reason ?? "stage did not complete"));
-      // A failed stage cancels what was queued behind it: the later stages
-      // depend on it (no catalogue → no demo book), and silently running them
-      // would produce a half-built brand that looks finished.
-      if (!ok) await admin.from("brand_onboarding").update({ queued_at: null })
-        .eq("brand_id", brandId).eq("status", "pending").not("queued_at", "is", null);
-      return json({ ok, stage, result: out });
+      // Cancel only what actually needed this stage. Everything else keeps its place in
+      // the queue: a house with no product feed should still get its documents, its
+      // assistant check, its ops deck and its data request.
+      const blocked = ok ? [] : blockedBy(stage);
+      if (blocked.length) {
+        await admin.from("brand_onboarding").update({ queued_at: null })
+          .eq("brand_id", brandId).eq("status", "pending").in("stage", blocked);
+      }
+      return json({ ok, stage, blocked, result: out });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await setStage(admin, brandId, stage, "failed", {}, msg);
@@ -243,6 +248,8 @@ Deno.serve(async (req: Request) => {
   const requested = (Array.isArray(body.stages) && body.stages.length
     ? body.stages.filter((s: string) => (ALL_STAGES as readonly string[]).includes(s))
     : [...ALL_STAGES]) as Stage[];
+  // Stages skipped because something they needed failed earlier in this run.
+  const skippedByFailure = new Set<Stage>();
 
   // Demo stages are dev-only. Asking for them in production is not an error to
   // hide — it is reported per stage, and the real onboarding stages still run.
@@ -250,6 +257,10 @@ Deno.serve(async (req: Request) => {
 
   const results: Record<string, unknown> = {};
   for (const stage of requested) {
+    if (skippedByFailure.has(stage)) {
+      results[stage] = { ok: true, skipped: true, reason: "something it needs failed earlier in this run" };
+      continue;
+    }
     if ((DEMO_STAGES as readonly string[]).includes(stage) && !demoAllowedForBrand(brand)) {
       const reason = demoBlockedForBrandReason(brand);
       await setStage(admin, brandId, stage, "skipped", { blocked: true, reason });
@@ -275,14 +286,14 @@ Deno.serve(async (req: Request) => {
       await setStage(admin, brandId, stage, ok ? "done" : "failed", out,
         ok ? null : String((out as { reason?: string }).reason ?? "stage did not complete"));
       results[stage] = out;
-      // A stage that couldn't complete usually blocks the ones after it (no
-      // catalogue → no demo book), so stop and let the admin see why.
-      if (!ok) break;
+      // Skip what needed this one, and carry on with everything that did not. Stopping the
+      // whole run was how one failure left a brand with no documents and no data request.
+      if (!ok) for (const s of blockedBy(stage)) skippedByFailure.add(s);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await setStage(admin, brandId, stage, "failed", {}, msg);
       results[stage] = { ok: false, error: msg };
-      break;
+      for (const s of blockedBy(stage)) skippedByFailure.add(s);
     }
   }
 
@@ -399,6 +410,20 @@ async function runStage(
     if (Object.keys(patch).length) {
       const { error } = await admin.from("brands").update(patch).eq("id", brandId);
       if (error) throw new Error(`brand update: ${error.message}`);
+    }
+
+    // The data-request workbook is built FROM legal_name and the registered address, and on
+    // a brand's first pass this stage runs before the crawl — so those cells are blank when
+    // the workbook is generated, and the workbook is queued ahead of the second pass that
+    // fills them. If this pass has just filled them, whatever workbook exists is already
+    // wrong in the two places that matter most, so build it again.
+    const filledForWorkbook = patch.legal_name != null || patch.hq_address != null || patch.hq_postcode != null;
+    if (filledForWorkbook) {
+      const { error } = await admin.rpc("queue_onboarding_stages", {
+        p_brand_id: brandId, p_stages: ["data_request"],
+      });
+      if (error) console.error("[onboard-brand] could not re-queue the data request", error.message);
+      else id.notes.push("the data request has been queued again, now that the legal entity and address are known");
     }
 
     return {
