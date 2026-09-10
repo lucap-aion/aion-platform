@@ -32,6 +32,7 @@ import { enrichFromWikidata } from "../_shared/brand-enrich.ts";
 import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } from "../_shared/brand-legal.ts";
 // What a failure actually stops, and why it is not "everything queued behind it".
 import { blockedBy } from "../_shared/stage-graph.ts";
+import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -39,6 +40,16 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
 const FUNCTIONS_BASE = `${SUPABASE_URL}/functions/v1`;
 const JINA_API_KEY = Deno.env.get("JINA_API_KEY") ?? "";
+// How many product images one sync run may embed. Small on purpose: embedding every image
+// takes longer than a single invocation is allowed to live, so the stage does a batch and
+// asks to be called again until nothing is left.
+//
+// This declaration was dropped in 139f054 — the commit that taught the pipeline to read a
+// catalogue off a non-Shopify storefront — while both uses of it stayed. It never threw,
+// because detection never once succeeded on such a site: it guessed three URLs, found
+// nothing, and returned before reaching the line that would have blown up. Fixing detection
+// is what finally reached it.
+const STOREFRONT_BATCH = 40;
 
 // Order is the order the queue runs them in, and it encodes the dependencies:
 // nothing can be branded before the site is read, no deck can be built before
@@ -519,7 +530,7 @@ async function runStage(
       // market emits even when it blocks plain fetches. That is the difference
       // between a brand with a catalogue and a brand without one, and therefore
       // between an intro deck with their pieces in it and AION's stock imagery.
-      const structured = await detectStructured(base, deadline);
+      const structured = await detectStructured(admin, brandId, base, deadline);
       await admin.from("storefront_sources").upsert(
         {
           brand_id: brandId, base_url: base,
@@ -537,17 +548,22 @@ async function runStage(
 
       // Hand it to the sync exactly like Shopify, and let it re-queue itself.
       const synced = await callFn("sync-storefront", { brand_id: brandId, max: STOREFRONT_BATCH }) as
-        { results?: { products?: number; embedded?: number; remaining?: number }[] };
+        { results?: { products?: number; embedded?: number; remaining?: number; pages_read?: number; pages_remaining?: number }[] };
       const r = synced.results?.[0] ?? {};
       const { count } = await admin.from("storefront_products").select("id", { count: "exact", head: true }).eq("brand_id", brandId);
       const remaining = Number(r.remaining ?? 0);
+      const pagesLeft = Number(r.pages_remaining ?? 0);
       return {
         ok: true, platform: "structured", base,
         products: count ?? 0,
         embedded_this_run: Number(r.embedded ?? 0),
         images_remaining: remaining,
-        note: `no Shopify feed — read ${structured} products from the site's own schema.org data`,
-        continue: remaining > 0,
+        pages_read: Number(r.pages_read ?? 0),
+        pages_remaining: pagesLeft,
+        note: `no Shopify feed — reading the catalogue out of the site's own schema.org data, ${count ?? 0} products so far`,
+        // Come back for the rest of the site as well as for the rest of the images. Reading
+        // every page in one call is what killed the worker.
+        continue: remaining > 0 || pagesLeft > 0,
       };
     }
 
@@ -924,17 +940,37 @@ async function detectShopify(base: string, deadline: number): Promise<{ base: st
 // Is there a catalogue in the page's structured data? One fetch of the homepage
 // is enough to tell: a storefront that publishes Product JSON-LD anywhere
 // publishes it on its landing and category pages.
-async function detectStructured(base: string, deadline: number): Promise<number> {
-  const candidates = [base, `${base}/shop`, `${base}/collections/all`];
+async function detectStructured(
+  admin: ReturnType<typeof createClient>, brandId: number, base: string, deadline: number,
+): Promise<number> {
+  // Ask the pages the CRAWLER actually found, not three guessed paths.
+  //
+  // This used to try base, /shop and /collections/all. Ferragamo's listing pages are at
+  // /shop/us/en/women/handbags — none of those three exists — so it reported "no structured
+  // product data on this site" about a site with 103 indexed product pages sitting in our
+  // own database. sync-storefront has always read the catalogue out of knowledge_crawl_queue;
+  // detection now samples the same list, so the two cannot disagree about whether a brand
+  // has a catalogue.
+  const { data: queued } = await admin.from("knowledge_crawl_queue")
+    .select("url").eq("brand_id", brandId).eq("status", "done").limit(400);
+  const crawled = rankCatalogueUrls(((queued ?? []) as { url: string }[]).map((r) => r.url));
 
-  // The cheap pass first, over every candidate. A plain fetch that works costs a second;
-  // it is only worth paying for a render when none of them do.
-  for (const url of candidates) {
-    if (Date.now() > deadline) return 0;
+  // Guessed paths last: they are the only hope before the crawl has run, and worthless
+  // after it.
+  const candidates = [...crawled, base, `${base}/shop`, `${base}/collections/all`]
+    .filter((u, i, all) => all.indexOf(u) === i);
+
+  const left = () => deadline - Date.now();
+  const window = (cap: number) => Math.min(cap, Math.max(1_000, left()));
+
+  // Cheap pass first. On a site that blocks us this costs almost nothing — a 403 comes back
+  // immediately — and on a site that does not, it answers without paying for a render.
+  for (const url of candidates.slice(0, 8)) {
+    if (left() < 3_000) return 0;
     try {
       const res = await fetch(url, {
         headers: { "User-Agent": "Mozilla/5.0 (AION onboarding)" },
-        signal: AbortSignal.timeout(Math.min(12_000, Math.max(1_000, deadline - Date.now()))),
+        signal: AbortSignal.timeout(window(6_000)),
       });
       if (!res.ok) continue;
       const found = extractProducts(await res.text(), url).length;
@@ -942,14 +978,21 @@ async function detectStructured(base: string, deadline: number): Promise<number>
     } catch { /* try the next candidate */ }
   }
 
-  // Then, at most ONE render, and only if there is time for it. This used to render all
-  // three candidates unconditionally — up to 45 seconds each on a page like Ferragamo's,
-  // which alone is more than one invocation is allowed to live.
-  if (!JINA_API_KEY || deadline - Date.now() < 30_000) return 0;
-  try {
-    return extractProducts(await jinaHtml(base), base).length;
-  } catch { return 0; }
+  // Then the renderer, on the few most likely to be listings. One page of a luxury site
+  // routinely carries sixty products, so this converges fast when it converges at all.
+  if (!JINA_API_KEY) return 0;
+  for (const url of candidates.slice(0, 4)) {
+    if (left() < 20_000) break;
+    try {
+      const found = extractProducts(await jinaHtml(url), url).length;
+      if (found > 0) return found;
+    } catch { /* try the next candidate */ }
+  }
+  return 0;
 }
+
+
+
 
 async function jinaHtml(url: string): Promise<string> {
   // HTML, not markdown: the structured data lives in <script> tags that a

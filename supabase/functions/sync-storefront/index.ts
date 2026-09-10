@@ -11,6 +11,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { extractProducts } from "../_shared/product-extract.ts";
+import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const JINA_API_KEY = Deno.env.get("JINA_API_KEY") ?? "";
@@ -34,13 +35,19 @@ const CORS = {
 // Brand storefronts we can ingest (Shopify stores expose /products.json) come
 // from the storefront_sources table, not from code: onboarding a new brand is an
 // INSERT, not a deploy. onboard-brand detects the feed and writes the row.
-type Storefront = { base: string; currency: string; keepUntyped: boolean };
+// `platform` is part of this, and its absence is why no non-Shopify brand ever got a
+// catalogue. syncBrand branches on `store.platform === "structured"`, loadStorefronts built
+// the object without it, so the check was always false and every brand went down the
+// Shopify path — which 404s on a site that has no /products.json. The Deno functions are not
+// covered by `tsc` (tsconfig includes only src/), so reading a property the type does not
+// have compiled and shipped in silence.
+type Storefront = { base: string; currency: string; keepUntyped: boolean; platform: string; cursor: number };
 
 async function loadStorefronts(
   admin: ReturnType<typeof createClient>, only: number | null,
 ): Promise<Map<number, Storefront>> {
   let q = admin.from("storefront_sources")
-    .select("brand_id, base_url, currency, keep_untyped, platform, enabled")
+    .select("brand_id, base_url, currency, keep_untyped, platform, enabled, structured_cursor")
     .eq("enabled", true).in("platform", ["shopify", "structured"]);
   if (only) q = q.eq("brand_id", only);
   const { data, error } = await q;
@@ -51,6 +58,8 @@ async function loadStorefronts(
       base: String(r.base_url).replace(/\/+$/, ""),
       currency: String(r.currency ?? "EUR"),
       keepUntyped: Boolean(r.keep_untyped),
+      platform: String(r.platform ?? "shopify"),
+      cursor: Number(r.structured_cursor ?? 0),
     });
   }
   return out;
@@ -107,9 +116,10 @@ async function syncBrand(
   // Shopify hands over the whole catalogue in one feed. Everything else
   // publishes it as schema.org JSON-LD for Google, which is most of the market
   // and includes every house that blocks a plain fetch.
-  const products = store.platform === "structured"
-    ? await fetchStructured(admin, brandId, store.base)
-    : await fetchStorefront(store.base, store.keepUntyped);
+  const structured = store.platform === "structured"
+    ? await fetchStructured(admin, brandId, store.base, store.cursor)
+    : null;
+  const products = structured ? structured.products : await fetchStorefront(store.base, store.keepUntyped);
 
   // 1. Upsert product fields for the whole range (cheap, every run).
   const rows = products.map((p) => ({
@@ -205,7 +215,12 @@ async function syncBrand(
   const remaining = Math.max(0, remainingBefore - embedded);
   return {
     brand_id: brandId, products: products.length, upserted: rows.length,
-    embedded, remaining, done: remaining === 0,
+    embedded, remaining,
+    // Pages of the site still to read. Separate from `remaining`, which counts images left
+    // to embed: a run can have embedded everything it fetched and still have most of the
+    // catalogue ahead of it.
+    ...(structured ? { pages_read: structured.pagesRead, pages_remaining: structured.pagesRemaining } : {}),
+    done: remaining === 0 && (structured ? structured.pagesRemaining === 0 : true),
     // Present only when something went wrong, so a run that embeds nothing says
     // why instead of looking like there was nothing to do.
     ...(lastEmbedError && embedded < slice.length ? { embed_error: lastEmbedError.slice(0, 300) } : {}),
@@ -227,29 +242,34 @@ type SProduct = {
 // Product data it publishes. A single category page routinely carries sixty
 // products, so this converges in a handful of fetches rather than one per item.
 async function fetchStructured(
-  admin: ReturnType<typeof createClient>, brandId: number, base: string,
-): Promise<SProduct[]> {
+  admin: ReturnType<typeof createClient>, brandId: number, base: string, cursor: number,
+): Promise<{ products: SProduct[]; pagesRead: number; pagesRemaining: number }> {
   const { data: queued } = await admin.from("knowledge_crawl_queue")
     .select("url").eq("brand_id", brandId).eq("status", "done").limit(400);
 
-  const urls = [base, ...((queued ?? []) as { url: string }[]).map((r) => r.url)];
-  // Listing pages first: they carry many products each, so the budget goes
-  // furthest on them. A page whose path suggests a collection is tried before a
-  // page that looks like a single item.
-  urls.sort((a, b) => score(b) - score(a));
+  // Deterministic order, because the cursor indexes into it. Sorting by score alone leaves
+  // ties in whatever order PostgREST returned them, and a list that reshuffles between runs
+  // makes a cursor meaningless.
+  const urls = rankCatalogueUrls([base, ...((queued ?? []) as { url: string }[]).map((r) => r.url)]);
+
+  // A BATCH, from where the last run stopped. Rendering the whole list in one call is what
+  // killed the worker: a luxury listing page takes ten to forty seconds, and the onboarding
+  // stage waits on this call.
+  const from = cursor >= urls.length ? 0 : cursor;
+  const window = urls.slice(from, from + STRUCTURED_MAX_PAGES);
 
   const seen = new Set<string>();
   const out: SProduct[] = [];
   let fetched = 0;
 
-  for (const url of urls) {
-    if (out.length >= STRUCTURED_MAX_PRODUCTS || fetched >= STRUCTURED_MAX_PAGES) break;
+  for (const url of window) {
+    if (out.length >= STRUCTURED_MAX_PRODUCTS) break;
     let html = "";
     try {
       html = JINA_API_KEY
         ? await jinaHtml(url)
         : await (await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20000) })).text();
-    } catch { continue; }
+    } catch { fetched++; continue; }
     fetched++;
 
     for (const p of extractProducts(html, url)) {
@@ -267,18 +287,22 @@ async function fetchStructured(
       } as SProduct);
     }
   }
-  return out;
+
+  // Wrap at the end rather than stopping: a catalogue read once still changes, and a cursor
+  // parked past the last URL would never look at the site again.
+  const next = from + fetched;
+  const wrapped = next >= urls.length ? 0 : next;
+  await admin.from("storefront_sources")
+    .update({ structured_cursor: wrapped }).eq("brand_id", brandId);
+
+  return { products: out, pagesRead: fetched, pagesRemaining: Math.max(0, urls.length - next) };
 }
 
-const STRUCTURED_MAX_PAGES = 25;
+// Small enough that a run of them, each a renderer call, finishes inside one worker.
+const STRUCTURED_MAX_PAGES = 5;
 const STRUCTURED_MAX_PRODUCTS = 600;
 
-function score(url: string): number {
-  const u = url.toLowerCase();
-  if (/\/(collections?|shop|category|categories|c)\//.test(u)) return 3;
-  if (/\/(products?|p|item)\//.test(u)) return 1;
-  return 2;
-}
+
 
 function handleFrom(productUrl: string | null, name: string): string {
   const fromUrl = productUrl
