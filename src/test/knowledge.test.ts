@@ -84,3 +84,92 @@ describe("lexical fallback term selection", () => {
       .toBeLessThanOrEqual(4);
   });
 });
+
+// ── Locale variants ─────────────────────────────────────────────────────────
+// Pasquale Bruni's sitemap lists every Middle East market, so the crawler
+// indexed the same page under ar-sa, ar-qa, ar-kw, en-sa and en-qa. 531
+// documents covering 139 pages. These pin the rule that collapses them.
+
+const LOCALE_SEG = /^[a-z]{2}(-[a-z]{2})?$/i;
+
+function preferCanonicalLocale(urls: string[]): string[] {
+  const best = new Map<string, { url: string; score: number }>();
+  for (const raw of urls) {
+    let u: URL;
+    try { u = new URL(raw); } catch { continue; }
+    const segs = u.pathname.split("/").filter(Boolean);
+    const hasLocale = segs.length > 0 && LOCALE_SEG.test(segs[0]);
+    const locale = hasLocale ? segs[0].toLowerCase() : "";
+    const key = `${u.hostname}/${(hasLocale ? segs.slice(1) : segs).join("/")}${u.search}`;
+    const score = !hasLocale ? 0 : locale.startsWith("en") ? 1 : 2;
+    const cur = best.get(key);
+    // Ties break on length, then lexically — never on which order the sitemap
+    // happened to list them, or the same crawl could pick en-sa one day and
+    // en-qa the next and re-index the whole base as "new" documents.
+    const better = !cur || score < cur.score ||
+      (score === cur.score && (raw.length < cur.url.length ||
+        (raw.length === cur.url.length && raw < cur.url)));
+    if (better) best.set(key, { url: raw, score });
+  }
+  return [...best.values()].map((v) => v.url);
+}
+
+describe("locale variants collapse to one page", () => {
+  const page = (l: string) => `https://www.pasqualebruni.com/${l}/blogs/news/luce`;
+
+  it("keeps the unprefixed page over every market variant", () => {
+    const out = preferCanonicalLocale([
+      page("ar-sa"), page("en-qa"), "https://www.pasqualebruni.com/blogs/news/luce", page("ar-kw"),
+    ]);
+    expect(out).toEqual(["https://www.pasqualebruni.com/blogs/news/luce"]);
+  });
+
+  it("prefers English when the site only serves locale-prefixed URLs", () => {
+    const out = preferCanonicalLocale([page("ar-sa"), page("ar-qa"), page("en-qa"), page("ar-kw")]);
+    expect(out).toEqual([page("en-qa")]);
+  });
+
+  it("is stable between crawls, not dependent on sitemap order", () => {
+    const a = preferCanonicalLocale([page("ar-sa"), page("en-sa"), page("en-qa")]);
+    const b = preferCanonicalLocale([page("en-qa"), page("ar-sa"), page("en-sa")]);
+    expect(a).toEqual(b);
+  });
+
+  it("does not merge genuinely different pages", () => {
+    const out = preferCanonicalLocale([
+      "https://x.com/en-gb/collections/rings",
+      "https://x.com/en-gb/collections/necklaces",
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  it("leaves a two-letter path that is not a locale alone", () => {
+    // /it/ is a locale; /shop/ is not, and neither is a product slug.
+    const out = preferCanonicalLocale(["https://x.com/shop/rings", "https://x.com/it/shop/rings"]);
+    expect(out).toEqual(["https://x.com/shop/rings"]);
+  });
+
+  it("collapses the real Pasquale Bruni shape 5:1", () => {
+    const urls = ["ar-sa", "ar-qa", "ar-kw", "en-sa", "en-qa"].flatMap((l) => [
+      page(l), `https://www.pasqualebruni.com/${l}/collections/fall-selection`,
+    ]);
+    expect(urls).toHaveLength(10);
+    expect(preferCanonicalLocale(urls)).toHaveLength(2);
+  });
+});
+
+describe("html entities in titles", () => {
+  const NAMED: Record<string, string> = {
+    nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+    ndash: "–", mdash: "—", rsquo: "’", eacute: "é",
+  };
+  const decode = (s: string) => s.replace(/&([a-z]+);/gi, (m, n) => NAMED[String(n).toLowerCase()] ?? m);
+
+  it("decodes the entity that reached 395 of one brand's titles", () => {
+    expect(decode("Fall selection &ndash; Pasquale Bruni")).toBe("Fall selection – Pasquale Bruni");
+  });
+
+  it("leaves an unknown entity visible rather than eating it", () => {
+    expect(decode("A &weirdthing; B")).toBe("A &weirdthing; B");
+  });
+});

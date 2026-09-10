@@ -94,8 +94,11 @@ export async function jinaRaw(url: string, jinaKey: string): Promise<string> {
 export function parseJinaMarkdown(raw: string): { title: string; text: string } {
   let title = "";
   let body = raw;
+  // decodeEntities, because this is the one string that never got it: the body
+  // goes through cleanMarkdown which decodes, the title did not. 395 of Pasquale
+  // Bruni's 531 documents are titled "Fall selection &ndash; Pasquale Bruni".
   const tm = raw.match(/^Title:\s*(.+)$/m);
-  if (tm) title = tm[1].trim();
+  if (tm) title = decodeEntities(tm[1].trim());
   const mc = raw.indexOf("Markdown Content:");
   if (mc !== -1) body = raw.slice(mc + "Markdown Content:".length);
   return { title, text: cleanMarkdown(body) };
@@ -266,13 +269,65 @@ function htmlToText(html: string): string {
   s = decodeEntities(s);
   return s.replace(/[ \t\f\v]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+// The named entities that actually turn up in luxury marketing copy. The list
+// used to stop at six, so every en-dash in a page title stayed as "&ndash;" —
+// visible in the knowledge list, and fed to the assistant and the embeddings
+// exactly like that.
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+  ndash: "\u2013", mdash: "\u2014", lsquo: "\u2018", rsquo: "\u2019",
+  ldquo: "\u201c", rdquo: "\u201d", hellip: "\u2026", middot: "\u00b7",
+  laquo: "\u00ab", raquo: "\u00bb", bull: "\u2022", deg: "\u00b0",
+  eacute: "\u00e9", egrave: "\u00e8", agrave: "\u00e0", ccedil: "\u00e7",
+  uuml: "\u00fc", ouml: "\u00f6", auml: "\u00e4", szlig: "\u00df",
+  copy: "\u00a9", reg: "\u00ae", trade: "\u2122", euro: "\u20ac", pound: "\u00a3",
+};
+
 export function decodeEntities(s: string): string {
-  return s.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"').replace(/&#0?39;|&apos;/gi, "'")
+  return s.replace(/&([a-z]+);/gi, (m, name) => NAMED_ENTITIES[String(name).toLowerCase()] ?? m)
     .replace(/&#(\d+);/g, (_, n) => safeChar(parseInt(n, 10)))
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => safeChar(parseInt(n, 16)));
 }
 function safeChar(code: number): string { try { return Number.isFinite(code) ? String.fromCodePoint(code) : ""; } catch { return ""; } }
+
+// A locale-prefixed path, as Shopify markets serve them: /ar-sa/..., /en-qa/...
+const LOCALE_SEG = /^[a-z]{2}(-[a-z]{2})?$/i;
+
+/**
+ * Collapse a URL list to one URL per page, choosing between locale variants.
+ *
+ * Pasquale Bruni's sitemap lists every Middle East market: the same page under
+ * ar-sa, ar-qa, ar-kw, en-sa and en-qa. The crawler accepted all of them because
+ * it only checked the hostname, so their knowledge base was 531 documents
+ * covering 139 pages — every page indexed four or five times, a quarter of it in
+ * Arabic, and the assistant retrieving over five copies of the same text while
+ * the embedding bill was paid five times.
+ *
+ * Preference, most wanted first: no locale prefix at all (the canonical page),
+ * then English, then whatever is left, breaking ties on the shortest URL so the
+ * choice is stable between crawls.
+ */
+export function preferCanonicalLocale(urls: string[]): string[] {
+  const best = new Map<string, { url: string; score: number }>();
+  for (const raw of urls) {
+    let u: URL;
+    try { u = new URL(raw); } catch { continue; }
+    const segs = u.pathname.split("/").filter(Boolean);
+    const hasLocale = segs.length > 0 && LOCALE_SEG.test(segs[0]);
+    const locale = hasLocale ? segs[0].toLowerCase() : "";
+    const key = `${u.hostname}/${(hasLocale ? segs.slice(1) : segs).join("/")}${u.search}`;
+    const score = !hasLocale ? 0 : locale.startsWith("en") ? 1 : 2;
+    const cur = best.get(key);
+    // Ties break on length, then lexically — never on which order the sitemap
+    // happened to list them, or the same crawl could pick en-sa one day and
+    // en-qa the next and re-index the whole base as "new" documents.
+    const better = !cur || score < cur.score ||
+      (score === cur.score && (raw.length < cur.url.length ||
+        (raw.length === cur.url.length && raw < cur.url)));
+    if (better) best.set(key, { url: raw, score });
+  }
+  return [...best.values()].map((v) => v.url);
+}
 
 export function titleFromUrl(url: string, fallback: string): string {
   try {

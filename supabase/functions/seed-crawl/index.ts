@@ -10,8 +10,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   UA, fetchText, jinaRaw, parseJinaMarkdown, extractContent, extractLinks,
-  extractMarkdownLinks, collectSitemapUrls, normLine, stripHash, decodeEntities,
-} from "../_shared/crawl.ts";
+  extractMarkdownLinks, collectSitemapUrls, normLine, stripHash, decodeEntities, preferCanonicalLocale } from "../_shared/crawl.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -99,7 +98,11 @@ Deno.serve(async (req: Request) => {
     if (rawHomeHtml) for (const { href } of extractLinks(rawHomeHtml, origin)) add(href);
     if (jinaHomeRaw) for (const { href } of extractMarkdownLinks(jinaHomeRaw, origin)) add(href);
 
-    const urls = [...pageUrls.keys()].slice(0, maxPages);
+    // One page per locale is one page. Without this the sitemap's market
+    // variants each became their own document — see preferCanonicalLocale.
+    const deduped = preferCanonicalLocale([...pageUrls.keys()]);
+    const collapsed = pageUrls.size - deduped.length;
+    const urls = deduped.slice(0, maxPages);
 
     // Boilerplate set: sample a few pages, keep lines repeated on >=40%.
     const sample = urls.slice(0, BOILERPLATE_SAMPLE);
@@ -152,7 +155,7 @@ Deno.serve(async (req: Request) => {
       else console.error("[seed enqueue]", error.message);
     }
 
-    return jsonOk({ brand_id: brandId, base_url: origin.href, render, page_urls: urls.length, news_items: newsItems.length, boilerplate_lines: boilerplate.length, enqueued });
+    return jsonOk({ brand_id: brandId, base_url: origin.href, render, page_urls: urls.length, locale_variants_collapsed: collapsed, news_items: newsItems.length, boilerplate_lines: boilerplate.length, enqueued });
   } catch (e) {
     console.error("[seed-crawl]", e);
     return jsonError(`seed failed: ${e instanceof Error ? e.message : "unknown"}`, 500);
