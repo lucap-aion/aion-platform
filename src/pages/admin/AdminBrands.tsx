@@ -78,6 +78,7 @@ const BRANDS_SCHEMA: ExportColumn[] = [
 ];
 import AdminDrawer from "./_components/AdminDrawer";
 import BrandOnboarding from "./_components/BrandOnboarding";
+import { Link } from "react-router-dom";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, TextArea, SaveBar } from "./_components/FormField";
 import { ImageUpload } from "./_components/ImageUpload";
@@ -315,13 +316,25 @@ const AdminBrands = () => {
         extraRowAction={(row) => {
           const r = row as unknown as Brand;
           return (
-            <button
-              onClick={(e) => { e.stopPropagation(); setOnboarding(r); }}
-              title="Prepare this brand for a demo"
-              className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              Demo
-            </button>
+            <div className="flex items-center gap-1">
+              {/* The demo is one step of five. The cycle screen is where the
+                  deck, the data request, the pricing and the ops deck live. */}
+              <Link
+                to={`/admin/commercial?brand=${r.id}`}
+                onClick={(e) => e.stopPropagation()}
+                title="The commercial cycle for this brand"
+                className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Cycle
+              </Link>
+              <button
+                onClick={(e) => { e.stopPropagation(); setOnboarding(r); }}
+                title="Prepare this brand for a demo"
+                className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Demo
+              </button>
+            </div>
           );
         }}
         filters={[

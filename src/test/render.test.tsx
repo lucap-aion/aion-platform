@@ -46,7 +46,7 @@ vi.mock("@/contexts/TenantContext", () => ({
 }));
 
 vi.mock("@/hooks/useAuthSlug", () => ({ useAuthSlug: () => "/lb" }));
-vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }), toast: vi.fn() }));
 
 const wrap = (ui: React.ReactElement) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -80,5 +80,27 @@ describe("pages mount", () => {
     wrap(<AdminKnowledge />);
     // The picker's own label, not any of the several other "brand" strings.
     expect(screen.getByText(/Uploads and edits here belong to the selected brand/i)).toBeTruthy();
+  });
+
+  it("the commercial cycle lists all five steps", async () => {
+    const { default: AdminCommercial } = await import("@/pages/admin/AdminCommercial");
+    wrap(<AdminCommercial />);
+    for (const title of ["First meeting", "NDA & data request", "Platform demo", "Pricing", "Operations review"]) {
+      expect(await screen.findByText(title)).toBeTruthy();
+    }
+  });
+
+  it("the business case panel renders its perimeter without a calculation", async () => {
+    const { default: BusinessCasePanel } = await import("@/pages/admin/_components/BusinessCasePanel");
+    wrap(<BusinessCasePanel brandId={18} brands={[{ id: 18, name: "Pasquale Bruni" }]} />);
+    expect(screen.getByText(/Perimeter/i)).toBeTruthy();
+    // Build deck stays disabled until Calculate has produced figures to build from.
+    expect(screen.getByRole("button", { name: /Build deck/i }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("the insurer quote editor says plainly when nothing can be priced", async () => {
+    const { default: InsurerQuotes } = await import("@/pages/admin/_components/InsurerQuotes");
+    wrap(<InsurerQuotes brands={[{ id: 18, name: "Pasquale Bruni" }]} />);
+    expect(await screen.findByText(/No quotes on file/i)).toBeTruthy();
   });
 });
