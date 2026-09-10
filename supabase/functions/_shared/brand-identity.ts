@@ -1,7 +1,7 @@
 import { jsonLdNodes } from "./product-extract.ts";
 import {
-  imageCandidates, assignPortalImages, brandColourFrom, frequentColours,
-  googleFontsFrom, declaredFontFamilies,
+  imageCandidates, assignPortalImages, namedColours, dominantUsableColour,
+  canCarryWhiteText, frequentColours, googleFontsFrom, declaredFontFamilies,
 } from "./brand-appearance.ts";
 // Harvest a brand's visual identity from its own website.
 //
@@ -171,22 +171,42 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   //
   // Everything beyond those two stays a suggestion. A wrong primary is worse than none.
   const theme: Record<string, string> = {};
-  const declaredColour = brandColourFrom(html);
+  const named = namedColours(html);
   const themeColor = meta(html, "theme-color");
-  const declaredHsl = declaredColour ? toHsl(declaredColour) : null;
-  const metaHsl = themeColor ? toHsl(themeColor.trim()) : null;
 
-  if (declaredHsl && isUsablePrimary(declaredHsl)) {
-    theme.primary_hsl = declaredHsl;
-    out.found.push(`primary colour (${declaredColour}, named by the site)`);
-  } else if (metaHsl && isUsablePrimary(metaHsl)) {
-    theme.primary_hsl = metaHsl;
-    out.found.push("primary colour (theme-color)");
+  // Whatever the site names for a role goes to that role. Ferragamo names one thing —
+  // `--bg-color: #DEDACB`, its sand — and reading only brand/primary/accent threw it away.
+  const setColour = (slot: string, hex: string | undefined, why: string) => {
+    const hsl = hex ? toHsl(hex) : null;
+    if (!hsl) return false;
+    theme[slot] = hsl;
+    out.found.push(`${why} (${hex})`);
+    return true;
+  };
+  setColour("background_hsl", named.background, "background colour, named by the site");
+  setColour("foreground_hsl", named.foreground, "text colour, named by the site");
+
+  // The primary, in order of how much the site meant it.
+  const themeColorUsable = themeColor && canCarryWhiteText(themeColor.trim()) ? themeColor.trim() : null;
+  const dominant = dominantUsableColour(html);
+  const primary = (named.primary && canCarryWhiteText(named.primary) ? named.primary : null)
+    ?? themeColorUsable
+    ?? dominant;
+
+  if (primary && setColour("primary_hsl", primary,
+    primary === named.primary ? "primary colour, named by the site"
+      : primary === themeColorUsable ? "primary colour, from theme-color"
+      : "primary colour, the one this site uses most")) {
+    if (primary === dominant) {
+      out.notes.push(`the site names no brand colour, so the primary was taken as ${primary} — the colour its stylesheet uses most that can still carry white text. Check it.`);
+    }
   } else {
-    if (metaHsl) out.notes.push(`theme-color is ${themeColor} — browser chrome, not a brand colour`);
+    // theme-color is usually white because it exists to tint mobile browser chrome, and
+    // taking that repaints the whole portal white. Pasquale Bruni declares #ffffff.
+    if (themeColor) out.notes.push(`theme-color is ${themeColor} — too light to carry white text, so it is browser chrome rather than a brand colour`);
     const suggestions = frequentColours(html);
     out.notes.push(suggestions.length
-      ? `no brand colour is declared; the stylesheet leans on ${suggestions.join(", ")} — pick the primary by hand`
+      ? `no usable brand colour anywhere; the stylesheet leans on ${suggestions.join(", ")}, none of which can carry white text — pick the primary by hand`
       : "no brand colour declared anywhere — pick the primary by hand");
   }
 
@@ -253,14 +273,6 @@ function getAttr(tag: string, name: string): string | undefined {
 
 function clean(s: string): string {
   return s.replace(/&amp;/g, "&").replace(/&#\d+;/g, " ").replace(/\s+/g, " ").trim();
-}
-
-// A primary colour has to be able to carry white text on a button. Near-white,
-// near-black and fully desaturated values cannot.
-function isUsablePrimary(hsl: string): boolean {
-  const [, sat, light] = hsl.match(/^(\d+) (\d+)% (\d+)%$/)?.map(Number) ?? [];
-  if (sat === undefined || light === undefined) return false;
-  return light >= 12 && light <= 88 && sat >= 12;
 }
 
 // The platform stores colours as "H S% L%" (shadcn CSS variables), not hex.

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   looksLikePhoto, widestFromSrcset, imageCandidates, assignPortalImages,
   brandColourFrom, frequentColours, googleFontsFrom, declaredFontFamilies,
+  namedColours, dominantUsableColour, canCarryWhiteText,
 } from "../../supabase/functions/_shared/brand-appearance.ts";
 
 // What dresses a client's portal. The failure that matters here is not an empty field — it
@@ -148,6 +149,43 @@ describe("the primary colour", () => {
     // A wrong primary is worse than none, because it repaints every screen. Frequency
     // across a stylesheet is a suggestion for a human, never an answer.
     expect(brandColourFrom("body{color:#333}.btn{background:#c9a227}")).toBeNull();
+  });
+
+  it("maps a colour to the role the site named it for", () => {
+    // Ferragamo's homepage declares exactly one colour token — its sand — and reading only
+    // brand/primary/accent names threw it away and left the portal on AION's defaults.
+    expect(namedColours(":root{--bg-color:#DEDACB}")).toEqual({ background: "#dedacb" });
+    expect(namedColours(":root{--text-color:#1d1d1b;--brand-gold:#c9a227}"))
+      .toEqual({ foreground: "#1d1d1b", primary: "#c9a227" });
+  });
+
+  it("keeps white as a legitimate background but not as a brand colour", () => {
+    expect(namedColours(":root{--bg-color:#ffffff}")).toEqual({ background: "#ffffff" });
+    expect(namedColours(":root{--primary:#ffffff}")).toEqual({});
+  });
+
+  it("judges a primary on whether white text survives on it, not on how colourful it is", () => {
+    // The rule this replaces demanded saturation >= 12% and lightness >= 12%. Ferragamo's
+    // near-black is 4% and 11%, so it failed twice over and the house kept AION's gold —
+    // while black buttons are the most common primary in the whole industry.
+    expect(canCarryWhiteText("#1d1d1b")).toBe(true);
+    expect(canCarryWhiteText("#000000")).toBe(true);
+    expect(canCarryWhiteText("#8b1a1a")).toBe(true);
+    expect(canCarryWhiteText("#ffffff")).toBe(false);
+    expect(canCarryWhiteText("#dedacb")).toBe(false);
+  });
+
+  it("takes the most-used usable colour, never the most colourful one", () => {
+    // Ferragamo's stylesheet offers its near-black first, then two blues belonging to an
+    // embedded third-party widget. Preferring saturation would paint a Florentine house navy.
+    const css = ".a{color:#1d1d1b}.b{color:#1d1d1b}.c{color:#1d1d1b}.d{color:#1d1d1b}"
+      + ".e{color:#28356a}.f{color:#28356a}.g{color:#28356a}";
+    expect(dominantUsableColour(css)).toBe("#1d1d1b");
+  });
+
+  it("skips colours too light to hold white text when choosing a primary", () => {
+    const css = ".a{color:#dedacb}.b{color:#dedacb}.c{color:#dedacb}.d{color:#8b1a1a}.e{color:#8b1a1a}.f{color:#8b1a1a}";
+    expect(dominantUsableColour(css)).toBe("#8b1a1a");
   });
 
   it("suggests the colours a stylesheet leans on, neutrals excluded", () => {

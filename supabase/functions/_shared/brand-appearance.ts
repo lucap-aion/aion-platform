@@ -166,9 +166,66 @@ export function assignPortalImages(candidates: string[]): PortalImages {
 
 // ── Colour ────────────────────────────────────────────────────────────────────────────
 
-// A custom property NAMED for the brand is the one colour signal on a stylesheet that is
-// not a guess: somebody wrote `--brand-gold` on purpose.
-const BRAND_TOKEN = /--(?:[\w-]*?(?:brand|primary|accent|main|theme)[\w-]*?)\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\))/gi;
+// A custom property NAMED for something is the one colour signal on a stylesheet that is
+// not a guess: somebody wrote `--brand-gold`, or `--bg-color`, on purpose. Ferragamo's
+// homepage declares exactly one — `--bg-color: #DEDACB`, its sand — and reading only
+// brand/primary/accent names threw it away.
+const TOKEN_PATTERNS: { slot: keyof NamedColours; re: RegExp }[] = [
+  { slot: "primary", re: /--[\w-]*?(?:brand|primary|accent|main|theme)[\w-]*?\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\))/gi },
+  { slot: "background", re: /--[\w-]*?(?:bg|background|surface|paper)[\w-]*?\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\))/gi },
+  { slot: "foreground", re: /--[\w-]*?(?:text|foreground|ink|copy)[\w-]*?\s*:\s*(#[0-9a-f]{3,8}|rgba?\([^)]+\))/gi },
+];
+
+export type NamedColours = { primary?: string; background?: string; foreground?: string };
+
+/** Every colour the site names for a role, mapped to the slot that role belongs to. */
+export function namedColours(css: string): NamedColours {
+  const out: NamedColours = {};
+  for (const { slot, re } of TOKEN_PATTERNS) {
+    for (const m of css.matchAll(re)) {
+      const value = toHex(m[1].trim());
+      if (!value) continue;
+      // A named token set to white or black is page furniture, not a decision — except for
+      // a background, where white is a perfectly deliberate answer.
+      if (slot !== "background" && /^#(?:ffffff|000000)$/i.test(value)) continue;
+      out[slot] = value;
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * The colour a stylesheet leans on hardest that could carry white text.
+ *
+ * Frequency, NOT saturation. Ferragamo's stylesheet offers #1d1d1b (its near-black, used
+ * most), then two blues that belong to an embedded third-party widget — and preferring the
+ * colourful one would paint a Florentine house navy.
+ */
+export function dominantUsableColour(css: string): string | null {
+  return frequentColours(css, 8).find((hex) => canCarryWhiteText(hex)) ?? null;
+}
+
+/**
+ * Could a button in this colour hold white text?
+ *
+ * This replaces a rule that also demanded saturation >= 12%, which rejected exactly the
+ * palette luxury actually uses: Ferragamo's #1d1d1b is 4% saturated and 11% light, so it
+ * failed as "too grey" AND as "too dark", and the house was left with AION's gold. Black
+ * buttons are the most common primary in this industry. Lightness is the only thing that
+ * decides legibility, so it is the only thing tested.
+ */
+export function canCarryWhiteText(hex: string): boolean {
+  const rgb = toHex(hex);
+  if (!rgb) return false;
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(rgb.slice(i, i + 2), 16) / 255);
+  // Relative luminance, the WCAG definition, so "light enough to lose white text" means the
+  // same thing here as it does to anyone checking the contrast afterwards.
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  // 4.5:1 against white, the AA threshold for body text.
+  return (1.05) / (luminance + 0.05) >= 4.5;
+}
 
 /**
  * The brand's primary colour, or null.
@@ -179,14 +236,7 @@ const BRAND_TOKEN = /--(?:[\w-]*?(?:brand|primary|accent|main|theme)[\w-]*?)\s*:
  * suggestion rather than applied.
  */
 export function brandColourFrom(css: string): string | null {
-  for (const m of css.matchAll(BRAND_TOKEN)) {
-    const value = toHex(m[1].trim());
-    if (!value) continue;
-    // A named token set to white or black is a neutral, not the house colour.
-    if (/^#(?:ffffff|000000)$/i.test(value)) continue;
-    return value;
-  }
-  return null;
+  return namedColours(css).primary ?? null;
 }
 
 /** "#c9a227", "#c92", "rgb(201, 162, 39)" -> "#c9a227". The platform speaks hex. */
@@ -210,7 +260,9 @@ export function frequentColours(css: string, limit = 4): string[] {
   const counts = new Map<string, number>();
   for (const m of css.matchAll(/#([0-9a-f]{6})\b/gi)) {
     const hex = `#${m[1].toLowerCase()}`;
-    // Neutrals are page furniture on every site ever built.
+    // Pure neutrals are page furniture on every site ever built. A near-black like #1d1d1b
+    // is NOT one of them — it is a deliberate off-black, and for a monochrome house it is
+    // the brand colour.
     if (/^#(?:0{6}|f{6}|([0-9a-f])\1{5})$/i.test(hex)) continue;
     counts.set(hex, (counts.get(hex) ?? 0) + 1);
   }
