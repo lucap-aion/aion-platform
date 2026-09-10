@@ -20,11 +20,14 @@ const BRANDS_SCHEMA: ExportColumn[] = [
   { key: "insurance_premium",     label: "Insurance Premium" },
   { key: "aion_premium_fee",      label: "AION Premium Fee" },
   { key: "max_covered_value",     label: "Max Covered Value" },
+  { key: "min_covered_value",     label: "Min Covered Value" },
   { key: "enable_chubb_reporting",label: "Chubb Reporting" },
   { key: "chubb_policy_prefix",   label: "Chubb Policy Prefix" },
 ];
 import AdminDrawer from "./_components/AdminDrawer";
 import { Link } from "react-router-dom";
+import { ExternalLink } from "lucide-react";
+import { formatCountry, formatWebsiteLabel, websiteHref } from "@/lib/format";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, TextArea, SaveBar } from "./_components/FormField";
 import { ImageUpload } from "./_components/ImageUpload";
@@ -83,7 +86,7 @@ const AdminBrands = () => {
   const handleExport = async (): Promise<Record<string, unknown>[]> => {
     let q = supabase
       .from("brands")
-      .select("id, name, slug, email, website, hq_country, status, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value")
+      .select("id, name, slug, email, website, hq_country, status, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value, min_covered_value")
       .order(sortKey, { ascending: sortDir === "asc" })
       .limit(10000);
     if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%,slug.ilike.%${search}%,hq_country.ilike.%${search}%,website.ilike.%${search}%,status.ilike.%${search}%`);
@@ -155,8 +158,32 @@ const AdminBrands = () => {
             },
           },
           { key: "email", label: "Email", sortable: true },
-          { key: "hq_country", label: "Country", sortable: true },
-          { key: "website", label: "Website" },
+          {
+            key: "hq_country", label: "Country", sortable: true,
+            // Stored as free text, so the same country arrives as "Italy" or as "IT".
+            render: (row) => <span>{formatCountry((row as unknown as Brand).hq_country)}</span>,
+          },
+          {
+            key: "website", label: "Website",
+            render: (row) => {
+              const href = websiteHref((row as unknown as Brand).website);
+              if (!href) return <span className="text-muted-foreground">—</span>;
+              return (
+                // stopPropagation: the row itself opens the brand, and a click meant for
+                // the site should not also navigate away behind the new tab.
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-1 text-foreground hover:text-primary hover:underline"
+                >
+                  {formatWebsiteLabel((row as unknown as Brand).website)}
+                  <ExternalLink className="h-3 w-3 shrink-0 opacity-50" />
+                </a>
+              );
+            },
+          },
           {
             key: "status", label: "Status", sortable: true,
             render: (row) => { const r = row as unknown as Brand; return r.status ? <StatusBadge status={r.status} /> : <span className="text-muted-foreground">—</span>; },
