@@ -10,6 +10,7 @@ import {
   AlertCircle, ExternalLink, Undo2, FileText,
 } from "lucide-react";
 import AssistantMarkdown from "@/components/assistant/AssistantMarkdown";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // The paperwork the onboarding run drafted, and what happens to it next.
 //
@@ -138,10 +139,28 @@ export default function BrandDocuments({ brandId, brandName }: { brandId: number
     await load();
   };
 
+  // The five kinds are fixed, so their names and descriptions are true before
+  // any fetch. What is NOT known yet is whether each one exists, its status, and
+  // how many pages it was written from — and "not drafted" in amber is a claim,
+  // not a placeholder.
   if (loading) {
-    return <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-      <Loader2 className="h-4 w-4 animate-spin" /> Loading documents…
-    </div>;
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-full max-w-2xl" />
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {KINDS.map((k) => (
+            <li key={k.key} className="flex items-start gap-3 p-3">
+              <Skeleton className="mt-0.5 h-4 w-4 shrink-0 rounded" />
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <p className="text-sm font-medium text-foreground">{k.label}</p>
+                <Skeleton className="h-3 w-full max-w-sm" />
+              </div>
+              <Skeleton className="h-6 w-16 shrink-0 rounded-md" />
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
   }
 
   const missing = KINDS.filter((k) => !byKind(k.key));

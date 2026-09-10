@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { untyped } from "@/integrations/supabase/untyped";
 import { toast } from "@/hooks/use-toast";
 import { Loader2, Check, AlertCircle, Package } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Where a brand's catalogue comes from.
 //
@@ -69,7 +70,24 @@ export default function CatalogueSource({ brandId, products, onSaved }: {
     await load(); onSaved?.();
   };
 
-  if (loading) return <p className="text-xs text-muted-foreground">Loading catalogue source…</p>;
+  // "No catalogue source registered" is the alarming case, and it was what an
+  // unloaded component looked like.
+  if (loading) {
+    return (
+      <div className="space-y-3 rounded-lg border border-border p-3">
+        <div className="flex items-center gap-2">
+          <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <p className="text-sm font-medium text-foreground">Catalogue source</p>
+          <Skeleton className="h-3.5 w-40" />
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <Skeleton className="h-9 min-w-56 flex-1 rounded-md" />
+          <Skeleton className="h-9 w-40 rounded-md" />
+          <Skeleton className="h-8 w-20 rounded-lg" />
+        </div>
+      </div>
+    );
+  }
 
   const dead = !row || row.platform === "none" || !row.enabled;
   const dirty = row ? (baseUrl.trim().replace(/\/+$/, "") !== row.base_url || keepUntyped !== row.keep_untyped || enabled !== row.enabled) : baseUrl.trim() !== "";

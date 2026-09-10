@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Check, X, Play, RefreshCw, Copy, Trash2, AlertCircle, Clock, SkipForward } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Prepare-demo panel: takes a brand that has just been created (name + website)
 // all the way to something you can put in front of a prospect — site crawled and
@@ -194,6 +195,8 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
         </div>
       )}
 
+      {!status && <Skeleton className="h-20 w-full rounded-lg" />}
+
       {status && (
         <div className={`rounded-lg border p-3 text-sm ${status.demo_ready ? "border-emerald-500/40 bg-emerald-500/10" : "border-border bg-muted/40"}`}>
           {status.demo_ready
@@ -266,7 +269,22 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
         </div>
       )}
 
-      <ul className="divide-y divide-border rounded-lg border border-border">
+      {status === null && (
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {STAGES.map((s) => (
+            <li key={s.key} className="flex items-start gap-3 p-3">
+              <Skeleton className="mt-0.5 h-4 w-4 shrink-0 rounded-full" />
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <p className="text-sm font-medium text-foreground">{s.label}</p>
+                <Skeleton className="h-3 w-full max-w-md" />
+              </div>
+              <Skeleton className="h-6 w-12 shrink-0 rounded-md" />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {status !== null && <ul className="divide-y divide-border rounded-lg border border-border">
         {visibleStages.map((s) => {
           const st = stageStatus(s.key);
           const state = stageState(st, busy === s.key);
@@ -296,7 +314,7 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
             </li>
           );
         })}
-      </ul>
+      </ul>}
 
       {accounts && (
         <div className="rounded-lg border border-border p-3">

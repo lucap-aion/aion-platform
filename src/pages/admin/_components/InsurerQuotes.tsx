@@ -8,6 +8,7 @@ import { untyped } from "@/integrations/supabase/untyped";
 import { toast } from "@/hooks/use-toast";
 import { Loader2, Plus, Trash2, Check, X } from "lucide-react";
 import { CATEGORIES, COVERAGES, DAMAGE_SCOPES, type Quote } from "./pricing-model";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // The quotes Chubb has actually given us.
 //
@@ -226,7 +227,11 @@ export default function InsurerQuotes({ brands, onChanged }: {
       )}
 
       {loading ? (
-        <p className="py-4 text-center text-sm text-muted-foreground">Loading quotes…</p>
+        // Not "no quotes on file" — that sentence means nothing can be priced,
+        // and it must only appear once we know it is true.
+        <div className="space-y-2 pt-1">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+        </div>
       ) : rows.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
           No quotes on file. Nothing can be priced until at least one is added.

@@ -15,6 +15,7 @@ import BrandOnboarding from "./_components/BrandOnboarding";
 import BrandDocuments from "./_components/BrandDocuments";
 import CatalogueSource from "./_components/CatalogueSource";
 import BusinessCasePanel from "./_components/BusinessCasePanel";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // The commercial cycle, on one screen.
 //
@@ -90,6 +91,7 @@ export default function AdminCommercial() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingBrand, setLoadingBrand] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<number | null>(null);
   const [review, setReview] = useState<Record<number, string[]>>({});
@@ -116,6 +118,7 @@ export default function AdminCommercial() {
 
   const load = useCallback(async () => {
     if (!brandId) return;
+    setLoadingBrand(true);
     const [ov, list] = await Promise.all([
       untyped.rpc("commercial_cycle_overview", { p_brand_id: brandId }),
       supabase.functions.invoke("build-collateral", { body: { brand_id: brandId, kind: "list" } }),
@@ -130,6 +133,7 @@ export default function AdminCommercial() {
     }
     const l = list.data as { artifacts?: Artifact[] } | null;
     setArtifacts(l?.artifacts ?? []);
+    setLoadingBrand(false);
   }, [brandId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -203,7 +207,18 @@ export default function AdminCommercial() {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center p-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+    return (
+      <div className="mx-auto max-w-5xl space-y-6 p-6">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-full max-w-2xl" />
+        </div>
+        <Skeleton className="h-20 w-full rounded-xl" />
+        <div className="space-y-3">
+          {STEPS.map((s) => <Skeleton key={s.n} className="h-24 w-full rounded-xl" />)}
+        </div>
+      </div>
+    );
   }
 
   const c = overview?.counts ?? {};
@@ -238,13 +253,19 @@ export default function AdminCommercial() {
             <img src={brand.logo_small} alt="" className="h-full w-full object-contain" />
           </div>
         )}
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>{doneCount}/5 steps done</span>
-          <span>{c.products ?? 0} products</span>
-          <span>{c.knowledge_chunks ?? 0} chunks indexed</span>
-          <span>{c.policies ?? 0} covers</span>
-          <span>{c.brand_users ?? 0} logins</span>
-        </div>
+        {loadingBrand ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {[16, 20, 28, 16, 16].map((w, i) => <Skeleton key={i} className="h-4" style={{ width: `${w * 4}px` }} />)}
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>{doneCount}/5 steps done</span>
+            <span>{c.products ?? 0} products</span>
+            <span>{c.knowledge_chunks ?? 0} chunks indexed</span>
+            <span>{c.policies ?? 0} covers</span>
+            <span>{c.brand_users ?? 0} logins</span>
+          </div>
+        )}
         {brand?.website && (
           <a href={brand.website.startsWith("http") ? brand.website : `https://${brand.website}`}
             target="_blank" rel="noreferrer"
@@ -268,11 +289,12 @@ export default function AdminCommercial() {
           const art = artifactFor(step.n);
           const isOpen = open === step.n;
           return (
-            <div key={step.n} className={`rounded-xl border ${state === "done" ? "border-emerald-500/40" : "border-border"}`}>
+            <div key={step.n} className={`rounded-xl border ${!loadingBrand && state === "done" ? "border-emerald-500/40" : "border-border"}`}>
               <button onClick={() => setOpen(isOpen ? null : step.n)}
                 className="flex w-full items-start gap-3 p-4 text-left">
                 <span className="mt-0.5 shrink-0">
-                  {state === "done" ? <Check className="h-5 w-5 text-emerald-600" />
+                  {loadingBrand ? <Skeleton className="h-5 w-5 rounded-full" />
+                    : state === "done" ? <Check className="h-5 w-5 text-emerald-600" />
                     : state === "in_progress" ? <CircleDot className="h-5 w-5 text-primary" />
                     : state === "skipped" ? <SkipForward className="h-5 w-5 text-muted-foreground" />
                     : <Circle className="h-5 w-5 text-muted-foreground/50" />}
@@ -283,13 +305,17 @@ export default function AdminCommercial() {
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">{step.blurb}</p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                    {art ? (
-                      <span className="text-emerald-700 dark:text-emerald-400">Built {when(art.generated_at)}</span>
-                    ) : ARTIFACT_FOR[step.n] ? (
-                      <span className="text-muted-foreground">Nothing built yet</span>
-                    ) : null}
-                    {p?.happened_on && <span className="text-muted-foreground">Met {when(p.happened_on)}</span>}
-                    {p?.note && <span className="truncate text-muted-foreground">“{p.note}”</span>}
+                    {loadingBrand ? <Skeleton className="h-3.5 w-32" /> : (
+                      <>
+                        {art ? (
+                          <span className="text-emerald-700 dark:text-emerald-400">Built {when(art.generated_at)}</span>
+                        ) : ARTIFACT_FOR[step.n] ? (
+                          <span className="text-muted-foreground">Nothing built yet</span>
+                        ) : null}
+                        {p?.happened_on && <span className="text-muted-foreground">Met {when(p.happened_on)}</span>}
+                        {p?.note && <span className="truncate text-muted-foreground">“{p.note}”</span>}
+                      </>
+                    )}
                   </div>
                 </div>
                 <span className="mt-0.5 shrink-0 text-muted-foreground">
@@ -299,9 +325,11 @@ export default function AdminCommercial() {
 
               {isOpen && (
                 <div className="space-y-4 border-t border-border p-4">
-                  <StepTracker step={step.n} row={p} onChange={setProgress} />
+                  {loadingBrand
+                    ? <Skeleton className="h-16 w-full rounded-lg" />
+                    : <StepTracker step={step.n} row={p} onChange={setProgress} />}
 
-                  {step.n === 1 && (
+                  {step.n === 1 && (loadingBrand ? <StepSkeleton /> :
                     <StepAction
                       produces={step.produces}
                       busy={busy === "step1"}
@@ -316,7 +344,7 @@ export default function AdminCommercial() {
                     />
                   )}
 
-                  {step.n === 2 && (
+                  {step.n === 2 && (loadingBrand ? <StepSkeleton /> :
                     <div className="space-y-3">
                       <div className="grid gap-3 sm:grid-cols-3">
                         <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -375,7 +403,7 @@ export default function AdminCommercial() {
                     <BusinessCasePanel brandId={brandId} brands={brands} onArtifact={() => void load()} />
                   )}
 
-                  {step.n === 5 && (
+                  {step.n === 5 && (loadingBrand ? <StepSkeleton /> :
                     <StepAction
                       produces={step.produces}
                       busy={busy === "step5"}
@@ -390,6 +418,21 @@ export default function AdminCommercial() {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// A step body whose every line is a fact from the database: the artifact, its
+// date, whether a field was filled. None of it can be guessed at, so none of it
+// is drawn until it is known.
+function StepSkeleton() {
+  return (
+    <div className="space-y-3">
+      <Skeleton className="h-3.5 w-64" />
+      <div className="flex gap-2">
+        <Skeleton className="h-9 w-40 rounded-lg" />
+        <Skeleton className="h-9 w-56 rounded-lg" />
       </div>
     </div>
   );

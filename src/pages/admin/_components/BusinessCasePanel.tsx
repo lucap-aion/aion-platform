@@ -9,6 +9,7 @@ import { toast } from "@/hooks/use-toast";
 import { Loader2, Plus, Trash2, Download, AlertTriangle, Calculator, ChevronDown, ChevronRight } from "lucide-react";
 import InsurerQuotes from "./InsurerQuotes";
 import { CATEGORIES, COVERAGES, DAMAGE_SCOPES, type BusinessCase, type Quote, type RateUsed } from "./pricing-model";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Step 4 of the commercial cycle: the pricing conversation.
 //
@@ -69,6 +70,7 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
   const [deck, setDeck] = useState<{ url: string; name: string } | null>(null);
   const [showQuotes, setShowQuotes] = useState(false);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [loadingRefs, setLoadingRefs] = useState(true);
   // The assumptions behind every figure on this screen. They were invisible —
   // the GVT fee, AION's share of the net premium, the setup fee and the tier
   // table all live in one row of aion_pricing_terms, and nothing showed you
@@ -90,6 +92,7 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
       const { data } = await untyped.from("aion_pricing_terms")
         .select("*").eq("key", "standard_2026").maybeSingle();
       setTerms((data ?? null) as Terms | null);
+      setLoadingRefs(false);
     })();
   }, []);
 
@@ -123,9 +126,9 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
 
   // Preflight, per segment: is there a rate that could price this at all?
   const uncovered = useMemo(() =>
-    payloadSegments.filter((s) =>
+    loadingRefs ? [] : payloadSegments.filter((s) =>
       !quotes.some((q) => q.category === s.category && q.coverage === s.coverage)),
-  [payloadSegments, quotes]);
+  [payloadSegments, quotes, loadingRefs]);
 
   const monthsValid = /^\d+$/.test(months.trim()) && Number(months) >= 1 && Number(months) <= 120;
 
@@ -390,7 +393,15 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
         </div>
       )}
 
-      {terms && (
+      {loadingRefs ? (
+        <div className="space-y-2 rounded-xl border border-border p-4">
+          <Skeleton className="h-4 w-56" />
+          <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-3.5 w-full max-w-64" />)}
+          </div>
+          <Skeleton className="h-3.5 w-full max-w-md" />
+        </div>
+      ) : terms && (
         <div className="rounded-xl border border-border p-4">
           <h3 className="mb-2 text-sm font-semibold text-foreground">The terms these figures apply</h3>
           <div className="grid gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
@@ -419,7 +430,9 @@ export default function BusinessCasePanel({ brandId, brands, onArtifact }: {
           className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-foreground">
           {showQuotes ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           Insurer quotes
-          <span className="font-normal text-muted-foreground">· {quotes.length} on file</span>
+          {loadingRefs
+            ? <Skeleton className="h-3.5 w-20" />
+            : <span className="font-normal text-muted-foreground">· {quotes.length} on file</span>}
         </button>
         {showQuotes && (
           <div className="border-t border-border p-4">
