@@ -135,9 +135,19 @@ export type StageState = {
   error?: string | null;
   detail?: Record<string, unknown> | null;
   finished_at?: string | null;
+  started_at?: string | null;
 };
 
-export type StageDisplayState = "done" | "failed" | "skipped" | "running" | "queued" | "pending";
+export type StageDisplayState = "done" | "failed" | "skipped" | "running" | "stalled" | "queued" | "pending";
+
+// How long a stage may claim to be running before nobody believes it.
+//
+// A stage sets status='running' and is only moved off it by the code that finishes. When an
+// invocation is killed instead — a wall clock, an unbounded fetch, a deploy landing mid-run
+// — the row stays 'running' with nothing to move it, and the server-side sweeper only looks
+// every so often. In between, the screen was saying "Running now. It will land here when it
+// finishes" about a stage that had already died, with its Run button disabled.
+export const STALE_AFTER_MS = 15 * 60_000;
 
 // `brand_onboarding` has no 'queued' status — a stage waiting for the cron tick is
 // 'pending' WITH queued_at set, which the overview reports as `queued: true`. Reading the
@@ -148,12 +158,20 @@ export function stageDisplayState(state: StageState | null | undefined, optimist
   if (!state) return "pending";
   if (state.queued === true) return "queued";
   if (state.status === "pending") return "pending";
-  if (state.status === "done" || state.status === "failed" || state.status === "skipped" || state.status === "running") {
-    return state.status;
-  }
+  if (state.status === "running") return isStalled(state) ? "stalled" : "running";
+  if (state.status === "done" || state.status === "failed" || state.status === "skipped") return state.status;
   return "pending";
 }
 
+/** A claim older than any invocation could live is abandoned, not in progress. */
+export function isStalled(state: StageState | null | undefined): boolean {
+  if (!state || state.status !== "running" || !state.started_at) return false;
+  const started = new Date(state.started_at).getTime();
+  return Number.isFinite(started) && Date.now() - started > STALE_AFTER_MS;
+}
+
+// A stalled stage is deliberately NOT busy: the step it feeds must stop waiting on it,
+// and its own Run button has to come back.
 export const isStageBusy = (s: StageDisplayState): boolean => s === "running" || s === "queued";
 
 /** Whether the pipeline currently owns a step, and pressing its build button would race it. */

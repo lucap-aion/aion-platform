@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   CYCLE_STEPS, PIPELINE_STAGES, pipelineStageKeys, DEMO_STAGE_KEYS,
-  stageDisplayState, stepIsBuilding, summarisePipeline, stagesForStep, stepStateLabel,
+  stageDisplayState, stepIsBuilding, summarisePipeline, stagesForStep, stepStateLabel, isStalled,
   type StageState,
 } from "@/lib/commercialCycle";
 
@@ -54,6 +54,41 @@ describe("reading a stage row", () => {
 
   it("shows the optimistic queue immediately after a click", () => {
     expect(stageDisplayState(undefined, true)).toBe("queued");
+  });
+});
+
+describe("a stage that stopped reporting", () => {
+  const running = (minutesAgo: number): StageState => ({
+    status: "running",
+    started_at: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
+  });
+
+  it("believes a claim that is still plausible", () => {
+    expect(stageDisplayState(running(2))).toBe("running");
+    expect(isStalled(running(2))).toBe(false);
+  });
+
+  it("stops believing one that outlived any invocation", () => {
+    // Nothing moves a row off 'running' except the code that finishes it, so a killed run
+    // leaves the claim standing. The screen used to say "Running now. It will land here
+    // when it finishes" about a stage that had died twenty minutes earlier, with its Run
+    // button disabled — and after three such deaths the server gave up too, which froze
+    // every OTHER stage of that brand as well.
+    expect(stageDisplayState(running(20))).toBe("stalled");
+    expect(isStalled(running(20))).toBe(true);
+  });
+
+  it("does not hold the step it feeds hostage once it has stalled", () => {
+    // stepIsBuilding keeps a step's build button disabled while the pipeline owns it. A
+    // stage nobody is running must give the button back.
+    expect(stepIsBuilding(1, { intro_deck: running(2) })).toBe(true);
+    expect(stepIsBuilding(1, { intro_deck: running(20) })).toBe(false);
+  });
+
+  it("says nothing about a row with no start time", () => {
+    expect(isStalled({ status: "running" })).toBe(false);
+    expect(isStalled({ status: "done", started_at: new Date(0).toISOString() })).toBe(false);
+    expect(isStalled(undefined)).toBe(false);
   });
 });
 

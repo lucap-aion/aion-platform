@@ -36,6 +36,7 @@ type Props = {
 const ICON: Record<string, React.ReactNode> = {
   done: <Check className="h-3 w-3" />,
   running: <Loader2 className="h-3 w-3 animate-spin" />,
+  stalled: <AlertCircle className="h-3 w-3" />,
   failed: <AlertCircle className="h-3 w-3" />,
   queued: <Clock className="h-3 w-3" />,
   skipped: <SkipForward className="h-3 w-3" />,
@@ -45,6 +46,7 @@ const ICON: Record<string, React.ReactNode> = {
 const CHIP: Record<string, string> = {
   done: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   running: "border-primary/50 bg-primary/10 text-primary",
+  stalled: "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-500",
   failed: "border-destructive/40 bg-destructive/5 text-destructive",
   queued: "border-primary/40 bg-primary/5 text-primary",
   skipped: "border-border text-muted-foreground/60",
@@ -61,13 +63,15 @@ export default function PipelinePanel({
   const summary = summarisePipeline(stages, visible);
   const at = (s: PipelineStage) => stageDisplayState(stages?.[s.key], busy === s.key);
 
-  // Open on the stage that needs a person: the first failure, else whatever is running.
-  // A pipeline that stopped four stages ago should not need a click to say so.
+  // Open on the stage that needs a person: a stalled claim first, then the first failure,
+  // then whatever is running. A pipeline that stopped four stages ago should not need a
+  // click to say so.
   //
   // Keyed on the stage KEYS, not on the objects: `summary.failed` is a fresh array every
   // render, so depending on it would re-run this effect on every render for the whole life
   // of the panel.
-  const wantsAttention = summary.failed[0]?.key ?? summary.running?.key ?? null;
+  const stalled = visible.filter((s) => at(s) === "stalled");
+  const wantsAttention = stalled[0]?.key ?? summary.failed[0]?.key ?? summary.running?.key ?? null;
   useEffect(() => {
     if (open || !wantsAttention) return;
     setOpen(wantsAttention);
@@ -125,6 +129,8 @@ export default function PipelinePanel({
             ? summary.running
               ? `${summary.running.label} — in progress`
               : `${summary.queued} step${summary.queued === 1 ? "" : "s"} waiting to start`
+            : stalled.length
+            ? `${stalled.length === 1 ? "One stage" : `${stalled.length} stages`} stopped reporting`
             : summary.failed.length
             ? `${summary.failed.length === 1 ? "One stage" : `${summary.failed.length} stages`} could not complete`
             : summary.total === 0
@@ -187,6 +193,8 @@ export default function PipelinePanel({
                   ? "Queued — the background runner picks it up within a minute, and nothing needs pressing."
                   : openAt === "running"
                   ? "Running now. It will land here when it finishes; you can leave the page."
+                  : openAt === "stalled"
+                  ? "This claimed to be running and then stopped reporting — the run was killed before it could finish. The server retries it on its own; pressing Run does it now."
                   : openState?.error ?? detailLine(openStage.key, openState) ?? openStage.hint}
               </p>
               {(openState?.attempts ?? 0) > 0 && openAt !== "done" && (
@@ -205,6 +213,7 @@ export default function PipelinePanel({
                 : openAt === "done" ? "Re-run"
                 : openAt === "queued" ? "Queued"
                 : openAt === "running" ? "Running"
+                : openAt === "stalled" ? "Run it again"
                 : openAt === "failed" ? "Try again"
                 : "Run"}
             </button>

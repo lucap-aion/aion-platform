@@ -461,14 +461,22 @@ async function runStage(
     const base = normaliseBase(website);
     if (!base) return { ok: false, reason: "no website to look for a catalogue on" };
 
-    const detected = await detectShopify(base);
+    // Detection has to fit inside one invocation with room left for the sync that follows.
+    // It did not, and the stage was being killed before it could write anything at all —
+    // Ferragamo never so much as got a storefront_sources row, on any attempt.
+    const deadline = Date.now() + 70_000;
+
+    const detected = await detectShopify(base, deadline);
+    if (Date.now() > deadline) {
+      return { ok: false, reason: `${base} did not answer in time — no catalogue could be detected. It may be blocking us, or simply slow; run this stage again.` };
+    }
     if (!detected) {
       // No Shopify feed. Before giving up, look for the structured data the site
       // publishes for Google: schema.org Product, which most of the luxury
       // market emits even when it blocks plain fetches. That is the difference
       // between a brand with a catalogue and a brand without one, and therefore
       // between an intro deck with their pieces in it and AION's stock imagery.
-      const structured = await detectStructured(base);
+      const structured = await detectStructured(base, deadline);
       await admin.from("storefront_sources").upsert(
         {
           brand_id: brandId, base_url: base,
@@ -841,17 +849,22 @@ function demoPassword(slug: string, key: string): string {
 // ── Storefront detection ─────────────────────────────────────────────────────
 // Shopify exposes /products.json. Try the site as given and its www/apex twin —
 // robertocoin.com redirects, www.robertocoin.com answers.
-async function detectShopify(base: string): Promise<{ base: string; keepUntyped: boolean } | null> {
+async function detectShopify(base: string, deadline: number): Promise<{ base: string; keepUntyped: boolean } | null> {
   const host = base.replace(/^https?:\/\//, "").replace(/\/$/, "");
   const candidates = host.startsWith("www.")
     ? [`https://${host}`, `https://${host.slice(4)}`]
     : [`https://${host}`, `https://www.${host}`];
 
   for (const c of candidates) {
+    if (Date.now() > deadline) return null;
     try {
+      // NO timeout here was the bug. A host that accepts the connection and then stalls
+      // hangs this until the platform kills the whole invocation — and the stage row is
+      // already 'running', so it stays 'running' with nothing written and nobody told.
       const res = await fetch(`${c}/products.json?limit=20`, {
         headers: { "User-Agent": "Mozilla/5.0 (AION onboarding)" },
         redirect: "follow",
+        signal: AbortSignal.timeout(Math.min(12_000, Math.max(1_000, deadline - Date.now()))),
       });
       if (!res.ok) continue;
       const products = (await res.json())?.products;
@@ -868,17 +881,31 @@ async function detectShopify(base: string): Promise<{ base: string; keepUntyped:
 // Is there a catalogue in the page's structured data? One fetch of the homepage
 // is enough to tell: a storefront that publishes Product JSON-LD anywhere
 // publishes it on its landing and category pages.
-async function detectStructured(base: string): Promise<number> {
-  for (const url of [base, `${base}/shop`, `${base}/collections/all`]) {
+async function detectStructured(base: string, deadline: number): Promise<number> {
+  const candidates = [base, `${base}/shop`, `${base}/collections/all`];
+
+  // The cheap pass first, over every candidate. A plain fetch that works costs a second;
+  // it is only worth paying for a render when none of them do.
+  for (const url of candidates) {
+    if (Date.now() > deadline) return 0;
     try {
-      const html = JINA_API_KEY
-        ? await jinaHtml(url)
-        : await (await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (AION onboarding)" }, signal: AbortSignal.timeout(20000) })).text();
-      const found = extractProducts(html, url).length;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (AION onboarding)" },
+        signal: AbortSignal.timeout(Math.min(12_000, Math.max(1_000, deadline - Date.now()))),
+      });
+      if (!res.ok) continue;
+      const found = extractProducts(await res.text(), url).length;
       if (found > 0) return found;
     } catch { /* try the next candidate */ }
   }
-  return 0;
+
+  // Then, at most ONE render, and only if there is time for it. This used to render all
+  // three candidates unconditionally — up to 45 seconds each on a page like Ferragamo's,
+  // which alone is more than one invocation is allowed to live.
+  if (!JINA_API_KEY || deadline - Date.now() < 30_000) return 0;
+  try {
+    return extractProducts(await jinaHtml(base), base).length;
+  } catch { return 0; }
 }
 
 async function jinaHtml(url: string): Promise<string> {
