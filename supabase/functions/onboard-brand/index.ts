@@ -24,6 +24,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { demoToolsEnabled, demoToolsBlockedReason, isNonProduction } from "../_shared/environment.ts";
 import { harvestBrandIdentity } from "../_shared/brand-identity.ts";
 import { extractProducts } from "../_shared/product-extract.ts";
+import { enrichFromWikidata } from "../_shared/brand-enrich.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -292,11 +293,34 @@ async function runStage(
     if (!website) return { ok: false, reason: "the brand has no website — add one on the brand record first" };
 
     const id = await harvestBrandIdentity(website);
+
+    // The site is the right source for colours and imagery and the wrong one for
+    // a description — a storefront's meta description is written for Google's
+    // results page. Wikidata/Wikipedia describe the same company as an
+    // encyclopaedia would, and hold the OFFICIAL logo as a Commons file that
+    // rasterises on request, so a vector wordmark arrives as a PNG a deck can
+    // actually embed. Nothing is taken unless the entity's own official website
+    // matches this brand's, so a same-named person or company cannot be
+    // attached by accident.
+    const wiki = await enrichFromWikidata(String(brand.name ?? ""), website).catch(() => null);
+    if (wiki) {
+      // Site-declared first, encyclopaedia second, SEO copy last.
+      if (wiki.description && !String(id.description ?? "").trim()) id.description = wiki.description;
+      else if (wiki.description && id.found.some((f) => f.includes("SEO metadata"))) {
+        id.description = wiki.description;
+        id.notes.push("replaced the site's SEO description with the encyclopaedia entry");
+      }
+      if (wiki.logo && !id.logo_big) id.logo_big = wiki.logo;
+      id.notes.push(`matched ${wiki.entity} on ${wiki.matched_on} (${wiki.source})`);
+    }
     // Only fill what is EMPTY. A logo or colour an admin chose deliberately
     // outranks anything scraped, and overwriting it silently would be worse
     // than finding nothing.
     const patch: Record<string, unknown> = {};
     const fillable: [string, unknown][] = [
+      // The data request needs the registered address, and it was going out
+      // blank because nothing ever filled it.
+      ["hq_city", wiki?.hq_city], ["hq_country", wiki?.hq_country],
       ["description", id.description], ["email", id.email],
       ["logo_big", id.logo_big], ["logo_small", id.logo_small],
       ["top_banner_image", id.top_banner_image], ["auth_background_image", id.auth_background_image],
@@ -323,6 +347,7 @@ async function runStage(
       kept_existing: kept,
       found: id.found,
       notes: id.notes,
+      enriched_from: wiki ? { entity: wiki.entity, source: wiki.source, founded: wiki.founded } : null,
     };
   }
 
