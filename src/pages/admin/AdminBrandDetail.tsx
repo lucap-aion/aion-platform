@@ -4,8 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import BrandRecordForm, { type Brand } from "./_components/BrandRecordForm";
+import NewBrand from "./_components/NewBrand";
 import CommercialCycle from "./_components/CommercialCycle";
 import BrandDocuments from "./_components/BrandDocuments";
+import GoLiveChecklist from "./_components/GoLiveChecklist";
 import BrandKnowledge from "@/pages/brand/BrandKnowledge";
 import { StatusBadge } from "./_components/AdminTable";
 
@@ -23,10 +25,13 @@ import { StatusBadge } from "./_components/AdminTable";
 // reach step 1. The tab is in the URL, so /admin/brands/18?tab=cycle is a link
 // you can send someone.
 
-type Tab = "record" | "cycle" | "documents" | "knowledge";
+type Tab = "record" | "golive" | "cycle" | "documents" | "knowledge";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "record", label: "Record" },
+  // Go-live sits right after the record because it is the thing you check when you
+  // open a brand: what is still missing before it can issue a real cover.
+  { key: "golive", label: "Go-live" },
   { key: "cycle", label: "Commercial cycle" },
   { key: "documents", label: "Documents" },
   { key: "knowledge", label: "Knowledge" },
@@ -76,13 +81,13 @@ export default function AdminBrandDetail() {
         <Link to="/admin/brands" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Brands
         </Link>
-        <h1 className="font-serif text-2xl font-bold text-foreground">New brand</h1>
-        <BrandRecordForm
-          initialMode="add"
-          embedded
-          onSaved={() => navigate("/admin/brands")}
-          onClose={() => navigate("/admin/brands")}
-        />
+        <div>
+          <h1 className="font-serif text-2xl font-bold text-foreground">New brand</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            A name and a website. Everything that can be discovered is discovered.
+          </p>
+        </div>
+        <NewBrand />
       </div>
     );
   }
@@ -160,6 +165,9 @@ export default function AdminBrandDetail() {
           mounting all three would fire every one of them to render one. */}
       {tab === "record" && (
         <BrandRecordForm brandId={brand.id} embedded onSaved={() => void load()} />
+      )}
+      {tab === "golive" && (
+        <GoLiveChecklist key={brand.id} brandId={brand.id} brandName={brand.name} />
       )}
       {tab === "cycle" && <CommercialCycle brand={brand} brands={brands} />}
       {tab === "documents" && (

@@ -36,11 +36,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 type Brand = { id: number; name: string | null; website: string | null; slug: string | null; logo_small: string | null; logo_big: string | null };
 type Artifact = { kind: string; file_name: string; generated_at: string; slots_filled: number; download_url: string | null };
+// One stage of the background pipeline. The collateral is built by it now, so a
+// step can say "queued", "running" or why it failed — not just whether a file
+// happens to exist.
+type StageState = {
+  status: string; queued: boolean; attempts: number;
+  error: string | null; detail: Record<string, unknown>; finished_at: string | null;
+};
 type ProgressRow = { state: string; note: string | null; happened_on: string | null; updated_at: string };
 type Overview = {
   brand: { id: number; name: string | null; website: string | null; legal_name: string | null; address: string | null } | null;
   artifacts: Record<string, { storage_path: string; generated_at: string; slots_filled: number }>;
   progress: Record<string, ProgressRow>;
+  stages: Record<string, StageState>;
   counts: Record<string, number>;
   quotes: { category: string; coverage: string; own_quote: boolean }[];
 };
@@ -82,6 +90,13 @@ const STATES = [
 
 const ARTIFACT_FOR: Record<number, string | null> = {
   1: "intro_teaser", 2: "data_request", 3: null, 4: "business_case", 5: "operations",
+};
+
+// Which pipeline stage builds each step's artifact. Step 3 is the whole platform
+// pipeline and has its own panel; step 4 needs a perimeter only a human can
+// declare, so neither maps to a single stage.
+const STAGE_FOR: Record<number, string | null> = {
+  1: "intro_deck", 2: "data_request", 3: null, 4: null, 5: "ops_deck",
 };
 
 const when = (iso?: string | null) =>
@@ -160,6 +175,10 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
 
   const isRaster = (u: string | null | undefined) => !!u && !/\.svg(\?|$)/i.test(u);
   const hasRasterLogo = isRaster(brand?.logo_big) || isRaster(brand?.logo_small);
+  const stageFor = (n: number): StageState | null => {
+    const key = STAGE_FOR[n];
+    return key ? overview?.stages?.[key] ?? null : null;
+  };
   const artifactFor = (n: number) => {
     const kind = ARTIFACT_FOR[n];
     return kind ? artifacts.find((a) => a.kind === kind) ?? null : null;
@@ -312,6 +331,7 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
                       onRun={() => void build(1, "brand-deck", {})}
                       artifact={art}
                       review={review[1]}
+                      stage={stageFor(1)}
                       warning={(c.products ?? 0) === 0
                         ? "No catalogue yet, so there are no pieces to swap into the deck. Run the Catalogue stage in step 3 first."
                         : !hasRasterLogo
@@ -354,6 +374,7 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
                         })}
                         artifact={art}
                         review={review[2]}
+                      stage={stageFor(2)}
                         warning={legalName.trim() ? undefined
                           : "No legal entity set — the workbook will go out with that field blank."}
                       />
@@ -387,6 +408,7 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
                       onRun={() => void build(5, "build-collateral", { kind: "operations" })}
                       artifact={art}
                       review={review[5]}
+                      stage={stageFor(5)}
                     />
                   )}
                 </div>
@@ -495,13 +517,40 @@ function StepTracker({ step, row, onChange }: {
   );
 }
 
-function StepAction({ produces, busy, disabled, label, onRun, artifact, review, warning }: {
+function StepAction({ produces, busy, disabled, label, onRun, artifact, review, warning, stage }: {
   produces: string; busy: boolean; disabled?: boolean; label: string;
   onRun: () => void; artifact: Artifact | null; review?: string[]; warning?: string;
+  stage?: StageState | null;
 }) {
+  // The pipeline builds this now. Saying so matters: without it, a stage that is
+  // queued behind a long crawl is indistinguishable from one nobody started, and
+  // the admin presses a button that was going to press itself.
+  const running = stage?.status === "running";
+  const queued = stage?.queued === true;
+  const failed = stage?.status === "failed";
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">{produces}</p>
+
+      {(running || queued) && (
+        <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5 text-xs">
+          <Loader2 className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-primary ${running ? "animate-spin" : ""}`} />
+          <span>
+            {running
+              ? "Building this now — it will appear here when it lands."
+              : "Queued. The pipeline picks it up within a minute; you do not need to press anything."}
+          </span>
+        </div>
+      )}
+      {failed && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2.5 text-xs">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+          <span>
+            The pipeline could not build this{(stage?.attempts ?? 0) >= 3 ? " after three attempts" : ""}
+            {stage?.error ? `: ${stage.error}` : "."} Rebuilding here runs it again straight away.
+          </span>
+        </div>
+      )}
       {warning && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />

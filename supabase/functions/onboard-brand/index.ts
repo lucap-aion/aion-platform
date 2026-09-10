@@ -30,7 +30,20 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
 const FUNCTIONS_BASE = `${SUPABASE_URL}/functions/v1`;
 
-const ALL_STAGES = ["branding", "sources", "storefront", "demo_data", "demo_users", "documents", "assistant"] as const;
+// Order is the order the queue runs them in, and it encodes the dependencies:
+// nothing can be branded before the site is read, no deck can be built before
+// the catalogue is pulled.
+//
+// The last three used to be buttons a human pressed one at a time on three
+// different screens. They need no decisions that the brand record does not
+// already hold, so they are stages like everything else — they run themselves,
+// they retry, and their state is visible in the same place as the rest.
+const ALL_STAGES = [
+  "branding", "sources", "storefront",
+  "intro_deck",
+  "demo_data", "demo_users", "documents", "assistant",
+  "ops_deck", "data_request",
+] as const;
 // Stages that invent data — never run outside a non-production project.
 const DEMO_STAGES = ["demo_data", "demo_users"] as const;
 type Stage = (typeof ALL_STAGES)[number];
@@ -68,6 +81,14 @@ async function unmetRequirements(
     ]);
     if (!products && !productPages) {
       return "no catalogue yet — run the storefront stage (or let the crawl index the product pages) so the demo is built from real pieces";
+    }
+  }
+
+  if (stage === "intro_deck") {
+    // The deck swaps in the brand's own pieces; with no catalogue it would just
+    // re-emit AION's stock imagery under the brand's name.
+    if (!(await has("storefront_products"))) {
+      return "no catalogue yet — the deck is built from the brand's own pieces, so the storefront stage has to land first";
     }
   }
 
@@ -368,6 +389,34 @@ async function runStage(
       // no single call has to carry the whole catalogue.
       continue: remaining > 0,
     };
+  }
+
+  if (stage === "intro_deck") {
+    const out = await callFn("brand-deck", { brand_id: brandId }) as Record<string, unknown>;
+    if (out.ok === false) return out;
+    return {
+      ok: true,
+      slots_filled: out.slots_filled, slots_total: out.slots_total,
+      slides_cobranded: out.slides_cobranded, logo_source: out.logo_source,
+      review: out.review,
+    };
+  }
+
+  if (stage === "ops_deck") {
+    // Needs nothing but the brand's name — the booklet is the same for every
+    // client, which is exactly why nobody should be building it by hand.
+    const out = await callFn("build-collateral", { brand_id: brandId, kind: "operations" }) as Record<string, unknown>;
+    if (out.ok === false || out.error) return { ok: false, reason: String(out.reason ?? out.error) };
+    return { ok: true, file_name: out.file_name, review: out.review };
+  }
+
+  if (stage === "data_request") {
+    // The legal entity and address come off the brand record; build-collateral
+    // falls back to them when they are not passed, and says in its review notes
+    // which fields went out blank.
+    const out = await callFn("build-collateral", { brand_id: brandId, kind: "data_request" }) as Record<string, unknown>;
+    if (out.ok === false || out.error) return { ok: false, reason: String(out.reason ?? out.error) };
+    return { ok: true, file_name: out.file_name, unmatched: out.unmatched, review: out.review };
   }
 
   if (stage === "demo_data") {

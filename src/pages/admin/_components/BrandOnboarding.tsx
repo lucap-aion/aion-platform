@@ -10,6 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 // portals. Each stage runs on its own so a long crawl that needs a second pass
 // doesn't mean starting the brand over.
 
+// The platform half of the pipeline. intro_deck, ops_deck and data_request are
+// stages too, but they belong to steps 1, 2 and 5 of the cycle and are shown
+// there — listing them here as well would put the same work in two places.
 type StageKey = "branding" | "sources" | "storefront" | "demo_data" | "demo_users" | "documents" | "assistant";
 
 // Stages that invent data. Dev-only, enforced server-side.
