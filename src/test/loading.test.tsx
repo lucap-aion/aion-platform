@@ -104,6 +104,8 @@ describe("nothing claims a fact it has not loaded", () => {
     const { container } = wrap(<AdminCommercial />);
     expect(screen.queryByText(/0 products/i)).toBeNull();
     expect(screen.queryByText(/0\/5 steps done/i)).toBeNull();
+    // Its replacement must not claim "not started" before it has read anything either.
+    expect(screen.queryByText(/not started/i)).toBeNull();
     expect(screen.queryByText(/Nothing built yet/i)).toBeNull();
     expect(skeletons(container)).toBeGreaterThan(0);
   });

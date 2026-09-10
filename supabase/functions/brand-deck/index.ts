@@ -1,11 +1,23 @@
 // brand-deck: the intro teaser, rebranded for a prospect.
 //
 // The commercial cycle opens with the same 12-slide deck every time, rebranded
-// by hand. Diffing the master against a real branded output shows the work is
-// narrow: 34 of 47 media files never change (the AION identity, the icons, the
-// team, the pioneer logos) — only the product and lifestyle imagery does, plus a
-// couple of figures. So this swaps exactly the slots the template declares and
-// leaves everything else alone.
+// by hand. This automates the part of that work which can be automated, and is
+// explicit in its output about the part which cannot.
+//
+// An earlier version of this comment claimed the work was narrow — "34 of 47
+// media files never change". That was wrong, and measuring it properly is what
+// prompted the rewrite. Diffing AION_Teaser_New.pptx against the deck a human
+// actually branded for Pasquale Bruni: they REPLACED 23 media files and ADDED
+// 14 more. Thirty-seven, against the six imagery slots this fills.
+//
+// The other half of the measurement matters more. NEITHER deck names the brand
+// in text on any slide — not the master, not the hand-branded one. The entire
+// identity is carried by imagery, and above all by the wordmark that recurs
+// bottom-left on nine of the twelve slides: AION's in the master, the BRAND's in
+// the branded deck. A generated deck that leaves that mark alone is an AION deck
+// with a few of the prospect's products in it, which is exactly what it looked
+// like. So the logo is now placed automatically, and the review notes say
+// honestly how much imagery is still an art-direction job.
 //
 // The pieces come from the brand's OWN catalogue, which onboarding has already
 // scraped, chosen for what each slot needs: a tall editorial shot for a hero,
@@ -26,6 +38,8 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
 const BUCKET = "decks";
+// 16:9 at 13.33in — the teaser's own slide size, used to mirror across the page.
+const SLIDE_W = 12192000;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -114,6 +128,21 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // ── Co-brand every slide ───────────────────────────────────────────────────
+  // The thing that made a generated deck read as generic. Diffing the master
+  // against the deck a human actually branded for Pasquale Bruni: the human
+  // touched 37 media files, this swapped 6 — and, more to the point, the ONE
+  // recurring element on nine of twelve slides is the wordmark bottom-left, and
+  // in the branded deck it is the BRAND's wordmark. Neither deck names the brand
+  // in text anywhere; the identity is entirely carried by that mark.
+  //
+  // So rather than replace AION's mark (this is still AION's deck, about AION's
+  // service), the brand's logo is mirrored opposite it — the bottom-left /
+  // bottom-right lockup a co-branded deck normally uses. Position and height are
+  // read off the AION mark on each slide rather than hardcoded, so the template
+  // can move without this drifting.
+  const cobrand = await coBrandSlides(zip, tpl.logo_anchor ?? "ppt/media/image2.png", brand, brandId);
+
   // ── Optional text edits ────────────────────────────────────────────────────
   // A run of text is often split across several <a:t> elements, so only edits
   // that actually match a single run are applied — a partial replacement would
@@ -163,19 +192,126 @@ Deno.serve(async (req: Request) => {
     slug,
     slots_filled: filled.length,
     slots_total: slots.length,
+    slides_cobranded: cobrand.slides,
+    logo_source: cobrand.source,
     text_edits: applied,
     storage_path: outPath,
     file_name: fileName,
     download_url: signed?.signedUrl ?? null,
     // Say plainly what a human still has to do — this drafts the deck, it
     // doesn't art-direct it.
+    // Say plainly what a human still has to do. The old version of this list
+    // undersold it badly — it read as three small checks on a finished deck,
+    // when in fact a hand-branded deck touches roughly six times as many images
+    // as this fills.
     review: [
+      cobrand.slides > 0
+        ? `${brand.name}'s logo is on ${cobrand.slides} slide${cobrand.slides === 1 ? "" : "s"}, opposite the AION mark.` +
+          (cobrand.source === "logo_small"
+            ? " It used the small logo — usually the monogram rather than the wordmark, because the main logo is a vector. A wordmark reads better here: put a PNG or JPEG one on the brand record and rebuild."
+            : " Check it reads well at that size.")
+        : `NO BRAND LOGO on any slide — ${cobrand.reason}. The deck carries only AION's mark, which is most of what makes it look generic. Put a PNG or JPEG logo on the brand record and rebuild.`,
+      `${filled.length} of ${slots.length} imagery slots filled from their catalogue. A deck branded by hand replaces around 37 images — the icons, diagrams, lifestyle photography and the pioneer logo wall on slide 9 are all still AION's originals and need doing by hand.`,
       "Check every swapped image on the slide — crops and aspect ratios differ from the originals.",
-      "Slide 9 (pioneer programs) and the team slide are untouched by design.",
-      "The brand's logo is not placed automatically; add it where the sample deck has it.",
+      "Neither this deck nor the hand-branded reference names the brand in text anywhere; the identity is carried by imagery, so the imagery is what has to be right.",
     ],
   });
 });
+
+// Put the brand's logo opposite the AION wordmark, on every slide that has one.
+//
+// Anchored off the AION mark itself: find the picture that embeds the anchor
+// media on a slide, read its position and height, and mirror it across the slide
+// with the SAME height and the same bottom edge. Width comes from the logo's own
+// pixel dimensions, never from the anchor's box — a square monogram forced into
+// the wordmark's 3.5:1 slot would be stretched to nearly twice its width, and a
+// distorted logo is worse than no logo.
+async function coBrandSlides(
+  zip: JSZip, anchorMedia: string, brand: Record<string, unknown>, brandId: number,
+): Promise<{ slides: number; source: string; reason: string }> {
+  const candidates: [string, unknown][] = [["logo_big", brand.logo_big], ["logo_small", brand.logo_small]];
+  let logo: { bytes: Uint8Array; ext: string; w: number; h: number } | null = null;
+  let source = "";
+  let reason = "the brand record has no logo on it";
+
+  for (const [field, url] of candidates) {
+    if (typeof url !== "string" || !url) continue;
+    // PowerPoint cannot embed an SVG without a raster fallback, and there is no
+    // rasteriser in this runtime. Say which field was unusable rather than
+    // failing silently on the brand whose only logo is a vector.
+    if (/\.svg(\?|$)/i.test(url)) { reason = `${field} is an SVG, which cannot be embedded without rasterising it`; continue; }
+    const img = await fetchImage(url);
+    if (!img) { reason = `${field} could not be downloaded`; continue; }
+    const size = imageSize(img.bytes);
+    if (!size) { reason = `${field} is not a readable PNG or JPEG`; continue; }
+    logo = { ...img, ...size }; source = field; break;
+  }
+  if (!logo) return { slides: 0, source: "", reason };
+
+  const anchorName = anchorMedia.replace("ppt/media/", "");
+  const logoName = `brand${brandId}_logo.${logo.ext}`;
+  zip.file(`ppt/media/${logoName}`, logo.bytes);
+
+  let placed = 0;
+  for (let n = 1; n <= 60; n++) {
+    const relPath = `ppt/slides/_rels/slide${n}.xml.rels`;
+    const slidePath = `ppt/slides/slide${n}.xml`;
+    const rels = await zip.file(relPath)?.async("string");
+    const xml = await zip.file(slidePath)?.async("string");
+    if (!rels || !xml) continue;
+
+    const anchorRel = new RegExp(`Id="([^"]+)"[^>]*Target="[^"]*${anchorName.replace(".", "\\.")}"`).exec(rels)
+      ?? new RegExp(`Target="[^"]*${anchorName.replace(".", "\\.")}"[^>]*Id="([^"]+)"`).exec(rels);
+    if (!anchorRel) continue;
+
+    const pic = (xml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) ?? [])
+      .find((p) => p.includes(`r:embed="${anchorRel[1]}"`));
+    if (!pic) continue;
+    const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(pic);
+    const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(pic);
+    if (!off || !ext) continue;
+
+    const ax = Number(off[1]), ay = Number(off[2]);
+    const acx = Number(ext[1]), acy = Number(ext[2]);
+    // Same height, own aspect ratio, right edge mirroring the anchor's left margin.
+    const cy = acy;
+    const cx = Math.round(cy * (logo.w / logo.h));
+    const x = Math.max(ax + acx + cy, SLIDE_W - ax - cx);
+
+    const relId = `rIdLogo${n}`;
+    zip.file(relPath, rels.replace("</Relationships>",
+      `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${logoName}"/></Relationships>`));
+    zip.file(slidePath, xml.replace("</p:spTree>",
+      `<p:pic><p:nvPicPr><p:cNvPr id="${900 + n}" name="Brand logo"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>` +
+      `<p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>` +
+      `<p:spPr><a:xfrm><a:off x="${x}" y="${ay}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+      `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic></p:spTree>`));
+    placed++;
+  }
+  return { slides: placed, source, reason: placed ? "" : "no slide carries the AION wordmark to mirror" };
+}
+
+// Intrinsic pixel dimensions, straight from the file header. PNG keeps them in
+// the IHDR chunk; JPEG in whichever SOF marker comes first.
+function imageSize(b: Uint8Array): { w: number; h: number } | null {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  if (b.length > 24 && b[0] === 0x89 && b[1] === 0x50) {
+    return { w: dv.getUint32(16), h: dv.getUint32(20) };
+  }
+  if (b.length > 4 && b[0] === 0xff && b[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const marker = b[i + 1];
+      // SOF0-SOF15, excluding the non-frame markers in that range.
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { h: dv.getUint16(i + 5), w: dv.getUint16(i + 7) };
+      }
+      i += 2 + dv.getUint16(i + 2);
+    }
+  }
+  return null;
+}
 
 // Hero slots want a tall editorial shot; product slots want the pieces that
 // carry the house. Both come from the brand's own catalogue.

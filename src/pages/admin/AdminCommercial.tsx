@@ -222,7 +222,6 @@ export default function AdminCommercial() {
   }
 
   const c = overview?.counts ?? {};
-  const doneCount = STEPS.filter((s) => overview?.progress?.[String(s.n)]?.state === "done").length;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -259,7 +258,7 @@ export default function AdminCommercial() {
           </div>
         ) : (
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span>{doneCount}/5 steps done</span>
+            <CycleProgress progress={overview?.progress} onJump={setOpen} />
             <span>{c.products ?? 0} products</span>
             <span>{c.knowledge_chunks ?? 0} chunks indexed</span>
             <span>{c.policies ?? 0} covers</span>
@@ -420,6 +419,52 @@ export default function AdminCommercial() {
         })}
       </div>
     </div>
+  );
+}
+
+// How far along this deal is, at a glance.
+//
+// This used to read "0/5 steps done", which is arithmetically true and useless:
+// it sits next to a step the screen is visibly showing as in progress, counts
+// only the finished ones, and so reports nothing happening on a deal that is
+// clearly moving. Worse, "in progress" is often set by the system rather than
+// the person — generating a deck promotes a step off not-started — so the first
+// thing they read after an action is a counter that still says zero.
+//
+// Five segments, one per step, in the step's own colour. It gives progress its
+// due, it is honest about what is and is not finished, and each segment jumps
+// to its step.
+function CycleProgress({ progress, onJump }: {
+  progress?: Record<string, ProgressRow>;
+  onJump: (step: number) => void;
+}) {
+  const stateOf = (n: number) => progress?.[String(n)]?.state ?? "not_started";
+  const count = (st: string) => STEPS.filter((s) => stateOf(s.n) === st).length;
+  const done = count("done"), active = count("in_progress"), skipped = count("skipped");
+
+  const parts = [
+    done ? `${done} done` : null,
+    active ? `${active} in progress` : null,
+    skipped ? `${skipped} skipped` : null,
+  ].filter(Boolean);
+
+  return (
+    <span className="flex items-center gap-2">
+      <span className="flex items-center gap-0.5" aria-hidden>
+        {STEPS.map((s) => {
+          const st = stateOf(s.n);
+          return (
+            <button key={s.n} onClick={() => onJump(s.n)} title={`${s.n}. ${s.title} — ${STATES.find((x) => x.value === st)?.label}`}
+              className={`h-1.5 w-5 rounded-full transition-opacity hover:opacity-70 ${
+                st === "done" ? "bg-emerald-500"
+                  : st === "in_progress" ? "bg-primary"
+                  : st === "skipped" ? "bg-muted-foreground/40"
+                  : "bg-border"}`} />
+          );
+        })}
+      </span>
+      <span>{parts.length ? parts.join(" · ") : "not started"}</span>
+    </span>
   );
 }
 
