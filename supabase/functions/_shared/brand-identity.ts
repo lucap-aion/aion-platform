@@ -1,4 +1,8 @@
 import { jsonLdNodes } from "./product-extract.ts";
+import {
+  imageCandidates, assignPortalImages, brandColourFrom, frequentColours,
+  googleFontsFrom, declaredFontFamilies,
+} from "./brand-appearance.ts";
 // Harvest a brand's visual identity from its own website.
 //
 // A brand record starts almost empty: name, website, maybe a country. Everything
@@ -16,6 +20,12 @@ export type BrandIdentity = {
   logo_small?: string;
   top_banner_image?: string;
   auth_background_image?: string;
+  // The four claim/FAQ/feedback slots. Never attempted before, so every onboarded brand
+  // arrived at the Record tab with four empty upload boxes.
+  theft_image?: string;
+  damage_image?: string;
+  faq_image?: string;
+  feedback_image?: string;
   theme_settings?: Record<string, string>;
   found: string[];
   notes: string[];
@@ -23,12 +33,25 @@ export type BrandIdentity = {
 
 const UA = "Mozilla/5.0 (AION brand onboarding)";
 
-export async function harvestBrandIdentity(website: string): Promise<BrandIdentity> {
+export async function harvestBrandIdentity(website: string, jinaKey = ""): Promise<BrandIdentity> {
   const base = website.startsWith("http") ? website : `https://${website}`;
   const out: BrandIdentity = { found: [], notes: [] };
 
-  const html = await fetchText(base);
-  if (!html) { out.notes.push("could not fetch the homepage"); return out; }
+  const html = await fetchText(base) ?? "";
+  let markdown = "";
+  // Two different ways a luxury homepage yields no pictures to a plain fetch, and both are
+  // normal. Some refuse it outright — ferragamo.com answers 403 to anything that is not a
+  // browser. Others answer with a JavaScript shell: stylesheets and meta tags, and not one
+  // <img> tag, because the photography is loaded client-side.
+  //
+  // The crawl already goes through a renderer for exactly this reason, so borrow it. Its
+  // markdown carries a ![](…) for every image the page actually shows, which is the one
+  // source of brand photography that works on either kind of site.
+  if (jinaKey && !html) {
+    markdown = await fetchRendered(base, jinaKey);
+    if (markdown) out.notes.push("the homepage refused a direct fetch, so it was read through the renderer — imagery only, no colours or fonts");
+  }
+  if (!html && !markdown) { out.notes.push("could not fetch the homepage"); return out; }
 
   const origin = new URL(base).origin;
   const abs = (u: string | null | undefined) => {
@@ -66,13 +89,29 @@ export async function harvestBrandIdentity(website: string): Promise<BrandIdenti
   if (contact) { out.email = contact; out.found.push("email"); }
 
   // ── Marks ─────────────────────────────────────────────────────────────────
-  // og:image is the brand's own chosen share image — the best single hero we
-  // can get without judgement. The icons are the reliable small mark.
-  const ogImage = abs(meta(html, "og:image"));
-  if (ogImage) {
-    out.top_banner_image = ogImage;
-    out.auth_background_image = ogImage;
-    out.found.push("hero image");
+  // Every picture the page offers, best first, handed out one per slot.
+  //
+  // This used to be og:image alone, copied into two of the six slots and nothing in the
+  // other four — so a house that declared no share image (Ferragamo declares none) got no
+  // portal imagery at all, and one that did got the same photograph twice.
+  let photos = imageCandidates({ html, markdown, origin });
+  if (!photos.length && html && jinaKey) {
+    // The fetch worked and still produced nothing: a rendered shell. Ask the renderer.
+    markdown = await fetchRendered(base, jinaKey);
+    photos = imageCandidates({ html, markdown, origin });
+    if (photos.length) out.notes.push("the homepage renders its photography in JavaScript, so the images were read through the renderer");
+  }
+  const portal = assignPortalImages(photos);
+  Object.assign(out, portal);
+  const slotsFilled = Object.keys(portal).length;
+  if (slotsFilled) {
+    out.found.push(`${slotsFilled} portal image${slotsFilled === 1 ? "" : "s"}`);
+    out.notes.push(
+      `${slotsFilled} of 6 portal slots filled from ${photos.length} usable picture${photos.length === 1 ? "" : "s"} on the homepage — ` +
+      "they were assigned in order, not chosen, so look at the claim and feedback screens before a client does",
+    );
+  } else {
+    out.notes.push("no usable photography on the homepage — the six portal images have to be collected by hand");
   }
 
   // LARGEST icon, not the first one in the document. Ferragamo lists 57x57
@@ -125,27 +164,71 @@ export async function harvestBrandIdentity(website: string): Promise<BrandIdenti
   else { out.notes.push("no logo found — the deck will carry only AION's mark until one is set on the record"); }
 
   // ── Colour ────────────────────────────────────────────────────────────────
-  // theme-color is the one colour a site declares about itself. Anything more
-  // (parsing stylesheets, averaging pixels) guesses, and a wrong primary colour
-  // is worse than none because it repaints the whole portal.
+  // A custom property the site NAMED for its brand is the one stylesheet signal that is not
+  // a guess — somebody wrote `--brand-gold` on purpose. theme-color is the fallback, and it
+  // is usually white or black because it exists to tint mobile browser chrome: Pasquale
+  // Bruni declares #ffffff, and taking that repaints the entire portal white.
+  //
+  // Everything beyond those two stays a suggestion. A wrong primary is worse than none.
+  const theme: Record<string, string> = {};
+  const declaredColour = brandColourFrom(html);
   const themeColor = meta(html, "theme-color");
-  const hsl = themeColor ? toHsl(themeColor.trim()) : null;
-  if (hsl && isUsablePrimary(hsl)) {
-    out.theme_settings = { primary_hsl: hsl };
-    out.found.push("primary colour");
-  } else if (hsl) {
-    // Most sites set theme-color to white or black for the mobile browser
-    // chrome. Taking that as the brand's primary repaints the entire portal in
-    // it — worse than leaving the default. Pasquale Bruni declares #ffffff.
-    out.notes.push(`theme-color is ${themeColor} — browser chrome, not a brand colour; set the primary by hand`);
+  const declaredHsl = declaredColour ? toHsl(declaredColour) : null;
+  const metaHsl = themeColor ? toHsl(themeColor.trim()) : null;
+
+  if (declaredHsl && isUsablePrimary(declaredHsl)) {
+    theme.primary_hsl = declaredHsl;
+    out.found.push(`primary colour (${declaredColour}, named by the site)`);
+  } else if (metaHsl && isUsablePrimary(metaHsl)) {
+    theme.primary_hsl = metaHsl;
+    out.found.push("primary colour (theme-color)");
   } else {
-    out.notes.push("no theme-color declared — pick the primary colour by hand");
+    if (metaHsl) out.notes.push(`theme-color is ${themeColor} — browser chrome, not a brand colour`);
+    const suggestions = frequentColours(html);
+    out.notes.push(suggestions.length
+      ? `no brand colour is declared; the stylesheet leans on ${suggestions.join(", ")} — pick the primary by hand`
+      : "no brand colour declared anywhere — pick the primary by hand");
   }
+
+  // ── Typefaces ─────────────────────────────────────────────────────────────
+  // Only when they can actually be served. A house's own typeface is licensed and
+  // self-hosted, so putting its name in the record sets a font-family the portal cannot
+  // load and every heading falls back silently — worse than the empty field, which at least
+  // asks somebody to look.
+  const fonts = googleFontsFrom(html);
+  if (fonts) {
+    Object.assign(theme, fonts);
+    out.found.push(`fonts (${fonts.heading_font}${fonts.body_font !== fonts.heading_font ? ` / ${fonts.body_font}` : ""})`);
+  } else {
+    const named = declaredFontFamilies(html);
+    out.notes.push(named.length
+      ? `the site sets ${named.join(", ")} — licensed faces it hosts itself, so they cannot be loaded here; pick a near match by hand`
+      : "no loadable typeface declared — set the fonts by hand");
+  }
+
+  if (Object.keys(theme).length) out.theme_settings = theme;
 
   return out;
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+// The crawl's renderer, used here only when a direct fetch was refused. Returns markdown,
+// which is enough for imagery and nothing else — there is no CSS in it, so the colour and
+// the fonts stay unanswered on a site that blocks us, and the notes say so.
+async function fetchRendered(url: string, jinaKey: string): Promise<string> {
+  try {
+    const res = await fetch("https://r.jina.ai/" + url, {
+      headers: {
+        ...(jinaKey ? { Authorization: `Bearer ${jinaKey}` } : {}),
+        Accept: "text/plain",
+        "X-Return-Format": "markdown",
+      },
+      signal: AbortSignal.timeout(45000),
+    });
+    return res.ok ? await res.text() : "";
+  } catch { return ""; }
+}
+
 async function fetchText(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, { headers: { "User-Agent": UA }, redirect: "follow" });

@@ -312,7 +312,9 @@ async function runStage(
     const website = String(brand.website ?? "").trim();
     if (!website) return { ok: false, reason: "the brand has no website — add one on the brand record first" };
 
-    const id = await harvestBrandIdentity(website);
+    // The key lets the harvester fall back to the crawl's renderer when the site refuses
+    // a direct fetch, which is how most luxury storefronts answer anything but a browser.
+    const id = await harvestBrandIdentity(website, JINA_API_KEY);
 
     // The site is the right source for colours and imagery and the wrong one for
     // a description — a storefront's meta description is written for Google's
@@ -377,7 +379,11 @@ async function runStage(
       ["hq_city", office?.city ?? wiki?.hq_city], ["hq_country", wiki?.hq_country],
       ["description", id.description], ["email", id.email],
       ["logo_big", id.logo_big], ["logo_small", id.logo_small],
+      // All six portal slots. Four of them were never in this list, so a brand could finish
+      // onboarding with the claim, FAQ and feedback screens carrying nothing at all.
       ["top_banner_image", id.top_banner_image], ["auth_background_image", id.auth_background_image],
+      ["theft_image", id.theft_image], ["damage_image", id.damage_image],
+      ["faq_image", id.faq_image], ["feedback_image", id.feedback_image],
       ["theme_settings", id.theme_settings],
     ];
     const kept: string[] = [];
