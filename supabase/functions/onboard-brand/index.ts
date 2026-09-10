@@ -23,12 +23,14 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { demoToolsEnabled, demoToolsBlockedReason, isNonProduction } from "../_shared/environment.ts";
 import { harvestBrandIdentity } from "../_shared/brand-identity.ts";
+import { extractProducts } from "../_shared/product-extract.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
 const FUNCTIONS_BASE = `${SUPABASE_URL}/functions/v1`;
+const JINA_API_KEY = Deno.env.get("JINA_API_KEY") ?? "";
 
 // Order is the order the queue runs them in, and it encodes the dependencies:
 // nothing can be branded before the site is read, no deck can be built before
@@ -350,15 +352,41 @@ async function runStage(
 
     const detected = await detectShopify(base);
     if (!detected) {
-      // Not every house sells online through a readable feed. That's fine — the
-      // crawler still indexed the product pages, and the demo book falls back to
-      // those. Record it so nobody goes looking for a bug.
+      // No Shopify feed. Before giving up, look for the structured data the site
+      // publishes for Google: schema.org Product, which most of the luxury
+      // market emits even when it blocks plain fetches. That is the difference
+      // between a brand with a catalogue and a brand without one, and therefore
+      // between an intro deck with their pieces in it and AION's stock imagery.
+      const structured = await detectStructured(base);
       await admin.from("storefront_sources").upsert(
-        { brand_id: brandId, base_url: base, platform: "none", enabled: false, detected_at: new Date().toISOString() },
+        {
+          brand_id: brandId, base_url: base,
+          platform: structured > 0 ? "structured" : "none",
+          enabled: structured > 0,
+          detected_at: new Date().toISOString(),
+        },
         { onConflict: "brand_id" },
       );
-      return { ok: true, platform: "none", products: 0,
-        note: "no public product feed found — the catalogue will come from the indexed product pages" };
+
+      if (structured === 0) {
+        return { ok: true, platform: "none", products: 0,
+          note: "no product feed and no structured product data on this site — the demo book will fall back to indexed product pages" };
+      }
+
+      // Hand it to the sync exactly like Shopify, and let it re-queue itself.
+      const synced = await callFn("sync-storefront", { brand_id: brandId, max: STOREFRONT_BATCH }) as
+        { results?: { products?: number; embedded?: number; remaining?: number }[] };
+      const r = synced.results?.[0] ?? {};
+      const { count } = await admin.from("storefront_products").select("id", { count: "exact", head: true }).eq("brand_id", brandId);
+      const remaining = Number(r.remaining ?? 0);
+      return {
+        ok: true, platform: "structured", base,
+        products: count ?? 0,
+        embedded_this_run: Number(r.embedded ?? 0),
+        images_remaining: remaining,
+        note: `no Shopify feed — read ${structured} products from the site's own schema.org data`,
+        continue: remaining > 0,
+      };
     }
 
     await admin.from("storefront_sources").upsert(
@@ -697,6 +725,33 @@ async function detectShopify(base: string): Promise<{ base: string; keepUntyped:
     } catch { /* try the next candidate */ }
   }
   return null;
+}
+
+// Is there a catalogue in the page's structured data? One fetch of the homepage
+// is enough to tell: a storefront that publishes Product JSON-LD anywhere
+// publishes it on its landing and category pages.
+async function detectStructured(base: string): Promise<number> {
+  for (const url of [base, `${base}/shop`, `${base}/collections/all`]) {
+    try {
+      const html = JINA_API_KEY
+        ? await jinaHtml(url)
+        : await (await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (AION onboarding)" }, signal: AbortSignal.timeout(20000) })).text();
+      const found = extractProducts(html, url).length;
+      if (found > 0) return found;
+    } catch { /* try the next candidate */ }
+  }
+  return 0;
+}
+
+async function jinaHtml(url: string): Promise<string> {
+  // HTML, not markdown: the structured data lives in <script> tags that a
+  // markdown conversion discards.
+  const res = await fetch("https://r.jina.ai/" + url, {
+    headers: { "Authorization": `Bearer ${JINA_API_KEY}`, "X-Return-Format": "html", "Accept": "text/plain" },
+    signal: AbortSignal.timeout(45000),
+  });
+  if (!res.ok) throw new Error(`jina HTTP ${res.status}`);
+  return await res.text();
 }
 
 function normaliseBase(website: string): string | null {

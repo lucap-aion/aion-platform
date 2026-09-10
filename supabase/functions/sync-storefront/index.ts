@@ -10,8 +10,11 @@
 // Returns: { results: [{ brand_id, products, upserted, embedded, remaining, done }] }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { extractProducts } from "../_shared/product-extract.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const JINA_API_KEY = Deno.env.get("JINA_API_KEY") ?? "";
+const UA = "Mozilla/5.0 (AION storefront sync)";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY")!;
@@ -38,7 +41,7 @@ async function loadStorefronts(
 ): Promise<Map<number, Storefront>> {
   let q = admin.from("storefront_sources")
     .select("brand_id, base_url, currency, keep_untyped, platform, enabled")
-    .eq("enabled", true).eq("platform", "shopify");
+    .eq("enabled", true).in("platform", ["shopify", "structured"]);
   if (only) q = q.eq("brand_id", only);
   const { data, error } = await q;
   if (error) throw new Error(`storefront_sources: ${error.message}`);
@@ -101,7 +104,12 @@ Deno.serve(async (req: Request) => {
 async function syncBrand(
   admin: ReturnType<typeof createClient>, brandId: number, store: Storefront, maxEmbed: number,
 ) {
-  const products = await fetchStorefront(store.base, store.keepUntyped);
+  // Shopify hands over the whole catalogue in one feed. Everything else
+  // publishes it as schema.org JSON-LD for Google, which is most of the market
+  // and includes every house that blocks a plain fetch.
+  const products = store.platform === "structured"
+    ? await fetchStructured(admin, brandId, store.base)
+    : await fetchStorefront(store.base, store.keepUntyped);
 
   // 1. Upsert product fields for the whole range (cheap, every run).
   const rows = products.map((p) => ({
@@ -117,7 +125,7 @@ async function syncBrand(
     price_currency: store.currency,
     available: p.available,
     image_url: p.imageUrl,
-    product_url: `${store.base}/products/${p.handle}`,
+    product_url: p.productUrl ?? `${store.base}/products/${p.handle}`,
     updated_at: new Date().toISOString(),
   }));
   for (let i = 0; i < rows.length; i += 200) {
@@ -205,10 +213,95 @@ async function syncBrand(
 }
 
 type SProduct = {
+  productUrl?: string | null;
   handle: string; sku: string | null; name: string; category: string | null;
   collection: string | null; description: string | null; price: number | null;
   compareAt: number | null; available: boolean; imageUrl: string | null;
 };
+
+// Read the catalogue out of the pages the crawler has already visited.
+//
+// The crawl queue is the list of the site's own URLs, so there is no second
+// discovery pass: fetch each page (through the renderer, because the houses that
+// need this are the ones that block plain fetches) and read the schema.org
+// Product data it publishes. A single category page routinely carries sixty
+// products, so this converges in a handful of fetches rather than one per item.
+async function fetchStructured(
+  admin: ReturnType<typeof createClient>, brandId: number, base: string,
+): Promise<SProduct[]> {
+  const { data: queued } = await admin.from("knowledge_crawl_queue")
+    .select("url").eq("brand_id", brandId).eq("status", "done").limit(400);
+
+  const urls = [base, ...((queued ?? []) as { url: string }[]).map((r) => r.url)];
+  // Listing pages first: they carry many products each, so the budget goes
+  // furthest on them. A page whose path suggests a collection is tried before a
+  // page that looks like a single item.
+  urls.sort((a, b) => score(b) - score(a));
+
+  const seen = new Set<string>();
+  const out: SProduct[] = [];
+  let fetched = 0;
+
+  for (const url of urls) {
+    if (out.length >= STRUCTURED_MAX_PRODUCTS || fetched >= STRUCTURED_MAX_PAGES) break;
+    let html = "";
+    try {
+      html = JINA_API_KEY
+        ? await jinaHtml(url)
+        : await (await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20000) })).text();
+    } catch { continue; }
+    fetched++;
+
+    for (const p of extractProducts(html, url)) {
+      const key = (p.product_url ?? p.name).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        // handle is the upsert key, and these sites have no Shopify handle — the
+        // product URL's last segment is the stable per-product identifier.
+        handle: handleFrom(p.product_url, p.name),
+        sku: p.sku, name: p.name, category: p.category, collection: null,
+        description: null, price: p.price, compareAt: null,
+        available: p.available ?? true, imageUrl: p.image_url,
+        productUrl: p.product_url,
+      } as SProduct);
+    }
+  }
+  return out;
+}
+
+const STRUCTURED_MAX_PAGES = 25;
+const STRUCTURED_MAX_PRODUCTS = 600;
+
+function score(url: string): number {
+  const u = url.toLowerCase();
+  if (/\/(collections?|shop|category|categories|c)\//.test(u)) return 3;
+  if (/\/(products?|p|item)\//.test(u)) return 1;
+  return 2;
+}
+
+function handleFrom(productUrl: string | null, name: string): string {
+  const fromUrl = productUrl
+    ? decodeURIComponent(new URL(productUrl).pathname).split("/").filter(Boolean).pop() ?? ""
+    : "";
+  const base = fromUrl || name;
+  return base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 120) || "item";
+}
+
+// The renderer returns rendered HTML rather than markdown, because the structured
+// data lives in <script> tags that a markdown conversion throws away.
+async function jinaHtml(url: string): Promise<string> {
+  const res = await fetch("https://r.jina.ai/" + url, {
+    headers: {
+      "Authorization": `Bearer ${JINA_API_KEY}`,
+      "X-Return-Format": "html",
+      "Accept": "text/plain",
+    },
+    signal: AbortSignal.timeout(45000),
+  });
+  if (!res.ok) throw new Error(`jina HTTP ${res.status}`);
+  return await res.text();
+}
 
 async function fetchStorefront(base: string, keepUntyped = false): Promise<SProduct[]> {
   const out: SProduct[] = [];
