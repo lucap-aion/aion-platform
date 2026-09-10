@@ -548,7 +548,8 @@ async function runStage(
 
       // Hand it to the sync exactly like Shopify, and let it re-queue itself.
       const synced = await callFn("sync-storefront", { brand_id: brandId, max: STOREFRONT_BATCH }) as
-        { results?: { products?: number; embedded?: number; remaining?: number; pages_read?: number; pages_remaining?: number }[] };
+        { results?: { products?: number; embedded?: number; remaining?: number; pages_read?: number;
+                      pages_remaining?: number; pages_done?: number; pages_total?: number }[] };
       const r = synced.results?.[0] ?? {};
       const { count } = await admin.from("storefront_products").select("id", { count: "exact", head: true }).eq("brand_id", brandId);
       const remaining = Number(r.remaining ?? 0);
@@ -560,6 +561,11 @@ async function runStage(
         images_remaining: remaining,
         pages_read: Number(r.pages_read ?? 0),
         pages_remaining: pagesLeft,
+        // How far through the site this pass is. The stage carries a long read across many
+        // invocations by re-queueing itself, and without these the only thing the screen
+        // could say between batches was that something was waiting to start.
+        pages_done: Number(r.pages_done ?? 0),
+        pages_total: Number(r.pages_total ?? 0),
         note: `no Shopify feed — reading the catalogue out of the site's own schema.org data, ${count ?? 0} products so far`,
         // Come back for the rest of the site as well as for the rest of the images. Reading
         // every page in one call is what killed the worker.

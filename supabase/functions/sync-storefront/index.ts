@@ -219,7 +219,12 @@ async function syncBrand(
     // Pages of the site still to read. Separate from `remaining`, which counts images left
     // to embed: a run can have embedded everything it fetched and still have most of the
     // catalogue ahead of it.
-    ...(structured ? { pages_read: structured.pagesRead, pages_remaining: structured.pagesRemaining } : {}),
+    ...(structured
+      ? {
+        pages_read: structured.pagesRead, pages_remaining: structured.pagesRemaining,
+        pages_done: structured.pagesDone, pages_total: structured.pagesTotal,
+      }
+      : {}),
     done: remaining === 0 && (structured ? structured.pagesRemaining === 0 : true),
     // Present only when something went wrong, so a run that embeds nothing says
     // why instead of looking like there was nothing to do.
@@ -243,7 +248,10 @@ type SProduct = {
 // products, so this converges in a handful of fetches rather than one per item.
 async function fetchStructured(
   admin: ReturnType<typeof createClient>, brandId: number, base: string, cursor: number,
-): Promise<{ products: SProduct[]; pagesRead: number; pagesRemaining: number }> {
+): Promise<{
+  products: SProduct[]; pagesRead: number; pagesRemaining: number;
+  pagesDone: number; pagesTotal: number;
+}> {
   const { data: queued } = await admin.from("knowledge_crawl_queue")
     .select("url").eq("brand_id", brandId).eq("status", "done").limit(400);
 
@@ -258,21 +266,36 @@ async function fetchStructured(
   const from = cursor >= urls.length ? 0 : cursor;
   const window = urls.slice(from, from + STRUCTURED_MAX_PAGES);
 
+  // Render the window CONCURRENTLY. One page takes three or four seconds, so five of them
+  // read in sequence used sixteen seconds of the seventy the stage is given and handed the
+  // rest back — a hundred-and-thirty-page site therefore took half an hour of once-a-minute
+  // ticks to read, and for most of that half hour the panel had nothing to show but a clock.
+  // A few at a time fills the budget instead of the minute.
+  const html: string[] = [];
+  for (let i = 0; i < window.length; i += STRUCTURED_CONCURRENCY) {
+    html.push(...await Promise.all(window.slice(i, i + STRUCTURED_CONCURRENCY).map(async (url) => {
+      try {
+        return JINA_API_KEY
+          ? await jinaHtml(url)
+          : await (await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20000) })).text();
+      } catch {
+        return "";
+      }
+    })));
+  }
+
   const seen = new Set<string>();
   const out: SProduct[] = [];
   let fetched = 0;
 
-  for (const url of window) {
+  for (let i = 0; i < window.length; i++) {
+    // Leave the rest of the window for the next run rather than advancing the cursor past
+    // pages nothing was read out of.
     if (out.length >= STRUCTURED_MAX_PRODUCTS) break;
-    let html = "";
-    try {
-      html = JINA_API_KEY
-        ? await jinaHtml(url)
-        : await (await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20000) })).text();
-    } catch { fetched++; continue; }
+    const url = window[i];
     fetched++;
 
-    for (const p of extractProducts(html, url)) {
+    for (const p of extractProducts(html[i], url)) {
       const key = (p.product_url ?? p.name).toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -295,11 +318,20 @@ async function fetchStructured(
   await admin.from("storefront_sources")
     .update({ structured_cursor: wrapped }).eq("brand_id", brandId);
 
-  return { products: out, pagesRead: fetched, pagesRemaining: Math.max(0, urls.length - next) };
+  return {
+    products: out, pagesRead: fetched,
+    pagesRemaining: Math.max(0, urls.length - next),
+    // Where this pass has got to, for a screen that would otherwise have to say either
+    // "waiting" or nothing at all for the twenty minutes a full read takes.
+    pagesDone: Math.min(next, urls.length), pagesTotal: urls.length,
+  };
 }
 
-// Small enough that a run of them, each a renderer call, finishes inside one worker.
-const STRUCTURED_MAX_PAGES = 5;
+// Small enough that a run of them finishes inside one worker — but read a few at a time
+// (below), so the limit is the stage's time budget rather than one renderer call after
+// another.
+const STRUCTURED_MAX_PAGES = 12;
+const STRUCTURED_CONCURRENCY = 4;
 const STRUCTURED_MAX_PRODUCTS = 600;
 
 

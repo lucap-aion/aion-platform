@@ -36,6 +36,7 @@ type Props = {
 const ICON: Record<string, React.ReactNode> = {
   done: <Check className="h-3 w-3" />,
   running: <Loader2 className="h-3 w-3 animate-spin" />,
+  working: <Loader2 className="h-3 w-3 animate-spin" />,
   stalled: <AlertCircle className="h-3 w-3" />,
   needs_input: <HelpCircle className="h-3 w-3" />,
   failed: <AlertCircle className="h-3 w-3" />,
@@ -47,6 +48,7 @@ const ICON: Record<string, React.ReactNode> = {
 const CHIP: Record<string, string> = {
   done: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   running: "border-primary/50 bg-primary/10 text-primary",
+  working: "border-primary/50 bg-primary/10 text-primary",
   stalled: "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-500",
   needs_input: "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-500",
   failed: "border-destructive/40 bg-destructive/5 text-destructive",
@@ -132,7 +134,7 @@ export default function PipelinePanel({
         <span className="text-xs text-muted-foreground">
           {summary.active
             ? summary.running
-              ? `${summary.running.label} — in progress`
+              ? `${summary.running.label} — ${progressLine(summary.running.key, stages?.[summary.running.key]) ?? "in progress"}`
               : `${summary.queued} step${summary.queued === 1 ? "" : "s"} waiting to start`
             : stalled.length
             ? `${stalled.length === 1 ? "One stage" : `${stalled.length} stages`} stopped reporting`
@@ -199,6 +201,8 @@ export default function PipelinePanel({
               <p className={`mt-0.5 text-xs ${openAt === "failed" ? "text-destructive" : "text-muted-foreground"}`}>
                 {openAt === "queued"
                   ? "Queued — the background runner picks it up within a minute, and nothing needs pressing."
+                  : openAt === "working"
+                  ? `${progressLine(openStage.key, openState) ?? "Working"} — it reads a batch a minute and keeps going on its own. You can leave the page.`
                   : openAt === "running"
                   ? "Running now. It will land here when it finishes; you can leave the page."
                   : openAt === "stalled"
@@ -218,12 +222,13 @@ export default function PipelinePanel({
             </div>
             <button
               onClick={() => void run([openStage.key])}
-              disabled={!website || busy !== null || openAt === "queued" || openAt === "running"}
+              disabled={!website || busy !== null || openAt === "queued" || openAt === "working" || openAt === "running"}
               className="shrink-0 rounded-md border border-border px-2.5 py-1.5 text-xs disabled:opacity-50"
             >
               {busy === openStage.key ? "Queueing…"
                 : openAt === "done" ? "Re-run"
                 : openAt === "queued" ? "Queued"
+                : openAt === "working" ? "Working"
                 : openAt === "running" ? "Running"
                 : openAt === "stalled" ? "Run it again"
                 : openAt === "needs_input" ? "Run anyway"
@@ -247,9 +252,34 @@ export default function PipelinePanel({
   );
 }
 
+// What a stage that is MID-WORK is doing, for the header and for its own panel.
+//
+// Distinct from detailLine below, which reports what landed once a stage is finished. A
+// long stage hands back between batches and re-queues itself, so for most of the twenty
+// minutes a full catalogue read takes there is no invocation in flight — but there is
+// always a last result saying how far it got, and that is the only honest thing to show.
+function progressLine(stage: string, st: StageState | undefined): string | null {
+  const d = (st?.detail ?? {}) as Record<string, unknown>;
+  const n = (k: string) => (typeof d[k] === "number" ? (d[k] as number) : null);
+  if (stage !== "storefront") return null;
+
+  const total = n("pages_total") ?? 0;
+  const done = n("pages_done") ?? 0;
+  const products = n("products") ?? 0;
+  const images = n("images_remaining") ?? 0;
+
+  if (total > 0 && done < total) {
+    return `${done} of ${total} pages read` + (products ? ` · ${products} products so far` : "");
+  }
+  if (images > 0) return `${images} product image${images === 1 ? "" : "s"} left to index`;
+  return null;
+}
+
 // One line of "what actually landed" per stage, so a green tick is auditable.
 function detailLine(stage: string, st: StageState | undefined): string | null {
-  if (!st || st.status === "pending") return null;
+  // A re-queued stage sits at 'pending' between batches with the last batch's result on it,
+  // so "pending" alone is not the same as "nothing has run".
+  if (!st || (st.status === "pending" && !st.detail?.continue)) return null;
   const d = (st.detail ?? {}) as Record<string, unknown>;
   const n = (k: string) => (typeof d[k] === "number" ? (d[k] as number) : null);
   switch (stage) {

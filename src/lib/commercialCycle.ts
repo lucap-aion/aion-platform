@@ -139,7 +139,7 @@ export type StageState = {
 };
 
 export type StageDisplayState =
-  | "done" | "failed" | "skipped" | "needs_input" | "running" | "stalled" | "queued" | "pending";
+  | "done" | "failed" | "skipped" | "needs_input" | "running" | "working" | "stalled" | "queued" | "pending";
 
 // How long a stage may claim to be running before nobody believes it.
 //
@@ -157,7 +157,12 @@ export const STALE_AFTER_MS = 15 * 60_000;
 export function stageDisplayState(state: StageState | null | undefined, optimistic = false): StageDisplayState {
   if (optimistic) return "queued";
   if (!state) return "pending";
-  if (state.queued === true) return "queued";
+  // Re-queueing is how a long stage carries its work across invocations: the catalogue read
+  // hands back after a batch of pages and asks for the next one, once a minute, for as long
+  // as the site takes. Between those batches the row is 'pending' with queued_at set — the
+  // same shape as a stage nobody has ever run, and the screen said the same words about
+  // both. Half an hour of "1 step waiting to start" is indistinguishable from a freeze.
+  if (state.queued === true) return state.detail?.continue === true ? "working" : "queued";
   if (state.status === "pending") return "pending";
   if (state.status === "running") return isStalled(state) ? "stalled" : "running";
   // A stage that stopped to ask a question is not the same as one that was passed over.
@@ -175,7 +180,8 @@ export function isStalled(state: StageState | null | undefined): boolean {
 
 // A stalled stage is deliberately NOT busy: the step it feeds must stop waiting on it,
 // and its own Run button has to come back.
-export const isStageBusy = (s: StageDisplayState): boolean => s === "running" || s === "queued";
+export const isStageBusy = (s: StageDisplayState): boolean =>
+  s === "running" || s === "working" || s === "queued";
 
 /** Whether the pipeline currently owns a step, and pressing its build button would race it. */
 export function stepIsBuilding(step: StepNumber, stages: Record<string, StageState> | undefined): boolean {
@@ -206,7 +212,9 @@ export function summarisePipeline(
 ): PipelineSummary {
   const known = visible.filter((s) => stages?.[s.key]);
   const at = (s: PipelineStage) => stageDisplayState(stages?.[s.key]);
-  const running = known.find((s) => at(s) === "running") ?? null;
+  // A stage mid-batch is running as far as anyone reading this is concerned; the fact that
+  // it is between invocations at this exact instant is an implementation detail.
+  const running = known.find((s) => at(s) === "running" || at(s) === "working") ?? null;
   const queued = known.filter((s) => at(s) === "queued").length;
   return {
     total: known.length,

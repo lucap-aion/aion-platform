@@ -54,7 +54,18 @@ describe("ranking a site's URLs", () => {
     const once = rankCatalogueUrls(urls);
     expect(rankCatalogueUrls([...urls].reverse())).toEqual(once);
     expect(once[0]).toBe("https://b.com/shop/en/a-item-100200");
-    expect(once[once.length - 1]).toBe("https://b.com/shop/en/sf/stories");
+    expect(once[once.length - 1]).toBe("https://b.com/collections/bags");
+  });
+
+  it("drops the pages that can never carry a product, rather than ranking them last", () => {
+    // Ranked last, editorial still cost a renderer call each at the end of every pass and
+    // padded the "pages remaining" the panel reports with pages nothing could be read from.
+    expect(rankCatalogueUrls([
+      "https://b.com/shop/en/a-item-100200",
+      "https://b.com/shop/en/sf/stories",
+      "https://b.com/shop/en/sf/faq",
+      "https://b.com/legal/privacy",
+    ])).toEqual(["https://b.com/shop/en/a-item-100200"]);
   });
 
   it("drops duplicates", () => {

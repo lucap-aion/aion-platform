@@ -55,6 +55,29 @@ describe("reading a stage row", () => {
   it("shows the optimistic queue immediately after a click", () => {
     expect(stageDisplayState(undefined, true)).toBe("queued");
   });
+
+  it("tells a stage carrying work across batches from one that has not begun", () => {
+    // The catalogue read hands back after a batch of pages and re-queues itself, once a
+    // minute, until the site is read. Both are 'pending' with queued_at set, so Ferragamo
+    // spent half an hour reporting "1 step waiting to start" while it was in fact on page
+    // sixty of a hundred and thirty-five — indistinguishable from a frozen pipeline.
+    const mid = row({ status: "pending", queued: true, detail: { continue: true, pages_done: 60, pages_total: 135 } });
+    expect(stageDisplayState(mid)).toBe("working");
+    expect(stageDisplayState(row({ status: "pending", queued: true, detail: { continue: false } }))).toBe("queued");
+  });
+
+  it("counts a stage mid-batch as the one that is running", () => {
+    // Otherwise the header falls through to "N steps waiting to start" and, worse, the
+    // whole panel reads as idle-but-blocked: "Re-run everything" is disabled while
+    // summary.active is true, so there is no way out and nothing to watch.
+    const summary = summarisePipeline({
+      branding: row({ status: "done" }),
+      storefront: row({ status: "pending", queued: true, detail: { continue: true, pages_done: 60, pages_total: 135 } }),
+    });
+    expect(summary.running?.key).toBe("storefront");
+    expect(summary.queued).toBe(0);
+    expect(summary.active).toBe(true);
+  });
 });
 
 describe("a stage that stopped reporting", () => {

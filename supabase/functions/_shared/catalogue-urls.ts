@@ -61,5 +61,10 @@ export function productUrlScore(url: string): number {
  */
 export function rankCatalogueUrls(urls: string[]): string[] {
   return [...new Set(urls)]
+    // Score 0 is not "unlikely to carry a product", it is "never": a FAQ, a privacy notice
+    // and a heritage story publish no Product data on any site. Ranking them last still
+    // cost a renderer call each at the end of every pass, and — worse — padded the
+    // "pages remaining" the panel reports with pages the run could learn nothing from.
+    .filter((u) => productUrlScore(u) > 0)
     .sort((a, b) => productUrlScore(b) - productUrlScore(a) || a.localeCompare(b));
 }
