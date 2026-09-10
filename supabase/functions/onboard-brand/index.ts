@@ -659,7 +659,14 @@ function normaliseBase(website: string): string | null {
 // ── Status: derived from the real tables, not from a status column ───────────
 async function status(admin: ReturnType<typeof createClient>, brandId: number) {
   const [stages, chunks, docs, queued, products, customers, policies, shops, users, src] = await Promise.all([
-    admin.from("brand_onboarding").select("stage, status, detail, error, started_at, finished_at").eq("brand_id", brandId),
+    // queued_at is what tells a caller the difference between "never run" and
+    // "waiting for the tick". Leaving it out of the select made every queued
+    // stage look idle: the panel stopped polling the moment it queued the work,
+    // so a run that was progressing fine appeared frozen until someone hit
+    // Refresh by hand.
+    admin.from("brand_onboarding")
+      .select("stage, status, detail, error, started_at, finished_at, queued_at, attempts")
+      .eq("brand_id", brandId),
     admin.from("brand_knowledge_chunks").select("id", { count: "exact", head: true }).eq("brand_id", brandId),
     admin.from("brand_knowledge_docs").select("id", { count: "exact", head: true }).eq("brand_id", brandId),
     admin.from("knowledge_crawl_queue").select("id", { count: "exact", head: true }).eq("brand_id", brandId).eq("status", "pending"),

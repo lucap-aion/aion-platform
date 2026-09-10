@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Check, X, Play, RefreshCw, Copy, Trash2, AlertCircle, FileText, Download, Clock } from "lucide-react";
+import { Loader2, Check, X, Play, RefreshCw, Copy, Trash2, AlertCircle, Clock, SkipForward } from "lucide-react";
 
 // Prepare-demo panel: takes a brand that has just been created (name + website)
 // all the way to something you can put in front of a prospect — site crawled and
@@ -24,7 +24,13 @@ const STAGES: { key: StageKey; label: string; hint: string }[] = [
   { key: "assistant", label: "Assistant", hint: "Confirm there is enough indexed to answer questions" },
 ];
 
-type StageRow = { stage: string; status: string; detail: Record<string, unknown>; error: string | null; queued_at?: string | null };
+type StageRow = {
+  stage: string; status: string; detail: Record<string, unknown>; error: string | null;
+  // A stage waiting for the cron tick is status 'pending' WITH queued_at set —
+  // there is no 'queued' status in the table, so the two have to be read
+  // together or a queued run is indistinguishable from one never started.
+  queued_at?: string | null; attempts?: number | null;
+};
 type Status = {
   demo_ready: boolean;
   // Server-authoritative: demo generation is dev-only, and the panel follows
@@ -48,11 +54,8 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
   const { toast } = useToast();
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [accounts, setAccounts] = useState<Record<string, Account> | null>(null);
   const [avgTicket, setAvgTicket] = useState("");
-  const [needsTicket, setNeedsTicket] = useState(false);
   const [preview, setPreview] = useState<PurgePreview | null>(null);
-  const [deck, setDeck] = useState<{ url: string; name: string; filled: number; total: number; review: string[] } | null>(null);
   const poll = useRef<number | null>(null);
 
   const call = useCallback(async (payload: Record<string, unknown>) => {
@@ -70,10 +73,29 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  const stageStatus = useCallback(
+    (key: StageKey) => status?.stages?.find((s) => s.stage === key),
+    [status],
+  );
+
   // Poll while there is anything in flight: a queued or running stage, or a
   // crawl still draining. Stops on its own when the work is done.
   const inFlight = (status?.stages ?? []).some((st) => st.status === "running" || (st.status === "pending" && st.queued_at))
     || (status?.counts?.crawl_pending ?? 0) > 0;
+
+  // Both of these used to be component state that nothing ever set, so the
+  // panels below them were unreachable. They are facts about the run, not about
+  // this component, so they are read from the stage rows — which means they
+  // survive a refresh and show up for a colleague opening the same brand.
+  const accounts = useMemo(() => {
+    const d = stageStatus("demo_users")?.detail as { accounts?: Record<string, Account> } | undefined;
+    return d?.accounts ?? null;
+  }, [stageStatus]);
+
+  // The demo generator reports { ok: false, needs: 'avg_ticket' } for a site that
+  // renders its prices in JavaScript. That is a question for the admin, not a
+  // failure — but the input that answers it never appeared.
+  const needsTicket = (stageStatus("demo_data")?.detail as { needs?: string } | undefined)?.needs === "avg_ticket";
 
   useEffect(() => {
     if (inFlight && poll.current === null) {
@@ -91,7 +113,6 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
   const run = async (stages?: StageKey[]) => {
     const wanted = (stages?.length ? stages : STAGES.map((s) => s.key))
       .filter((k) => demoEnabled || !DEMO_STAGES.includes(k));
-    setNeedsTicket(false);
     setBusy(stages?.length === 1 ? stages[0] : "all");
     try {
       const options: Record<string, unknown> = {};
@@ -126,54 +147,12 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
         description: `${sumCounts((out.purged as { deleted?: Record<string, number> })?.deleted)} rows and ${removed} login${removed === 1 ? "" : "s"} deleted. The brand, its indexed site and its catalogue are untouched.`,
       });
       setPreview(null);
-      setAccounts(null);
       setStatus((out.status as unknown as Status) ?? null);
     } catch (e) {
       toast({ title: "Purge failed", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
     } finally { setBusy(null); }
   };
 
-  // The intro deck isn't an onboarding stage — it's a sales asset you regenerate
-  // whenever the catalogue changes, so it gets its own action.
-  const buildDeck = async () => {
-    setBusy("deck");
-    try {
-      const { data, error } = await supabase.functions.invoke("brand-deck", { body: { brand_id: brandId } });
-      if (error) throw new Error(error.message);
-      const d = data as Record<string, unknown>;
-      if (d.ok === false || d.error) throw new Error(String(d.reason ?? d.error));
-      setDeck({
-        url: String(d.download_url ?? ""), name: String(d.file_name ?? "deck.pptx"),
-        filled: Number(d.slots_filled ?? 0), total: Number(d.slots_total ?? 0),
-        review: (d.review as string[]) ?? [],
-      });
-      toast({ title: "Deck ready", description: `${d.slots_filled}/${d.slots_total} images swapped for their own pieces.` });
-    } catch (e) {
-      toast({ title: "Deck build failed", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
-    } finally { setBusy(null); }
-  };
-
-  // Data request and ops deck need no inputs. The business case needs a declared
-  // perimeter (segments, COGS ratio, average price), so it stays an API call
-  // until there's a form for it.
-  const buildCollateral = async (kind: "data_request" | "operations") => {
-    setBusy(kind);
-    try {
-      const { data, error } = await supabase.functions.invoke("build-collateral", { body: { brand_id: brandId, kind } });
-      if (error) throw new Error(error.message);
-      const d = data as Record<string, unknown>;
-      if (d.error || d.ok === false) throw new Error(String(d.error ?? d.reason));
-      setDeck({
-        url: String(d.download_url ?? ""), name: String(d.file_name ?? ""),
-        filled: 0, total: 0, review: (d.review as string[]) ?? [],
-      });
-      toast({ title: `${String(d.file_name)} ready` });
-    } catch (e) {
-      toast({ title: "Build failed", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
-    } finally { setBusy(null); }
-  };
-
-  const stageStatus = (key: StageKey) => status?.stages?.find((s) => s.stage === key);
   const c = status?.counts ?? {};
   // Undefined while the first status is in flight — assume off, so demo controls
   // never flash up on production.
@@ -197,18 +176,6 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
         >
           {busy?.startsWith("all") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
           {demoEnabled ? "Prepare demo" : "Run onboarding"}
-        </button>
-        <button onClick={() => void buildDeck()} disabled={busy !== null}
-          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
-          {busy === "deck" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Intro deck
-        </button>
-        <button onClick={() => void buildCollateral("data_request")} disabled={busy !== null}
-          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
-          {busy === "data_request" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Data request
-        </button>
-        <button onClick={() => void buildCollateral("operations")} disabled={busy !== null}
-          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
-          {busy === "operations" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Ops deck
         </button>
         <button onClick={() => void refresh()} disabled={busy !== null}
           className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
@@ -302,47 +269,34 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
       <ul className="divide-y divide-border rounded-lg border border-border">
         {visibleStages.map((s) => {
           const st = stageStatus(s.key);
-          const state = busy === s.key ? "running" : st?.status ?? "pending";
+          const state = stageState(st, busy === s.key);
+          const retried = (st?.attempts ?? 0) > 0 && state !== "done";
           return (
             <li key={s.key} className="flex items-start gap-3 p-3">
               <span className="mt-0.5">
                 {state === "done" ? <Check className="h-4 w-4 text-emerald-600" />
                   : state === "failed" ? <X className="h-4 w-4 text-destructive" />
+                  : state === "skipped" ? <SkipForward className="h-4 w-4 text-muted-foreground" />
                   : state === "running" ? <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  : state === "queued" ? <Clock className="h-4 w-4 text-muted-foreground" />
+                  : state === "queued" ? <Clock className="h-4 w-4 text-primary" />
                   : <span className="block h-4 w-4 rounded-full border border-border" />}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-foreground">{s.label}</p>
-                <p className="text-xs text-muted-foreground">
-                  {state === "queued" ? "Queued — starts within a minute" : st?.error ?? detailLine(st) ?? s.hint}
+                <p className={`text-xs ${state === "failed" ? "text-destructive" : "text-muted-foreground"}`}>
+                  {state === "queued" ? "Queued — the background runner picks it up within a minute"
+                    : st?.error ?? detailLine(st) ?? s.hint}
+                  {retried && ` · attempt ${(st?.attempts ?? 0) + 1} of 3`}
                 </p>
               </div>
-              <button onClick={() => void run([s.key])} disabled={!website || busy !== null}
+              <button onClick={() => void run([s.key])} disabled={!website || busy !== null || state === "queued" || state === "running"}
                 className="shrink-0 rounded-md border border-border px-2 py-1 text-xs disabled:opacity-50">
-                {state === "done" ? "Re-run" : state === "queued" ? "Queued" : "Run"}
+                {state === "done" ? "Re-run" : state === "queued" ? "Queued" : state === "running" ? "Running" : "Run"}
               </button>
             </li>
           );
         })}
       </ul>
-
-      {deck && (
-        <div className="rounded-lg border border-border p-3">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium">{deck.name || "Deck"}</p>
-            {deck.total > 0 && (
-              <span className="text-xs text-muted-foreground">{deck.filled}/{deck.total} images from their catalogue</span>
-            )}
-            <a href={deck.url} className="ml-auto inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
-              <Download className="h-4 w-4" /> Download
-            </a>
-          </div>
-          <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-            {deck.review.map((r) => <li key={r}>{r}</li>)}
-          </ul>
-        </div>
-      )}
 
       {accounts && (
         <div className="rounded-lg border border-border p-3">
@@ -365,6 +319,17 @@ export default function BrandOnboarding({ brandId, brandName, website }: {
       )}
     </div>
   );
+}
+
+// The table has no 'queued' status — a stage waiting for the cron tick is
+// 'pending' with queued_at set. Reading status alone made a queued run look
+// exactly like one that had never been started, right down to an enabled "Run"
+// button that queued it a second time.
+function stageState(st: StageRow | undefined, optimistic: boolean): string {
+  if (optimistic) return "queued";
+  if (!st) return "pending";
+  if (st.status === "pending" && st.queued_at) return "queued";
+  return st.status;
 }
 
 function sumCounts(o?: Record<string, number>): number {
