@@ -700,14 +700,27 @@ Deno.serve(async (req) => {
 
       case "transfer_request": {
         const { customer, recipient_email, cover, portal_url } = data;
-        // cover.policy_id = the policy being transferred
+        // cover.policy_id = the policy being transferred. Ownership of it was
+        // checked before this switch — a caller can only name a cover their own
+        // RLS lets them see.
+
+        // 0. The policy decides which brand the recipient belongs to. Taking
+        // cover.brand_id from the request body instead would let a caller file
+        // the new owner under a house that has nothing to do with the cover.
+        const { data: policyRow } = await supabaseAdmin
+          .from("policies")
+          .select("customer_id, former_customer_ids, brand_id")
+          .eq("id", cover.policy_id)
+          .single();
+        if (!policyRow) return deny("that cover no longer exists", 404);
+        const transferBrandId = policyRow.brand_id;
 
         // 1. Resolve or create recipient profile
         let { data: recipientProfile } = await supabaseAdmin
           .from("profiles")
           .select("id")
           .eq("email", recipient_email)
-          .eq("brand_id", cover.brand_id)
+          .eq("brand_id", transferBrandId)
           .maybeSingle();
 
         const isNewUser = !recipientProfile;
@@ -715,22 +728,15 @@ Deno.serve(async (req) => {
         if (isNewUser) {
           const { data: newProfile } = await supabaseAdmin
             .from("profiles")
-            .insert({ email: recipient_email, brand_id: cover.brand_id, status: "pending" })
+            .insert({ email: recipient_email, brand_id: transferBrandId, status: "pending" })
             .select("id")
             .single();
           recipientProfile = newProfile;
         }
 
-        // 2. Fetch current policy to get old customer_id and former_customer_ids
-        const { data: policy } = await supabaseAdmin
-          .from("policies")
-          .select("customer_id, former_customer_ids")
-          .eq("id", cover.policy_id)
-          .single();
-
-        // 3. Transfer ownership
-        const oldCustomerId = policy?.customer_id;
-        const prevFormer: any[] = policy?.former_customer_ids ?? [];
+        // 2. Transfer ownership, from the row read above.
+        const oldCustomerId = policyRow.customer_id;
+        const prevFormer: any[] = policyRow.former_customer_ids ?? [];
         const updatedFormer = oldCustomerId ? [...prevFormer, oldCustomerId] : prevFormer;
 
         await supabaseAdmin
