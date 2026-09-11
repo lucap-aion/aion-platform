@@ -62,6 +62,7 @@ import AdminCatalogues from "./pages/admin/AdminCatalogues";
 import AdminReports from "./pages/admin/AdminReports";
 import AdminInsights from "./pages/admin/AdminInsights";
 import AdminFeedback from "./pages/admin/AdminFeedback";
+import AdminAssistantInbox from "./pages/admin/AdminAssistantInbox";
 import AdminAIQuery from "./pages/admin/AdminAIQuery";
 import NotFound from "./pages/NotFound";
 
@@ -249,6 +250,7 @@ const App = () => (
               <Route path="/admin/claims" element={<AdminClaims />} />
               <Route path="/admin/stores" element={<AdminShops />} />
               <Route path="/admin/knowledge" element={<AdminKnowledge />} />
+              <Route path="/admin/assistant-inbox" element={<AdminAssistantInbox />} />
               <Route path="/admin/brands/:brandId" element={<AdminBrandDetail />} />
               <Route path="/admin/commercial" element={<AdminCommercial />} />
               <Route path="/admin/business-case" element={<AdminBusinessCase />} />

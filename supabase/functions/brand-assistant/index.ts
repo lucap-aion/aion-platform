@@ -435,6 +435,18 @@ you answered, for something you got from the catalogue or the client record, or
 for a detail missing from material you did find. One wrong entry sends someone
 to write a document that already exists.
 
+# Questions about AION itself
+Some asks are not about the house at all: connecting a shop system (Shopify, a
+POS, a CRM), what the platform can or cannot do, a feature they want, something
+that looks broken, data they expected to find and didn't. You cannot answer
+those and guessing is worse than silence — but they must not die in the chat.
+Call escalate_to_aion with the question in the associate's own words, then say
+in ONE line that you have passed it to the AION team and they will come back on
+it. Never invent what the platform does and never promise a date. (The rule
+above about not explaining the plumbing is for questions about OTHER HOUSES. A
+question about AION itself is precisely the case where the associate should be
+told where their question went.)
+
 # Accuracy — NON-NEGOTIABLE
 - Use ONLY what the tools return. Do NOT draw on your own prior knowledge about
   this brand — its history, people, dates, products, prices, anything — even if
@@ -659,6 +671,28 @@ const TOOLS = [
     },
   },
   {
+    name: "escalate_to_aion",
+    description:
+      "Call this when the associate asks about AION itself rather than about " +
+      "the house: connecting an external system (Shopify, a POS, a CRM), what " +
+      "the platform can or cannot do, a feature they want, something that looks " +
+      "broken, or data they expected to find and didn't. It puts the question " +
+      "in front of the AION team, who answer it. Do NOT call it for anything " +
+      "you can answer from the knowledge base, the catalogue or client data, " +
+      "and do NOT call it for missing brand knowledge — that is " +
+      "report_knowledge_gap.",
+    input_schema: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description: "The ask in the associate's own words (e.g. 'can the assistant connect to our Shopify?').",
+        },
+      },
+      required: ["question"],
+    },
+  },
+  {
     name: "search_knowledge",
     description:
       "Semantic search over the brand's uploaded knowledge base (product " +
@@ -839,7 +873,7 @@ const TOOLS = [
 // analyst toolkit (charts + Chubb/monthly exports). generate_report is brand-only
 // (the admin UI renders 'chart'/'report_files', not the 'report' object);
 // shipping_estimate is a trunk-show/brand tool.
-const BRAND_TOOL_NAMES = new Set(["search_knowledge", "lookup_knowledge_card", "shipping_estimate", "run_sql", "generate_report", "report_knowledge_gap"]);
+const BRAND_TOOL_NAMES = new Set(["search_knowledge", "lookup_knowledge_card", "shipping_estimate", "run_sql", "generate_report", "report_knowledge_gap", "escalate_to_aion"]);
 const ADMIN_TOOL_NAMES = new Set(["run_sql", "search_knowledge", "lookup_knowledge_card", "render_chart", "generate_daily_chubb_export", "generate_monthly_internal_report"]);
 
 Deno.serve(async (req: Request) => {
@@ -872,6 +906,9 @@ Deno.serve(async (req: Request) => {
   //     comparisons/rankings/aggregates.
   let brandId: number | null = null;
   let brandName: string | null = null;
+  // Who is asking, for anything we log on their behalf. Null for an admin —
+  // admins have no profile row, and an admin is already AION.
+  let profileId: string | null = null;
   let isAdmin = false;
   let crossBrand = false;
 
@@ -902,18 +939,21 @@ Deno.serve(async (req: Request) => {
   } else {
     const { data: profileRow } = await userClient
       .from("profiles")
-      .select("brand_id, role, brands(name)")
+      .select("id, brand_id, role, brands(name)")
       .eq("user_id", user.id)
       .in("role", ["brand", "brand_admin", "brand_user"])
       .maybeSingle();
     if (!profileRow?.brand_id) return jsonError("admin or brand role required", 403);
     brandId = profileRow.brand_id as number;
+    profileId = (profileRow.id as string) ?? null;
     const rel = (profileRow as { brands?: { name?: string } | { name?: string }[] }).brands;
     brandName = (Array.isArray(rel) ? rel[0]?.name : rel?.name) ?? null;
   }
 
   const question = String(body.question ?? "").trim();
   const history = Array.isArray(body.history) ? body.history : [];
+  // The thread this turn belongs to, so an escalation can be read in context.
+  const chatId = typeof body.chat_id === "string" && body.chat_id ? body.chat_id : null;
   const locale = body.locale === "it" ? "it" : "en";
   // Optional photo for visual product search (data URL: "data:image/…;base64,…").
   const image = parseDataUrl(body.image);
@@ -1257,6 +1297,21 @@ Deno.serve(async (req: Request) => {
                 type: "tool_result",
                 tool_use_id: block.id,
                 content: "Noted — it will appear on the brand's list of knowledge to add. Tell the associate you don't have it and suggest who can.",
+              });
+            } else if (block.name === "escalate_to_aion") {
+              // Best-effort, like the gap log: the associate's answer must never
+              // wait on, or fail because of, our own inbox.
+              const ask = String((block.input as { question?: string })?.question ?? "").trim().slice(0, 500);
+              if (ask && brandId) {
+                serviceClient.rpc("log_assistant_escalation", {
+                  p_brand_id: brandId, p_question: ask, p_answer_excerpt: null,
+                  p_profile_id: profileId, p_chat_id: chatId,
+                }).then(({ error }) => { if (error) console.warn("[escalation]", error.message); });
+              }
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: block.id,
+                content: "Sent to the AION team. Tell the associate, in one line, that you've passed it on and they'll come back on it — do not guess at the answer yourself.",
               });
             } else if (block.name === "lookup_knowledge_card") {
               const name = String((block.input as { name?: string })?.name ?? "").trim();

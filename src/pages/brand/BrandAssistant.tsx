@@ -15,8 +15,9 @@ import { useSearchParams } from "react-router-dom";
 import AssistantMarkdown from "@/components/assistant/AssistantMarkdown";
 import {
   ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
-  Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown,
+  Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown, LifeBuoy, Check,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -628,7 +629,7 @@ export default function BrandAssistant() {
         signal: ac.signal,
         // brand_id is used only when the caller is an admin (e.g. viewing-as a
         // brand user); real brand users are pinned to their own brand server-side.
-        body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id, image: attached ?? undefined, spreadsheet: attachedSheet ? { name: attachedSheet.name, text: attachedSheet.text } : undefined }),
+        body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id, chat_id: chatId ?? undefined, image: attached ?? undefined, spreadsheet: attachedSheet ? { name: attachedSheet.name, text: attachedSheet.text } : undefined }),
       });
 
       if (!res.ok || !res.body) {
@@ -700,8 +701,51 @@ export default function BrandAssistant() {
     toast.success(rating === 1 ? tt(locale, "Thanks!", "Grazie!") : tt(locale, "Thanks — logged for improvement.", "Grazie — registrato per migliorare."));
   };
 
+  // ── Ask AION ───────────────────────────────────────────────────────────────
+  // The assistant answers about the house. Everything else — an integration, a
+  // feature, something that looks wrong — used to stop dead in the chat: the
+  // associate read a polite refusal and nobody at AION ever knew the question
+  // had been asked. This sends it to us, with the answer that prompted it.
+  const [escalating, setEscalating] = useState<number | null>(null);
+  const [escalationNote, setEscalationNote] = useState("");
+  const [sendingEscalation, setSendingEscalation] = useState(false);
+  const [escalated, setEscalated] = useState<Set<number>>(new Set());
+
+  const questionBefore = (i: number) =>
+    ([...messages.slice(0, i)].reverse().find((m) => m.role === "user") as { content?: string } | undefined)?.content ?? "";
+
+  const sendEscalation = async () => {
+    // No ownerId guard: an AION admin driving the assistant has no profile row,
+    // and the admin policy covers that insert.
+    if (escalating == null || !brandId) return;
+    const i = escalating;
+    const msg = messages[i];
+    const question = questionBefore(i).trim();
+    if (!question) {
+      toast.error(tt(locale, "Nothing to send.", "Niente da inviare."));
+      return;
+    }
+    setSendingEscalation(true);
+    const { error } = await supabase.from("assistant_escalations" as never).insert({
+      brand_id: brandId, profile_id: ownerId, chat_id: chatId, source: "associate",
+      question: question.slice(0, 500),
+      note: escalationNote.trim() || null,
+      answer_excerpt: (msg?.role === "assistant" ? msg.summary : "").slice(0, 500) || null,
+    } as never);
+    setSendingEscalation(false);
+    if (error) {
+      toast.error(tt(locale, "Couldn't send it. Try again.", "Invio non riuscito. Riprova."));
+      return;
+    }
+    setEscalated((prev) => new Set(prev).add(i));
+    setEscalating(null);
+    setEscalationNote("");
+    toast.success(tt(locale, "Sent to AION — they'll come back on it.", "Inviato ad AION — ti risponderanno."));
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
+    <>
     <div className="flex h-full min-h-0 overflow-hidden">
       <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card/40 md:flex">
         <div className="border-b border-border p-3">
@@ -817,7 +861,16 @@ export default function BrandAssistant() {
               {messages.map((m, i) =>
                 m.role === "user"
                   ? <UserBubble key={i} text={m.content} image={m.image} file={m.file} />
-                  : <AssistantBlock key={i} message={m} locale={locale} isLast={i === messages.length - 1} onFollowup={(q) => void send(q)} onFeedback={(rating) => void submitFeedback(i, rating)} />,
+                  : <AssistantBlock
+                      key={i}
+                      message={m}
+                      locale={locale}
+                      isLast={i === messages.length - 1}
+                      onFollowup={(q) => void send(q)}
+                      onFeedback={(rating) => void submitFeedback(i, rating)}
+                      onEscalate={() => setEscalating(i)}
+                      escalated={escalated.has(i)}
+                    />,
               )}
             </div>
           )}
@@ -941,6 +994,65 @@ export default function BrandAssistant() {
         </div>
       </div>
     </div>
+
+    <Dialog open={escalating != null} onOpenChange={(o) => { if (!o) { setEscalating(null); setEscalationNote(""); } }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{tt(locale, "Send this to AION", "Invia ad AION")}</DialogTitle>
+          <DialogDescription>
+            {tt(
+              locale,
+              "The AION team will see your question and come back to you. Add anything that helps them understand what you needed.",
+              "Il team AION vedrà la tua domanda e ti risponderà. Aggiungi qualsiasi cosa possa aiutarli a capire cosa ti serviva.",
+            )}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {tt(locale, "Your question", "La tua domanda")}
+            </p>
+            <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
+              {escalating != null ? questionBefore(escalating) : ""}
+            </p>
+          </div>
+          <div>
+            <label htmlFor="escalation-note" className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {tt(locale, "Anything to add (optional)", "Vuoi aggiungere qualcosa? (facoltativo)")}
+            </label>
+            <textarea
+              id="escalation-note"
+              rows={3}
+              value={escalationNote}
+              onChange={(e) => setEscalationNote(e.target.value)}
+              placeholder={tt(locale, "e.g. a client asked me this in store", "es. me l'ha chiesto una cliente in negozio")}
+              className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => { setEscalating(null); setEscalationNote(""); }}
+            className="rounded-lg border border-border px-4 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+          >
+            {tt(locale, "Cancel", "Annulla")}
+          </button>
+          <button
+            type="button"
+            disabled={sendingEscalation}
+            onClick={() => void sendEscalation()}
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {sendingEscalation && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {tt(locale, "Send to AION", "Invia ad AION")}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 
@@ -1128,8 +1240,9 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
   other: { en: "Doc", it: "Documento" },
 };
 
-const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback }: {
+const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEscalate, escalated }: {
   message: AssistantMessage; locale: string; isLast: boolean; onFollowup: (q: string) => void; onFeedback?: (rating: 1 | -1) => void;
+  onEscalate?: () => void; escalated?: boolean;
 }) => {
   const { summary, sources, columns, rows, activity, followups, report, streaming } = message;
   const [voted, setVoted] = useState<1 | -1 | null>(null);
@@ -1234,6 +1347,26 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback }: {
           >
             <ThumbsDown className="h-3.5 w-3.5" />
           </button>
+          {onEscalate && (
+            escalated ? (
+              <span className="ml-1 flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-emerald-600">
+                <Check className="h-3.5 w-3.5" />
+                {tt(locale, "Sent to AION", "Inviato ad AION")}
+              </span>
+            ) : (
+              // Deliberately labelled, not a bare icon: the whole point is that
+              // an associate notices they can push the question further.
+              <button
+                type="button"
+                onClick={onEscalate}
+                className="ml-1 flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+                title={tt(locale, "Send this question to the AION team", "Invia la domanda al team AION")}
+              >
+                <LifeBuoy className="h-3.5 w-3.5" />
+                {tt(locale, "Ask AION", "Chiedi ad AION")}
+              </button>
+            )
+          )}
         </div>
       )}
 
