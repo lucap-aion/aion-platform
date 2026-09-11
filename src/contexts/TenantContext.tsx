@@ -119,7 +119,6 @@ export interface TenantConfig {
   slug: string;
   name: string;
   tagline: string;
-  email: string | null;
   website: string | null;
   // Branding
   logoUrl: string;
@@ -140,15 +139,6 @@ export interface TenantConfig {
   // FAQs
   faqEn: Json | null;
   faqIt: Json | null;
-  // HQ address
-  hqAddress: string | null;
-  hqCity: string | null;
-  hqCountry: string | null;
-  hqPostcode: string | null;
-  // Pricing
-  activationFee: number | null;
-  insurancePremium: number | null;
-  aionPremiumFee: number | null;
 }
 
 /** Empty — no overrides. index.css defaults apply for any key not set. */
@@ -161,7 +151,6 @@ const DEFAULT_TENANT: TenantConfig = {
   slug: "default",
   name: "AION Cover",
   tagline: "Global Protection for Luxury Products",
-  email: null,
   website: null,
   logoUrl: "/aion_dark_logo.png",
   logoIconUrl: "/aion_dark_icon.png",
@@ -177,13 +166,6 @@ const DEFAULT_TENANT: TenantConfig = {
   theftImage: null,
   faqEn: null,
   faqIt: null,
-  hqAddress: null,
-  hqCity: null,
-  hqCountry: null,
-  hqPostcode: null,
-  activationFee: null,
-  insurancePremium: null,
-  aionPremiumFee: null,
 };
 
 /** Parse theme_settings JSON — only keeps keys the brand explicitly set. */
@@ -207,14 +189,16 @@ const parseThemeSettings = (raw: Database["public"]["Tables"]["brands"]["Row"]["
 
 type BrandRow = Database["public"]["Tables"]["brands"]["Row"];
 
-const BRAND_SELECT = "id, slug, name, description, email, website, logo_big, logo_small, auth_background_image, top_banner_image, theme_settings, faq_en, faq_it, faq_image, feedback_image, damage_image, theft_image, hq_address, hq_city, hq_country, hq_postcode, activation_fee, insurance_premium, aion_premium_fee" as const;
+// Presentation only. This runs for anonymous visitors — the tenant is resolved
+// from the URL before anyone signs in — so the house's contact address, its
+// registered address and every fee it pays us have no business being in the
+// response. Nothing outside this file ever read them.
+const BRAND_SELECT = "id, slug, name, description, website, logo_big, logo_small, auth_background_image, top_banner_image, theme_settings, faq_en, faq_it, faq_image, feedback_image, damage_image, theft_image" as const;
 
 type BrandLookup = Pick<BrandRow,
-  | "id" | "slug" | "name" | "description" | "email" | "website"
+  | "id" | "slug" | "name" | "description" | "website"
   | "logo_big" | "logo_small" | "auth_background_image" | "top_banner_image" | "theme_settings"
   | "faq_en" | "faq_it" | "faq_image" | "feedback_image" | "damage_image" | "theft_image"
-  | "hq_address" | "hq_city" | "hq_country" | "hq_postcode"
-  | "activation_fee" | "insurance_premium" | "aion_premium_fee"
 >;
 
 const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
@@ -225,7 +209,6 @@ const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
     slug: brand.slug || DEFAULT_TENANT.slug,
     name: brand.name || DEFAULT_TENANT.name,
     tagline: brand.description || DEFAULT_TENANT.tagline,
-    email: brand.email ?? null,
     website: brand.website ?? null,
     logoUrl: brand.logo_big || brand.logo_small || DEFAULT_TENANT.logoUrl,
     logoIconUrl: brand.logo_small || brand.logo_big || DEFAULT_TENANT.logoIconUrl,
@@ -241,13 +224,6 @@ const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
     feedbackImage: brand.feedback_image ?? null,
     damageImage: brand.damage_image ?? null,
     theftImage: brand.theft_image ?? null,
-    hqAddress: brand.hq_address ?? null,
-    hqCity: brand.hq_city ?? null,
-    hqCountry: brand.hq_country ?? null,
-    hqPostcode: brand.hq_postcode ?? null,
-    activationFee: brand.activation_fee ?? null,
-    insurancePremium: brand.insurance_premium ?? null,
-    aionPremiumFee: brand.aion_premium_fee ?? null,
   };
 };
 
