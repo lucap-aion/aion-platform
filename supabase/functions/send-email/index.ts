@@ -372,6 +372,170 @@ function feedbackHtml(feedback: any): string {
     ${autoNote(S)}`);
 }
 
+// ─── Who may send what ────────────────────────────────────────────────────────
+//
+// This function had no authentication of its own. The gateway accepts the anon
+// key — which ships in the client bundle — so anyone at all could POST a type
+// and have the platform send a branded AION email, to any address, with any
+// content and any link in it. An invite is the worst case: a real AION invite,
+// from our domain, pointing wherever the sender liked.
+//
+// Three gates, in order. None of them changes a payload, so every existing
+// caller keeps working:
+//   1. WHO — a service-role caller (our own edge functions), or a signed-in
+//      user. The anon key alone is no longer enough.
+//   2. WHAT — each type names the kinds of caller allowed to send it. A
+//      customer cannot invite an admin.
+//   3. WHERE — the address has to be one the caller could already see. An
+//      admin may write to anyone in the system, a brand user to their own
+//      brand's people, a customer only to themselves. Links must point at one
+//      of our own hosts.
+//
+// The one deliberate exception is transfer_request, whose whole purpose is to
+// email someone not yet in the system: there the cover being transferred must
+// be one the caller can actually see.
+
+type CallerKind = "service" | "admin" | "brand" | "customer";
+type Caller = {
+  kind: CallerKind;
+  email: string | null;
+  brandId: number | null;
+};
+
+type Recipients = "internal" | "known" | "self_or_known" | "arbitrary";
+
+const POLICY: Record<string, { kinds: CallerKind[]; recipients: Recipients }> = {
+  customer_invite:          { kinds: ["service", "admin", "brand"],                        recipients: "known" },
+  customer_transfer_invite: { kinds: ["service", "admin", "customer"],                     recipients: "known" },
+  brand_user_invite:        { kinds: ["service", "admin", "brand"],                        recipients: "known" },
+  admin_invite:             { kinds: ["service", "admin"],                                 recipients: "known" },
+  claim_submitted:          { kinds: ["service", "admin", "brand", "customer"],            recipients: "self_or_known" },
+  claim_updated:            { kinds: ["service", "admin", "brand", "customer"],            recipients: "self_or_known" },
+  support_submitted:        { kinds: ["service", "admin", "brand", "customer"],            recipients: "self_or_known" },
+  transfer_request:         { kinds: ["service", "admin", "customer"],                     recipients: "arbitrary" },
+  feedback_submitted:       { kinds: ["service", "admin", "brand", "customer"],            recipients: "internal" },
+  assistant_escalation:     { kinds: ["service", "admin", "brand"],                        recipients: "internal" },
+};
+
+function jwtRole(token: string): string | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")))?.role ?? null;
+  } catch { return null; }
+}
+
+const norm = (v: unknown): string => String(v ?? "").trim().toLowerCase();
+
+async function identifyCaller(req: Request): Promise<Caller | null> {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const batchSecret = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
+  if (bearer && (bearer === serviceKey || jwtRole(bearer) === "service_role")) {
+    return { kind: "service", email: null, brandId: null };
+  }
+  if (batchSecret && req.headers.get("x-batch-secret") === batchSecret) {
+    return { kind: "service", email: null, brandId: null };
+  }
+  if (!bearer) return null;
+
+  const userClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: authHeader } } },
+  );
+  const { data: { user } } = await userClient.auth.getUser();
+  // The anon key is itself a JWT, so this is the check that stops the bundle's
+  // own public key from being a licence to send mail.
+  if (!user) return null;
+
+  const { data: adminRow } = await supabaseAdmin
+    .from("admins").select("id").eq("user_id", user.id).maybeSingle();
+  if (adminRow) return { kind: "admin", email: norm(user.email), brandId: null };
+
+  const { data: profile } = await supabaseAdmin
+    .from("profiles").select("role, brand_id").eq("user_id", user.id).maybeSingle();
+  const role = String(profile?.role ?? "");
+  const kind: CallerKind = ["brand", "brand_admin", "brand_user"].includes(role) ? "brand" : "customer";
+  return { kind, email: norm(user.email), brandId: (profile?.brand_id as number) ?? null };
+}
+
+/** The addresses a given payload would write to, outside our own team inbox. */
+function externalRecipients(type: string, data: any): string[] {
+  const pick = (v: unknown) => (norm(v) ? [norm(v)] : []);
+  switch (type) {
+    case "customer_invite":          return pick(data?.customer?.email);
+    case "customer_transfer_invite": return pick(data?.newCustomer?.email);
+    case "brand_user_invite":        return pick(data?.brandUser?.email);
+    case "admin_invite":             return pick(data?.admin?.email);
+    case "claim_submitted":          return pick(data?.claim?.policy?.customer?.email);
+    case "claim_updated":            return pick(data?.claim?.customerEmail);
+    case "support_submitted":        return pick(data?.user?.email);
+    case "transfer_request":         return pick(data?.recipient_email);
+    default:                         return [];
+  }
+}
+
+/** Every link we would put in the mail. */
+function linksIn(data: any): string[] {
+  return [data?.url, data?.portal_url].filter((u) => typeof u === "string" && u) as string[];
+}
+
+// A link in an AION email has to point at AION. Without this, an invite is a
+// ready-made phishing template with our logo on it.
+function linkAllowed(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (!isProd && (u.hostname === "localhost" || u.hostname === "127.0.0.1")) return true;
+    return u.protocol === "https:" && /(^|\.)aioncover\.com$/.test(u.hostname);
+  } catch { return false; }
+}
+
+/** Is this an address the caller could already look up? */
+async function recipientAllowed(caller: Caller, email: string): Promise<boolean> {
+  if (caller.kind === "service") return true;
+  if (caller.kind === "customer") return caller.email !== null && email === caller.email;
+
+  if (caller.kind === "brand") {
+    if (caller.brandId == null) return false;
+    const { data } = await supabaseAdmin
+      .from("profiles").select("id").eq("brand_id", caller.brandId).ilike("email", email).limit(1).maybeSingle();
+    return Boolean(data);
+  }
+  // Admin: anyone already in the system — a person we hold a record for.
+  const [{ data: p }, { data: a }] = await Promise.all([
+    supabaseAdmin.from("profiles").select("id").ilike("email", email).limit(1).maybeSingle(),
+    supabaseAdmin.from("admins").select("id").ilike("email", email).limit(1).maybeSingle(),
+  ]);
+  return Boolean(p || a);
+}
+
+/**
+ * transfer_request is the one type that may write to a stranger — that is what
+ * transferring a cover to someone means. So the gate is ownership instead:
+ * the cover has to be one this caller can see under their own RLS.
+ */
+async function ownsCover(req: Request, caller: Caller, data: any): Promise<boolean> {
+  if (caller.kind === "service" || caller.kind === "admin") return true;
+  const policyId = data?.cover?.policy_id;
+  if (!policyId) return false;
+  const userClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } },
+  );
+  const { data: row } = await userClient.from("policies").select("id").eq("id", policyId).maybeSingle();
+  return Boolean(row);
+}
+
+function deny(message: string, status: number) {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+  });
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -387,6 +551,33 @@ Deno.serve(async (req) => {
   try {
     const { type, data } = await req.json();
     let result: any;
+
+    // ── Gates ────────────────────────────────────────────────────────────────
+    const policy = POLICY[String(type)];
+    if (!policy) return deny(`Unknown type: ${type}`, 400);
+
+    const caller = await identifyCaller(req);
+    if (!caller) return deny("sign in to send mail", 401);
+    if (!policy.kinds.includes(caller.kind)) {
+      return deny(`a ${caller.kind} may not send ${type}`, 403);
+    }
+
+    for (const link of linksIn(data)) {
+      if (!linkAllowed(link)) return deny("links must point at aioncover.com", 400);
+    }
+
+    if (policy.recipients === "known" || policy.recipients === "self_or_known") {
+      for (const to of externalRecipients(String(type), data)) {
+        if (!(await recipientAllowed(caller, to))) {
+          // Deliberately the same sentence whoever you are: telling a caller
+          // whether an address exists is its own small leak.
+          return deny("that recipient is not one you can write to", 403);
+        }
+      }
+    }
+    if (policy.recipients === "arbitrary" && !(await ownsCover(req, caller, data))) {
+      return deny("that cover is not yours to transfer", 403);
+    }
 
     switch (type) {
       case "customer_invite": {
