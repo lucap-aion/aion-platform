@@ -18,6 +18,7 @@
 //   event: error        { message }
 
 import Anthropic from "npm:@anthropic-ai/sdk@0.32.1";
+import { originAllowed, originRefused } from "../_shared/origin.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 // Analyst persona + full schema/glossary/playbooks, used for ADMIN callers (the
 // merged assistant serves both the sales floor and the admin analyst).
@@ -910,6 +911,9 @@ const BRAND_TOOL_NAMES = new Set(["search_knowledge", "lookup_knowledge_card", "
 const ADMIN_TOOL_NAMES = new Set(["run_sql", "search_knowledge", "lookup_knowledge_card", "render_chart", "generate_daily_chubb_export", "generate_monthly_internal_report"]);
 
 Deno.serve(async (req: Request) => {
+  // Refuse a browser origin that isn't ours before doing anything else.
+  if (!originAllowed(req)) return originRefused();
+
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST") {
     return new Response("method not allowed", { status: 405, headers: CORS });

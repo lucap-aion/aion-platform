@@ -22,6 +22,7 @@
 //         stages?: string[], options?: { customers, policies, avg_ticket } }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { originAllowed, originRefused } from "../_shared/origin.ts";
 import {
   demoToolsEnabled, isNonProduction,
   demoAllowedForBrand, demoBlockedForBrandReason,
@@ -155,6 +156,9 @@ async function unmetRequirements(
 }
 
 Deno.serve(async (req: Request) => {
+  // Refuse a browser origin that isn't ours before doing anything else.
+  if (!originAllowed(req)) return originRefused();
+
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 

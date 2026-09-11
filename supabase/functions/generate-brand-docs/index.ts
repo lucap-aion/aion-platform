@@ -15,6 +15,7 @@
 // Body: { brand_id, kinds?: string[], locales?: ("en"|"it")[], force?: boolean }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { originAllowed, originRefused } from "../_shared/origin.ts";
 import Anthropic from "npm:@anthropic-ai/sdk@0.65.0";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -97,6 +98,9 @@ are blank, write the placeholder as [to be agreed] rather than inventing a numbe
 };
 
 Deno.serve(async (req: Request) => {
+  // Refuse a browser origin that isn't ours before doing anything else.
+  if (!originAllowed(req)) return originRefused();
+
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 

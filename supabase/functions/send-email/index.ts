@@ -1,4 +1,5 @@
 import { Resend } from "npm:resend@4";
+import { originAllowed, originRefused } from "../_shared/origin.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY")!);
@@ -539,6 +540,9 @@ function deny(message: string, status: number) {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
+  // Refuse a browser origin that isn't ours before doing anything else.
+  if (!originAllowed(req)) return originRefused();
+
   if (req.method === "OPTIONS") {
     return new Response(null, {
       headers: {

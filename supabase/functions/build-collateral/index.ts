@@ -18,6 +18,7 @@
 //         file_base64?, file_name? }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { originAllowed, originRefused } from "../_shared/origin.ts";
 import JSZip from "npm:jszip@3.10.1";
 import { sharedStrings, sheetGrid, extractPerimeter, decodeXml, type Sheet } from "../_shared/xlsx-grid.ts";
 
@@ -37,6 +38,9 @@ const CORS = {
 type SlideSpec = { title: string; bullets: string[] };
 
 Deno.serve(async (req: Request) => {
+  // Refuse a browser origin that isn't ours before doing anything else.
+  if (!originAllowed(req)) return originRefused();
+
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 

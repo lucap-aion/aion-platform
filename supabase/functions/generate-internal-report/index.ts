@@ -6,6 +6,7 @@
 // a row into the `reports` table.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { originAllowed, originRefused } from "../_shared/origin.ts";
 import ExcelJS from "npm:exceljs@4.4.0";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -197,6 +198,9 @@ const previousMonth = (): { year: number; month: number } => {
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 Deno.serve(async (req: Request) => {
+  // Refuse a browser origin that isn't ours before doing anything else.
+  if (!originAllowed(req)) return originRefused();
+
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST") {
     return new Response("method not allowed", { status: 405, headers: CORS });

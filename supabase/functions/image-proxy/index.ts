@@ -7,6 +7,8 @@
 //
 // GET /image-proxy?url=<encoded image url>
 
+import { originAllowed, originRefused } from "../_shared/origin.ts";
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -17,6 +19,9 @@ const CORS = {
 const ALLOW = [/\.x-tra\.it$/i, /(^|\.)shopify\.com$/i, /(^|\.)shopifycdn\.com$/i, /\.robertocoin\.com$/i, /\.supabase\.co$/i];
 
 Deno.serve(async (req) => {
+  // This one runs without a JWT, so the origin check is doing more work here
+  // than elsewhere. A plain <img src> sends no Origin and still passes.
+  if (!originAllowed(req)) return originRefused();
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "GET") return new Response("method not allowed", { status: 405, headers: CORS });
 

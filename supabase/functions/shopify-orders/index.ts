@@ -18,6 +18,7 @@
 //         token?, orders_since?, dry_run?, max_pages? }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { originAllowed, originRefused } from "../_shared/origin.ts";
 import { mapOrder, nextPageInfo, missingScopes, type AdminOrder } from "../_shared/shopify-orders.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -284,6 +285,9 @@ async function syncOrders(brandId: number, opts: { dryRun: boolean; maxPages: nu
 }
 
 Deno.serve(async (req: Request) => {
+  // Refuse a browser origin that isn't ours before doing anything else.
+  if (!originAllowed(req)) return originRefused();
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return jsonError("POST only", 405);
 
