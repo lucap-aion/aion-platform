@@ -24,11 +24,28 @@ export const PRIVATE_BUCKETS = new Set(["claims_media", "profile_pictures", "pur
 const PUBLIC_MARKER = "/object/public/";
 const SIGNED_MARKER = "/object/sign/";
 
+// Only this project's own storage is ours to sign. It matters more than it
+// sounds: every avatar row on DEV points at PROD's public bucket, so stripping
+// the path out of the URL and signing it here would ask dev for a file that
+// only exists there — and turn every face in the app into initials. A URL from
+// another origin is somebody else's file and is handed over untouched.
+const PROJECT_ORIGIN = (() => {
+  try { return new URL(import.meta.env.VITE_SUPABASE_URL as string).origin; }
+  catch { return ""; }
+})();
+
+function isOurOrigin(value: string): boolean {
+  try { return new URL(value).origin === PROJECT_ORIGIN; } catch { return false; }
+}
+
 /** Whatever is stored → the object path inside `bucket`, or null. */
 export function storagePath(bucket: string, value: string | null | undefined): string | null {
   if (!value) return null;
   const v = String(value).trim();
   if (!v) return null;
+
+  const absolute = /^https?:\/\//i.test(v);
+  if (absolute && !isOurOrigin(v)) return null;
 
   for (const marker of [PUBLIC_MARKER, SIGNED_MARKER]) {
     const needle = `${marker}${bucket}/`;
