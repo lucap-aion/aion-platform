@@ -11,6 +11,8 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { extractProducts } from "../_shared/product-extract.ts";
+import { mapShopifyProducts } from "../_shared/shopify-feed.ts";
+import type { FeedVariant, RawShopifyProduct } from "../_shared/shopify-feed.ts";
 import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -66,7 +68,6 @@ async function loadStorefronts(
 }
 
 // product_type values that aren't real sellable jewelry.
-const SKIP_TYPES = new Set(["storytelling", "storytelling 3", "gadget", ""]);
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -116,6 +117,8 @@ async function syncBrand(
   // Shopify hands over the whole catalogue in one feed. Everything else
   // publishes it as schema.org JSON-LD for Google, which is most of the market
   // and includes every house that blocks a plain fetch.
+  // One timestamp for the whole run: the mark in mark-and-sweep below.
+  const runStart = new Date().toISOString();
   const structured = store.platform === "structured"
     ? await fetchStructured(admin, brandId, store.base, store.cursor)
     : null;
@@ -174,6 +177,46 @@ async function syncBrand(
   const idByHandle = new Map<string, number>();
   for (const r of (cur ?? []) as { id: number; handle: string }[]) idByHandle.set(r.handle, r.id);
 
+  // 3. Sizes. Per-variant price and availability, kept whole: a sold-out 38
+  // beside an available 40 is precisely what the associate needs to see, and
+  // the product-level `available` flattens it away.
+  //
+  // Mark and sweep — everything seen this run carries runStart, then anything
+  // older for this brand is a variant the shop has removed. Shopify path only:
+  // the structured reader sees a slice of the site per run and a sweep would
+  // delete every variant it didn't happen to visit.
+  let variantsUpserted = 0;
+  if (!structured) {
+    const vRows = products.flatMap((p) => {
+      const productId = idByHandle.get(p.handle);
+      if (!productId) return [];
+      return (p.variants ?? []).map((v) => ({
+        brand_id: brandId,
+        product_id: productId,
+        variant_id: v.variantId,
+        title: v.title,
+        option_name: p.optionName ?? null,
+        sku: v.sku,
+        price: v.price,
+        compare_at_price: v.compareAt,
+        available: v.available,
+        position: v.position,
+        updated_at: runStart,
+      }));
+    });
+    for (let i = 0; i < vRows.length; i += 500) {
+      const { error } = await admin
+        .from("storefront_variants")
+        .upsert(vRows.slice(i, i + 500), { onConflict: "product_id,title", ignoreDuplicates: false });
+      if (error) throw new Error(`variant upsert: ${error.message}`);
+    }
+    variantsUpserted = vRows.length;
+    const { error: sweepErr } = await admin
+      .from("storefront_variants")
+      .delete().eq("brand_id", brandId).lt("updated_at", runStart);
+    if (sweepErr) throw new Error(`variant sweep: ${sweepErr.message}`);
+  }
+
   const todo = products.filter((p) => p.imageUrl && !hasEmbedding.has(p.handle));
   const remainingBefore = todo.length;
   const slice = todo.slice(0, maxEmbed);
@@ -215,6 +258,7 @@ async function syncBrand(
   const remaining = Math.max(0, remainingBefore - embedded);
   return {
     brand_id: brandId, products: products.length, upserted: rows.length,
+    variants: variantsUpserted,
     embedded, remaining,
     // Pages of the site still to read. Separate from `remaining`, which counts images left
     // to embed: a run can have embedded everything it fetched and still have most of the
@@ -237,6 +281,9 @@ type SProduct = {
   handle: string; sku: string | null; name: string; category: string | null;
   collection: string | null; description: string | null; price: number | null;
   compareAt: number | null; available: boolean; imageUrl: string | null;
+  // Only the Shopify feed carries these; the structured path leaves them empty.
+  optionName?: string | null;
+  variants?: FeedVariant[];
 };
 
 // Read the catalogue out of the pages the crawler has already visited.
@@ -360,61 +407,19 @@ async function jinaHtml(url: string): Promise<string> {
 }
 
 async function fetchStorefront(base: string, keepUntyped = false): Promise<SProduct[]> {
-  const out: SProduct[] = [];
+  const raw: RawShopifyProduct[] = [];
   for (let page = 1; page <= 40; page++) {
     const res = await fetch(`${base}/products.json?limit=250&page=${page}`, {
-      headers: { "User-Agent": "Mozilla/5.0 (AION storefront sync)" },
+      headers: { "User-Agent": UA },
     });
     if (!res.ok) throw new Error(`storefront ${res.status} on page ${page}`);
     const products = (await res.json())?.products ?? [];
     if (!products.length) break;
-    for (const p of products as ShopifyProduct[]) {
-      const type = (p.product_type ?? "").trim();
-      // Some stores leave product_type empty on real products (keepUntyped);
-      // only apply the junk-type skip list to non-empty types there.
-      if (SKIP_TYPES.has(type.toLowerCase()) && !(keepUntyped && type === "")) continue;
-      const variants = p.variants ?? [];
-      const available = variants.some((v) => v.available);
-      const prices = variants.map((v) => Number(v.price)).filter((n) => Number.isFinite(n) && n > 0);
-      const comps = variants.map((v) => Number(v.compare_at_price)).filter((n) => Number.isFinite(n) && n > 0);
-      // Mirror the storefront: it hides the price on unavailable items (shows
-      // "price on request"). products.json still carries a price for them, but
-      // quoting it makes the associate look wrong to the client — so only trust
-      // a price when the piece is actually purchasable online.
-      out.push({
-        handle: p.handle,
-        sku: (variants[0]?.sku ?? "").trim() || null,
-        name: p.title,
-        category: type || null,
-        collection: deriveCollection(p.tags, type),
-        description: stripHtml(p.body_html ?? "").slice(0, 2000) || null,
-        price: available && prices.length ? Math.min(...prices) : null,
-        compareAt: available && comps.length ? Math.min(...comps) : null,
-        available,
-        imageUrl: p.images?.[0]?.src ?? null,
-      });
-    }
+    raw.push(...(products as RawShopifyProduct[]));
   }
-  return out;
-}
-
-// Collection = the tag that isn't a housekeeping tag, an internal code, or the
-// category itself. Shops tag products with ERP codes too ("SAPG::9370 ~ Color");
-// those are noise to a sales associate, so skip them and take the next tag —
-// the DB trigger normalises whatever still gets through.
-function deriveCollection(tags: string[] | string | undefined, category: string): string | null {
-  const list = Array.isArray(tags)
-    ? tags
-    : typeof tags === "string" ? tags.split(",").map((t) => t.trim()) : [];
-  const stop = new Set(["all products", "new", "sale", category.toLowerCase()]);
-  const isCode = (t: string) => /^SAPG::/i.test(t) || /~\s*Color$/i.test(t);
-  const pick = list.find((t) => t && !stop.has(t.trim().toLowerCase()) && !isCode(t.trim()));
-  return pick ? pick.trim() : null;
-}
-
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&").replace(/&#\d+;/g, " ").replace(/\s+/g, " ").trim();
+  // The mapping lives in _shared/shopify-feed.ts so it can be tested against a
+  // recorded feed without fetching anything.
+  return mapShopifyProducts(raw, keepUntyped);
 }
 
 // Ask the CDN for a display-sized image before handing it to Voyage.
@@ -452,13 +457,6 @@ async function voyageEmbedImages(urls: string[]): Promise<number[][]> {
   });
   return out;
 }
-
-type ShopifyProduct = {
-  handle: string; title: string; body_html?: string; product_type?: string;
-  tags?: string[] | string;
-  variants?: { sku?: string; price?: string; compare_at_price?: string; available?: boolean }[];
-  images?: { src?: string }[];
-};
 
 function jwtRole(token: string): string | null {
   try {

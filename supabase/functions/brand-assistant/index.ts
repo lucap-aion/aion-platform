@@ -150,6 +150,24 @@ Schema (your brand only):
     flag arrival dates, and show the current-season collection instead — never
     fall back to id order, or to the newest-looking pieces, and call them new
     arrivals to a client.
+- storefront_variants(id, product_id->storefront_products.id, title, option_name,
+    sku, price, compare_at_price, available, position) — ONE ROW PER SIZE of a
+    catalogue piece. title IS the size, written the way the shop writes it ("38",
+    "M", "42 / Nero"); option_name is what the shop calls the axis ("Size").
+    EVERY size question — "do we have it in 42", "which sizes are left", "is the
+    M still there" — is answered HERE and only here: storefront_products.available
+    is true when ANY size is in stock, so it can never speak about one size. Join
+    product_id = storefront_products.id. A sold-out size still carries its price,
+    so you can always quote it and offer to order.
+    NEVER tell an associate that the catalogue doesn't carry sizes, or that a
+    category has no sizes, without querying this table first — rings and
+    bracelets are sized here exactly like dresses. If a piece really has no rows,
+    say THAT PIECE has no size options; don't generalise it to the catalogue.
+    Sizes belong to ONE piece. Several catalogue rows often share a name (the
+    same design in different metals or colourways), so GROUP BY product_id and
+    name the version you are quoting — never OR the availability together across
+    versions, which turns a sold-out M into an available one and sends the
+    associate to promise a client something the shop cannot ship.
 - catalogues(id, name, category, collection, composition, sku, picture) — the
     SUBSET of products synced into AION from sales; join target for policies (what
     a specific client owns). Use it to resolve a client's purchased items, NOT to
@@ -1016,6 +1034,7 @@ Deno.serve(async (req: Request) => {
   const adminSchemaSupplement = isAdmin
     ? `\n\n# Additional tables (NOT in the schema above — use these)
 - storefront_products(id, brand_id, name, category, collection, description, sku, price, price_currency, compare_at_price, available, image_url, product_url) — the brand's FULL live e-commerce catalogue (complete range, photos, prices). For "how many products / what's in the catalogue / the online range / price / availability", query THIS — NOT catalogues (catalogues is only the sales-synced subset that links a policy to its item, and is empty for brands whose range lives online, e.g. Luisa Beccaria). Brand-scoped by brand_id.
+- storefront_variants(id, brand_id, product_id, title, option_name, sku, price, compare_at_price, available, position) — ONE ROW PER SIZE of a storefront product (title is the size: '38', 'M', '42 / Nero'; option_name is what the shop calls the axis). Join on product_id = storefront_products.id. Use it for any question about a SIZE — "do we have it in 42", "which sizes are left", "what's still available in the blouse". storefront_products.available is true when ANY size is in stock, so it can never answer this; a size that is sold out still carries its price. Brand-scoped by brand_id.
 - events(id, brand_id, name, city, country, venue, start_date, end_date, status, pr_agency, pr_cost, venue_cost, shipping_cost, other_cost, guests_invited, guests_attended, revenue) — trunk shows / brand events (past + planned).
 - event_items(id, event_id, brand_id, article, description, category, season, colour_code, colour_name, size, size_scale, qty, composition, ddt_number, ddt_date, outcome, sold_qty, revenue, customer_id, customer_name, reconciled_at) — one row per GARMENT sent to an event (the shipment manifest). Use this for any list/count/aggregate of what was sent ("which pieces went to X", "how many dresses", "what's in size 40"); the same shipment also exists as chunked knowledge cards, which return only a fraction of the list. size means nothing without size_scale ('IT' or 'US'). Any breakdown must come from its own GROUP BY — never tally the rows a SELECT returned, that is how a 31-dress shipment gets reported as 24.
 - event_sell_through (view over events + event_items): pieces_sent, pieces_reconciled, pieces_sold, pieces_returned, pieces_retained, revenue_from_items, sell_through_pct, fully_reconciled.
