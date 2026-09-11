@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { forgetSignedUrl } from "@/lib/storage";
+import SignedImage from "@/components/SignedImage";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -29,8 +31,10 @@ const AdminProfile = () => {
         .from("profile_pictures")
         .upload(path, file, { upsert: true });
       if (upErr) throw upErr;
-      const { data } = supabase.storage.from("profile_pictures").getPublicUrl(path);
-      const url = `${data.publicUrl}?t=${Date.now()}`;
+      // Private bucket: the path is what we keep. No ?t= suffix — that belonged
+      // to a public URL and would only corrupt a path.
+      forgetSignedUrl("profile_pictures", path);
+      const url = path;
       const { error: dbErr } = await supabase
         .from("admins")
         .update({ avatar: url })
@@ -93,7 +97,7 @@ const AdminProfile = () => {
           title="Change photo"
         >
           {avatarUrl ? (
-            <img src={avatarUrl} alt={`${firstName} ${lastName}`} className="h-20 w-20 rounded-full object-cover border border-border" />
+            <SignedImage bucket="profile_pictures" value={avatarUrl} alt={`${firstName} ${lastName}`} className="h-20 w-20 rounded-full object-cover border border-border" />
           ) : (
             <div className="h-20 w-20 rounded-full bg-primary/10 border border-border flex items-center justify-center">
               <span className="text-2xl font-bold text-primary">{initials}</span>

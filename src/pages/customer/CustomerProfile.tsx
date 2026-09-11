@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { forgetSignedUrl } from "@/lib/storage";
+import SignedImage from "@/components/SignedImage";
 import { motion } from "framer-motion";
 import { User, Mail, Phone, MapPin, Shield, Camera, Save, CheckCircle, Calendar, Globe } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -87,10 +89,13 @@ const CustomerProfile = () => {
       setUploadingAvatar(false);
       return;
     }
-    const { data: { publicUrl } } = supabase.storage.from("profile_pictures").getPublicUrl(path);
-    const url = `${publicUrl}?t=${Date.now()}`;
-    await supabase.from("profiles").update({ avatar: url }).eq("id", authProfile.id);
-    setAvatarUrl(url);
+    // Private bucket: the path is what we keep, with no cache-busting suffix —
+    // that used to hang off a public URL, and on a path it would simply become
+    // part of a filename that does not exist. The signature is dropped instead,
+    // so the replacement is fetched rather than the face we just overwrote.
+    forgetSignedUrl("profile_pictures", path);
+    await supabase.from("profiles").update({ avatar: path }).eq("id", authProfile.id);
+    setAvatarUrl(path);
     setUploadingAvatar(false);
     toast({ title: "Photo updated" });
     await refreshProfile();
@@ -173,7 +178,7 @@ const CustomerProfile = () => {
           <div className="relative">
             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 overflow-hidden">
               {avatarUrl ? (
-                <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+                <SignedImage bucket="profile_pictures" value={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
               ) : (
                 <span className="font-serif text-2xl font-bold text-primary">
                   {(profile.firstName[0] || "A").toUpperCase()}

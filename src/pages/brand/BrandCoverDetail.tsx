@@ -1,4 +1,5 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
+import SignedImage from "@/components/SignedImage";
 import { motion } from "framer-motion";
 import { ArrowLeft, Shield, User, Package, Store, Calendar, DollarSign } from "lucide-react";
 import { format } from "date-fns";
@@ -277,7 +278,7 @@ const BrandCoverDetail = () => {
               <div className="flex items-center gap-3 mb-4">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary shrink-0 overflow-hidden">
                   {customer?.avatar
-                    ? <img src={customer.avatar} alt="" className="h-full w-full object-cover" />
+                    ? <SignedImage bucket="profile_pictures" value={customer.avatar} alt="" className="h-full w-full object-cover" />
                     : initials}
                 </div>
                 <div className="min-w-0">

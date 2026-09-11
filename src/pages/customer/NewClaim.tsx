@@ -107,8 +107,8 @@ const NewClaim = () => {
         setIsSubmitting(false);
         return;
       }
-      const { data: { publicUrl } } = supabase.storage.from("claims_media").getPublicUrl(path);
-      mediaUrls.push(publicUrl);
+      // The bucket is private: store the path and sign it when it is read.
+      mediaUrls.push(path);
     }
 
     const { error } = await supabase.from("claims").insert({

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import SignedImage from "@/components/SignedImage";
 import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, MessageSquare, Library } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
@@ -284,7 +285,7 @@ const AppSidebar = () => {
             <button className={`flex w-full items-center rounded-lg hover:bg-muted transition-colors cursor-pointer ${collapsed ? "justify-center p-2" : "gap-3 px-3 py-2.5"}`}>
               <div className={`flex shrink-0 items-center justify-center rounded-full bg-primary/10 overflow-hidden ${collapsed ? "h-8 w-8" : "h-10 w-10"}`}>
                 {avatar ? (
-                  <img src={avatar} alt="Profile" className="h-full w-full object-cover" />
+                  <SignedImage bucket="profile_pictures" value={avatar} alt="Profile" className="h-full w-full object-cover" />
                 ) : (
                   <span className={`font-semibold text-primary ${collapsed ? "text-xs" : "text-sm"}`}>{profileInitials}</span>
                 )}

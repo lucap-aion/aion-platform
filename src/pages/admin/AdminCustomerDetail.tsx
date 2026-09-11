@@ -1,4 +1,5 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
+import SignedImage from "@/components/SignedImage";
 import { motion } from "framer-motion";
 import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin, Calendar, Globe } from "lucide-react";
 import { format } from "date-fns";
@@ -124,7 +125,7 @@ const AdminCustomerDetail = () => {
         <div className="flex items-center gap-4">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-lg font-semibold text-primary shrink-0 overflow-hidden">
             {customer.avatar
-              ? <img src={customer.avatar} alt="" className="h-full w-full object-cover" />
+              ? <SignedImage bucket="profile_pictures" value={customer.avatar} alt="" className="h-full w-full object-cover" />
               : initials}
           </div>
           <div>

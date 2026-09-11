@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSignedUrls } from "@/lib/useSignedUrls";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, XCircle, Clock, CheckCircle2, Paperclip, User, Package, Image, FileText, File, ChevronLeft, ChevronRight, X, ExternalLink, Download } from "lucide-react";
@@ -55,6 +56,9 @@ const BrandClaimDetail = () => {
   const [isClosing, setIsClosing] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const attachments: string[] = Array.isArray((claim as any)?.media) ? (claim as any).media : [];
+  // claims_media is private: sign the whole list once, for the thumbnails,
+  // the PDF preview and the lightbox alike.
+  const signedAttachments = useSignedUrls("claims_media", attachments);
 
   useEffect(() => {
     if (lightboxIndex === null) return;
@@ -196,10 +200,10 @@ const BrandClaimDetail = () => {
                           className="group relative rounded-xl border border-border bg-muted overflow-hidden transition-all hover:border-primary/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40"
                         >
                           {isImage ? (
-                            <img src={file} alt={name} className="w-full h-48 object-cover transition-transform group-hover:scale-[1.02]" />
+                            <img src={signedAttachments[file]} alt={name} className="w-full h-48 object-cover transition-transform group-hover:scale-[1.02]" />
                           ) : isPdf ? (
                             <div className="w-full h-48 pointer-events-none">
-                              <embed src={file} type="application/pdf" className="w-full h-full" />
+                              <embed src={signedAttachments[file]} type="application/pdf" className="w-full h-full" />
                             </div>
                           ) : (
                             <div className="flex h-36 w-full flex-col items-center justify-center gap-2 p-4">
@@ -356,7 +360,7 @@ const BrandClaimDetail = () => {
                     />
                   ) : isPdf ? (
                     <div className="bg-white rounded-xl overflow-hidden shadow-2xl" style={{ width: "min(85vw, 800px)", height: "80vh" }}>
-                      <embed src={file} type="application/pdf" className="w-full h-full" />
+                      <embed src={signedAttachments[file]} type="application/pdf" className="w-full h-full" />
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-4 rounded-xl bg-white/10 p-12 text-white">

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import SignedImage from "@/components/SignedImage";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
 import { Search, XCircle, ChevronDown, Trash2, Plus, Pencil, X, ChevronLeft, ChevronRight, ArrowUpDown, FileText, Upload, LayoutGrid, List, AlertTriangle, ImageIcon, ShieldAlert, Repeat, MapPin } from "lucide-react";
@@ -330,8 +331,8 @@ const BrandClaims = () => {
         setIsSaving(false);
         return;
       }
-      const { data: { publicUrl } } = supabase.storage.from("claims_media").getPublicUrl(path);
-      uploadedUrls.push(publicUrl);
+      // The bucket is private: store the path and sign it when it is read.
+      uploadedUrls.push(path);
     }
 
     if (editingId) {
@@ -603,7 +604,7 @@ const BrandClaims = () => {
                             <div className="flex items-center gap-2.5">
                               <div className="h-9 w-9 shrink-0 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary overflow-hidden">
                                 {claim.policies?.profiles?.avatar
-                                  ? <img src={claim.policies.profiles.avatar} alt="" className="h-full w-full object-cover" />
+                                  ? <SignedImage bucket="profile_pictures" value={claim.policies.profiles.avatar} alt="" className="h-full w-full object-cover" />
                                   : initials}
                               </div>
                               <div>
@@ -863,7 +864,7 @@ const BrandClaims = () => {
                             className="h-16 w-16 shrink-0 rounded-lg border border-border overflow-hidden bg-muted flex items-center justify-center hover:border-primary/40 transition-colors"
                           >
                             {isImage
-                              ? <img src={url} alt="" className="h-full w-full object-cover" />
+                              ? <SignedImage bucket="claims_media" value={url} alt="" className="h-full w-full object-cover" />
                               : <FileText className="h-6 w-6 text-muted-foreground" />}
                           </a>
                           <button
@@ -1064,7 +1065,7 @@ const TriageGrid = ({
           >
             <div className="relative aspect-[16/10] w-full bg-muted/60">
               {isImage ? (
-                <img src={cover} alt="" className="h-full w-full object-cover" />
+                <SignedImage bucket="claims_media" value={cover} alt="" className="h-full w-full object-cover" />
               ) : claim.policies?.catalogues?.picture ? (
                 <img
                   src={claim.policies.catalogues.picture}

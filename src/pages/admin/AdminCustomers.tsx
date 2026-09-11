@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import SignedImage from "@/components/SignedImage";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useListUrlState } from "@/hooks/useListUrlState";
@@ -498,7 +499,7 @@ const AdminCustomers = () => {
                   </Tooltip>
                   <Link to={`/admin/customers/${r.id}`} className="group/cust flex items-center gap-2 min-w-0" title="View customer profile">
                     <div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
-                      {r.avatar ? <img src={r.avatar} alt={name} className="h-full w-full object-cover" /> : initials}
+                      {r.avatar ? <SignedImage bucket="profile_pictures" value={r.avatar} alt={name} className="h-full w-full object-cover" /> : initials}
                     </div>
                     <div className="min-w-0"><p className="font-medium text-foreground truncate group-hover/cust:text-primary group-hover/cust:underline">{name}</p><p className="text-xs text-muted-foreground truncate">{r.email}</p></div>
                   </Link>

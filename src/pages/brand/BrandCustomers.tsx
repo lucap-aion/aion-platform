@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import SignedImage from "@/components/SignedImage";
 import { Search, ChevronDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, ArrowUpDown, Crown, Clock, AlertTriangle, Heart } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -556,7 +557,7 @@ const BrandCustomers = () => {
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0 overflow-hidden">
                           {c.avatar
-                            ? <img src={c.avatar} alt="" className="h-full w-full object-cover" />
+                            ? <SignedImage bucket="profile_pictures" value={c.avatar} alt="" className="h-full w-full object-cover" />
                             : <>{c.first_name?.[0] || ""}{c.last_name?.[0] || ""}</>}
                         </div>
                         <div>

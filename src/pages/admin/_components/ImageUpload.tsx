@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { PRIVATE_BUCKETS, forgetSignedUrl } from "@/lib/storage";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, X, ImageIcon } from "lucide-react";
@@ -36,8 +37,15 @@ export const ImageUpload = ({
         .from(bucket)
         .upload(fullPath, file, { upsert: true });
       if (upErr) throw upErr;
-      const { data } = supabase.storage.from(bucket).getPublicUrl(fullPath);
-      onChange(`${data.publicUrl}?t=${Date.now()}`);
+      if (PRIVATE_BUCKETS.has(bucket)) {
+        // Private buckets keep the path; it is signed at read time. The ?t=
+        // cache-buster below belongs to a public URL and would break a path.
+        forgetSignedUrl(bucket, fullPath);
+        onChange(fullPath);
+      } else {
+        const { data } = supabase.storage.from(bucket).getPublicUrl(fullPath);
+        onChange(`${data.publicUrl}?t=${Date.now()}`);
+      }
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
     } finally {

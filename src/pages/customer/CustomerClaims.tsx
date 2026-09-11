@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import SignedImage from "@/components/SignedImage";
+import SignedLink from "@/components/SignedLink";
 import { motion } from "framer-motion";
 import { Plus, Clock, CheckCircle2, LayoutGrid, List, Pencil, Trash2, FileText, Upload, X } from "lucide-react";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
@@ -139,8 +141,8 @@ const CustomerClaims = () => {
         setIsSavingEdit(false);
         return;
       }
-      const { data: { publicUrl } } = supabase.storage.from("claims_media").getPublicUrl(path);
-      uploadedUrls.push(publicUrl);
+      // The bucket is private: store the path and sign it when it is read.
+      uploadedUrls.push(path);
     }
 
     const mergedMedia = [...editMedia, ...uploadedUrls];
@@ -331,13 +333,13 @@ const CustomerClaims = () => {
                             const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
                             const isImage = ["jpg","jpeg","png","gif","webp","avif","svg"].includes(ext);
                             return (
-                              <a key={idx} href={url} target="_blank" rel="noopener noreferrer"
+                              <SignedLink key={idx} bucket="claims_media" value={url} target="_blank" rel="noopener noreferrer"
                                 className="h-10 w-10 shrink-0 rounded-lg border border-border overflow-hidden bg-muted flex items-center justify-center hover:border-primary/40 transition-colors"
                               >
                                 {isImage
-                                  ? <img src={url} alt="" className="h-full w-full object-cover" />
+                                  ? <SignedImage bucket="claims_media" value={url} alt="" className="h-full w-full object-cover" />
                                   : <FileText className="h-5 w-5 text-muted-foreground" />}
-                              </a>
+                              </SignedLink>
                             );
                           })}
                         </div>
