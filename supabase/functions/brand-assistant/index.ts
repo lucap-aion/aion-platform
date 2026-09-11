@@ -1342,7 +1342,18 @@ Deno.serve(async (req: Request) => {
                 serviceClient.rpc("log_assistant_escalation", {
                   p_brand_id: brandId, p_question: ask, p_answer_excerpt: null,
                   p_profile_id: profileId, p_chat_id: chatId,
-                }).then(({ error }) => { if (error) console.warn("[escalation]", error.message); });
+                }).then(({ data: isNew, error }) => {
+                  if (error) { console.warn("[escalation]", error.message); return; }
+                  // Only the FIRST time a question is asked. After that the row
+                  // is already in the inbox and its counter goes up; forty
+                  // associates asking about Shopify is one mail, not forty.
+                  if (isNew === true) {
+                    void notifyEscalation({
+                      brand_id: brandId, source: "assistant", question: ask,
+                      asked_by: user.email ?? null,
+                    });
+                  }
+                });
               }
               toolResults.push({
                 type: "tool_result",
@@ -1987,6 +1998,23 @@ async function voyageRerank(query: string, documents: string[]): Promise<{ index
   return results
     .map((r: { index: number; relevance_score: number }) => ({ index: r.index, score: r.relevance_score }))
     .filter((r: { index: number }) => Number.isInteger(r.index));
+}
+
+// Mail the team about a question the assistant could not answer. Best-effort in
+// every sense: it runs after the row is written, it is never awaited, and a
+// failure is logged and dropped — the associate's answer must not wait on, or
+// break because of, our own inbox.
+async function notifyEscalation(escalation: Record<string, unknown>) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+      body: JSON.stringify({ type: "assistant_escalation", data: { escalation } }),
+    });
+    if (!res.ok) console.warn("[escalation email]", res.status, (await res.text()).slice(0, 200));
+  } catch (e) {
+    console.warn("[escalation email]", e instanceof Error ? e.message : String(e));
+  }
 }
 
 function jsonError(message: string, status: number) {

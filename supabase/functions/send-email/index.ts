@@ -43,6 +43,15 @@ function hslToHex(hsl: string): string {
 
 const AION_PRIMARY = "#7A5F28";
 
+// The escalation email carries text an associate typed, straight into HTML. An
+// apostrophe or a stray angle bracket in a real question would mangle the mail;
+// a deliberate one would do worse.
+function esc(v: unknown): string {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 // ─── Shared styles (default = AION branded) ──────────────────────────────────
 function makeStyles(primaryHex: string) {
   return {
@@ -269,6 +278,26 @@ function supportInternalHtml(message: any): string {
     <p style="${S.label}">Brand</p><p style="${S.value}">${message.brand.name}</p>
     <hr style="${S.rule}">
     <p style="${S.label}">Message</p><p style="${S.value}">${message.message}</p>
+    ${autoNote(S)}`);
+}
+
+// A question an associate could not get answered. Internal only — it carries
+// the brand's own words, so it never goes anywhere but AION.
+function assistantEscalationHtml(e: {
+  brand_name?: string | null; question?: string; note?: string | null;
+  answer_excerpt?: string | null; source?: string; asked_by?: string | null; inbox_url?: string;
+}): string {
+  const fromAssistant = e.source === "assistant";
+  return wrap(`
+    ${soloLogo(AION_LOGO, "AION Cover")}
+    <h1 style="${S.title}">${fromAssistant ? "The assistant couldn't answer this" : "An associate asked AION"}</h1>
+    <hr style="${S.rule}">
+    <p style="${S.label}">Brand</p><p style="${S.value}">${esc(e.brand_name ?? "—")}</p>
+    ${e.asked_by ? `<p style="${S.label}">Asked by</p><p style="${S.value}">${esc(e.asked_by)}</p>` : ""}
+    <p style="${S.label}">Question</p><p style="${S.value}">${esc(e.question ?? "")}</p>
+    ${e.note ? `<p style="${S.label}">What they added</p><p style="${S.value}">${esc(e.note)}</p>` : ""}
+    ${e.answer_excerpt ? `<p style="${S.label}">What the assistant had answered</p><p style="${S.value}">${esc(e.answer_excerpt)}</p>` : ""}
+    ${e.inbox_url ? `<div style="${S.btnWrap}"><a href="${e.inbox_url}" style="${S.btn}">Open the inbox</a></div>` : ""}
     ${autoNote(S)}`);
 }
 
@@ -583,6 +612,36 @@ Deno.serve(async (req) => {
           }),
         ]);
         result = { internal, confirmation };
+        break;
+      }
+
+      case "assistant_escalation": {
+        const { escalation } = data;
+        // The brand's name is resolved here rather than trusted from the caller:
+        // this email is the record of what was asked and by whom.
+        let brandName: string | null = escalation?.brand_name ?? null;
+        if (!brandName && escalation?.brand_id) {
+          const { data: b } = await supabaseAdmin
+            .from("brands").select("name").eq("id", escalation.brand_id).maybeSingle();
+          brandName = b?.name ?? null;
+        }
+        const appUrl = Deno.env.get("APP_URL") ?? (isProd ? "https://app.aioncover.com" : "https://dev.app.aioncover.com");
+        const html = assistantEscalationHtml({
+          ...escalation, brand_name: brandName,
+          // Built here, never taken from the caller: a link in a mail we send
+          // must not be something the sender got to choose.
+          inbox_url: `${appUrl}/admin/assistant-inbox`,
+        });
+        result = await resend.emails.send({
+          from: "AION Cover <team@aioncover.com>",
+          to: ["team@aioncover.com"],
+          bcc: ["luca@aioncover.com", "giulio@aioncover.com"],
+          subject: `${devPrefix}${brandName ? `${brandName}: ` : ""}${
+            escalation?.source === "assistant" ? "assistant couldn't answer" : "question for AION"
+          } — ${String(escalation?.question ?? "").slice(0, 80)}`,
+          html,
+          text: htmlToText(html),
+        });
         break;
       }
 

@@ -20,6 +20,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { sendEmail } from "@/utils/sendEmail";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import ReportView, { type ReportPayload } from "@/components/assistant/ReportView";
@@ -737,6 +738,20 @@ export default function BrandAssistant() {
       toast.error(tt(locale, "Couldn't send it. Try again.", "Invio non riuscito. Riprova."));
       return;
     }
+    // Tell the team it arrived. Best-effort and deliberately after the insert:
+    // the question is already saved, so a mail that fails must never tell an
+    // associate their question didn't get through.
+    void sendEmail("assistant_escalation", {
+      escalation: {
+        brand_id: brandId,
+        source: "associate",
+        question: question.slice(0, 500),
+        note: escalationNote.trim() || null,
+        answer_excerpt: (msg?.role === "assistant" ? msg.summary : "").slice(0, 500) || null,
+        asked_by: profile?.email ?? null,
+      },
+    });
+
     setEscalated((prev) => new Set(prev).add(i));
     setEscalating(null);
     setEscalationNote("");

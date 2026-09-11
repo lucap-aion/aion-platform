@@ -103,9 +103,12 @@ create or replace function public.log_assistant_escalation(
   p_profile_id     uuid default null,
   p_chat_id        uuid default null
 )
-returns void language plpgsql security definer set search_path = public, pg_temp as $fn$
+-- Returns true only when the row is NEW: the caller emails on a first ask and
+-- stays quiet when the counter merely goes up.
+returns boolean language plpgsql security definer set search_path = public, pg_temp as $fn$
+declare v_hits integer;
 begin
-  if p_brand_id is null or coalesce(btrim(p_question), '') = '' then return; end if;
+  if p_brand_id is null or coalesce(btrim(p_question), '') = '' then return false; end if;
   insert into public.assistant_escalations
     (brand_id, profile_id, chat_id, source, question, answer_excerpt)
   values
@@ -116,7 +119,9 @@ begin
         last_seen = now(),
         -- Asked again after we closed it: it is open again.
         status    = 'open',
-        handled_at = null;
+        handled_at = null
+  returning hits into v_hits;
+  return coalesce(v_hits, 0) = 1;
 end $fn$;
 
 revoke all on function public.log_assistant_escalation(integer, text, text, uuid, uuid) from public;
