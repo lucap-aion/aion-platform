@@ -9,6 +9,7 @@ import CommercialCycle from "./_components/CommercialCycle";
 import BrandDocuments from "./_components/BrandDocuments";
 import GoLiveChecklist from "./_components/GoLiveChecklist";
 import BrandKnowledge from "@/pages/brand/BrandKnowledge";
+import ShopifyConnection from "./_components/ShopifyConnection";
 import { StatusBadge } from "./_components/AdminTable";
 
 // Everything about one brand, in one place.
@@ -25,7 +26,7 @@ import { StatusBadge } from "./_components/AdminTable";
 // reach step 1. The tab is in the URL, so /admin/brands/18?tab=cycle is a link
 // you can send someone.
 
-type Tab = "record" | "cycle" | "golive" | "documents" | "knowledge";
+type Tab = "record" | "cycle" | "golive" | "documents" | "knowledge" | "integrations";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "record", label: "Record" },
@@ -37,6 +38,10 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "golive", label: "Go-live" },
   { key: "documents", label: "Documents" },
   { key: "knowledge", label: "Knowledge" },
+  // Where this house's commerce data comes from. The catalogue needs nothing
+  // from them; orders need a credential, which is why it has a home of its own
+  // rather than another field on the cycle.
+  { key: "integrations", label: "Integrations" },
 ];
 
 export default function AdminBrandDetail() {
@@ -181,6 +186,7 @@ export default function AdminBrandDetail() {
       {tab === "knowledge" && (
         <BrandKnowledge key={brand.id} brandIdOverride={brand.id} canWriteOverride />
       )}
+      {tab === "integrations" && <ShopifyConnection brandId={brand.id} />}
     </div>
   );
 }
