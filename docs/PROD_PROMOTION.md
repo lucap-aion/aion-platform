@@ -382,7 +382,9 @@ Suggested slices, each independently shippable and each one a §2.1 lockstep:
 
 1. **Extension + commercial cycle** — `create extension vector`; the
    `20260910*` series plus `20260912000001/2`; `onboard-brand`,
-   `build-collateral` and `brand-deck`. Check first
+   `build-collateral`, `brand-deck` and `sync-storefront` (the catalogue a
+   non-Shopify house gets is read by the last one, and the intro deck and the
+   demo book are both built from it). Check first
    whether prod already has `20260910000008/9` (applied to dev out of band).
    Watch `commercial_cycle_overview`: `legal_name` changed from an alias of
    `brands.name` to a real nullable column, so the DB must not land ahead of
