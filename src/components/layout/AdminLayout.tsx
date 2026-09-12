@@ -24,7 +24,16 @@ const AdminLayout = () => (
             <HeaderControls />
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto">
+        {/* overflow-x-hidden, not just overflow-y-auto.
+            `overflow-y: auto` with `overflow-x: visible` is not a thing in CSS — the
+            visible axis computes to `auto` — so any single child wider than the column
+            turned the whole page into a horizontal scroller: the sidebar stayed put, the
+            content slid off to the right, and you had to scroll sideways to read a form.
+            One unbreakable identifier, one wide table, one fixed-width grid is enough.
+            Clipping here keeps the page in the viewport; anything that genuinely needs
+            more width (a table, a diagram) scrolls inside its own box, which is where a
+            reader expects a sideways scrollbar to be. */}
+        <main className="flex-1 overflow-y-auto overflow-x-hidden">
           <Outlet />
         </main>
       </div>

@@ -34,7 +34,9 @@ const AppLayout = () => {
               <HeaderControls />
             </header>
           </div>
-          <main className="flex-1 overflow-y-auto min-h-0">
+          {/* overflow-x-hidden for the same reason as the admin shell: one child wider
+              than the column would otherwise make the whole portal scroll sideways. */}
+          <main className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
             <Outlet />
           </main>
         </div>
