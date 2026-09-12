@@ -143,25 +143,143 @@ export type PortalImages = {
   feedback_image?: string;
 };
 
-// The order the slots get filled. The two a client sees first come first, so a site that
-// only yields two usable pictures still dresses the sign-in screen and the dashboard.
-const SLOTS: (keyof PortalImages)[] = [
-  "auth_background_image", "top_banner_image",
-  "theft_image", "damage_image", "faq_image", "feedback_image",
-];
+/** A candidate with whatever is known about its shape. */
+export type SizedImage = { url: string; width?: number; height?: number };
 
 /**
- * Hand the candidates out across the six slots, one each.
+ * What each slot actually needs, because they are six different jobs.
  *
- * Distinct on purpose, and short rather than repeated: the same photograph behind the login
- * form, across the dashboard banner and on all four claim screens reads as a bug. Fewer
- * pictures than slots leaves the remainder empty, which is honest and which the go-live
- * checklist already has a human tick for.
+ * The old rule handed the candidates out in document order, one per slot, and its own note
+ * admitted it: "assigned in order, not chosen, so look at the claim and feedback screens
+ * before a client does". In practice that put a square packshot behind the sign-in form
+ * (where it is stretched across a whole screen) and a wide campaign crop into a claim tile
+ * (where it is letterboxed into a thumbnail).
+ *
+ *   auth background — a full screen behind a form. Wide, and the bigger the better.
+ *   top banner      — a letterbox strip across the portal. The widest thing available.
+ *   theft / damage  — a tile beside "my piece was stolen". A PIECE, square-ish.
+ *   faq             — a tile beside the questions. Landscape, atmospheric.
+ *   feedback        — a tile beside "how did we do". Anything portrait or square.
+ *
+ * `want` is the aspect ratio the slot is happiest with; a candidate is scored by how far it
+ * is from that, then by size. An image whose dimensions are unknown is neither favoured nor
+ * rejected — it sorts in the middle, because a picture with no measurements is still better
+ * than an empty box.
  */
-export function assignPortalImages(candidates: string[]): PortalImages {
+const SLOT_SHAPES: { slot: keyof PortalImages; want: number; minWidth?: number }[] = [
+  { slot: "auth_background_image", want: 1.8, minWidth: 1000 },
+  { slot: "top_banner_image", want: 3.0, minWidth: 900 },
+  { slot: "theft_image", want: 1.0 },
+  { slot: "damage_image", want: 1.0 },
+  { slot: "faq_image", want: 1.5 },
+  { slot: "feedback_image", want: 0.9 },
+];
+
+const aspect = (c: SizedImage): number | null =>
+  c.width && c.height ? c.width / c.height : null;
+
+/** How wrong this picture is for a slot that wants `want`. Unknown shape = middling. */
+function shapeCost(c: SizedImage, want: number): number {
+  const ratio = aspect(c);
+  if (ratio == null) return 0.6;
+  // Log distance, so 3:1 against 1:1 costs the same as 1:3 does.
+  return Math.abs(Math.log(ratio / want));
+}
+
+/**
+ * Hand the candidates out across the six slots, best fit first.
+ *
+ * Still one picture per slot and never the same one twice: the same photograph behind the
+ * login form, across the dashboard banner and on all four claim screens reads as a bug.
+ * Fewer pictures than slots leaves the remainder empty, which is honest and which the
+ * go-live checklist already has a human tick for.
+ *
+ * Slots are filled in the order above — the two a client sees first get the pick of the
+ * pile — and `preferred` (a brand's own product photography, which is exactly what belongs
+ * beside a claim form) is offered to the tiles before anything scraped off a homepage.
+ */
+export function assignPortalImages(
+  candidates: (string | SizedImage)[],
+  preferred: { theft_image?: string; damage_image?: string } = {},
+): PortalImages {
+  const pool: SizedImage[] = candidates.map((c) => (typeof c === "string" ? { url: c } : c));
   const out: PortalImages = {};
-  SLOTS.forEach((slot, i) => { if (candidates[i]) out[slot] = candidates[i]; });
+  const used = new Set<string>();
+
+  for (const [slot, url] of Object.entries(preferred)) {
+    if (url && !used.has(url)) { out[slot as keyof PortalImages] = url; used.add(url); }
+  }
+
+  for (const { slot, want, minWidth } of SLOT_SHAPES) {
+    if (out[slot]) continue;
+    const ranked = pool
+      .filter((c) => !used.has(c.url))
+      // A hero slot would rather be empty than hold a thumbnail stretched over a screen —
+      // but only when the width is actually known.
+      .filter((c) => !(minWidth && c.width && c.width < minWidth))
+      .map((c) => ({ c, cost: shapeCost(c, want), area: (c.width ?? 0) * (c.height ?? 0) }))
+      .sort((a, b) => a.cost - b.cost || b.area - a.area);
+    const pick = ranked[0]?.c;
+    if (pick) { out[slot] = pick.url; used.add(pick.url); }
+  }
   return out;
+}
+
+// ── Measuring a picture without downloading it ────────────────────────────────────────
+
+/**
+ * The pixel dimensions in an image's header bytes.
+ *
+ * The first couple of kilobytes of a PNG, JPEG, GIF or WebP carry the size, so the shape of
+ * ten candidates costs ten range requests rather than ten photographs. A URL that states
+ * its own size is read for free by `sizeFromUrl` and never fetched at all.
+ */
+export function dimensionsFromHeader(bytes: Uint8Array): { width: number; height: number } | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const u16 = (o: number, le = false) => (o + 2 <= bytes.length ? view.getUint16(o, le) : 0);
+  const u32 = (o: number, le = false) => (o + 4 <= bytes.length ? view.getUint32(o, le) : 0);
+
+  // PNG: IHDR is always the first chunk.
+  if (bytes.length > 24 && u32(0) === 0x89504e47) {
+    return { width: u32(16), height: u32(20) };
+  }
+  // GIF87a/GIF89a: little-endian logical screen descriptor.
+  if (bytes.length > 10 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+    return { width: u16(6, true), height: u16(8, true) };
+  }
+  // WebP: VP8/VP8L/VP8X all state it differently.
+  if (bytes.length > 30 && u32(0) === 0x52494646 && u32(8) === 0x57454250) {
+    const fourcc = u32(12);
+    if (fourcc === 0x56503858) return { width: (u32(24, true) & 0xffffff) + 1, height: ((u32(26, true) >> 8) & 0xffffff) + 1 };
+    if (fourcc === 0x56503820) return { width: u16(26, true) & 0x3fff, height: u16(28, true) & 0x3fff };
+    if (fourcc === 0x5650384c) {
+      const b = u32(21, true);
+      return { width: (b & 0x3fff) + 1, height: ((b >> 14) & 0x3fff) + 1 };
+    }
+  }
+  // JPEG: walk the segment markers to the first frame header.
+  if (bytes.length > 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let o = 2;
+    while (o + 9 < bytes.length) {
+      if (bytes[o] !== 0xff) { o++; continue; }
+      const marker = bytes[o + 1];
+      // SOF0…SOF15, excluding the four that are not frame headers.
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+        return { height: u16(o + 5), width: u16(o + 7) };
+      }
+      o += 2 + u16(o + 2);
+    }
+  }
+  return null;
+}
+
+/** The dimensions a URL states about itself — "…_1600x900.jpg", "?width=1600&height=900". */
+export function sizeFromUrl(url: string): { width: number; height: number } | null {
+  const pair = SIZE_IN_URL.exec(url);
+  if (pair) return { width: Number(pair[1]), height: Number(pair[2]) };
+  const w = Number(WIDTH_PARAM.exec(url)?.[1] ?? 0);
+  const h = Number(/[?&](?:h|height|sh|maxheight)=(\d{2,4})\b/i.exec(url)?.[1] ?? 0);
+  return w && h ? { width: w, height: h } : null;
 }
 
 // ── Colour ────────────────────────────────────────────────────────────────────────────
@@ -285,7 +403,7 @@ export type BrandFonts = { font_url: string; heading_font: string; body_font: st
  * back. So this only answers for a site that loads Google Fonts, where the name and the URL
  * that provides it come together and both are usable.
  */
-export function googleFontsFrom(html: string): BrandFonts | null {
+export function googleFontsFrom(html: string, css = ""): BrandFonts | null {
   const link = [...html.matchAll(/<link\b[^>]*href=["']([^"']*fonts\.googleapis\.com\/css2?[^"']*)["'][^>]*>/gi)]
     .map((m) => m[1])
     .find((href) => /family=/.test(href));
@@ -297,6 +415,27 @@ export function googleFontsFrom(html: string): BrandFonts | null {
     .filter(Boolean);
   if (!families.length) return null;
 
+  // A LOADED font is not necessarily the site's typeface. Buccellati loads Qwitcher Grypen,
+  // a handwriting face, for one flourish — and taking the first family in the link set every
+  // heading and every line of body copy in that client's portal to a script font.
+  //
+  // So when the stylesheet is available, rank the loadable families by how much the site
+  // actually uses each one, and refuse a family it barely touches. Without the stylesheet
+  // there is nothing to weigh and the link order stands, as before.
+  if (css) {
+    const used = families
+      .map((family) => ({ family, uses: fontFamilyUses(css, family) }))
+      .filter((f) => f.uses >= 2)
+      .sort((a, b) => b.uses - a.uses);
+    if (!used.length) return null;
+    return {
+      font_url: url,
+      // The face used most is the body copy; the runner-up, if there is one, is the display.
+      body_font: used[0].family,
+      heading_font: (used[1] ?? used[0]).family,
+    };
+  }
+
   // Two families is the usual pairing: a display face for headings and a text face for
   // everything else, in that order. One family does both jobs.
   return {
@@ -304,6 +443,12 @@ export function googleFontsFrom(html: string): BrandFonts | null {
     heading_font: families[0],
     body_font: families[1] ?? families[0],
   };
+}
+
+/** How many font-family declarations in this stylesheet name a given family. */
+export function fontFamilyUses(css: string, family: string): number {
+  const escaped = family.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (css.match(new RegExp(`font-family\\s*:[^;}]*["']?${escaped}["']?`, "gi")) ?? []).length;
 }
 
 /** The font families a page names, for a note when they cannot be loaded. */
@@ -319,4 +464,49 @@ export function declaredFontFamilies(css: string, limit = 3): string[] {
     if (seen.size >= limit) break;
   }
   return [...seen];
+}
+
+// ── A typeface we can actually serve ──────────────────────────────────────────────────
+
+// Faces that are BOTH what these houses use and free on Google Fonts, so naming one in the
+// record sets a font-family the portal can really load.
+//
+// The reason this list exists: a house self-hosts its licensed webfonts, so
+// `googleFontsFrom` finds no Google link and the record was left with empty font fields and
+// a note telling somebody to "pick a near match by hand". But the family the stylesheet
+// names is very often a Google face already — Buccellati sets Cormorant, which is free, and
+// the programme in production runs on Cormorant Garamond. When the name matches, the match
+// is not "near", it is exact.
+const SERVABLE_FAMILIES = [
+  "Cormorant Garamond", "Cormorant", "Cormorant Infant", "EB Garamond", "Playfair Display",
+  "Libre Baskerville", "Lora", "Marcellus", "Italiana", "Tenor Sans", "Gilda Display",
+  "Bodoni Moda", "Prata", "Spectral", "Crimson Text", "Josefin Sans", "Jost", "Montserrat",
+  "Lato", "Raleway", "Inter", "Work Sans", "Karla", "Manrope", "DM Sans", "Mulish",
+  "Nunito Sans", "Open Sans", "Roboto", "Poppins", "Futura", "Optima",
+];
+
+/**
+ * The typeface a site names, when Google Fonts can serve that exact family.
+ *
+ * Only an exact family match, and only faces on the list above: guessing that "Ferragamo
+ * Sans" is near enough to something else would put a typeface on a client's portal that
+ * their brand team never chose. A name we cannot serve stays unanswered, as before.
+ */
+export function servableDeclaredFonts(css: string): BrandFonts | null {
+  const declared = declaredFontFamilies(css, 8);
+  const matches = declared
+    .map((family) => SERVABLE_FAMILIES.find((s) => s.toLowerCase() === family.toLowerCase()))
+    .filter((f): f is string => !!f);
+  if (!matches.length) return null;
+
+  const heading = matches[0];
+  const body = matches[1] ?? matches[0];
+  const families = [...new Set([heading, body])]
+    .map((f) => `family=${f.replace(/ /g, "+")}:wght@400;500;600;700`)
+    .join("&");
+  return {
+    font_url: `https://fonts.googleapis.com/css2?${families}&display=swap`,
+    heading_font: heading,
+    body_font: body,
+  };
 }

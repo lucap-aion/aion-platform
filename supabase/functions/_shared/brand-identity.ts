@@ -2,6 +2,7 @@ import { jsonLdNodes } from "./product-extract.ts";
 import {
   imageCandidates, assignPortalImages, namedColours, dominantUsableColour,
   canCarryWhiteText, frequentColours, googleFontsFrom, declaredFontFamilies,
+  servableDeclaredFonts, dimensionsFromHeader, sizeFromUrl, type SizedImage,
 } from "./brand-appearance.ts";
 // Harvest a brand's visual identity from its own website.
 //
@@ -27,6 +28,13 @@ export type BrandIdentity = {
   faq_image?: string;
   feedback_image?: string;
   theme_settings?: Record<string, string>;
+  // The registered office, when the house publishes it as structured data. The legal-page
+  // reader in brand-legal.ts is the other source; this one is free and more often right,
+  // because it is what the site hands Google.
+  hq_address?: string;
+  hq_postcode?: string;
+  hq_city?: string;
+  hq_country?: string;
   found: string[];
   notes: string[];
 };
@@ -48,10 +56,24 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   // markdown carries a ![](…) for every image the page actually shows, which is the one
   // source of brand photography that works on either kind of site.
   if (jinaKey && !html) {
-    markdown = await fetchRendered(base, jinaKey);
-    if (markdown) out.notes.push("the homepage refused a direct fetch, so it was read through the renderer — imagery only, no colours or fonts");
+    // HTML, not markdown. Markdown carries the pictures and throws away everything else, so
+    // a house that refuses a plain fetch — most of them — had no colour, no typeface, no
+    // declared logo and no structured data: "imagery only, no colours or fonts" was a
+    // limitation of the request, not of the site.
+    html = await fetchRendered(base, jinaKey, "html");
+    if (html) out.notes.push("the homepage refused a direct fetch, so it was read through the renderer");
+    else {
+      markdown = await fetchRendered(base, jinaKey, "markdown");
+      if (markdown) out.notes.push("the homepage could only be read as text through the renderer — imagery only, no colours or fonts");
+    }
   }
   if (!html && !markdown) { out.notes.push("could not fetch the homepage"); return out; }
+
+  // The site's own stylesheets, which is where the colours and the typefaces live on any
+  // site built this decade. Reading only the inline <style> blocks worked for the houses
+  // that ship one enormous inline sheet and found nothing at all on the rest — Buccellati
+  // came out of onboarding with AION's gold as its primary and a handwriting font.
+  const css = html ? `${inlineStyles(html)}\n${await fetchStylesheets(html, base)}` : "";
 
   const origin = new URL(base).origin;
   const abs = (u: string | null | undefined) => {
@@ -101,14 +123,19 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
     photos = imageCandidates({ html, markdown, origin });
     if (photos.length) out.notes.push("the homepage renders its photography in JavaScript, so the images were read through the renderer");
   }
-  const portal = assignPortalImages(photos);
+  // Measured, so each slot can be given a picture the right shape for it rather than the
+  // next one in document order. See assignPortalImages.
+  const sized = await measureImages(photos.slice(0, 14));
+  const portal = assignPortalImages(sized);
   Object.assign(out, portal);
   const slotsFilled = Object.keys(portal).length;
   if (slotsFilled) {
     out.found.push(`${slotsFilled} portal image${slotsFilled === 1 ? "" : "s"}`);
+    const measured = sized.filter((c) => c.width).length;
     out.notes.push(
-      `${slotsFilled} of 6 portal slots filled from ${photos.length} usable picture${photos.length === 1 ? "" : "s"} on the homepage — ` +
-      "they were assigned in order, not chosen, so look at the claim and feedback screens before a client does",
+      `${slotsFilled} of 6 portal slots filled from ${photos.length} usable picture${photos.length === 1 ? "" : "s"} on the homepage, ` +
+      `chosen by shape (${measured} of ${sized.length} measured) — a wide one behind the sign-in form, square ones in the claim tiles. ` +
+      "Worth a look before a client sees them.",
     );
   } else {
     out.notes.push("no usable photography on the homepage — the six portal images have to be collected by hand");
@@ -163,6 +190,29 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   if (logo) { out.logo_big = logo; out.found.push(declaredLogo ? "logo (declared)" : "logo (markup)"); }
   else { out.notes.push("no logo found — the deck will carry only AION's mark until one is set on the record"); }
 
+  // ── Where the company is ──────────────────────────────────────────────────
+  // schema.org PostalAddress, which a house publishes for Google's local results. Free —
+  // the JSON-LD is already parsed — and it is the same fact the legal-page reader goes
+  // hunting for in the privacy policy. Empty nodes are common (Pomellato publishes
+  // `address: {"@type":"PostalAddress"}` and nothing else), so every field is optional.
+  const postal = jsonLdNodes(html)
+    .map((n) => n.address as unknown)
+    .flatMap((a) => (Array.isArray(a) ? a : [a]))
+    .find((a): a is Record<string, unknown> => !!a && typeof a === "object"
+      && Object.keys(a).some((k) => /streetAddress|postalCode|addressLocality/.test(k)));
+  if (postal) {
+    const str = (k: string) => {
+      const v = postal[k];
+      return typeof v === "string" && v.trim() ? clean(v).slice(0, 200) : undefined;
+    };
+    out.hq_address = str("streetAddress");
+    out.hq_postcode = str("postalCode");
+    out.hq_city = str("addressLocality");
+    out.hq_country = str("addressCountry");
+    const parts = [out.hq_address, out.hq_postcode, out.hq_city].filter(Boolean);
+    if (parts.length) out.found.push(`registered office, declared (${parts.join(", ")})`);
+  }
+
   // ── Colour ────────────────────────────────────────────────────────────────
   // A custom property the site NAMED for its brand is the one stylesheet signal that is not
   // a guess — somebody wrote `--brand-gold` on purpose. theme-color is the fallback, and it
@@ -171,7 +221,7 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   //
   // Everything beyond those two stays a suggestion. A wrong primary is worse than none.
   const theme: Record<string, string> = {};
-  const named = namedColours(html);
+  const named = namedColours(`${html}\n${css}`);
   const themeColor = meta(html, "theme-color");
 
   // Whatever the site names for a role goes to that role. Ferragamo names one thing —
@@ -188,7 +238,7 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
 
   // The primary, in order of how much the site meant it.
   const themeColorUsable = themeColor && canCarryWhiteText(themeColor.trim()) ? themeColor.trim() : null;
-  const dominant = dominantUsableColour(html);
+  const dominant = dominantUsableColour(`${html}\n${css}`);
   const primary = (named.primary && canCarryWhiteText(named.primary) ? named.primary : null)
     ?? themeColorUsable
     ?? dominant;
@@ -204,7 +254,7 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
     // theme-color is usually white because it exists to tint mobile browser chrome, and
     // taking that repaints the whole portal white. Pasquale Bruni declares #ffffff.
     if (themeColor) out.notes.push(`theme-color is ${themeColor} — too light to carry white text, so it is browser chrome rather than a brand colour`);
-    const suggestions = frequentColours(html);
+    const suggestions = frequentColours(`${html}\n${css}`);
     out.notes.push(suggestions.length
       ? `no usable brand colour anywhere; the stylesheet leans on ${suggestions.join(", ")}, none of which can carry white text — pick the primary by hand`
       : "no brand colour declared anywhere — pick the primary by hand");
@@ -215,14 +265,17 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   // self-hosted, so putting its name in the record sets a font-family the portal cannot
   // load and every heading falls back silently — worse than the empty field, which at least
   // asks somebody to look.
-  const fonts = googleFontsFrom(html);
+  // What the site LOADS from Google first, then what it NAMES that Google happens to serve.
+  // The second case is the common one: these houses self-host their licensed faces, and the
+  // family is very often a free one anyway — Buccellati sets Cormorant.
+  const fonts = googleFontsFrom(html, css) ?? servableDeclaredFonts(`${html}\n${css}`);
   if (fonts) {
     Object.assign(theme, fonts);
     out.found.push(`fonts (${fonts.heading_font}${fonts.body_font !== fonts.heading_font ? ` / ${fonts.body_font}` : ""})`);
   } else {
-    const named = declaredFontFamilies(html);
+    const named = declaredFontFamilies(`${html}\n${css}`);
     out.notes.push(named.length
-      ? `the site sets ${named.join(", ")} — licensed faces it hosts itself, so they cannot be loaded here; pick a near match by hand`
+      ? `the site sets ${named.join(", ")} — licensed faces it hosts itself and none of them is a family Google serves, so they cannot be loaded here; pick a near match by hand`
       : "no loadable typeface declared — set the fonts by hand");
   }
 
@@ -232,21 +285,90 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
-// The crawl's renderer, used here only when a direct fetch was refused. Returns markdown,
-// which is enough for imagery and nothing else — there is no CSS in it, so the colour and
-// the fonts stay unanswered on a site that blocks us, and the notes say so.
-async function fetchRendered(url: string, jinaKey: string): Promise<string> {
+// The crawl's renderer, used here only when a direct fetch was refused. HTML by preference:
+// it carries the stylesheets, the structured data and the <img> tags, so a site that blocks
+// us still yields a colour, a typeface and a declared logo. Markdown is the fallback and is
+// enough for imagery alone.
+async function fetchRendered(url: string, jinaKey: string, format: "html" | "markdown"): Promise<string> {
   try {
     const res = await fetch("https://r.jina.ai/" + url, {
       headers: {
         ...(jinaKey ? { Authorization: `Bearer ${jinaKey}` } : {}),
         Accept: "text/plain",
-        "X-Return-Format": "markdown",
+        "X-Return-Format": format,
       },
       signal: AbortSignal.timeout(45000),
     });
     return res.ok ? await res.text() : "";
   } catch { return ""; }
+}
+
+/** Every <style> block on the page, concatenated. */
+function inlineStyles(html: string): string {
+  return [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join("\n");
+}
+
+// Enough of the site's own CSS to find a brand colour in, and no more: three sheets, a
+// megabyte each. A luxury homepage links a dozen, most of them a cookie banner or a carousel
+// library, and the brand tokens are in the first one or two the page loads.
+const MAX_SHEETS = 3;
+const MAX_SHEET_BYTES = 1_000_000;
+
+async function fetchStylesheets(html: string, base: string): Promise<string> {
+  let origin: string;
+  try { origin = new URL(base).origin; } catch { return ""; }
+
+  const hrefs: string[] = [];
+  for (const tag of html.matchAll(/<link\b[^>]*>/gi)) {
+    if (!/rel=["'][^"']*stylesheet/i.test(tag[0])) continue;
+    const href = getAttr(tag[0], "href");
+    if (!href) continue;
+    let abs: string;
+    try { abs = new URL(href.replace(/&amp;/g, "&"), base).toString(); } catch { continue; }
+    // Same origin only. A third-party sheet is a cookie banner or a chat widget, and its
+    // colours are not the brand's — those blues are exactly what the frequency rule used to
+    // mistake for a primary.
+    if (!abs.startsWith(origin)) continue;
+    if (/fonts\.googleapis|fonts\.gstatic/.test(abs)) continue;
+    hrefs.push(abs);
+    if (hrefs.length >= MAX_SHEETS) break;
+  }
+  if (!hrefs.length) return "";
+
+  const sheets = await Promise.all(hrefs.map(async (href) => {
+    try {
+      const res = await fetch(href, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12000) });
+      if (!res.ok) return "";
+      const text = await res.text();
+      return text.length > MAX_SHEET_BYTES ? text.slice(0, MAX_SHEET_BYTES) : text;
+    } catch { return ""; }
+  }));
+  return sheets.join("\n");
+}
+
+/**
+ * The shape of each candidate picture.
+ *
+ * A URL that states its own size answers for free. For the rest, ask for the first two
+ * kilobytes — the header of a PNG, JPEG, GIF or WebP carries the dimensions — and fall back
+ * to unknown, which the slot assignment treats as "neither good nor bad" rather than
+ * discarding.
+ */
+async function measureImages(urls: string[]): Promise<SizedImage[]> {
+  return await Promise.all(urls.map(async (url) => {
+    const stated = sizeFromUrl(url);
+    if (stated) return { url, ...stated };
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": UA, Range: "bytes=0-2047" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok && res.status !== 206) return { url };
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      const dims = dimensionsFromHeader(bytes);
+      return dims ? { url, ...dims } : { url };
+    } catch { return { url }; }
+  }));
 }
 
 async function fetchText(url: string): Promise<string | null> {
