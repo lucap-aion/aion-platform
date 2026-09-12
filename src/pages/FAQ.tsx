@@ -26,17 +26,28 @@ const FAQ = () => {
 
   // FAQ: use brand JSON from DB. Supports both the editor format
   // ({ title, content: { blocks } }) and the legacy ({ question, answer }) shape.
+  //
+  // A block is a paragraph OR a list, and the list is not decoration: the answer to "what is
+  // excluded" is nine bulleted exclusions under one introductory line, and the answers to
+  // "what do I do if it is stolen / damaged" are the documents a customer has to provide.
+  // This read them as `.filter(b => b.text)` — a list block has `items`, not `text` — so
+  // every one of those lists was dropped and the exclusions question displayed as a single
+  // sentence promising a list that was not there. True of the live programme's FAQ too.
+  type Block = { type?: string; text?: string; items?: string[] };
   const faqItems = (() => {
     const source = locale === "it" ? tenant.faqIt : tenant.faqEn;
     if (Array.isArray(source) && source.length > 0) {
-      return (source as any[]).map((item) => ({
-        q: item.title ?? item.question ?? "",
-        a: item.content?.blocks
-          ? (item.content.blocks as any[]).filter((b: any) => b.text).map((b: any) => b.text).join(" ")
-          : (item.answer ?? ""),
-      }));
+      return (source as any[]).map((item) => {
+        const blocks: Block[] = item.content?.blocks ?? (item.answer ? [{ type: "p", text: item.answer }] : []);
+        return {
+          q: item.title ?? item.question ?? "",
+          blocks,
+          // One flat string, for the search box only.
+          a: blocks.map((b) => b.text ?? (b.items ?? []).join(" ")).join(" "),
+        };
+      });
     }
-    return [] as { q: string; a: string }[];
+    return [] as { q: string; a: string; blocks: Block[] }[];
   })();
 
   const filtered = faqItems.filter((item) => {
@@ -85,7 +96,17 @@ const FAQ = () => {
                     {item.q}
                   </AccordionTrigger>
                   <AccordionContent className="text-sm text-muted-foreground leading-relaxed">
-                    {item.a}
+                    <div className="space-y-2">
+                      {item.blocks.map((b, j) =>
+                        b.items?.length ? (
+                          <ul key={j} className="list-disc space-y-1 pl-5">
+                            {b.items.map((li, k) => <li key={k}>{li}</li>)}
+                          </ul>
+                        ) : b.text ? (
+                          <p key={j}>{b.text}</p>
+                        ) : null,
+                      )}
+                    </div>
                   </AccordionContent>
                 </AccordionItem>
               ))}
