@@ -13,7 +13,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { extractProducts } from "../_shared/product-extract.ts";
 import { mapShopifyProducts } from "../_shared/shopify-feed.ts";
 import type { FeedVariant, RawShopifyProduct } from "../_shared/shopify-feed.ts";
-import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
+import { rankCatalogueUrls, preferredLocale, inLocale, localeOf } from "../_shared/catalogue-urls.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const JINA_API_KEY = Deno.env.get("JINA_API_KEY") ?? "";
@@ -135,7 +135,10 @@ async function syncBrand(
     description: p.description,
     price: p.price,
     compare_at_price: p.compareAt,
-    price_currency: store.currency,
+    // The currency the page published, not the one configured on the source. A house that
+    // sells in nine markets publishes nine prices for the same ring, and storing a dollar
+    // figure as euros overstates the value covered by whatever the pair is worth that week.
+    price_currency: p.currency || store.currency,
     available: p.available,
     image_url: p.imageUrl,
     product_url: p.productUrl ?? `${store.base}/products/${p.handle}`,
@@ -281,10 +284,54 @@ type SProduct = {
   handle: string; sku: string | null; name: string; category: string | null;
   collection: string | null; description: string | null; price: number | null;
   compareAt: number | null; available: boolean; imageUrl: string | null;
+  // What the PAGE said the price was in. Only the structured path knows it; the Shopify
+  // feed is single-currency and the source row carries that.
+  currency?: string | null;
   // Only the Shopify feed carries these; the structured path leaves them empty.
   optionName?: string | null;
   variants?: FeedVariant[];
 };
+
+/**
+ * One page's HTML, the cheap way first.
+ *
+ * This used to go straight to the renderer whenever a JINA key was configured, and never
+ * try anything else. It is the right order for Ferragamo, which 403s a plain fetch — and it
+ * is why Pomellato reported "0 products so far" run after run over a catalogue that a plain
+ * `fetch` hands over on the first try: the renderer returns nothing usable for that site,
+ * and nothing behind it ever looked. A page a cheap request can read should never cost a
+ * render, and a house should never be recorded as having no catalogue because one fetch
+ * strategy failed.
+ *
+ * A raw read is only trusted when the site answers 2xx AND keeps us in the locale we asked
+ * for. These sites geo-redirect: ask for /at_de and be sent to /gb_en, and the prices come
+ * back in a different currency for a row keyed on a locale-independent handle.
+ */
+async function readPage(url: string): Promise<string> {
+  let raw = "";
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      signal: AbortSignal.timeout(15000),
+      redirect: "follow",
+    });
+    // An error page is not a product page. Pomellato's /404 publishes og:image and a title,
+    // which the extractor's OpenGraph fallback read as a product called
+    // "Pomellato Online-Boutique | Schmuck — Ringe, Ohrringe…".
+    if (res.ok) {
+      const body = await res.text();
+      if (localeOf(res.url) === localeOf(url)) raw = body;
+    }
+  } catch { /* fall through to the renderer */ }
+
+  if (raw && extractProducts(raw, url).length > 0) return raw;
+  if (!JINA_API_KEY) return raw;
+  try {
+    return await jinaHtml(url);
+  } catch {
+    return raw;
+  }
+}
 
 // Read the catalogue out of the pages the crawler has already visited.
 //
@@ -299,13 +346,22 @@ async function fetchStructured(
   products: SProduct[]; pagesRead: number; pagesRemaining: number;
   pagesDone: number; pagesTotal: number;
 }> {
+  // Discovered, not fetched: the reader reads these pages itself, and waiting for the
+  // knowledge crawl to reach page 300 of 520 before the catalogue can be read is hours of
+  // nothing. See the same change in onboard-brand's detectStructured.
   const { data: queued } = await admin.from("knowledge_crawl_queue")
-    .select("url").eq("brand_id", brandId).eq("status", "done").limit(400);
+    .select("url").eq("brand_id", brandId).limit(400);
 
   // Deterministic order, because the cursor indexes into it. Sorting by score alone leaves
   // ties in whatever order PostgREST returned them, and a list that reshuffles between runs
   // makes a cursor meaningless.
-  const urls = rankCatalogueUrls([base, ...((queued ?? []) as { url: string }[]).map((r) => r.url)]);
+  const ranked = rankCatalogueUrls([base, ...((queued ?? []) as { url: string }[]).map((r) => r.url)]);
+
+  // One locale, so the catalogue is priced in one currency. Ferragamo's 135 products were
+  // all read off /shop/us/en — dollar prices, stored as euros, straight into the demo book
+  // and the value covered.
+  const locale = preferredLocale(ranked);
+  const urls = inLocale(ranked, locale);
 
   // A BATCH, from where the last run stopped. Rendering the whole list in one call is what
   // killed the worker: a luxury listing page takes ten to forty seconds, and the onboarding
@@ -320,15 +376,7 @@ async function fetchStructured(
   // A few at a time fills the budget instead of the minute.
   const html: string[] = [];
   for (let i = 0; i < window.length; i += STRUCTURED_CONCURRENCY) {
-    html.push(...await Promise.all(window.slice(i, i + STRUCTURED_CONCURRENCY).map(async (url) => {
-      try {
-        return JINA_API_KEY
-          ? await jinaHtml(url)
-          : await (await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20000) })).text();
-      } catch {
-        return "";
-      }
-    })));
+    html.push(...await Promise.all(window.slice(i, i + STRUCTURED_CONCURRENCY).map(readPage)));
   }
 
   const seen = new Set<string>();
@@ -353,7 +401,7 @@ async function fetchStructured(
         sku: p.sku, name: p.name, category: p.category, collection: null,
         description: null, price: p.price, compareAt: null,
         available: p.available ?? true, imageUrl: p.image_url,
-        productUrl: p.product_url,
+        productUrl: p.product_url, currency: p.price_currency,
       } as SProduct);
     }
   }
