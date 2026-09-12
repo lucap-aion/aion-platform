@@ -1,7 +1,9 @@
 // build-collateral: the rest of the commercial pack, per brand.
 //
-//   data_request  — the pilot data-request workbook, with the prospect's legal
-//                   entity, address and product focus in place of Ferragamo's
+//   data_request  — the pilot data-request workbook: a blank form, with the
+//                   prospect's legal entity, address and product focus filled
+//                   into its three placeholders, and checked on the way out for
+//                   anything a previous client left in it
 //   read_data_request
 //                 — the SAME workbook, filled in and sent back, read into a
 //                   pricing perimeter instead of retyped by hand
@@ -20,7 +22,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { originAllowed, originRefused } from "../_shared/origin.ts";
 import JSZip from "npm:jszip@3.10.1";
-import { sharedStrings, sheetGrid, extractPerimeter, decodeXml, type Sheet } from "../_shared/xlsx-grid.ts";
+import {
+  sharedStrings, sheetGrid, extractPerimeter, decodeXml, filledNumericCells, type Sheet,
+} from "../_shared/xlsx-grid.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -65,9 +69,12 @@ Deno.serve(async (req: Request) => {
   const kind = String(body.kind ?? "");
   if (!brandId) return json({ error: "brand_id required" }, 400);
 
-  const { data: brand } = await admin.from("brands")
+  // A read that failed is not a brand that does not exist — see the same fix in
+  // onboard-brand. 503 says "try again", which is what the tick does.
+  const { data: brand, error: brandErr } = await admin.from("brands")
     .select("id, name, slug, hq_address, hq_city, hq_country, hq_postcode, legal_name, registered_address, product_focus")
     .eq("id", brandId).maybeSingle();
+  if (brandErr) return json({ error: `could not read brand ${brandId}: ${brandErr.message}` }, 503);
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
 
   try {
@@ -114,7 +121,11 @@ async function listArtifacts(admin: ReturnType<typeof createClient>, brand: Reco
 // A .xlsx keeps its text in xl/sharedStrings.xml, so branding it is a string
 // swap — the questions, structure and formatting are untouched.
 async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>, body: Record<string, unknown>) {
-  const { data: tpl } = await admin.from("deck_templates").select("*").eq("key", "data_request").maybeSingle();
+  const { data: tpl, error: tplErr } = await admin.from("deck_templates").select("*").eq("key", "data_request").maybeSingle();
+  // "Not registered" is a thing somebody has to go and fix; a read that failed is a thing to
+  // try again. Telling the second story as the first sends an admin to a migration that was
+  // never the problem.
+  if (tplErr) throw new Error(`could not read the data-request template: ${tplErr.message}`);
   // Both of these used to surface as one unhelpful line. They are different
   // problems with different fixes, so say which one it is and where the file
   // belongs — this button failed on every brand for weeks because nothing ever
@@ -174,19 +185,91 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
   }
   zip.file(path, xml);
 
+  // Whose file is this, really?
+  //
+  // The template was for a long time the first house's own returned workbook, and the three
+  // swaps above left the rest of it — their revenues, their units, their COGS, their broker
+  // — in a file addressed to somebody else. The template is blank now, but a template is a
+  // binary somebody re-uploads by hand, so this reads the file back before it leaves.
+  //
+  // Two tests, because the obvious one is the weaker one. Another client's NAME is caught by
+  // matching the brands table — but the leak that actually happened left no name behind: the
+  // three swaps replaced every string that named them and left every figure they had typed.
+  //
+  // So the test that matters is an invariant: a data REQUEST is a form nobody has filled in,
+  // and a blank form has no numbers in it. Any cached numeric value in the workbook we are
+  // about to send is somebody's answer, and it is not this prospect's.
+  const leaks = [
+    ...await foreignNamesIn(admin, Number(brand.id), xml),
+    ...await answersLeftIn(zip),
+  ];
+
   const out = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
   return await store(admin, brand, "data_request", "xlsx", out,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     {
       replacements: applied,
       unmatched: missed,
+      leaks,
       review: [
+        ...(leaks.length
+          ? [`DO NOT SEND — ${leaks.join("; ")}. The template in storage is a filled-in ` +
+             `workbook, or a text slot stopped matching. Run ` +
+             `scripts/blank-data-request-template.py on it, re-upload it to the decks bucket, ` +
+             `and build this again.`]
+          : []),
         legalName ? `Confirm "${legalName}" is the entity the pilot is contracted with.` : "No legal entity set — the workbook went out blank there.",
         brandAddress ? "Check the registered address against the client's own records." : "No registered address set — fill it on the brand record or in the field above.",
         focus ? `Product focus: ${focus}.` : "No product focus set — the client will not know which categories the pilot covers.",
         ...(missed.length ? [`${missed.length} template slot${missed.length === 1 ? "" : "s"} did not match the workbook — it has been revised since the template was mapped, so check those cells by hand.`] : []),
       ],
     });
+}
+
+/**
+ * Other brands' names that appear in a document meant for this one.
+ *
+ * Trading name and legal entity, for every other brand on the platform. Short names are
+ * skipped — a three-letter house name matches half the English language — and the search is
+ * case-insensitive on the XML, which is where a swap that did not take would leave it.
+ */
+async function foreignNamesIn(
+  admin: ReturnType<typeof createClient>, brandId: number, xml: string,
+): Promise<string[]> {
+  const { data } = await admin.from("brands").select("id, name, legal_name").neq("id", brandId);
+  const haystack = xml.toLowerCase();
+  const found = new Set<string>();
+  for (const b of (data ?? []) as { name: string | null; legal_name: string | null }[]) {
+    for (const raw of [b.name, b.legal_name]) {
+      const needle = (raw ?? "").trim();
+      if (needle.length < 5) continue;
+      if (haystack.includes(needle.toLowerCase())) found.add(needle);
+    }
+  }
+  return [...found].map((n) => `it names ${n}`);
+}
+
+/**
+ * Figures already filled in, in a form that is supposed to go out empty.
+ *
+ * The test itself is `filledNumericCells` in _shared/xlsx-grid.ts, where it can be unit
+ * tested; this walks the sheets and says where. Reported with the cells, because the first
+ * question is always "where?".
+ */
+async function answersLeftIn(zip: JSZip): Promise<string[]> {
+  const out: string[] = [];
+  for (const path of Object.keys(zip.files)) {
+    if (!/^xl\/worksheets\/sheet\d+\.xml$/.test(path)) continue;
+    const xml = await zip.file(path)?.async("string");
+    if (!xml) continue;
+    const filled = filledNumericCells(xml);
+    if (filled.length) {
+      const sheet = path.replace("xl/worksheets/", "").replace(".xml", "");
+      out.push(`${filled.length} figure${filled.length === 1 ? "" : "s"} are already filled in on ` +
+        `${sheet} (${filled.slice(0, 6).join(", ")}${filled.length > 6 ? ", …" : ""})`);
+    }
+  }
+  return out;
 }
 
 // ── 1b. The same workbook, filled in and sent back ──────────────────────────
@@ -364,14 +447,24 @@ async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: 
       "Figures are a model, not an offer — the formal insurer quotation governs",
     ] },
 
-    // Provenance is the slide that keeps this honest: what the rate covers, who
-    // it was quoted for, and at what volume.
+    // Provenance is the slide that keeps this honest: what the rate covers, how
+    // current it is, and at what volume.
+    //
+    // What it must NOT do is name the house the rate was quoted for. This deck goes to a
+    // prospect, and "quoted for Roberto Coin (2026-07-30): 6.00% of COGS" hands them a
+    // live client's name and that client's insurance rate in one line. The admin needs to
+    // know whose rate it is — that is in the panel, and in the review notes below — but a
+    // prospect does not, and the honesty the slide owes them is "this is not yours yet",
+    // which "INDICATIVE" says without naming anybody.
     { title: "Where these rates come from", bullets: (c.rates_used ?? []).map((r: any) => {
       const cover = r.coverage === "theft" ? "theft only"
         : `theft + accidental damage${r.damage_scope ? ` (${r.damage_scope})` : ""}`;
       const band = r.gmv_from != null
         ? `, quoted at ${eur(r.gmv_from)}–${r.gmv_to != null ? eur(r.gmv_to) : "no cap"} volume` : "";
-      return `${r.category} — ${cover}: ${pct(r.rate_of_cogs)} of COGS. ${r.insurer}, quoted for ${r.quoted_for ?? "—"}` +
+      const who = r.own_quote
+        ? `quoted for ${brand.name}`
+        : "quoted for a comparable house in the same category";
+      return `${r.category} — ${cover}: ${pct(r.rate_of_cogs)} of COGS. ${r.insurer}, ${who}` +
         `${r.quoted_at ? ` (${r.quoted_at})` : ""}${band}${r.own_quote ? "" : " — INDICATIVE"}`;
     }) },
   ];
@@ -383,8 +476,14 @@ async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: 
       business_case: c,
       indicative: c.indicative,
       review: [
+        // The slide says "a comparable house"; this says which, because the person sending
+        // it has to know whose rate they are about to quote.
         c.indicative
-          ? "These rates were quoted for another house. Decide deliberately whether to show them, and keep the 'indicative' wording on the slide."
+          ? "Borrowed rates, named on screen but NOT on the slide: " +
+            (c.rates_used ?? []).filter((r: any) => !r.own_quote)
+              .map((r: any) => `${r.category} ${pct(r.rate_of_cogs)} from ${r.quoted_for ?? "an unnamed quote"}`)
+              .join("; ") +
+            ". Decide deliberately whether to show them, and keep the 'indicative' wording."
           : "Rates are this brand's own quote.",
         ...((c.notes ?? []) as string[]),
         "Check the perimeter against what the client actually declared in the data request.",
@@ -545,10 +644,23 @@ async function renderDeck(admin: ReturnType<typeof createClient>, slides: SlideS
 const BG = "FAF7F2";
 const MARK = { x: 848926, y: 6455335, cx: 627631, cy: 178973 };
 
+// The teaser's typography does not come from its theme either — the theme says Arial, and
+// every slide in the hand-built deck overrides it: Georgia for the headings, Montserrat for
+// the body. Generated slides that set neither inherited Arial, so the ops deck and the
+// business case were recognisably NOT the intro deck the moment you put them side by side,
+// which is the one thing they are supposed to be.
+const HEADING = "Georgia";
+const BODY = "Montserrat";
+const INK = "262626";
+
 function slideXml(s: SlideSpec, markRelId: string | null): string {
-  const para = (t: string, lvl = 0) =>
-    `<a:p>${lvl ? `<a:pPr lvl="${lvl}"/>` : ""}<a:r><a:rPr lang="en-GB" dirty="0"/><a:t>${escapeXml(t)}</a:t></a:r></a:p>`;
-  const bullets = s.bullets.filter(Boolean).map((b) => para(b)).join("") || para("");
+  const run = (t: string, face: string, size?: number) =>
+    `<a:r><a:rPr lang="en-GB" dirty="0"${size ? ` sz="${size}"` : ""}>` +
+    `<a:solidFill><a:srgbClr val="${INK}"/></a:solidFill>` +
+    `<a:latin typeface="${face}"/><a:cs typeface="${face}"/>` +
+    `</a:rPr><a:t>${escapeXml(t)}</a:t></a:r>`;
+  const para = (t: string, face: string, size?: number) => `<a:p>${run(t, face, size)}</a:p>`;
+  const bullets = s.bullets.filter(Boolean).map((b) => para(b, BODY, 1600)).join("") || para("", BODY, 1600);
   const mark = markRelId
     ? `<p:pic><p:nvPicPr><p:cNvPr id="4" name="AION"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>` +
       `<p:blipFill><a:blip r:embed="${markRelId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>` +
@@ -566,7 +678,7 @@ function slideXml(s: SlideSpec, markRelId: string | null): string {
     `<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title 1"/>` +
     `<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
     `<p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr/>` +
-    `<p:txBody><a:bodyPr/><a:lstStyle/>${para(s.title)}</p:txBody></p:sp>` +
+    `<p:txBody><a:bodyPr/><a:lstStyle/>${para(s.title, HEADING)}</p:txBody></p:sp>` +
     `<p:sp><p:nvSpPr><p:cNvPr id="3" name="Content Placeholder 2"/>` +
     `<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
     `<p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr/>` +

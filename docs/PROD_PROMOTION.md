@@ -259,6 +259,18 @@ Cron jobs call edge functions with an auth header
 (`20260730000012_cron_auth_header.sql`); that header has to be right for the
 prod project, not copied from dev.
 
+Schedule them from the **current** tick definitions, not from an older
+migration. Every tick dispatches through `net.http_post`, and pg_net's default
+timeout is 5 s — which it enforces by cancelling the request. A cold
+`onboard-brand` needs longer than that just to boot, so the function never runs
+a line and the queued stage stays `pending` with `queued_at` set, no error, no
+attempt spent: the screen says "queued, it runs on the server" forever.
+Measured on dev 2026-09-12 — three consecutive ticks dispatched Pomellato's
+branding stage and none of them started it; the same call by hand took 6.5 s
+and worked. `20260912000001_tick_http_timeout.sql` puts
+`timeout_milliseconds := 20000` on all five, and that migration has to be in
+before the jobs are worth scheduling.
+
 ### 4.6 Storage buckets are public on both
 
 `claims_media`, `profile_pictures`, `purchase_receipts` are `public=true` on
@@ -369,12 +381,32 @@ cron jobs, 4 secrets, and a 154-commit merge. Do not attempt it as one act.
 Suggested slices, each independently shippable and each one a §2.1 lockstep:
 
 1. **Extension + commercial cycle** — `create extension vector`; the
-   `20260910*` series; `onboard-brand` + `build-collateral`. Check first
+   `20260910*` series plus `20260912000001/2`; `onboard-brand`,
+   `build-collateral` and `brand-deck`. Check first
    whether prod already has `20260910000008/9` (applied to dev out of band).
    Watch `commercial_cycle_overview`: `legal_name` changed from an alias of
    `brands.name` to a real nullable column, so the DB must not land ahead of
    the client. `is_prospect` defaults to `false`, so every existing prod brand
    stays a client. See `commercial_cycle_prod_gap`.
+
+   **Two binaries no migration carries.** `deck_templates` rows name storage
+   paths in the private `decks` bucket, and the bucket is created empty:
+
+   | path | what it is |
+   |------|------------|
+   | `templates/AION_Teaser_New.pptx` | the intro deck. Every generated deck — teaser, ops, business case — is built *into* this package for its theme, so without it all three fail at the first download. |
+   | `templates/AION_Data_Request_Pilot_Blank.xlsx` | the blank data-request workbook. Committed at `docs/templates/AION_Data_Request_Pilot_Blank.xlsx`, and reproducible from a revised source with `scripts/blank-data-request-template.py`. |
+
+   Copy the teaser from dev; upload the workbook from the repo. Do **not** register
+   `templates/AION_Data_Request_Pilot.xlsx` on prod, and do not "restore" it if
+   you find it there: that file is the first house's own returned workbook, and
+   the generator only ever replaced three strings in it — everything else, their
+   revenues, units, average prices, COGS ratios, price-band volumes, their
+   answers on group payment structure and on their broker, and their tenant's
+   Microsoft sensitivity labels, went out to every prospect who received a data
+   request. `20260912000002` repoints the row; `build-collateral` now also reads
+   the file back before it leaves and refuses it with "DO NOT SEND" if any
+   figure is already filled in.
 2. **Knowledge base + assistant** — `20260625*`, `20260707*`, the
    `brand_knowledge_*` tables, `VOYAGE_API_KEY` + `JINA_API_KEY` +
    `KNOWLEDGE_BATCH_SECRET`, the crawl/ingest/assistant functions, and the
