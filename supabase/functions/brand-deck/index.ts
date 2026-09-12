@@ -75,10 +75,15 @@ Deno.serve(async (req: Request) => {
   if (!brandId) return json({ error: "brand_id required" }, 400);
   const templateKey = String(body.template_key ?? "intro_teaser");
 
-  const { data: brand } = await admin.from("brands").select("id, name, slug, logo_big, logo_small").eq("id", brandId).maybeSingle();
+  // A read that failed is not a brand that does not exist — see the same fix in
+  // onboard-brand. 503 says "try again", which is what the tick does.
+  const { data: brand, error: brandErr } = await admin.from("brands")
+    .select("id, name, slug, logo_big, logo_small").eq("id", brandId).maybeSingle();
+  if (brandErr) return json({ error: `could not read brand ${brandId}: ${brandErr.message}` }, 503);
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
 
-  const { data: tpl } = await admin.from("deck_templates").select("*").eq("key", templateKey).maybeSingle();
+  const { data: tpl, error: tplErr } = await admin.from("deck_templates").select("*").eq("key", templateKey).maybeSingle();
+  if (tplErr) return json({ error: `could not read the ${templateKey} template: ${tplErr.message}` }, 503);
   if (!tpl) return json({ error: `template ${templateKey} not found` }, 404);
 
   const slots = (tpl.slots ?? []) as Slot[];

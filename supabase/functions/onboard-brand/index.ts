@@ -188,7 +188,15 @@ Deno.serve(async (req: Request) => {
   if (!brandId) return json({ error: "brand_id required" }, 400);
   const options = (body.options ?? {}) as { customers?: number; policies?: number; avg_ticket?: number; force?: boolean };
 
-  const { data: brand } = await admin.from("brands").select("*").eq("id", brandId).maybeSingle();
+  // A read that FAILED is not a brand that does not exist.
+  //
+  // This ignored the error and reported "brand 16 not found" for Pomellato — a house with a
+  // demo, a catalogue and 2,686 indexed chunks — because one of two concurrent cold-start
+  // invocations lost its database read (dev, 2026-09-12 11:41:07). The stage stayed queued
+  // and the next tick got it, so the automation recovered; the person reading the message
+  // would have gone looking for a deleted brand.
+  const { data: brand, error: brandErr } = await admin.from("brands").select("*").eq("id", brandId).maybeSingle();
+  if (brandErr) return json({ error: `could not read brand ${brandId}: ${brandErr.message}` }, 503);
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
 
   const action = String(body.action ?? "run");
@@ -481,7 +489,16 @@ async function runStage(
         p_brand_id: brandId, p_stages: ["data_request"],
       });
       if (error) console.error("[onboard-brand] could not re-queue the data request", error.message);
-      else id.notes.push("the data request has been queued again, now that the legal entity and address are known");
+      // Say which of the two was found. It used to claim "now that the legal entity and
+      // address are known" whenever EITHER landed, so a brand whose legal entity could not
+      // be established — the note directly above says so — was told in the next line that
+      // it had been. Two contradictory sentences, one of them wrong, every time.
+      else {
+        const what = patch.legal_name != null
+          ? (patch.hq_address != null || patch.hq_postcode != null ? "legal entity and address" : "legal entity")
+          : "registered address";
+        id.notes.push(`the data request has been queued again, now that the ${what} is known`);
+      }
     }
 
     return {
