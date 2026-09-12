@@ -105,10 +105,16 @@ async function unmetRequirements(
   };
   // A prerequisite stage that has FINISHED and produced nothing will not produce anything
   // on its own; anything else may still deliver.
+  // Settled means "nothing more is coming from it", which a FAILURE satisfies as surely as
+  // a success. Reading only 'done' meant a dependent stage was told its wait was
+  // non-terminal for ever: now that a non-terminal wait re-queues instead of failing, a
+  // prerequisite that died would have had the stages behind it re-queueing once a minute
+  // until someone noticed.
   const settled = async (prerequisite: Stage) => {
     const { data } = await admin.from("brand_onboarding")
       .select("status").eq("brand_id", brandId).eq("stage", prerequisite).maybeSingle();
-    return (data as { status?: string } | null)?.status === "done";
+    const status = (data as { status?: string } | null)?.status;
+    return status === "done" || status === "failed" || status === "skipped";
   };
 
   if (stage === "demo_data") {
@@ -130,14 +136,19 @@ async function unmetRequirements(
   if (stage === "intro_deck") {
     // The deck swaps in the brand's own pieces; with no catalogue it would just
     // re-emit AION's stock imagery under the brand's name.
-    if (!(await has("storefront_products"))) {
+    //
+    // PICTURES, not products. The deck fills image slots, so a catalogue of priced rows
+    // with no photography leaves it with nothing to put on a slide — and because that check
+    // lived in brand-deck rather than here, it came back as a hard failure on a brand whose
+    // catalogue was still being read, a minute before the pictures arrived.
+    if (!(await has("storefront_products", (q: any) => q.not("image_url", "is", null)))) {
       return await settled("storefront")
         ? {
-          reason: "this site publishes no product feed and no structured product data, so there are no pieces to put in a deck — the catalogue stage looked and found none",
+          reason: "no pictures in this brand's catalogue, so there are no pieces to put in a deck — the catalogue stage has finished and found none",
           terminal: true,
         }
         : {
-          reason: "no catalogue yet — the deck is built from the brand's own pieces, so the storefront stage has to land first",
+          reason: "no catalogue pictures yet — the deck is built from the brand's own pieces, so the catalogue stage has to land first",
           terminal: false,
         };
     }
@@ -195,7 +206,18 @@ Deno.serve(async (req: Request) => {
   // invocations lost its database read (dev, 2026-09-12 11:41:07). The stage stayed queued
   // and the next tick got it, so the automation recovered; the person reading the message
   // would have gone looking for a deleted brand.
-  const { data: brand, error: brandErr } = await admin.from("brands").select("*").eq("id", brandId).maybeSingle();
+  // Retried once, because the read that fails is usually a blip and the caller is a cron
+  // tick. Four of seven ticks lost their run to "Gateway Timeout" while the crawl worker,
+  // the assistant check and a catalogue read were all talking to the database at once.
+  let brand: Record<string, unknown> | null = null;
+  let brandErr: { message: string } | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await admin.from("brands").select("*").eq("id", brandId).maybeSingle();
+    brand = (r.data ?? null) as Record<string, unknown> | null;
+    brandErr = r.error ?? null;
+    if (!brandErr) break;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
   if (brandErr) return json({ error: `could not read brand ${brandId}: ${brandErr.message}` }, 503);
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
 
@@ -231,41 +253,61 @@ Deno.serve(async (req: Request) => {
   }
 
   // Called by the tick: run exactly ONE queued stage, then get out of the way.
+  //
+  // The tick must NOT wait for the work. pg_net cancels the request at its timeout and the
+  // runtime takes the invocation down with it, so a stage whose batch runs longer than that
+  // never lands: Buccellati's catalogue read takes thirty seconds against a twenty-second
+  // timeout, and four ticks in a row started it, were cut, and wrote nothing — the row sat
+  // 'pending' with its old detail and the screen said "queued" for as long as you cared to
+  // watch. Claim the stage, answer, and finish the work in the background; the row's own
+  // status is what reports progress, with the fifteen-minute sweeper behind it.
   if (action === "run_queued") {
     const stage = String(body.stage ?? "") as Stage;
     if (!(ALL_STAGES as readonly string[]).includes(stage)) return json({ error: "unknown stage" }, 400);
     await setStage(admin, brandId, stage, "running");
-    try {
-      const out = await runStage(admin, brand, stage, options);
-      const ok = (out as { ok?: boolean }).ok !== false;
-      const more = ok && (out as { continue?: boolean }).continue === true;
+    const work = (async () => {
+      try {
+        const out = await runStage(admin, brand, stage, options);
+        const ok = (out as { ok?: boolean }).ok !== false;
+        const more = ok && (out as { continue?: boolean }).continue === true;
 
-      if (more) {
-        // Still work to do: back in the queue, at the end, so another brand's
-        // stages are not starved while this catalogue finishes.
-        await setStage(admin, brandId, stage, "pending", out);
-        await admin.from("brand_onboarding")
-          .update({ queued_at: new Date().toISOString() })
-          .eq("brand_id", brandId).eq("stage", stage);
-        return json({ ok: true, stage, continuing: true, result: out });
-      }
+        if (more) {
+          // Still work to do: back in the queue, at the end, so another brand's
+          // stages are not starved while this catalogue finishes.
+          await setStage(admin, brandId, stage, "pending", out);
+          await admin.from("brand_onboarding")
+            .update({ queued_at: new Date().toISOString() })
+            .eq("brand_id", brandId).eq("stage", stage);
+          return { ok: true, stage, continuing: true, result: out };
+        }
 
-      await setStage(admin, brandId, stage, outcomeOf(out, ok), out,
-        ok ? null : String((out as { reason?: string }).reason ?? "stage did not complete"));
-      // Cancel only what actually needed this stage. Everything else keeps its place in
-      // the queue: a house with no product feed should still get its documents, its
-      // assistant check, its ops deck and its data request.
-      const blocked = ok ? [] : blockedBy(stage);
-      if (blocked.length) {
-        await admin.from("brand_onboarding").update({ queued_at: null })
-          .eq("brand_id", brandId).eq("status", "pending").in("stage", blocked);
+        await setStage(admin, brandId, stage, outcomeOf(out, ok), out,
+          ok ? null : String((out as { reason?: string }).reason ?? "stage did not complete"));
+        // Cancel only what actually needed this stage. Everything else keeps its place in
+        // the queue: a house with no product feed should still get its documents, its
+        // assistant check, its ops deck and its data request.
+        const blocked = ok ? [] : blockedBy(stage);
+        if (blocked.length) {
+          await admin.from("brand_onboarding").update({ queued_at: null })
+            .eq("brand_id", brandId).eq("status", "pending").in("stage", blocked);
+        }
+        return { ok, stage, blocked, result: out };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await setStage(admin, brandId, stage, "failed", {}, msg);
+        return { ok: false, stage, error: msg };
       }
-      return json({ ok, stage, blocked, result: out });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await setStage(admin, brandId, stage, "failed", {}, msg);
-      return json({ ok: false, stage, error: msg }, 200);
+    })();
+
+    // waitUntil keeps the isolate alive after the response; without it (a local `supabase
+    // functions serve`, or a runtime that does not provide it) fall back to waiting, which
+    // is the old behaviour rather than a silent no-op.
+    const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+    if (typeof runtime?.waitUntil === "function") {
+      runtime.waitUntil(work);
+      return json({ ok: true, stage, started: true });
     }
+    return json(await work);
   }
 
   // Dry run: what a purge would take out, and what it would leave behind.
@@ -333,7 +375,7 @@ Deno.serve(async (req: Request) => {
         await admin.from("brand_onboarding")
           .update({ queued_at: new Date().toISOString() })
           .eq("brand_id", brandId).eq("stage", stage);
-        return json({ ok: true, stage, continuing: true, result: out });
+        return { ok: true, stage, continuing: true, result: out };
       }
 
       await setStage(admin, brandId, stage, outcomeOf(out, ok), out,
@@ -365,6 +407,34 @@ Deno.serve(async (req: Request) => {
 // stage that cannot run because the thing it needs genuinely does not exist is finished
 // with, not broken. Marking either "failed" paints a red mark on a healthy brand and sends
 // somebody to fix a site that has nothing wrong with it.
+/**
+ * Whether we yet know enough about the site to say if it has a catalogue.
+ *
+ * Detection reads pages off the crawl's URL list, so what it needs is DISCOVERY — the
+ * sitemap pass in `sources`, which takes one tick and hands over the whole site — not the
+ * crawl itself, which then works through those pages at eight a minute for an hour.
+ *
+ * Before this, a non-Shopify house onboarded from scratch had its catalogue judged three
+ * minutes in, off the eight pages the crawl had managed by then, and the answer was recorded
+ * as 'none' for good: no deck, no demo, no way back without a person pressing Run.
+ */
+async function catalogueReadiness(
+  admin: ReturnType<typeof createClient>, brandId: number,
+): Promise<{ discovered: number; canDecide: boolean }> {
+  const { count } = await admin.from("knowledge_crawl_queue")
+    .select("id", { count: "exact", head: true }).eq("brand_id", brandId);
+  const discovered = count ?? 0;
+  if (discovered > 0) return { discovered, canDecide: true };
+
+  // Nothing discovered. Either `sources` has not run yet — wait for it — or it has run and
+  // found nothing, in which case the guessed paths are all there will ever be and there is
+  // no point waiting for a list that is not coming.
+  const { data } = await admin.from("brand_onboarding")
+    .select("status").eq("brand_id", brandId).eq("stage", "sources").maybeSingle();
+  const sources = (data as { status?: string } | null)?.status;
+  return { discovered, canDecide: sources === "done" || sources === "failed" || sources === "skipped" };
+}
+
 function outcomeOf(out: unknown, ok: boolean): "done" | "failed" | "skipped" {
   if (ok) return "done";
   const d = (out ?? {}) as { needs?: string; terminal?: boolean };
@@ -382,8 +452,20 @@ async function runStage(
   const brandId = Number(brand.id);
   const force = options.force === true;
 
+  // A requirement that is not met YET is a wait, not a failure.
+  //
+  // outcomeOf() records a non-terminal `ok: false` as 'failed', and nothing re-runs a failed
+  // stage: the queue only ever picks up 'pending'. So a stage that ran a minute early — the
+  // deck before the catalogue, the documents before the crawl — went permanently red and
+  // needed a person to press Run, on a pipeline whose whole purpose is that nobody has to.
+  // It re-queues instead, and terminality is what ends it: once the stage it is waiting on
+  // has settled, unmetRequirements says terminal and this skips with the reason.
   const unmet = await unmetRequirements(admin, brandId, stage);
-  if (unmet) return { ok: false, reason: unmet.reason, terminal: unmet.terminal };
+  if (unmet) {
+    return unmet.terminal
+      ? { ok: false, reason: unmet.reason, terminal: true }
+      : { ok: true, waiting: unmet.reason, note: unmet.reason, continue: true };
+  }
 
   if (stage === "branding") {
     const website = String(brand.website ?? "").trim();
@@ -551,7 +633,29 @@ async function runStage(
       // market emits even when it blocks plain fetches. That is the difference
       // between a brand with a catalogue and a brand without one, and therefore
       // between an intro deck with their pieces in it and AION's stock imagery.
+      // Detection reads the pages the CRAWL has indexed, so asking it before the crawl has
+      // got anywhere answers a question it cannot yet answer — and answers it "no".
+      //
+      // That is what happened to every non-Shopify house onboarded from scratch. The queue
+      // runs branding, sources, storefront: by the time this stage ran, `sources` had
+      // enqueued 520 pages and the worker had fetched EIGHT of them, none of which was a
+      // product page. Detection found nothing, wrote platform 'none' with enabled false,
+      // and that was permanent — nothing re-runs it when the crawl finishes. intro_deck
+      // then skipped itself as terminal ("this site publishes no product feed"), demo_data
+      // skipped for want of prices, and a house with a full catalogue was recorded as
+      // having none, three minutes into its onboarding, for good.
+      const ready = await catalogueReadiness(admin, brandId);
+      if (!ready.canDecide) {
+        // Say nothing about the platform yet: an absent row is "not known", and 'none' is a
+        // verdict. Come back once the site's own URL list exists.
+        return {
+          ok: true, platform: null, products: 0,
+          note: "waiting for the site's page list before deciding whether it publishes a catalogue",
+          continue: true,
+        };
+      }
       const structured = await detectStructured(admin, brandId, base, deadline);
+
       await admin.from("storefront_sources").upsert(
         {
           brand_id: brandId, base_url: base,
@@ -978,8 +1082,20 @@ async function detectStructured(
   // own database. sync-storefront has always read the catalogue out of knowledge_crawl_queue;
   // detection now samples the same list, so the two cannot disagree about whether a brand
   // has a catalogue.
+  // EVERY url the crawl has DISCOVERED, whatever it has done with it.
+  //
+  // This asked for status='done' — pages the knowledge crawl had already fetched — and that
+  // is a different question from "which pages does this site have". The sitemap gives up the
+  // whole list in the first minute; the crawl then works through it at eight pages a tick,
+  // and on a 520-page site the product pages are hours down that queue. Buccellati's
+  // catalogue was in the queue from the start and detection could not see it: it sampled the
+  // hundred-odd pages already fetched, which were all categories and editorial, and recorded
+  // a house with a full catalogue as having none.
+  //
+  // The reader fetches these pages itself, so it never needed the crawl to have read them
+  // first — only to have found them.
   const { data: queued } = await admin.from("knowledge_crawl_queue")
-    .select("url").eq("brand_id", brandId).eq("status", "done").limit(400);
+    .select("url").eq("brand_id", brandId).limit(400);
   const crawled = rankCatalogueUrls(((queued ?? []) as { url: string }[]).map((r) => r.url));
 
   // Guessed paths last: they are the only hope before the crawl has run, and worthless
