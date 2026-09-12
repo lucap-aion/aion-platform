@@ -34,6 +34,8 @@ import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } fro
 // What a failure actually stops, and why it is not "everything queued behind it".
 import { blockedBy } from "../_shared/stage-graph.ts";
 import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
+// The record's non-visual defaults: focus, FAQ, fee rates, policy prefix.
+import { policyPrefix, productFocus, renderFaqs, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -522,6 +524,15 @@ async function runStage(
       id.notes.push("no legal entity could be established — the trading name is not one, so the data request needs it filled by hand");
     }
 
+    // The claim tiles would rather have a piece than a campaign crop, and the catalogue is
+    // the only place a piece comes from. Done here rather than in the harvester because the
+    // harvester only ever sees the website.
+    const pieces = await claimTilePieces(admin, brandId, 4);
+    if (pieces[0]) id.theft_image = pieces[0];
+    if (pieces[1]) id.damage_image = pieces[1];
+    if (pieces[2]) id.faq_image = pieces[2];
+    if (pieces[3]) id.feedback_image = pieces[3];
+
     // Only fill what is EMPTY. A logo or colour an admin chose deliberately
     // outranks anything scraped, and overwriting it silently would be worse
     // than finding nothing.
@@ -534,8 +545,14 @@ async function runStage(
       // address has to be internally consistent, and "Via de' Tornabuoni 2, 50123,
       // Florence" is a street in Firenze with an English city bolted on.
       ["legal_name", legalName],
-      ["hq_address", office?.street], ["hq_postcode", office?.postcode],
-      ["hq_city", office?.city ?? wiki?.hq_city], ["hq_country", wiki?.hq_country],
+      // Three sources, most specific first: the legal page the house publishes its
+      // registered office on, the schema.org PostalAddress it hands Google, then the
+      // encyclopaedia. A brand-new house was arriving with a city and nothing else — no
+      // street, no postcode — which is exactly the pair the data request asks for.
+      ["hq_address", office?.street ?? id.hq_address],
+      ["hq_postcode", office?.postcode ?? id.hq_postcode],
+      ["hq_city", office?.city ?? id.hq_city ?? wiki?.hq_city],
+      ["hq_country", id.hq_country ?? wiki?.hq_country],
       ["description", id.description], ["email", id.email],
       ["logo_big", id.logo_big], ["logo_small", id.logo_small],
       // All six portal slots. Four of them were never in this list, so a brand could finish
@@ -583,9 +600,16 @@ async function runStage(
       }
     }
 
+    // Everything on the record that is not visual: the focus, the FAQ, the fee rates and
+    // the policy prefix. Runs here and again after the catalogue lands, because the focus
+    // and the claim imagery are read out of the catalogue and it does not exist yet on a
+    // brand's first pass.
+    const defaults = await fillRecordDefaults(admin, brandId);
+    id.notes.push(...defaults.notes);
+
     return {
       ok: true,
-      filled: Object.keys(patch),
+      filled: [...Object.keys(patch), ...defaults.filled],
       kept_existing: kept,
       found: id.found,
       notes: id.notes,
@@ -679,9 +703,14 @@ async function runStage(
       const { count } = await admin.from("storefront_products").select("id", { count: "exact", head: true }).eq("brand_id", brandId);
       const remaining = Number(r.remaining ?? 0);
       const pagesLeft = Number(r.pages_remaining ?? 0);
+      // The focus and the claim tiles are read out of the catalogue, which did not exist
+      // when the branding stage ran. Cheap and idempotent: it only fills what is empty.
+      const defaults = (count ?? 0) > 0 ? await fillRecordDefaults(admin, brandId) : { filled: [], notes: [] };
       return {
         ok: true, platform: "structured", base,
         products: count ?? 0,
+        record_defaults: defaults.filled,
+        record_notes: defaults.notes,
         embedded_this_run: Number(r.embedded ?? 0),
         images_remaining: remaining,
         pages_read: Number(r.pages_read ?? 0),
@@ -714,12 +743,16 @@ async function runStage(
     const r = synced.results?.[0] ?? {};
     const { count } = await admin.from("storefront_products").select("id", { count: "exact", head: true }).eq("brand_id", brandId);
     const remaining = Number(r.remaining ?? 0);
+    // Same as the structured path: the focus and the claim tiles come from the catalogue.
+    const defaults = (count ?? 0) > 0 ? await fillRecordDefaults(admin, brandId) : { filled: [], notes: [] };
 
     return {
       ok: true,
       platform: "shopify",
       base: detected.base,
       products: count ?? 0,
+      record_defaults: defaults.filled,
+      record_notes: defaults.notes,
       embedded_this_run: Number(r.embedded ?? 0),
       images_remaining: remaining,
       // The runner re-queues rather than finishing, so progress is visible and
@@ -1260,6 +1293,142 @@ async function callFn(name: string, payload: Record<string, unknown>) {
   try { parsed = JSON.parse(text); } catch { parsed = text.slice(0, 300); }
   if (!res.ok) throw new Error(`${name} ${res.status}: ${typeof parsed === "string" ? parsed : JSON.stringify(parsed).slice(0, 300)}`);
   return parsed;
+}
+
+/**
+ * The half of a brand record that is not a picture.
+ *
+ * Product focus, the customer FAQ, the fee rates and the Chubb policy prefix were all left
+ * empty by onboarding and typed in by hand for every house — and half of them were then
+ * forgotten, which is how a brand reached a demo with a blank FAQ tab, no activation fee and
+ * no policy prefix to put in a bordereau.
+ *
+ * Only ever fills what is EMPTY. A rate somebody negotiated, a prefix somebody agreed with
+ * Chubb and an FAQ somebody edited all outrank a default, silently overwriting any of them
+ * would be worse than leaving them blank, and this runs more than once per brand.
+ */
+/**
+ * The brand's own pieces, for the four tile slots.
+ *
+ * The two hero slots — the sign-in background and the portal banner — want atmosphere, and
+ * a homepage campaign shot is the right thing there. The four TILES do not: "my piece was
+ * stolen", "my piece was damaged", the FAQ and the feedback prompt each sit beside a small
+ * picture, and a catalogue shot of an actual piece on white is what reads correctly at that
+ * size. Left to the homepage, Buccellati's tiles came out as a watercolour illustration of
+ * fish and a navy poster for a goldsmithing school — both real pictures on their site,
+ * neither of them a piece of jewellery.
+ *
+ * Most valuable first, distinct, and only where the catalogue has been read.
+ */
+async function claimTilePieces(
+  admin: ReturnType<typeof createClient>, brandId: number, want = 2,
+): Promise<string[]> {
+  const { data } = await admin.from("storefront_products")
+    .select("image_url, price")
+    .eq("brand_id", brandId)
+    .not("image_url", "is", null)
+    .order("price", { ascending: false, nullsFirst: false })
+    .limit(24);
+  const out: string[] = [];
+  for (const row of (data ?? []) as { image_url: string | null }[]) {
+    if (row.image_url && !out.includes(row.image_url)) out.push(row.image_url);
+    if (out.length === want) break;
+  }
+  return out;
+}
+
+async function fillRecordDefaults(
+  admin: ReturnType<typeof createClient>, brandId: number,
+): Promise<{ filled: string[]; notes: string[] }> {
+  const notes: string[] = [];
+  const { data: row } = await admin.from("brands")
+    .select("id, name, email, description, hq_country, product_focus, chubb_policy_prefix, " +
+            "activation_fee, insurance_premium, aion_premium_fee, min_covered_value, max_covered_value, " +
+            "faq_en, faq_it, theft_image, damage_image")
+    .eq("id", brandId).maybeSingle();
+  const brand = row as Record<string, unknown> | null;
+  if (!brand) return { filled: [], notes };
+
+  const name = String(brand.name ?? "").trim();
+  if (!name) return { filled: [], notes };
+
+  // What the catalogue says this house sells. Evidence, not marketing — see productFocus.
+  const { data: products } = await admin.from("storefront_products")
+    .select("name, category, collection, image_url, price")
+    .eq("brand_id", brandId).limit(400);
+  const rows = (products ?? []) as { name: string | null; category: string | null; collection: string | null; image_url: string | null; price: number | null }[];
+  const evidence = {
+    categories: rows.flatMap((r) => [r.category, r.collection]),
+    names: rows.map((r) => r.name),
+    description: brand.description as string | null,
+  };
+
+  const patch: Record<string, unknown> = {};
+  const isEmpty = (key: string) => {
+    const v = brand[key];
+    return v == null || v === "" || (Array.isArray(v) && v.length === 0);
+  };
+
+  // ── What they sell ──
+  if (isEmpty("product_focus")) {
+    const focus = productFocus(evidence);
+    if (focus) {
+      patch.product_focus = focus;
+      notes.push(`product focus read from the catalogue: ${focus}`);
+    } else if (rows.length === 0) {
+      notes.push("product focus left blank — no catalogue to read it from yet");
+    }
+  }
+
+  // ── The prefix every policy number carries ──
+  if (isEmpty("chubb_policy_prefix")) {
+    const { data: others } = await admin.from("brands").select("chubb_policy_prefix").neq("id", brandId);
+    const taken = ((others ?? []) as { chubb_policy_prefix: string | null }[])
+      .map((o) => o.chubb_policy_prefix ?? "").filter(Boolean);
+    patch.chubb_policy_prefix = policyPrefix(name, brand.hq_country as string | null, taken);
+    notes.push(`policy prefix ${patch.chubb_policy_prefix} — confirm it with Chubb before the first bordereau`);
+  }
+
+  // ── Fee rates ──
+  const rateKeys = Object.keys(STANDARD_FEE_RATES) as (keyof typeof STANDARD_FEE_RATES)[];
+  const ratesFilled = rateKeys.filter((k) => isEmpty(k));
+  for (const key of ratesFilled) patch[key] = STANDARD_FEE_RATES[key];
+  if (ratesFilled.length) {
+    notes.push(`${ratesFilled.join(", ")} set to the programme's standard terms — the formal quotation replaces the insurance rate`);
+  }
+
+  // ── The customer FAQ ──
+  if (isEmpty("faq_en") || isEmpty("faq_it")) {
+    const faqs = renderFaqs({
+      brand: name,
+      minCoveredValue: (patch.min_covered_value ?? brand.min_covered_value) as number | null,
+      maxCoveredValue: (patch.max_covered_value ?? brand.max_covered_value) as number | null,
+      supportEmail: brand.email as string | null,
+      evidence,
+    });
+    if (isEmpty("faq_en")) patch.faq_en = faqs.en;
+    if (isEmpty("faq_it")) patch.faq_it = faqs.it;
+    notes.push(
+      `${faqs.en.length} FAQ entries drafted in English and Italian from the approved wording. ` +
+      "The launch date and the boutiques in scope are deliberately general — fill them in before publishing.",
+    );
+  }
+
+  // ── The two claim tiles want a PIECE, not a campaign crop ──
+  const tiles = await claimTilePieces(admin, brandId, 4);
+  const tileSlots = ["theft_image", "damage_image", "faq_image", "feedback_image"] as const;
+  tileSlots.forEach((slot, i) => { if (tiles[i] && isEmpty(slot)) patch[slot] = tiles[i]; });
+  if (tileSlots.some((slot) => patch[slot])) {
+    notes.push("the claim, FAQ and feedback tiles now show their own pieces rather than homepage photography");
+  }
+
+  if (!Object.keys(patch).length) return { filled: [], notes };
+  const { error } = await admin.from("brands").update(patch).eq("id", brandId);
+  if (error) {
+    notes.push(`could not write the record defaults: ${error.message}`);
+    return { filled: [], notes };
+  }
+  return { filled: Object.keys(patch), notes };
 }
 
 async function setStage(

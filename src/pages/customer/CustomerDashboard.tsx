@@ -119,10 +119,13 @@ const CustomerDashboard = () => {
     if (Array.isArray(source) && source.length > 0) {
       return (source as any[]).slice(0, 5).map((item) => {
         const question = item.title ?? item.question ?? "";
+        // A list block carries `items`, not `text`. Filtering on `text` dropped every one of
+        // them — see the same fix in Faq.tsx. This is a five-question preview, so the list
+        // is flattened rather than rendered.
         const answer = item.content?.blocks
           ? (item.content.blocks as any[])
-              .filter((b: any) => b.text)
-              .map((b: any) => b.text)
+              .map((b: any) => b.text ?? (Array.isArray(b.items) ? b.items.join(" ") : ""))
+              .filter(Boolean)
               .join(" ")
           : (item.answer ?? "");
         return {
