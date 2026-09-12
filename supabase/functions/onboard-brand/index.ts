@@ -1341,11 +1341,15 @@ async function fillRecordDefaults(
   admin: ReturnType<typeof createClient>, brandId: number,
 ): Promise<{ filled: string[]; notes: string[] }> {
   const notes: string[] = [];
-  const { data: row } = await admin.from("brands")
-    .select("id, name, email, description, hq_country, product_focus, chubb_policy_prefix, " +
-            "activation_fee, insurance_premium, aion_premium_fee, min_covered_value, max_covered_value, " +
-            "faq_en, faq_it, theft_image, damage_image")
-    .eq("id", brandId).maybeSingle();
+  // EVERY column, deliberately.
+  //
+  // This listed the columns it needed and missed two of them — faq_image and feedback_image
+  // — while still testing them for emptiness below. A column that was never selected reads
+  // as undefined, undefined reads as empty, and "only fill what is empty" quietly became
+  // "overwrite it": the live brand's two uploaded portal images were replaced with hotlinks
+  // to its Shopify CDN, and the go-live checklist noticed before anybody else did. One row,
+  // thirty-four columns; there is nothing to save here and a whole class of bug to avoid.
+  const { data: row } = await admin.from("brands").select("*").eq("id", brandId).maybeSingle();
   const brand = row as Record<string, unknown> | null;
   if (!brand) return { filled: [], notes };
 
@@ -1365,6 +1369,11 @@ async function fillRecordDefaults(
 
   const patch: Record<string, unknown> = {};
   const isEmpty = (key: string) => {
+    // A key that is not on the row at all is not "empty" — it is unknown, and filling an
+    // unknown is how the bug above overwrote real values. With select("*") this cannot
+    // happen; the guard stays because the next person to narrow that select will not read
+    // this far.
+    if (!(key in brand)) return false;
     const v = brand[key];
     return v == null || v === "" || (Array.isArray(v) && v.length === 0);
   };
