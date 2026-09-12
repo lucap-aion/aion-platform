@@ -396,3 +396,28 @@ export function extractPerimeter(sheets: Sheet[]): Extraction {
 
   return { segments, notes, scanned };
 }
+
+// ── Has this form been filled in? ───────────────────────────────────────────────────────
+/**
+ * The cells of one worksheet that carry a typed-in NUMBER.
+ *
+ * Used on the way OUT, not on the way in: a data request is a form nobody has answered yet,
+ * so a figure in it belongs to whoever last filled the template. The workbook registered as
+ * the template was for months the first house's own returned file, and the three strings the
+ * generator swapped left every one of their figures behind — revenues, units, average
+ * prices, COGS, the volumes in each price band — in a workbook addressed to a different
+ * house. No name was left to catch, so names were never going to catch it.
+ *
+ * Labels are shared strings (`t="s"`) and a template's own formulas carry `<f>` with no
+ * cached result, so neither trips this. Anything else with a `<v>` was typed by somebody.
+ */
+export function filledNumericCells(sheetXml: string): string[] {
+  const out: string[] = [];
+  for (const m of sheetXml.matchAll(/<c r="([A-Z]+\d+)"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    const [, ref, attrs, inner = ""] = m;
+    if (/\st="(s|inlineStr|str)"/.test(attrs)) continue;
+    if (!/<v>/.test(inner)) continue;
+    out.push(ref);
+  }
+  return out;
+}

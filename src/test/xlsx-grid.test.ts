@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   sharedStrings, sheetGrid, columnIndex, parseNumber, mapCategory, mapCoverage,
-  extractPerimeter, type Sheet,
+  extractPerimeter, filledNumericCells, type Sheet,
 } from "../../supabase/functions/_shared/xlsx-grid.ts";
 
 // The reader that turns a client's returned data-request workbook into a pricing
@@ -219,5 +219,41 @@ describe("extracting a perimeter", () => {
     expect(out.segments).toEqual([]);
     expect(out.notes[0]).toMatch(/Nothing in this workbook reads as a perimeter/);
     expect(out.scanned).toEqual(["Instructions"]);
+  });
+});
+
+// ── The outgoing workbook ────────────────────────────────────────────────────────────────
+// The data request has to leave EMPTY. It did not: the registered template was the first
+// house's own returned file, the generator swapped three strings in it, and every figure
+// they had typed went out in a workbook addressed to somebody else — with no name left in
+// it for a name-matching check to catch.
+describe("figures left in an outgoing form", () => {
+  it("finds the numbers somebody typed, and says which cells", () => {
+    const xml = sheetXml({
+      A9: { v: "7", s: true },      // "Revenues - €", a label
+      B9: { v: "1031006" },         // the previous client's revenue
+      B10: { v: "267" },
+      A19: { v: "8", s: true },
+    });
+    expect(filledNumericCells(xml)).toEqual(["B9", "B10"]);
+  });
+
+  it("passes a blank form, formulas and self-closing cells included", () => {
+    const xml =
+      `<worksheet><sheetData>` +
+      `<row r="9"><c r="A9" t="s"><v>7</v></c><c r="B9" s="4"/></row>` +
+      // A template keeps its own arithmetic: a formula with no cached result is not an answer.
+      `<row r="11"><c r="A11" t="s"><v>8</v></c><c r="B11" s="4"><f>B9/B10</f></c></row>` +
+      // Nor is a formula whose result is text.
+      `<row r="12"><c r="B12" t="str"><f>A1&amp;""</f><v>x</v></c></row>` +
+      `</sheetData></worksheet>`;
+    expect(filledNumericCells(xml)).toEqual([]);
+  });
+
+  it("does catch a formula that cached a number, because that number is somebody's", () => {
+    const xml = `<worksheet><sheetData><row r="25">` +
+      `<c r="B25" s="4"><f>SUM(B20:B24)</f><v>267</v></c>` +
+      `</row></sheetData></worksheet>`;
+    expect(filledNumericCells(xml)).toEqual(["B25"]);
   });
 });
