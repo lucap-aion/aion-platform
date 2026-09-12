@@ -4,10 +4,11 @@ import { supabase } from "@/integrations/supabase/client";
 // The standalone `toast`, not `useToast().toast` — the hook returns a fresh object every
 // render, so a fetcher that depends on it never stops re-running.
 import { toast } from "@/hooks/use-toast";
-import { Check, Loader2, MessageSquare, X } from "lucide-react";
+import { Check, Loader2, MessageSquare, X, Sparkles } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  GO_LIVE_CHECKLIST, checklistProgress, type ChecklistState,
+  GO_LIVE_CHECKLIST, checklistProgress, isItemDone,
+  type ChecklistState, type ChecklistSignals,
 } from "@/lib/goLiveChecklist";
 
 // What has to be true before a brand can issue a real cover — shared across AION admins.
@@ -19,6 +20,13 @@ import {
 //
 // The item list itself is in code (src/lib/goLiveChecklist.ts) so brands pick up new items
 // automatically; only what has been DONE is stored. An item with no row is untouched.
+//
+// Eighteen of the items no longer need a tick at all. "Set the insurance premium" is a number
+// on the brand record, "Write and load the FAQ" is two jsonb columns, "Assign the policy
+// number prefix" is a five-character string — brand_golive_signals() reads all of them and
+// this screen shows them as done, with the evidence, the moment they are true. Asking a
+// person to confirm what the database already says produced a checklist that disagreed with
+// the platform as soon as anything changed, and a launch where nobody trusted either.
 
 type Row = {
   item_key: string;
@@ -30,6 +38,7 @@ type Row = {
 
 export default function GoLiveChecklist({ brandId, brandName }: { brandId: number; brandName: string | null }) {
   const [state, setState] = useState<ChecklistState>({});
+  const [signals, setSignals] = useState<ChecklistSignals>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [noteFor, setNoteFor] = useState<string | null>(null);
@@ -53,6 +62,21 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
       next[r.item_key] = { done: r.done, note: r.note, updated_at: r.updated_at, updated_by: r.updated_by };
     }
     setState(next);
+
+    // What the platform can see for itself. A failure here is not a failure of the screen:
+    // the manual ticks still render, and every derivable item simply falls back to needing
+    // one, which is how this worked before.
+    const { data: detected, error: signalError } = await untyped.rpc("brand_golive_signals", { p_brand_id: brandId });
+    if (signalError) {
+      toast({
+        title: "Could not read what is already done",
+        description: `${signalError.message} — every item is showing as a manual tick.`,
+        variant: "destructive",
+      });
+      setSignals({});
+    } else {
+      setSignals((detected ?? {}) as ChecklistSignals);
+    }
     setLoading(false);
   }, [brandId]);
 
@@ -115,7 +139,7 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
     );
   }
 
-  const { done, total, blockingLeft } = checklistProgress(state);
+  const { done, total, blockingLeft, detected } = checklistProgress(state, signals);
   const pct = total ? Math.round((done / total) * 100) : 0;
 
   return (
@@ -128,6 +152,12 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
             <p className="mt-0.5 text-xs text-muted-foreground">
               What has to be true before {brandName ?? "this brand"} can issue a real cover. Shared across AION admins.
             </p>
+            {detected > 0 && (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Sparkles className="h-3 w-3 text-primary" />
+                {detected} {detected === 1 ? "item is" : "items are"} confirmed by the platform itself and update as the work lands
+              </p>
+            )}
           </div>
           <div className="text-right">
             <p className="text-lg font-semibold tabular-nums text-foreground">{done} / {total}</p>
@@ -147,7 +177,7 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
       </div>
 
       {GO_LIVE_CHECKLIST.map((group) => {
-        const gDone = group.items.filter((i) => state[i.key]?.done).length;
+        const gDone = group.items.filter((i) => isItemDone(i.key, state, signals)).length;
         return (
           <div key={group.key}>
             <div className="flex items-baseline gap-3 border-b border-foreground/80 pb-1.5">
@@ -161,20 +191,27 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
             <ul className="divide-y divide-border">
               {group.items.map((item) => {
                 const row = state[item.key];
-                const isDone = !!row?.done;
+                const auto = signals[item.key] === true;
+                const isDone = isItemDone(item.key, state, signals);
                 const who = row?.updated_by ? admins[row.updated_by] : null;
                 return (
                   <li key={item.key} className="py-3">
                     <div className="flex items-start gap-3">
+                      {/* An item the platform can see is not a thing to click: un-ticking a
+                          premium that is demonstrably set would be a lie the next reload
+                          corrects. It shows as done, and says why. */}
                       <button
                         type="button"
                         role="checkbox"
                         aria-checked={isDone}
                         aria-label={item.title}
+                        aria-disabled={auto}
+                        disabled={auto}
+                        title={auto ? `Confirmed by the platform: ${item.evidence}` : undefined}
                         onClick={() => void save(item.key, { done: !isDone })}
                         className={`mt-0.5 grid h-[18px] w-[18px] shrink-0 place-items-center rounded border transition-colors ${
                           isDone ? "border-emerald-500 bg-emerald-500 text-white" : "border-input bg-background hover:border-primary"
-                        }`}
+                        } ${auto ? "cursor-default" : ""}`}
                       >
                         {saving === item.key
                           ? <Loader2 className="h-3 w-3 animate-spin" />
@@ -191,8 +228,20 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
                               blocking
                             </span>
                           )}
+                          {auto && (
+                            <span className="inline-flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                              <Sparkles className="h-2.5 w-2.5" /> detected
+                            </span>
+                          )}
                         </div>
                         <p className="mt-0.5 text-xs text-muted-foreground">{item.detail}</p>
+                        {/* The evidence, so "detected" is checkable rather than magic — and so
+                            an item that is NOT detected says what would make it so. */}
+                        {item.evidence && (
+                          <p className={`mt-0.5 text-xs ${auto ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground/80"}`}>
+                            {auto ? "✓ " : "Waiting on: "}{item.evidence}
+                          </p>
+                        )}
 
                         {noteFor === item.key ? (
                           <div className="mt-2 flex items-start gap-2">

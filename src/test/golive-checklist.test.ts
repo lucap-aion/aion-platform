@@ -3,6 +3,7 @@ import {
   GO_LIVE_CHECKLIST,
   ALL_ITEMS,
   checklistProgress,
+  isItemDone,
   type ChecklistState,
 } from "@/lib/goLiveChecklist";
 
@@ -45,5 +46,44 @@ describe("go-live checklist", () => {
     for (const name of ["roberto coin", "pomellato", "luisa beccaria", "pasquale bruni", "ferragamo", "rocit"]) {
       expect(text).not.toContain(name);
     }
+  });
+});
+
+// ── The half of the list the platform can answer itself ──────────────────────────────────
+describe("what the checklist can see for itself", () => {
+  it("counts a detected item as done without anybody ticking it", () => {
+    // Eighteen of the thirty-three items are facts on the record — a premium, a prefix, two
+    // jsonb columns. Asking a person to confirm those produced a checklist that disagreed
+    // with the platform the moment anything changed.
+    const { done, detected } = checklistProgress({}, { premium: true, faq: true, policy_prefix: true });
+    expect(done).toBe(3);
+    expect(detected).toBe(3);
+  });
+
+  it("lets a tick and a signal agree without double-counting", () => {
+    const state = { premium: { done: true, note: null, updated_at: "", updated_by: null } };
+    expect(checklistProgress(state, { premium: true }).done).toBe(1);
+  });
+
+  it("clears a blocking item when the platform can see it is done", () => {
+    const before = checklistProgress({}, {}).blockingLeft;
+    const after = checklistProgress({}, { premium: true }).blockingLeft;
+    expect(after).toBe(before - 1);
+  });
+
+  it("still lets a person tick what no query can see", () => {
+    // Training, the claims runbook, the first sale date: work with no trace in any table.
+    const manual = ALL_ITEMS.filter((i) => !i.evidence).map((i) => i.key);
+    expect(manual).toContain("training");
+    expect(manual).toContain("claims_runbook");
+    expect(isItemDone("training", { training: { done: true, note: null, updated_at: "", updated_by: null } }, {})).toBe(true);
+  });
+
+  it("gives every detectable item a phrase saying what it looks at", () => {
+    // "Detected" has to be checkable rather than magic.
+    for (const item of ALL_ITEMS.filter((i) => i.evidence)) {
+      expect(item.evidence!.length).toBeGreaterThan(10);
+    }
+    expect(ALL_ITEMS.filter((i) => i.evidence)).toHaveLength(18);
   });
 });
