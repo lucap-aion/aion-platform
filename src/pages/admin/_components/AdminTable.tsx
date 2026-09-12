@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { Link } from "react-router-dom";
 import {
   Search, Plus, Pencil, Trash2, Eye, EyeOff,
   ChevronDown, X, ChevronsUpDown, Download, SlidersHorizontal, Pin, GripVertical,
@@ -148,6 +149,14 @@ export interface Column<T> {
   sortKey?: string;
   width?: number;
   render?: (row: T) => React.ReactNode;
+  /**
+   * Do not turn this cell into the row's link.
+   *
+   * For a first column that already has a control of its own — the catalogue list opens its
+   * item from a button in that cell — because a button inside a button is invalid markup and
+   * ambiguous to click.
+   */
+  noRowLink?: boolean;
 }
 
 export interface FilterDef {
@@ -173,6 +182,19 @@ interface AdminTableProps<T extends Record<string, unknown>> {
   onAdd?: () => void;
   addLabel?: string;
   onView?: (row: T) => void;
+  /**
+   * Where this row's own page is, when it has one.
+   *
+   * The first column then renders as a real link: the name is visibly clickable, it opens in
+   * a new tab on cmd-click, it is reachable by keyboard, and the browser shows the
+   * destination on hover. Reaching a brand used to mean hovering the row to reveal an eye
+   * icon at the far right of a twelve-column table and clicking that — after moving the
+   * pointer across the whole row, with nothing about the name suggesting it led anywhere.
+   *
+   * Without it, a table that has `onView` gets the same affordance on the first column,
+   * opening whatever that view is (most of these lists open a drawer rather than a page).
+   */
+  rowHref?: (row: T) => string | null | undefined;
   onEdit?: (row: T) => void;
   onDelete?: (row: T) => void;
   filters?: FilterDef[];
@@ -329,6 +351,7 @@ function AdminTable<T extends Record<string, unknown>>({
   filterValues = {},
   onFilterChange,
   extraRowAction,
+  rowHref,
   onExport,
   exportFilename = title,
   exportSchema,
@@ -919,23 +942,44 @@ function AdminTable<T extends Record<string, unknown>>({
                     key={i}
                     className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors group"
                   >
-                    {visibleColumns.map((col) => {
+                    {visibleColumns.map((col, colIndex) => {
                       const isFrozen = frozenVisible.includes(col.key);
+                      const content = col.render
+                        ? col.render(row)
+                        : (() => {
+                            const v = row[col.key];
+                            if (isDateLikeValue(v, col.key)) {
+                              return <span className="block truncate">{fmtDate(v as string)}</span>;
+                            }
+                            return <span className="block truncate">{v == null || v === "" ? "—" : String(v)}</span>;
+                          })();
+                      // The first column is the row's identity — the brand, the customer, the
+                      // claim — so that is what leads to it.
+                      const leads = colIndex === 0 && !col.noRowLink;
+                      const href = leads ? rowHref?.(row) : null;
+                      const opens = leads && !href && onView ? () => onView(row) : null;
                       return (
                         <td
                           key={col.key}
                           className="px-4 py-3 text-foreground"
                           style={isFrozen ? frozenTdStyle(col.key) : normalTdStyle(col.key)}
                         >
-                          {col.render
-                            ? col.render(row)
-                            : (() => {
-                                const v = row[col.key];
-                                if (isDateLikeValue(v, col.key)) {
-                                  return <span className="block truncate">{fmtDate(v as string)}</span>;
-                                }
-                                return <span className="block truncate">{v == null || v === "" ? "—" : String(v)}</span>;
-                              })()}
+                          {href ? (
+                            <Link
+                              to={href}
+                              className="block min-w-0 rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-primary/40"
+                            >
+                              {content}
+                            </Link>
+                          ) : opens ? (
+                            <button
+                              type="button"
+                              onClick={opens}
+                              className="block w-full min-w-0 cursor-pointer rounded-sm text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-primary/40"
+                            >
+                              {content}
+                            </button>
+                          ) : content}
                         </td>
                       );
                     })}

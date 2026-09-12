@@ -108,6 +108,17 @@ const CATEGORY_WORDS: { focus: string; en: string; enSingular: string; it: strin
     match: /\bshoe|sneaker|loafer|pump|sandal|scarp|calzatur|boot|stivale/i },
   { focus: "Eyewear", en: "eyewear", enSingular: "pair of glasses", it: "occhiali", itSingular: "paio di occhiali",
     match: /eyewear|sunglass|occhial|\bframes?\b/i },
+  // Beyond the five obvious ones. A silversmith is not a hypothetical: one of the houses
+  // onboarded here sells table silver next to its jewellery, and with no match at all the
+  // focus stayed blank and the FAQ said "pieces".
+  { focus: "Silver and tableware", en: "silver pieces", enSingular: "piece", it: "argenti", itSingular: "pezzo",
+    match: /\bsilver\b|silverware|argenteria|argenti\b|tableware|centrepiece|centerpiece|candelab|posate|vassoi|tray\b/i },
+  { focus: "Accessories", en: "accessories", enSingular: "accessory", it: "accessori", itSingular: "accessorio",
+    match: /\bscarf|scarves|foulard|\btie\b|cravatt|\bbelt|cintur|\bglove|guanti|\bhat\b|cappell|cufflink|gemell/i },
+  { focus: "Fragrance and beauty", en: "fragrances", enSingular: "fragrance", it: "profumi", itSingular: "profumo",
+    match: /fragrance|perfume|profum|eau de (?:parfum|toilette)|cologne|\bbeauty\b|skincare|cosmetic/i },
+  { focus: "Writing instruments", en: "writing instruments", enSingular: "pen", it: "strumenti di scrittura", itSingular: "penna",
+    match: /fountain pen|ballpoint|rollerball|writing instrument|stilografic|\bpenne?\b/i },
 ];
 
 /** The neutral wording, for a house whose catalogue says nothing recognisable. */
@@ -255,10 +266,19 @@ export function renderFaqs(params: FaqParams): { en: FaqEntry[]; it: FaqEntry[] 
 // record — and from there into a customer-facing FAQ — is the failure this avoids, and no
 // amount of pattern-matching on names is as reliable as refusing everything unlisted.
 const ROLE_PREFIXES = [
-  "clientservice", "client.service", "client-service", "clientcare", "client.care",
-  "customercare", "customer.care", "customerservice", "customer.service",
-  "servizioclienti", "info", "contact", "contacts", "enquiries", "inquiries",
-  "service", "care", "support", "hello", "assistenza",
+  // Client care, in the languages these houses actually write in. The list was English and
+  // Italian only, which quietly blanked the field for a French, German or Spanish brand and
+  // sent its FAQ to "the brand's customer service" instead of to an address.
+  "clientservice", "client.service", "client-service", "clientservices", "clientcare", "client.care",
+  "customercare", "customer.care", "customerservice", "customer.service", "customerservices",
+  "servizioclienti", "servizio.clienti", "clienti",
+  "serviceclient", "service.client", "serviceclients", "relationclient", "relation.client",
+  "kundenservice", "kundendienst", "kundenbetreuung",
+  "servicioclientes", "servicio.clientes", "atencionalcliente", "atencioncliente",
+  "clientadvisor", "concierge", "boutiqueservice",
+  "info", "informazioni", "contact", "contacts", "contacto", "contatti", "kontakt",
+  "enquiries", "inquiries", "service", "care", "support", "help", "hello", "assistenza",
+  "cs", "care.team",
 ];
 
 /**

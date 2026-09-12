@@ -192,6 +192,8 @@ const AdminCatalogues = () => {
         onFilterChange={setFilter}
         columns={[
           {
+            // Its own button in this cell opens the item, so the table must not wrap it in one.
+            noRowLink: true,
             key: "name", label: "Item", sortable: true, width: 260,
             render: (row) => {
               const r = row as unknown as Catalogue;

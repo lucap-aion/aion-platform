@@ -170,6 +170,7 @@ const AdminBrands = () => {
         onSort={setSort}
         onExport={handleExport} exportFilename="brands" exportSchema={BRANDS_SCHEMA}
         onAdd={() => navigate("/admin/brands/new")} addLabel="New Brand"
+        rowHref={(row) => `/admin/brands/${(row as unknown as Brand).id}`}
         onView={(row) => navigate(`/admin/brands/${(row as unknown as Brand).id}`)}
         onEdit={(row) => navigate(`/admin/brands/${(row as unknown as Brand).id}`)}
         onDelete={(row) => setDeleteTarget(row as unknown as Brand)}

@@ -192,3 +192,43 @@ describe("finding a customer-service address", () => {
     expect(JSON.stringify(en)).not.toContain("the brand’s customer service");
   });
 });
+
+// ── Does this generalise past the houses it was built against? ───────────────────────────
+describe("brands other than the ones this was tested on", () => {
+  it("finds a role address in French, German, Spanish and Italian", () => {
+    const cases: [string, string, string][] = [
+      ["serviceclient@chanel.com", "https://www.chanel.com", "serviceclient@chanel.com"],
+      ["kundenservice@montblanc.com", "https://www.montblanc.com", "kundenservice@montblanc.com"],
+      ["servicioclientes@loewe.com", "https://www.loewe.com", "servicioclientes@loewe.com"],
+      ["servizioclienti@damiani.com", "https://www.damiani.com", "servizioclienti@damiani.com"],
+    ];
+    for (const [text, site, expected] of cases) {
+      expect(customerServiceEmail(text, site)).toBe(expected);
+    }
+  });
+
+  it("names a category outside jewellery, watches and bags", () => {
+    // A silversmith, a perfumer and a pen maker were all "pieces" before.
+    expect(productFocus({ names: ["Silver centrepiece", "Silver tray", "Candelabra"] }))
+      .toContain("Silver and tableware");
+    expect(productFocus({ names: ["Eau de Parfum 100ml", "Cologne intense"] }))
+      .toContain("Fragrance and beauty");
+    expect(productFocus({ names: ["Meisterstück fountain pen", "Rollerball"] }))
+      .toContain("Writing instruments");
+    expect(productFocus({ names: ["Silk scarf", "Cashmere gloves"] })).toContain("Accessories");
+  });
+
+  it("still refuses to name one it cannot recognise", () => {
+    // The point of the vocabulary is that an unknown category reads as unknown, not as a
+    // guess: the focus goes on a data request and into a customer FAQ.
+    expect(productFocus({ names: ["Model 42", "Series B"] })).toBe(null);
+    expect(categoryWords({ names: ["Model 42"] })).toMatchObject({ en: "pieces" });
+  });
+
+  it("builds a prefix for a house in any country the record names", () => {
+    expect(policyPrefix("Chanel", "France")).toBe("CHAFR");
+    expect(policyPrefix("Montblanc", "Germany")).toBe("MONDE");
+    expect(policyPrefix("Loewe", "Spain")).toBe("LOEES");
+    expect(policyPrefix("Van Cleef & Arpels", "France")).toBe("VACFR");
+  });
+});

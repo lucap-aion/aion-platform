@@ -412,6 +412,7 @@ const AdminCustomers = () => {
         onSort={setSort}
         onExport={handleExport} exportFilename="customers" exportSchema={CUSTOMERS_SCHEMA}
         onAdd={openAdd} addLabel="New Customer"
+        rowHref={(row) => `/admin/customers/${(row as unknown as Customer).id}`}
         onView={openView} onEdit={openEdit}
         onDelete={(row) => setDeleteTarget(row as unknown as Customer)}
         filters={[
