@@ -247,8 +247,11 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
             <FormField label="Name" required={!ro}><Input disabled={ro} value={editing.name ?? ""} onChange={(e) => set("name", e.target.value)} required={!ro} /></FormField>
             <FormField label="Slug" required={!ro} hint="Used in URLs"><Input disabled={ro} value={editing.slug ?? ""} onChange={(e) => set("slug", e.target.value)} required={!ro} /></FormField>
           </div>
-          <FormField label="Description" hint="Tagline shown in the portal">
-            <Input disabled={ro} value={editing.description ?? ""} onChange={(e) => set("description", e.target.value)} />
+          {/* A textarea, not an input: onboarding writes the encyclopaedia's paragraph about
+              the house in here, and a single line showed the first eighty characters of it
+              with the rest reachable only by dragging the caret. */}
+          <FormField label="Description" hint="Shown in the portal and used as the house's own words in generated documents">
+            <TextArea rows={4} disabled={ro} value={editing.description ?? ""} onChange={(e) => set("description", e.target.value)} />
           </FormField>
           <FormField label="Email"><Input type="email" disabled={ro} value={editing.email ?? ""} onChange={(e) => set("email", e.target.value)} /></FormField>
           <FormField label="Website"><Input disabled={ro} value={editing.website ?? ""} onChange={(e) => set("website", e.target.value)} /></FormField>

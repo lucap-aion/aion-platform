@@ -33,8 +33,11 @@ export const Select = ({ children, ...props }: SelectProps) => (
 );
 
 interface TextAreaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {}
+// Vertically resizable: several of these hold a paragraph or a JSON array of seventeen FAQ
+// entries, and `resize-none` meant reading them four lines at a time with no way to open
+// them up. Horizontal resize stays off — that one only ever breaks the layout.
 export const TextArea = (props: TextAreaProps) => (
-  <textarea {...props} rows={props.rows ?? 3} className={`${base} resize-none ${props.className ?? ""}`} />
+  <textarea {...props} rows={props.rows ?? 3} className={`${base} resize-y ${props.className ?? ""}`} />
 );
 
 interface SaveBarProps {

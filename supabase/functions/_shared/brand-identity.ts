@@ -1,4 +1,5 @@
 import { jsonLdNodes } from "./product-extract.ts";
+import { customerServiceEmail } from "./brand-defaults.ts";
 import {
   imageCandidates, assignPortalImages, namedColours, dominantUsableColour,
   canCarryWhiteText, frequentColours, googleFontsFrom, declaredFontFamilies,
@@ -104,10 +105,12 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
     }
   }
 
-  // A contact address the brand publishes itself. Skip the obvious noise.
-  const emails = [...html.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]{2,}/g)].map((m) => m[0].toLowerCase())
-    .filter((e) => !/\.(png|jpe?g|gif|webp|svg)$/.test(e) && !/sentry|wixpress|example|domain\.com/.test(e));
-  const contact = emails.find((e) => /^(info|customercare|customer\.?service|clientservice|contact|hello|care)@/.test(e)) ?? emails[0];
+  // A contact address the brand publishes itself — and only a ROLE address on the house's
+  // own domain. The old rule preferred those and then fell back to `emails[0]`, which is
+  // whatever appeared first in the markup: one house ended up with boutique.milano@ on its
+  // record, an address that would have gone into a customer FAQ as where to send a claim.
+  // Same rule as the crawl-wide search in brand-defaults, so both agree.
+  const contact = customerServiceEmail(html, base);
   if (contact) { out.email = contact; out.found.push("email"); }
 
   // ── Marks ─────────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  policyPrefix, productFocus, categoryWords, renderFaqs, STANDARD_FEE_RATES,
+  policyPrefix, productFocus, categoryWords, renderFaqs, customerServiceEmail,
+  STANDARD_FEE_RATES,
 } from "../../supabase/functions/_shared/brand-defaults.ts";
 import { FAQ_TEMPLATE_EN, FAQ_TEMPLATE_IT } from "../../supabase/functions/_shared/faq-template.ts";
 
@@ -135,5 +136,59 @@ describe("fee rates", () => {
       min_covered_value: 999,
       max_covered_value: 100000,
     });
+  });
+});
+
+// ── The address a customer writes to ─────────────────────────────────────────────────────
+describe("finding a customer-service address", () => {
+  const site = "https://www.buccellati.com";
+
+  it("takes a role address on the brand's own domain", () => {
+    const text = "For assistance contact info@buccellati.com or visit a boutique.";
+    expect(customerServiceEmail(text, site)).toBe("info@buccellati.com");
+  });
+
+  it("refuses a named individual, which is what these pages are full of", () => {
+    // The real crawl of one house yielded arabella-xy.zhang@, douglas.lim@, aspen@,
+    // beverlyhills@ and info@. Only the last is an address a client should be given, and
+    // putting a salesperson's into a customer-facing FAQ is the failure to avoid.
+    const text = "arabella-xy.zhang@buccellati.com douglas.lim@buccellati.com aspen@buccellati.com beverlyhills@buccellati.com";
+    expect(customerServiceEmail(text, site)).toBe(null);
+  });
+
+  it("prefers client service over a generic inbox", () => {
+    const text = "info@buccellati.com and clientservice@buccellati.com";
+    expect(customerServiceEmail(text, site)).toBe("clientservice@buccellati.com");
+  });
+
+  it("ignores another company's address", () => {
+    expect(customerServiceEmail("info@some-agency.com support@shopify.com", site)).toBe(null);
+  });
+
+  it("accepts a subdomain of the brand's own site", () => {
+    expect(customerServiceEmail("care@help.buccellati.com", site)).toBe("care@help.buccellati.com");
+    // One house's client-care address really is on a subdomain like this.
+    expect(customerServiceEmail("customercare@sf.ferragamo.com", "https://www.ferragamo.com"))
+      .toBe("customercare@sf.ferragamo.com");
+  });
+
+  it("accepts the same house on another TLD", () => {
+    // The site is .com and the mailbox is .it, which is how one of these brands publishes it.
+    expect(customerServiceEmail("info@luisabeccaria.it", "https://www.luisabeccaria.com"))
+      .toBe("info@luisabeccaria.it");
+  });
+
+  it("still refuses a boutique address, which is not where a claim should go", () => {
+    expect(customerServiceEmail("boutique.milano@pasqualebruni.com", "https://www.pasqualebruni.com")).toBe(null);
+  });
+
+  it("strips the punctuation a sentence leaves behind", () => {
+    expect(customerServiceEmail("write to info@buccellati.com.", site)).toBe("info@buccellati.com");
+  });
+
+  it("puts the address it finds into the FAQ", () => {
+    const { en } = renderFaqs({ brand: "Buccellati", supportEmail: "info@buccellati.com" });
+    expect(JSON.stringify(en)).toContain("info@buccellati.com");
+    expect(JSON.stringify(en)).not.toContain("the brand’s customer service");
   });
 });

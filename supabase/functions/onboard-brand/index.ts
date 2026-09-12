@@ -35,7 +35,7 @@ import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } fro
 import { blockedBy } from "../_shared/stage-graph.ts";
 import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
 // The record's non-visual defaults: focus, FAQ, fee rates, policy prefix.
-import { policyPrefix, productFocus, renderFaqs, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
+import { policyPrefix, productFocus, renderFaqs, customerServiceEmail, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -1406,13 +1406,33 @@ async function fillRecordDefaults(
     notes.push(`${ratesFilled.join(", ")} set to the programme's standard terms — the formal quotation replaces the insurance rate`);
   }
 
+  // ── The address a customer writes to ──
+  // The harvester reads the homepage, and these houses put no address there — they have a
+  // contact form. It is on the client-service page, which the crawl has indexed. Buccellati
+  // publishes info@ there, alongside a dozen boutique addresses and its sales people's
+  // personal ones; only a role prefix on the brand's own domain is taken.
+  if (isEmpty("email") && String(brand.website ?? "").trim()) {
+    const { data: chunks } = await admin.from("brand_knowledge_chunks")
+      .select("content")
+      .eq("brand_id", brandId)
+      .ilike("content", `%@%`)
+      .limit(400);
+    const text = ((chunks ?? []) as { content: string | null }[])
+      .map((c) => c.content ?? "").join(" \n");
+    const email = customerServiceEmail(text, String(brand.website));
+    if (email) {
+      patch.email = email;
+      notes.push(`customer-service address ${email}, found on their own site — check it is the one they want clients to use`);
+    }
+  }
+
   // ── The customer FAQ ──
   if (isEmpty("faq_en") || isEmpty("faq_it")) {
     const faqs = renderFaqs({
       brand: name,
       minCoveredValue: (patch.min_covered_value ?? brand.min_covered_value) as number | null,
       maxCoveredValue: (patch.max_covered_value ?? brand.max_covered_value) as number | null,
-      supportEmail: brand.email as string | null,
+      supportEmail: (patch.email ?? brand.email) as string | null,
       evidence,
     });
     if (isEmpty("faq_en")) patch.faq_en = faqs.en;

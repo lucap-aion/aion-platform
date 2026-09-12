@@ -246,3 +246,64 @@ export function renderFaqs(params: FaqParams): { en: FaqEntry[]; it: FaqEntry[] 
 
   return { en: render(FAQ_TEMPLATE_EN, "en"), it: render(FAQ_TEMPLATE_IT, "it") };
 }
+
+// ── The address a customer should write to ──────────────────────────────────────────────── //
+
+// Role addresses, best first. An exact prefix match ONLY, which is the whole point: a
+// jeweller's site publishes info@, its boutiques publish aspen@ and beverlyhills@, and its
+// sales people publish firstname.lastname@. Putting a named individual's address in a brand
+// record — and from there into a customer-facing FAQ — is the failure this avoids, and no
+// amount of pattern-matching on names is as reliable as refusing everything unlisted.
+const ROLE_PREFIXES = [
+  "clientservice", "client.service", "client-service", "clientcare", "client.care",
+  "customercare", "customer.care", "customerservice", "customer.service",
+  "servizioclienti", "info", "contact", "contacts", "enquiries", "inquiries",
+  "service", "care", "support", "hello", "assistenza",
+];
+
+/**
+ * The brand's own customer-service address, from text crawled off its site.
+ *
+ * The identity harvester only reads the homepage, and these houses put no address there —
+ * they have a contact form. The address is on the client-service page, which the crawl has
+ * indexed along with the rest of the site.
+ *
+ * Only on the brand's own domain, and only a role prefix.
+ */
+export function customerServiceEmail(text: string, website: string): string | null {
+  // The HOUSE, not the exact hostname. A brand's site is luisabeccaria.com and its mailbox is
+  // info@luisabeccaria.it; another's client-care address is on sf.ferragamo.com. Matching the
+  // full domain rejected both, and matching anything at all would take an agency's address
+  // out of a footer. So: the label to the left of the public suffix has to be the same.
+  const label = (hostname: string): string | null => {
+    const parts = hostname.replace(/^www\./, "").toLowerCase().split(".").filter(Boolean);
+    if (parts.length < 2) return null;
+    // "co.uk", "com.au" and friends: the registrable label is one further left.
+    const suffixish = /^(co|com|net|org|gov|edu|ac)$/.test(parts[parts.length - 2]);
+    return parts[parts.length - (suffixish ? 3 : 2)] ?? null;
+  };
+
+  let brandLabel: string | null;
+  try {
+    brandLabel = label(new URL(website.startsWith("http") ? website : `https://${website}`).hostname);
+  } catch {
+    return null;
+  }
+  if (!brandLabel || brandLabel.length < 3) return null;
+
+  const found = new Set<string>();
+  for (const m of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g)) {
+    const address = m[0].toLowerCase().replace(/[.,;:)\]]+$/, "");
+    const [prefix, host] = address.split("@");
+    if (!host || label(host) !== brandLabel) continue;
+    if (!ROLE_PREFIXES.includes(prefix)) continue;
+    found.add(address);
+  }
+  if (!found.size) return null;
+
+  // Whichever listed prefix ranks highest, so "clientservice@" beats "info@" when a house
+  // publishes both.
+  return [...found].sort((a, b) =>
+    ROLE_PREFIXES.indexOf(a.split("@")[0]) - ROLE_PREFIXES.indexOf(b.split("@")[0])
+    || a.localeCompare(b))[0];
+}
