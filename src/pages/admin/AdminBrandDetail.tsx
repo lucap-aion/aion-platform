@@ -84,7 +84,7 @@ export default function AdminBrandDetail() {
 
   if (isNew) {
     return (
-      <div className="mx-auto max-w-5xl space-y-6 p-6">
+      <div className="mx-auto w-full max-w-7xl space-y-6 p-6">
         <Link to="/admin/brands" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Brands
         </Link>
@@ -101,7 +101,7 @@ export default function AdminBrandDetail() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-5xl space-y-6 p-6">
+      <div className="mx-auto w-full max-w-7xl space-y-6 p-6">
         <Skeleton className="h-4 w-24" />
         <div className="flex items-center gap-4">
           <Skeleton className="h-12 w-12 rounded" />
@@ -115,7 +115,7 @@ export default function AdminBrandDetail() {
 
   if (!brand) {
     return (
-      <div className="mx-auto max-w-5xl space-y-4 p-6">
+      <div className="mx-auto w-full max-w-7xl space-y-4 p-6">
         <Link to="/admin/brands" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Brands
         </Link>
@@ -125,7 +125,10 @@ export default function AdminBrandDetail() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 p-6">
+    // max-w-7xl, not 5xl: on a wide window the old cap left the record in a 1024px strip
+    // with several hundred pixels of dead space either side, which reads as the page not
+    // fitting the screen. Still capped, because a form field three feet wide is worse.
+    <div className="mx-auto w-full max-w-7xl space-y-5 p-6">
       <Link to="/admin/brands" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" /> Brands
       </Link>
