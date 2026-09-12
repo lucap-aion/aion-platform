@@ -325,7 +325,12 @@ async function pickBrandImages(admin: ReturnType<typeof createClient>, brandId: 
     .select("image_url, price, available, category")
     .eq("brand_id", brandId)
     .not("image_url", "is", null)
-    .neq("category", "HOME")
+    // `category <> 'HOME'` is NULL for a product with no category, and NULL is not TRUE, so
+    // this filter quietly dropped every such row. A catalogue read out of a site's
+    // OpenGraph tags has no category on any product — so Buccellati, with 35 pieces and a
+    // picture on every one of them, was told "no catalogue images for this brand yet" and
+    // its intro deck went red.
+    .or("category.is.null,category.neq.HOME")
     .order("price", { ascending: false, nullsFirst: false })
     .limit(Math.max(want * 4, 24));
 

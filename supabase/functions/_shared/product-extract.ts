@@ -42,6 +42,35 @@ export function jsonLdNodes(html: string): Record<string, unknown>[] {
   return out;
 }
 
+// Text arrives HTML-escaped, because it comes out of markup. Buccellati's OpenGraph title is
+// "BANGLE&#x20;BRACCIALE" — a hex entity for a space — and that went into the catalogue, the
+// demo book and the deck exactly like that. Ampersands in image URLs arrive as "&amp;" for
+// the same reason, which turns every query parameter after the first into junk.
+const NAMED: Record<string, string> = {
+  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", ndash: "–", mdash: "—",
+  lsquo: "\u2018", rsquo: "\u2019", ldquo: "\u201C", rdquo: "\u201D", hellip: "…", eacute: "é",
+};
+
+export function decodeEntities(value: string): string {
+  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, body: string) => {
+    if (body[0] === "#") {
+      const code = body[1] === "x" || body[1] === "X"
+        ? parseInt(body.slice(2), 16)
+        : parseInt(body.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+    }
+    return NAMED[body.toLowerCase()] ?? whole;
+  });
+}
+
+// "Price on request" as a number. These catalogues write it as a run of nines — Buccellati
+// publishes product:price:amount 9999999 on every piece that has no public price — and a
+// €9,999,999 bracelet in the demo book is both wrong and the first thing anyone notices.
+// Zero is the other spelling of the same thing.
+function isSentinelPrice(n: number): boolean {
+  return n === 0 || /^9{5,}$/.test(String(Math.round(n)));
+}
+
 export type ExtractedProduct = {
   name: string;
   product_url: string | null;
@@ -99,7 +128,7 @@ function firstImage(v: unknown, base: string): string | null {
 }
 
 function productFrom(node: Record<string, unknown>, base: string): ExtractedProduct | null {
-  const name = typeof node.name === "string" ? node.name.trim() : "";
+  const name = typeof node.name === "string" ? decodeEntities(node.name).trim() : "";
   if (!name) return null;
 
   const offers = asArray(node.offers as unknown)[0] as Record<string, unknown> | undefined;
@@ -109,15 +138,19 @@ function productFrom(node: Record<string, unknown>, base: string): ExtractedProd
     name: name.slice(0, 300),
     product_url: absolute(node.url ?? offers?.url, base),
     image_url: firstImage(node.image, base),
-    price: toPrice(offers?.price ?? (offers?.priceSpecification as Record<string, unknown> | undefined)?.price),
+    price: usablePrice(toPrice(offers?.price ?? (offers?.priceSpecification as Record<string, unknown> | undefined)?.price)),
     price_currency: typeof offers?.priceCurrency === "string" ? offers.priceCurrency.toUpperCase().slice(0, 3) : null,
     sku: typeof node.sku === "string" ? node.sku : typeof node.productID === "string" ? node.productID : null,
     // Absent availability means unknown, not out of stock — most listing pages
     // omit it entirely and marking everything unavailable would empty the deck.
     available: availability ? /instock|limitedavailability|preorder|backorder/.test(availability) : null,
-    category: typeof node.category === "string" ? node.category.slice(0, 120) : null,
+    category: typeof node.category === "string" ? decodeEntities(node.category).slice(0, 120) : null,
   };
 }
+
+/** A price we would be willing to show a client, or nothing. */
+const usablePrice = (n: number | null): number | null =>
+  n != null && !isSentinelPrice(n) ? n : null;
 
 // Walks anything: a bare Product, an array, an @graph, an ItemList of ListItems,
 // an ItemList of Products directly. Sites disagree about which, and a parser
@@ -151,13 +184,19 @@ function fromOpenGraph(html: string, base: string): ExtractedProduct | null {
   const type = (meta("og:type") ?? "").toLowerCase();
   const name = meta("og:title");
   const image = meta("og:image");
-  if (!name || !image || (type && !type.includes("product"))) return null;
+  const price = usablePrice(toPrice(meta("product:price:amount") ?? meta("og:price:amount")));
+  if (!name || !image) return null;
+  // A title and a picture is what EVERY page has, error pages included. Pomellato's /404
+  // publishes its default share image and "Pomellato Online-Boutique | Schmuck — Ringe,
+  // Ohrringe, Armbänder, Halsketten", and that arrived in the catalogue as a product with
+  // that name. So the page has to claim to be a product, or carry a price.
+  if (!type.includes("product") && price == null) return null;
 
   return {
-    name: name.trim().slice(0, 300),
-    product_url: absolute(meta("og:url") ?? base, base),
-    image_url: absolute(image, base),
-    price: toPrice(meta("product:price:amount") ?? meta("og:price:amount")),
+    name: decodeEntities(name).trim().slice(0, 300),
+    product_url: absolute(decodeEntities(meta("og:url") ?? base), base),
+    image_url: absolute(decodeEntities(image), base),
+    price,
     price_currency: (meta("product:price:currency") ?? meta("og:price:currency") ?? "").toUpperCase().slice(0, 3) || null,
     sku: null,
     available: null,

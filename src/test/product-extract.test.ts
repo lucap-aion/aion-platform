@@ -100,3 +100,82 @@ describe("the shapes different sites publish", () => {
     expect(out).toEqual([]);
   });
 });
+
+// ── An error page is not a product ───────────────────────────────────────────────────────
+describe("the OpenGraph fallback", () => {
+  const og = (tags: Record<string, string>) =>
+    `<html><head>${Object.entries(tags)
+      .map(([p, c]) => `<meta property="${p}" content="${c}"/>`).join("")}</head></html>`;
+
+  it("refuses a page that is only a title and a picture", () => {
+    // Pomellato's /404 publishes exactly this, and it came back as a product named
+    // "Pomellato Online-Boutique | Schmuck — Ringe, Ohrringe, Armbänder, Halsketten".
+    expect(extractProducts(og({
+      "og:title": "Pomellato Online-Boutique | Schmuck",
+      "og:image": "https://www.pomellato.com/at_de/default_meta_image.jpg",
+    }), "https://www.pomellato.com/at_de/404")).toEqual([]);
+  });
+
+  it("takes a page that says it is a product", () => {
+    const found = extractProducts(og({
+      "og:type": "product",
+      "og:title": "Nudo Classic Ring",
+      "og:image": "https://cdn.brand.com/nudo.jpg",
+    }), "https://brand.com/nudo-ring-pab9040");
+    expect(found).toHaveLength(1);
+    expect(found[0].name).toBe("Nudo Classic Ring");
+  });
+
+  it("takes a page that carries a price, whatever it calls itself", () => {
+    const found = extractProducts(og({
+      "og:title": "Sabbia Bracelet",
+      "og:image": "https://cdn.brand.com/sabbia.jpg",
+      "product:price:amount": "5000",
+      "product:price:currency": "eur",
+    }), "https://brand.com/sabbia-pbc3053");
+    expect(found).toHaveLength(1);
+    expect(found[0].price).toBe(5000);
+    expect(found[0].price_currency).toBe("EUR");
+  });
+});
+
+// ── What a page says vs what it means ────────────────────────────────────────────────────
+describe("text and prices as sites actually publish them", () => {
+  it("decodes the entities markup arrives with", () => {
+    const html = `<html><head>
+      <meta property="og:type" content="product"/>
+      <meta property="og:title" content="BANGLE&#x20;BRACCIALE&#x20;&amp;&#x20;CUFF"/>
+      <meta property="og:image" content="https://cdn.b.com/i.png?a=1&amp;b=2"/>
+      <meta property="product:price:amount" content="4200"/>
+    </head></html>`;
+    const [p] = extractProducts(html, "https://b.com/bangle-jaubra013551.html");
+    // "BANGLE&#x20;BRACCIALE" went into the catalogue, the demo book and the deck verbatim.
+    expect(p.name).toBe("BANGLE BRACCIALE & CUFF");
+    // And every query parameter after the first was junk.
+    expect(p.image_url).toBe("https://cdn.b.com/i.png?a=1&b=2");
+  });
+
+  it("treats a run of nines as 'price on request'", () => {
+    // Buccellati publishes 9999999 on every piece with no public price. A €9,999,999
+    // bracelet in the demo book is the first thing anyone notices.
+    const html = `<html><head>
+      <meta property="og:type" content="product"/>
+      <meta property="og:title" content="Anello Cocktail"/>
+      <meta property="og:image" content="https://cdn.b.com/ring.png"/>
+      <meta property="product:price:amount" content="9999999"/>
+    </head></html>`;
+    const [p] = extractProducts(html, "https://b.com/anello-jaurin008275.html");
+    expect(p.price).toBe(null);
+    // Still worth keeping: the deck needs the picture.
+    expect(p.image_url).toBe("https://cdn.b.com/ring.png");
+  });
+
+  it("keeps a real price that happens to be large", () => {
+    const html = `<html><head><script type="application/ld+json">${JSON.stringify({
+      "@type": "Product", name: "High jewellery necklace",
+      image: "https://cdn.b.com/n.png",
+      offers: { "@type": "Offer", price: 1250000, priceCurrency: "EUR" },
+    })}</script></head></html>`;
+    expect(extractProducts(html, "https://b.com/n-123456")[0].price).toBe(1250000);
+  });
+});
