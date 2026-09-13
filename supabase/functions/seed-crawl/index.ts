@@ -12,6 +12,9 @@ import { originAllowed, originRefused } from "../_shared/origin.ts";
 import {
   UA, fetchText, jinaRaw, parseJinaMarkdown, extractContent, extractLinks,
   extractMarkdownLinks, collectSitemapUrls, normLine, stripHash, decodeEntities, preferCanonicalLocale } from "../_shared/crawl.ts";
+// Which of a site's pages look like they carry a product, so the page cap cannot cut the
+// catalogue out of a large sitemap.
+import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -98,7 +101,11 @@ Deno.serve(async (req: Request) => {
     const pageUrls = new Map<string, string>(); // url -> category_hint
     const add = (u: URL) => { if (u.hostname !== origin.hostname) return; const k = stripHash(u.href); if (!pageUrls.has(k)) pageUrls.set(k, ""); };
     add(origin);
-    for (const u of await collectSitemapUrls(origin, maxPages)) { try { add(new URL(u)); } catch { /* skip */ } }
+    // The key, so a site that blocks plain requests still gives up its sitemap. Without it
+    // the houses that block us are exactly the ones whose catalogue is never found.
+    for (const u of await collectSitemapUrls(origin, maxPages, 24, JINA_API_KEY)) {
+      try { add(new URL(u)); } catch { /* skip */ }
+    }
     if (rawHomeHtml) for (const { href } of extractLinks(rawHomeHtml, origin)) add(href);
     if (jinaHomeRaw) for (const { href } of extractMarkdownLinks(jinaHomeRaw, origin)) add(href);
 
@@ -106,7 +113,26 @@ Deno.serve(async (req: Request) => {
     // variants each became their own document — see preferCanonicalLocale.
     const deduped = preferCanonicalLocale([...pageUrls.keys()]);
     const collapsed = pageUrls.size - deduped.length;
-    const urls = deduped.slice(0, maxPages);
+
+    // Truncating to maxPages used to be `slice(0, maxPages)` — the first five hundred in
+    // whatever order the sitemap happened to list them. On a house with three thousand
+    // pages that is a lottery, and Damiani lost it: five hundred store-locator entries, and
+    // not one of its six hundred product pages, so the catalogue read had nothing to read
+    // and the house was recorded as having none.
+    //
+    // So a share of the budget is reserved for the pages that look like products, and the
+    // rest is filled in the site's own order. Both halves keep their relative order, so the
+    // boilerplate sample and the crawl still walk the site the way it presents itself — the
+    // only change is WHICH pages survive the cap.
+    //
+    // Not all of it: the crawl also feeds the assistant's knowledge base, and a queue of
+    // nothing but product pages would leave it unable to answer a question about returns.
+    const productQuota = Math.floor(maxPages * 0.4);
+    const keep = new Set(rankCatalogueUrls(deduped).slice(0, productQuota));
+    const urls = [
+      ...deduped.filter((u) => keep.has(u)),
+      ...deduped.filter((u) => !keep.has(u)),
+    ].slice(0, maxPages);
 
     // Boilerplate set: sample a few pages, keep lines repeated on >=40%.
     const sample = urls.slice(0, BOILERPLATE_SAMPLE);

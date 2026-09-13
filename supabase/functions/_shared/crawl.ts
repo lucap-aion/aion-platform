@@ -128,7 +128,43 @@ export function extractMarkdownLinks(md: string, base: URL): { href: URL; text: 
 }
 
 // ── Sitemaps ─────────────────────────────────────────────────────────────
-export async function collectSitemapUrls(origin: URL, maxUrls = 3000, maxFiles = 24): Promise<string[]> {
+//
+// A sitemap is the canonical list of every page a site wants found, published precisely so
+// nobody has to guess. It is by some distance the best source of product URLs on a house
+// with no product feed — and it was being read with a plain fetch and nothing behind it.
+//
+// Which meant it yielded nothing on exactly the sites that need it most. damiani.com answers
+// 403 to every plain request, its own robots.txt included in spirit if not in fact; the
+// sitemap fetch threw, the loop swallowed it, and the crawl fell back to following links. Six
+// hundred and forty-three product pages sat in that sitemap while the queue filled up with
+// store-locator entries, and the house was recorded as having no catalogue at all.
+
+/** Does this URL name another sitemap rather than a page? */
+const looksLikeSitemap = (u: string) => /\.xml($|[?#])|sitemap/i.test(u);
+
+/**
+ * The URLs inside one sitemap.
+ *
+ * `<loc>` when we have the XML. When a renderer fetched it the tags are gone and all that is
+ * left is the text, so same-origin absolute URLs are what a sitemap looks like by then.
+ */
+function urlsInSitemap(xml: string, origin: URL): string[] {
+  const locs = [...xml.matchAll(/<loc>\s*([\s\S]*?)\s*<\/loc>/gi)].map((m) => decodeEntities(m[1]).trim());
+  if (locs.length) return locs;
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of xml.matchAll(/https?:\/\/[^\s"'<>)\]]+/g)) {
+    const u = m[0].replace(/[.,;]+$/, "");
+    try { if (new URL(u).hostname !== origin.hostname) continue; } catch { continue; }
+    if (!seen.has(u)) { seen.add(u); out.push(u); }
+  }
+  return out;
+}
+
+export async function collectSitemapUrls(
+  origin: URL, maxUrls = 3000, maxFiles = 24, jinaKey = "",
+): Promise<string[]> {
   const queue: string[] = [];
   const seen = new Set<string>();
   try {
@@ -136,6 +172,10 @@ export async function collectSitemapUrls(origin: URL, maxUrls = 3000, maxFiles =
     for (const m of robots.matchAll(/^\s*sitemap:\s*(\S+)/gim)) queue.push(m[1].trim());
   } catch { /* ignore */ }
   for (const p of ["/sitemap.xml", "/sitemap_index.xml", "/sitemap/index.xml"]) queue.push(new URL(p, origin).href);
+
+  // Remember the order they were offered in: robots.txt lists the house's own primary market
+  // first, and that is the sitemap worth paying a render for.
+  const offered = [...queue];
 
   const urls: string[] = [];
   let files = 0;
@@ -145,8 +185,11 @@ export async function collectSitemapUrls(origin: URL, maxUrls = 3000, maxFiles =
     seen.add(sm);
     let xml: string;
     try { xml = await fetchSitemap(sm); files++; } catch { continue; }
-    const isIndex = /<sitemapindex/i.test(xml);
-    const locs = [...xml.matchAll(/<loc>\s*([\s\S]*?)\s*<\/loc>/gi)].map((m) => decodeEntities(m[1]).trim());
+
+    const locs = urlsInSitemap(xml, origin);
+    // A rendered sitemap has no <sitemapindex> tag left to recognise, so fall back to what
+    // the entries themselves are: a file listing nothing but other sitemaps is an index.
+    const isIndex = /<sitemapindex/i.test(xml) || (locs.length > 0 && locs.every(looksLikeSitemap));
     if (isIndex) {
       // Process informational sitemaps (pages, policies, collections, blogs)
       // before the product catalogue. A large catalogue can otherwise exhaust
@@ -160,6 +203,24 @@ export async function collectSitemapUrls(origin: URL, maxUrls = 3000, maxFiles =
     }
     else { for (const l of locs) { urls.push(l); if (urls.length >= maxUrls) break; } }
   }
+
+  // The cheap pass found nothing at all, which on these sites means blocked rather than
+  // absent. ONE render, on the first sitemap the site itself named — a rendered fetch costs
+  // thirty to sixty seconds, and one of them gave up three thousand Damiani URLs, so paying
+  // for more would buy a second locale of the same catalogue at the price of the stage.
+  if (!urls.length && jinaKey) {
+    const best = offered.find(looksLikeSitemap) ?? offered[0];
+    if (best) {
+      try {
+        const rendered = await fetchViaRenderer(best, jinaKey);
+        for (const l of urlsInSitemap(rendered, origin)) {
+          if (looksLikeSitemap(l)) continue;
+          urls.push(l);
+          if (urls.length >= maxUrls) break;
+        }
+      } catch { /* the site is genuinely unreadable; link-following is all that is left */ }
+    }
+  }
   return urls;
 }
 
@@ -169,6 +230,16 @@ async function fetchSitemap(url: string): Promise<string> {
   if (/\.gz($|\?)/i.test(url) || /application\/gzip/i.test(res.headers.get("content-type") ?? "")) {
     return await new Response(res.body!.pipeThrough(new DecompressionStream("gzip"))).text();
   }
+  return await res.text();
+}
+
+/** The renderer, asked for text: a sitemap has no layout worth preserving, only URLs. */
+async function fetchViaRenderer(url: string, jinaKey: string): Promise<string> {
+  const res = await fetch("https://r.jina.ai/" + url, {
+    headers: { "Authorization": `Bearer ${jinaKey}`, "X-Return-Format": "text", "Accept": "text/plain" },
+    signal: AbortSignal.timeout(75000),
+  });
+  if (!res.ok) throw new Error(`renderer HTTP ${res.status}`);
   return await res.text();
 }
 
