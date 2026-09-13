@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   productUrlScore, rankCatalogueUrls, hasItemCode, localeOf, preferredLocale, inLocale,
+  catalogueSample,
 } from "../../supabase/functions/_shared/catalogue-urls.ts";
 
 // Which of a site's pages to read first when looking for a catalogue. A run reads a handful,
@@ -123,8 +124,30 @@ describe("choosing the locale to read a catalogue from", () => {
       "https://www.pomellato.com/ae_en/catene-ring-pac3011-o7000-db000",
       "https://www.pomellato.com/va_it/anello-sabbia-pab9032-o7000-dbr00",
     ];
-    // The Emirates locale has three pages to the Italian one's one, and is still not it.
+    // The Emirates locale has three pages to the Italian one's one, and is still not it:
+    // a crawl is a sample, and a eurozone market legitimately turns up smaller.
     expect(preferredLocale(urls)).toBe("va_it");
+  });
+
+  it("abandons the eurozone when that locale plainly has no catalogue in it", () => {
+    // messika.com: 166 product pages under /en, exactly one under /fr. The preference used
+    // to be absolute, so /fr won on being French, and the reader spent every run on a
+    // hundred and fifty-three French editorial pages reporting "0 products so far" about a
+    // house whose product pages hand over a complete Product record to a plain fetch.
+    const urls = [
+      ...Array.from({ length: 166 }, (_, i) => `https://www.messika.com/en/ring-joy-xs-0${5000 + i}-pg`),
+      "https://www.messika.com/fr/bague-move-05337-pg",
+    ];
+    expect(preferredLocale(urls)).toBe("en");
+  });
+
+  it("is a test of having a catalogue, not of having the biggest one", () => {
+    // A quarter is enough: the eurozone market is genuinely stocked, merely crawled less.
+    const urls = [
+      ...Array.from({ length: 100 }, (_, i) => `https://h.com/uk_en/ring-${10000 + i}`),
+      ...Array.from({ length: 30 }, (_, i) => `https://h.com/it_it/anello-${20000 + i}`),
+    ];
+    expect(preferredLocale(urls)).toBe("it_it");
   });
 
   it("falls back to the locale the site publishes most of", () => {
@@ -191,5 +214,72 @@ describe("assets on the candidate list", () => {
   it("does not mistake a product page for a file", () => {
     // A path can carry an extension and still be the page: Cartier's PDPs end in .html.
     expect(productUrlScore("https://www.cartier.com/en-gb/jewellery/love-ring-b4084600.html")).toBe(5);
+  });
+});
+
+// ── A year is not an item code ───────────────────────────────────────────────────────────
+describe("terms of sale, published once a year per language", () => {
+  it("does not read a year as a manufacturer's reference", () => {
+    // Messika publishes the terms of its Barcelona promotion as cgv-barcelona-2021-ca,
+    // -2021-en, -2021-es, -2022-ca … "2021" satisfied the item-code rule exactly, ties break
+    // alphabetically, and so the eight pages detection sampled out of four hundred were
+    // eight sets of terms and conditions. The house was recorded as having no catalogue
+    // while its product pages published a complete Product record to a plain fetch.
+    expect(hasItemCode("cgv-barcelona-2021-ca")).toBe(false);
+    expect(hasItemCode("collection-2024")).toBe(false);
+    expect(hasItemCode("archive-1999")).toBe(false);
+    expect(productUrlScore("https://www.messika.com/en/cgv-barcelona-2021-es")).toBe(0);
+  });
+
+  it("still reads a real reference, including one that contains a year", () => {
+    expect(hasItemCode("rose-gold-diamnd-bracelet-joy-xs-05337-pg")).toBe(true);
+    expect(hasItemCode("white-gold-and-diamonds-necklace-20059783")).toBe(true);
+    expect(hasItemCode("bypass-ring-in-white-gold-20078486-c")).toBe(true);
+    expect(hasItemCode("love-ring-b4084600")).toBe(true);
+    expect(hasItemCode("nudo-classic-ring-pab9040-o6bkr-zaltl")).toBe(true);
+    // Not a year, because it is not the only thing in the token.
+    expect(hasItemCode("ring-20210044")).toBe(true);
+  });
+
+  it("ranks a product page above a set of terms", () => {
+    const ranked = rankCatalogueUrls([
+      "https://www.messika.com/en/cgv-barcelona-2021-ca",
+      "https://www.messika.com/en/rose-gold-diamnd-bracelet-joy-xs-05337-pg",
+    ]);
+    expect(ranked[0]).toContain("joy-xs-05337-pg");
+    expect(ranked).toHaveLength(1);
+  });
+});
+
+describe("what detection actually tries", () => {
+  const many = (prefix: string, n: number) =>
+    Array.from({ length: n }, (_, i) => `https://h.com/en/${prefix}-${String(i).padStart(3, "0")}-123456`);
+
+  it("does not spend the whole sample on one family of pages", () => {
+    // A contiguous slice of a list sorted alphabetically is n variants of the same page.
+    const ranked = [...many("aaa-terms", 50), ...many("zzz-ring", 50)];
+    const sample = catalogueSample(ranked, 8);
+    expect(sample).toHaveLength(8);
+    expect(sample.some((u) => u.includes("zzz-ring"))).toBe(true);
+  });
+
+  it("still puts the best-ranked candidates first", () => {
+    const ranked = many("ring", 100);
+    expect(catalogueSample(ranked, 8).slice(0, 3)).toEqual(ranked.slice(0, 3));
+  });
+
+  it("returns everything when there is less than a sample's worth", () => {
+    const ranked = many("ring", 5);
+    expect(catalogueSample(ranked, 8)).toEqual(ranked);
+  });
+
+  it("is deterministic — the cursor into this list has to mean something between runs", () => {
+    const ranked = many("ring", 200);
+    expect(catalogueSample(ranked, 8)).toEqual(catalogueSample(ranked, 8));
+  });
+
+  it("never returns the same page twice", () => {
+    const sample = catalogueSample(many("ring", 9), 8);
+    expect(new Set(sample).size).toBe(sample.length);
   });
 });

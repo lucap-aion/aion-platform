@@ -33,7 +33,7 @@ import { enrichFromWikidata } from "../_shared/brand-enrich.ts";
 import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } from "../_shared/brand-legal.ts";
 // What a failure actually stops, and why it is not "everything queued behind it".
 import { blockedBy } from "../_shared/stage-graph.ts";
-import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
+import { rankCatalogueUrls, catalogueSample } from "../_shared/catalogue-urls.ts";
 // The record's non-visual defaults: focus, FAQ, fee rates, policy prefix.
 import { policyPrefix, productFocus, renderFaqs, customerServiceEmail, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
 // A brand's imagery, held by us rather than hotlinked from a site that will be redesigned.
@@ -725,20 +725,28 @@ async function runStage(
         };
       }
       const structured = await detectStructured(admin, brandId, base, deadline);
+      // "We looked and there is nothing" and "we were not allowed to look" are different
+      // answers, and only one of them is about the brand. Recorded as 'blocked' so nothing
+      // downstream mistakes a locked door for an empty shop.
+      const blocked = structured.found === 0 && structured.refused > 0 &&
+        structured.refused >= Math.ceil(structured.tried / 2);
 
       await admin.from("storefront_sources").upsert(
         {
           brand_id: brandId, base_url: base,
-          platform: structured > 0 ? "structured" : "none",
-          enabled: structured > 0,
+          platform: structured.found > 0 ? "structured" : blocked ? "blocked" : "none",
+          enabled: structured.found > 0,
           detected_at: new Date().toISOString(),
         },
         { onConflict: "brand_id" },
       );
 
-      if (structured === 0) {
-        return { ok: true, platform: "none", products: 0,
-          note: "no product feed and no structured product data on this site — the demo book will fall back to indexed product pages" };
+      if (structured.found === 0) {
+        return blocked
+          ? { ok: true, platform: "blocked", products: 0,
+              note: `the site refused ${structured.refused} of ${structured.tried} requests — it is behind bot protection that answers a challenge page rather than the catalogue. Nothing can be read from it directly; ask the house for a product feed, or add its pieces by hand.` }
+          : { ok: true, platform: "none", products: 0,
+              note: "no product feed and no structured product data on this site — the demo book will fall back to indexed product pages" };
       }
 
       // Hand it to the sync exactly like Shopify, and let it re-queue itself.
@@ -1150,9 +1158,25 @@ async function detectShopify(base: string, deadline: number): Promise<{ base: st
 // Is there a catalogue in the page's structured data? One fetch of the homepage
 // is enough to tell: a storefront that publishes Product JSON-LD anywhere
 // publishes it on its landing and category pages.
+/**
+ * What a refusal looks like.
+ *
+ * damiani.com sits behind Cloudflare's interstitial: every product page answers 403 to a
+ * plain fetch and hands the RENDERER a "Just a moment…" challenge page with a 200. Both are
+ * refusals, and neither is evidence about whether the house has a catalogue — it publishes
+ * six hundred and forty-three product pages in its own sitemap. Reporting that as "no
+ * structured product data on this site" told an admin the brand has nothing to sell; the
+ * true answer is that we are locked out, and the next move is to ask the client for a feed.
+ */
+function looksBlocked(status: number, body: string): boolean {
+  if (status === 403 || status === 429 || status === 503) return true;
+  const head = body.slice(0, 2000);
+  return /just a moment|cf-browser-verification|challenge-platform|captcha-delivery|px-captcha|incapsula|access denied|are you a robot/i.test(head);
+}
+
 async function detectStructured(
   admin: ReturnType<typeof createClient>, brandId: number, base: string, deadline: number,
-): Promise<number> {
+): Promise<{ found: number; tried: number; refused: number }> {
   // Ask the pages the CRAWLER actually found, not three guessed paths.
   //
   // This used to try base, /shop and /collections/all. Ferragamo's listing pages are at
@@ -1187,30 +1211,45 @@ async function detectStructured(
 
   // Cheap pass first. On a site that blocks us this costs almost nothing — a 403 comes back
   // immediately — and on a site that does not, it answers without paying for a render.
-  for (const url of candidates.slice(0, 8)) {
-    if (left() < 3_000) return 0;
+  // A SPREAD of eight, not the first eight. The ranked list is sorted by score and then
+  // alphabetically, so a contiguous slice is a run of near-identical pages — see
+  // catalogueSample, and the Barcelona terms that convinced this function Messika had no
+  // catalogue.
+  let tried = 0;
+  let refused = 0;
+
+  for (const url of catalogueSample(candidates, 8)) {
+    if (left() < 3_000) return { found: 0, tried, refused };
     try {
+      tried++;
       const res = await fetch(url, {
         headers: { "User-Agent": "Mozilla/5.0 (AION onboarding)" },
         signal: AbortSignal.timeout(window(6_000)),
       });
+      const body = res.ok ? await res.text() : "";
+      if (looksBlocked(res.status, body)) { refused++; continue; }
       if (!res.ok) continue;
-      const found = extractProducts(await res.text(), url).length;
-      if (found > 0) return found;
-    } catch { /* try the next candidate */ }
+      const found = extractProducts(body, url).length;
+      if (found > 0) return { found, tried, refused };
+    } catch { /* a timeout is not a refusal; try the next candidate */ }
   }
 
   // Then the renderer, on the few most likely to be listings. One page of a luxury site
   // routinely carries sixty products, so this converges fast when it converges at all.
-  if (!JINA_API_KEY) return 0;
-  for (const url of candidates.slice(0, 4)) {
+  if (!JINA_API_KEY) return { found: 0, tried, refused };
+  for (const url of catalogueSample(candidates, 4, 2)) {
     if (left() < 20_000) break;
     try {
-      const found = extractProducts(await jinaHtml(url), url).length;
-      if (found > 0) return found;
+      tried++;
+      const html = await jinaHtml(url);
+      // A renderer answers 200 carrying the challenge page itself, so the status tells us
+      // nothing here and the body tells us everything.
+      if (looksBlocked(200, html)) { refused++; continue; }
+      const found = extractProducts(html, url).length;
+      if (found > 0) return { found, tried, refused };
     } catch { /* try the next candidate */ }
   }
-  return 0;
+  return { found: 0, tried, refused };
 }
 
 

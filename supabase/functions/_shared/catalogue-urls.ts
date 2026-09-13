@@ -47,7 +47,14 @@ export function productUrlScore(url: string): number {
   // never have a price in them. Worth actively ranking below everything else rather than
   // merely not boosting. Whole segments only — a word that merely appears inside a product
   // slug must not sink it.
-  if (/\/(stories|news|journal|about|world|heritage|magazine|faq|help|customer|customer-service|client-service|legal|privacy|cookie|cookies|terms|terms-and-conditions|terms-and-conditions-of-sale|terms-and-conditions-of-use|care|care-and-repairing|repairs|boutique|boutiques|store|stores|store-locator|contact|contact-us|careers|sustainability|shipping|returns|sitemap|accessibility)(\/|$)/.test(path)) {
+  if (/\/(stories|news|journal|about|world|heritage|magazine|faq|help|customer|customer-service|client-service|legal|privacy|cookie|cookies|terms|terms-and-conditions|terms-and-conditions-of-sale|terms-and-conditions-of-use|care|care-and-repairing|repairs|boutique|boutiques|store|stores|store-locator|storelocator|contact|contact-us|careers|sustainability|shipping|returns|sitemap|accessibility)(\/|$)/.test(path)) {
+    return 0;
+  }
+
+  // Terms of sale, published per market and per year, one page each. "cgv" is the French
+  // abbreviation and the segment these sites actually use; there are dozens of them on a
+  // house that runs promotions, and they carry a year in the slug — see YEARLIKE below.
+  if (/\/(cgv|cgu|cga|conditions|conditions-generales|conditions-de-vente|terms-of-sale|mentions-legales|note-legali|aviso-legal|impressum)[^/]*(\/|$)/.test(path)) {
     return 0;
   }
 
@@ -60,7 +67,7 @@ export function productUrlScore(url: string): number {
 
   // An item code — "hug-sh-ew-798503", "yasmin-95-797084". One page, one product, and the
   // product's full structured data.
-  if (/\d{4,}$/.test(last) || /-\d{4,}(-|$)/.test(last) || hasItemCode(last)) return 5;
+  if (hasItemCode(last)) return 5;
 
   // A path that names itself a product.
   if (/\/(products?|item|pd|dp)\//.test(path)) return 4;
@@ -85,13 +92,29 @@ export function productUrlScore(url: string): number {
  * demo book.
  *
  * A code is a token with at least three digits in it, whatever letters surround them —
- * "pab9040", "b4084600", "jauring014744". A collection year ("autumn2024") slips through,
- * and one wasted page read is a better trade than a missed catalogue.
+ * "pab9040", "b4084600", "jauring014744".
+ *
+ * A YEAR is not one, and that exception is not academic. Messika publishes the terms of its
+ * Barcelona boutique promotion once per year per language — cgv-barcelona-2021-ca,
+ * -2021-en, -2021-es, -2022-ca … — and "2021" satisfied the rule exactly. Ties break
+ * alphabetically, so "cgv-…" sorted to the top of four hundred URLs, and the eight pages
+ * detection sampled were eight sets of terms and conditions. A house whose product pages
+ * publish a complete Product record, readable with a plain fetch, was recorded as having no
+ * catalogue at all.
+ *
+ * Only when the year is the token's ONLY run of digits: "gatsby-05446-pg" keeps its code,
+ * and a reference that genuinely reads 2021 among other digits — "ring-20210044" — is still
+ * a code.
  */
+const YEARLIKE = /^(?:19|20)\d{2}$/;
+
 export function hasItemCode(segment: string): boolean {
-  return segment.split(/[-_.]/).some((token) =>
-    /^[a-z]*\d{3,}[a-z0-9]*$/.test(token) && (token.match(/\d/g) ?? []).length >= 3
-  );
+  return segment.split(/[-_.]/).some((token) => {
+    if (!/^[a-z]*\d{3,}[a-z0-9]*$/.test(token)) return false;
+    if ((token.match(/\d/g) ?? []).length < 3) return false;
+    const runs = token.match(/\d+/g) ?? [];
+    return !(runs.length === 1 && YEARLIKE.test(runs[0]));
+  });
 }
 
 // ── One locale, not nine ────────────────────────────────────────────────────────────────── //
@@ -138,13 +161,31 @@ export function localeOf(url: string): string | null {
 const localeParts = (locale: string): string[] => locale.split(/[_\-/]/);
 
 /**
- * Which locale to read a catalogue from: a eurozone one if the site has one, else the one
- * it publishes most of. Null when the site has no locale prefixes at all, which is most
- * single-market sites and needs no filtering.
+ * Which locale to read a catalogue from. Null when the site has no locale prefixes at all,
+ * which is most single-market sites and needs no filtering.
  *
  * Counted over pages that actually look like products, because a locale can be present in
  * the crawl only as a homepage.
+ *
+ * A eurozone locale wins — but only if it carries a catalogue worth reading. The preference
+ * used to be absolute, and on messika.com that was fatal: 166 product pages under /en, none
+ * at all under /fr, and /fr won because French is a eurozone language. The reader then spent
+ * every run on a hundred and fifty-three French editorial pages and reported "0 products so
+ * far" for as long as anyone cared to watch, about a house whose product pages hand over a
+ * complete Product record to a plain fetch.
+ *
+ * The test is "does this locale have a catalogue at all", NOT "does it have the biggest one".
+ * A crawl is a sample, and a eurozone market legitimately turns up with fewer pages than
+ * another — Pomellato's /va_it against its /ae_en — and should still win. What it cannot do
+ * is win with a share so small the locale plainly has no catalogue in it: Messika's French
+ * side offered one product page against English's hundred and sixty-six.
+ *
+ * Prices are stored with the currency the page states, so reading a non-euro market records
+ * pounds as pounds rather than as euros. The reason to prefer the eurozone is that
+ * everything downstream is quoted in it, not that a foreign price would be mislabelled.
  */
+const EUROZONE_SHARE = 0.25;
+
 export function preferredLocale(urls: string[]): string | null {
   const counts = new Map<string, number>();
   for (const url of urls) {
@@ -154,13 +195,16 @@ export function preferredLocale(urls: string[]): string | null {
     counts.set(locale, (counts.get(locale) ?? 0) + 1);
   }
   if (!counts.size) return null;
-  // Stable: count first, then eurozone, then alphabetical — never insertion order, because
-  // the caller keeps a cursor into the list this decides.
-  const ranked = [...counts.entries()].sort((a, b) =>
-    Number(localeParts(b[0]).some((p) => EUROZONE.has(p))) - Number(localeParts(a[0]).some((p) => EUROZONE.has(p)))
-    || b[1] - a[1]
-    || a[0].localeCompare(b[0]));
-  return ranked[0][0];
+
+  const isEuro = (locale: string) => localeParts(locale).some((p) => EUROZONE.has(p));
+  // Stable: count, then eurozone, then alphabetical — never insertion order, because the
+  // caller keeps a cursor into the list this decides.
+  const byCount = [...counts.entries()].sort((a, b) =>
+    b[1] - a[1] || Number(isEuro(b[0])) - Number(isEuro(a[0])) || a[0].localeCompare(b[0]));
+
+  const richest = byCount[0];
+  const euro = byCount.find(([locale]) => isEuro(locale));
+  return euro && euro[1] >= richest[1] * EUROZONE_SHARE ? euro[0] : richest[0];
 }
 
 /** URLs in one locale, or all of them when narrowing would leave too little to read. */
@@ -176,6 +220,30 @@ export function inLocale(urls: string[], locale: string | null, keepAtLeast = 5)
  * The tie-break is not decoration: the caller reads a window of this list and stores an
  * index into it, so a list that reshuffles between runs makes that cursor meaningless.
  */
+/**
+ * A sample to TRY, out of a ranked list that may be thousands long.
+ *
+ * `ranked.slice(0, n)` takes a contiguous alphabetical run, which on a real site is n
+ * variants of the same page: eight sets of Barcelona terms, or eight boutique addresses.
+ * Detection then reports "this site publishes no catalogue" on the strength of having looked
+ * at the same page eight times.
+ *
+ * So: the best few, which is where a well-ranked list really does have the answer, and the
+ * rest spread evenly across the whole list. Order is preserved and the result is
+ * deterministic, because the cursor into these lists has to mean something between runs.
+ */
+export function catalogueSample(ranked: string[], n: number, best = 3): string[] {
+  if (ranked.length <= n) return [...ranked];
+  const out = ranked.slice(0, Math.min(best, n));
+  const spread = n - out.length;
+  for (let i = 0; i < spread; i++) {
+    const at = out.length + Math.floor((i * (ranked.length - out.length)) / spread);
+    const pick = ranked[Math.min(at, ranked.length - 1)];
+    if (!out.includes(pick)) out.push(pick);
+  }
+  return out;
+}
+
 export function rankCatalogueUrls(urls: string[]): string[] {
   return [...new Set(urls)]
     // Score 0 is not "unlikely to carry a product", it is "never": a FAQ, a privacy notice
