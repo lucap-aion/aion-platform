@@ -46,7 +46,11 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   const base = website.startsWith("http") ? website : `https://${website}`;
   const out: BrandIdentity = { found: [], notes: [] };
 
-  const html = await fetchText(base) ?? "";
+  // `let`, because the renderer branch below reassigns it. It was `const`, and every house
+  // that refuses a plain fetch crashed the branding stage with "Assignment to constant
+  // variable" — never caught, because nothing typechecks the edge functions and
+  // typescript-eslint switches no-const-assign off on the grounds that TypeScript will.
+  let html = await fetchText(base) ?? "";
   let markdown = "";
   // Two different ways a luxury homepage yields no pictures to a plain fetch, and both are
   // normal. Some refuse it outright — ferragamo.com answers 403 to anything that is not a
