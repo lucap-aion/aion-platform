@@ -13,6 +13,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { extractProducts } from "../_shared/product-extract.ts";
 import { mapShopifyProducts } from "../_shared/shopify-feed.ts";
 import type { FeedVariant, RawShopifyProduct } from "../_shared/shopify-feed.ts";
+import { parseProductFeed } from "../_shared/product-feed.ts";
 import { rankCatalogueUrls, preferredLocale, inLocale, localeOf } from "../_shared/catalogue-urls.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -50,7 +51,7 @@ async function loadStorefronts(
 ): Promise<Map<number, Storefront>> {
   let q = admin.from("storefront_sources")
     .select("brand_id, base_url, currency, keep_untyped, platform, enabled, structured_cursor")
-    .eq("enabled", true).in("platform", ["shopify", "structured"]);
+    .eq("enabled", true).in("platform", ["shopify", "structured", "feed"]);
   if (only) q = q.eq("brand_id", only);
   const { data, error } = await q;
   if (error) throw new Error(`storefront_sources: ${error.message}`);
@@ -122,7 +123,12 @@ async function syncBrand(
   const structured = store.platform === "structured"
     ? await fetchStructured(admin, brandId, store.base, store.cursor)
     : null;
-  const products = structured ? structured.products : await fetchStorefront(store.base, store.keepUntyped);
+  const products = structured
+    ? structured.products
+    : store.platform === "feed"
+    // A feed the house publishes: one request, the whole catalogue, maintained by them.
+    ? await fetchFeed(store.base, store.currency)
+    : await fetchStorefront(store.base, store.keepUntyped);
 
   // 1. Upsert product fields for the whole range (cheap, every run).
   const rows = products.map((p) => ({
@@ -452,6 +458,39 @@ async function jinaHtml(url: string): Promise<string> {
   });
   if (!res.ok) throw new Error(`jina HTTP ${res.status}`);
   return await res.text();
+}
+
+/**
+ * A product feed, read whole.
+ *
+ * One request against a file the house maintains for Google anyway. No pagination, no
+ * cursor, no renderer: this is the cheapest and most current catalogue there is, and the
+ * only one that stays right without us doing anything.
+ */
+async function fetchFeed(url: string, fallbackCurrency: string): Promise<SProduct[]> {
+  const res = await fetch(url, {
+    headers: { "User-Agent": UA, "Accept": "application/xml,text/xml,text/csv,text/plain,*/*" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(45_000),
+  });
+  if (!res.ok) throw new Error(`feed HTTP ${res.status}`);
+  const text = await res.text();
+  return parseProductFeed(text).map((p) => ({
+    productUrl: p.productUrl,
+    handle: p.handle,
+    sku: p.sku,
+    name: p.name,
+    category: p.category,
+    collection: null,
+    description: p.description,
+    price: p.price,
+    compareAt: null,
+    available: p.available,
+    imageUrl: p.imageUrl,
+    // What the feed said, not what the source was configured with — a feed states its own
+    // currency per row and a house publishes one per market.
+    currency: p.currency ?? fallbackCurrency,
+  }));
 }
 
 async function fetchStorefront(base: string, keepUntyped = false): Promise<SProduct[]> {

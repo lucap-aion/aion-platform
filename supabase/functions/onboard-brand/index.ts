@@ -38,6 +38,9 @@ import { rankCatalogueUrls, catalogueSample } from "../_shared/catalogue-urls.ts
 // the packshots, and the item code joins them.
 import { collectSitemap } from "../_shared/crawl.ts";
 import { productsFromSitemap } from "../_shared/sitemap-products.ts";
+// A product feed the house already publishes — for Google Shopping, for a marketplace. The
+// same catalogue, maintained by them, and the cheapest one there is.
+import { parseProductFeed } from "../_shared/product-feed.ts";
 // The record's non-visual defaults: focus, FAQ, fee rates, policy prefix.
 import { policyPrefix, productFocus, renderFaqs, customerServiceEmail, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
 // A brand's imagery, held by us rather than hotlinked from a site that will be redesigned.
@@ -717,6 +720,36 @@ async function runStage(
     // Ferragamo never so much as got a storefront_sources row, on any attempt.
     const deadline = Date.now() + 70_000;
 
+    // A URL somebody typed in is a house telling us where its catalogue is, and it need not
+    // be a shop at all — a Google Shopping feed is the same catalogue, maintained by them,
+    // and the only source that stays current without us doing anything. Tried first,
+    // because it is one request and it settles the question.
+    const { data: configured } = await admin.from("storefront_sources")
+      .select("base_url").eq("brand_id", brandId).maybeSingle();
+    const typedIn = String((configured as { base_url?: string } | null)?.base_url ?? "").trim();
+    if (typedIn && typedIn.replace(/\/+$/, "") !== base.replace(/\/+$/, "")) {
+      const items = await detectFeed(typedIn, deadline);
+      if (items > 0) {
+        await admin.from("storefront_sources").upsert(
+          { brand_id: brandId, base_url: typedIn, platform: "feed", enabled: true,
+            detected_at: new Date().toISOString() },
+          { onConflict: "brand_id" },
+        );
+        const synced = await callFn("sync-storefront", { brand_id: brandId, max: STOREFRONT_BATCH });
+        const { count } = await admin.from("storefront_products")
+          .select("id", { count: "exact", head: true }).eq("brand_id", brandId);
+        const defaults = (count ?? 0) > 0 ? await fillRecordDefaults(admin, brandId) : { filled: [], notes: [] };
+        const revived = await reviveSkipped(admin, brandId, "storefront");
+        return {
+          ok: true, platform: "feed", base: typedIn, products: count ?? 0,
+          record_defaults: defaults.filled,
+          ...(revived.length ? { revived } : {}),
+          note: `read ${items} pieces from the product feed at ${typedIn} — the house maintains this file itself, so it stays current with nothing for us to do.`,
+          synced,
+        };
+      }
+    }
+
     const detected = await detectShopify(base, deadline);
     if (Date.now() > deadline) {
       return { ok: false, reason: `${base} did not answer in time — no catalogue could be detected. It may be blocking us, or simply slow; run this stage again.` };
@@ -1257,6 +1290,31 @@ async function detectShopify(base: string, deadline: number): Promise<{ base: st
 // Is there a catalogue in the page's structured data? One fetch of the homepage
 // is enough to tell: a storefront that publishes Product JSON-LD anywhere
 // publishes it on its landing and category pages.
+/**
+ * Is there a product feed at this URL?
+ *
+ * Tried on a URL an admin typed in, which is the point at which a house has told us where
+ * its catalogue is. One request, and the CONTENT decides the format — a feed is served as
+ * text/plain, application/octet-stream and text/xml by different hosts for the same file.
+ */
+async function detectFeed(url: string, deadline: number): Promise<number> {
+  if (!/^https?:\/\//i.test(url)) return 0;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (AION onboarding)",
+        "Accept": "application/xml,text/xml,text/csv,text/plain,*/*",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(Math.min(20_000, Math.max(2_000, deadline - Date.now()))),
+    });
+    if (!res.ok) return 0;
+    return parseProductFeed(await res.text()).length;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * The catalogue a sitemap gives up when no page can be read.
  *

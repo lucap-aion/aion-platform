@@ -49,24 +49,28 @@ export default function CatalogueSource({ brandId, products, onSaved }: {
   useEffect(() => { void load(); }, [load]);
 
   const save = async () => {
+    // A feed URL has a path and often a query string, so only a trailing slash is trimmed
+    // and a path is no longer a reason to refuse it.
     const url = baseUrl.trim().replace(/\/+$/, "");
     if (!/^https?:\/\/[^/\s]+/.test(url)) {
-      toast({ title: "That is not a URL", description: "The shop's origin, e.g. https://shop.brand.com — no trailing path.", variant: "destructive" });
+      toast({ title: "That is not a URL", description: "A shop origin like https://shop.brand.com, or a feed like https://brand.com/feeds/google.xml", variant: "destructive" });
       return;
     }
     setSaving(true);
     const { error } = await untyped.from("storefront_sources").upsert({
       brand_id: brandId, base_url: url,
-      // Setting a URL by hand is an assertion that there IS a feed there, so the
-      // platform goes back to shopify — leaving it 'none' would keep the sync
-      // skipping the brand no matter what URL was entered.
+      // Setting a URL by hand is an assertion that there IS a catalogue there, so the
+      // platform goes back to shopify — leaving it 'none' or 'blocked' would keep the sync
+      // skipping the brand no matter what URL was entered. The Catalogue stage then decides
+      // what it actually is: it tries the URL as a product feed first, and a feed that
+      // reads sets the platform to 'feed'.
       platform: "shopify",
       keep_untyped: keepUntyped, enabled,
       currency: row?.currency ?? "EUR",
     } as never, { onConflict: "brand_id" });
     setSaving(false);
     if (error) { toast({ title: "Could not save", description: error.message, variant: "destructive" }); return; }
-    toast({ title: "Catalogue source saved", description: "Re-run the Catalogue stage above to pull from it." });
+    toast({ title: "Catalogue source saved", description: "Re-run the Catalogue stage above — it works out whether that URL is a shop or a product feed." });
     await load(); onSaved?.();
   };
 
@@ -106,8 +110,10 @@ export default function CatalogueSource({ brandId, products, onSaved }: {
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
           <span>
-            {row?.platform === "none"
-              ? "No product feed was found on this site. If the shop lives somewhere detection could not reach — a subdomain, a market-specific domain — set it here."
+            {row?.platform === "blocked"
+              ? "This site answers a bot challenge rather than its catalogue. Ask the house for its product feed — the file it already publishes for Google Shopping — and paste the URL here."
+              : row?.platform === "none"
+              ? "No product feed was found on this site. Paste a shop origin, or the product feed the house publishes for Google Shopping — either works."
               : "No catalogue source registered. Without one there are no images for the intro deck and no real pieces for the demo book."}
           </span>
         </div>
@@ -115,9 +121,9 @@ export default function CatalogueSource({ brandId, products, onSaved }: {
 
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-56 flex-1 flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-          Shop origin
+          Shop origin or feed URL
           <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://shop.brand.com"
+            placeholder="https://shop.brand.com  ·  or  ·  https://brand.com/feeds/google.xml"
             className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground" />
         </label>
         <label className="flex items-center gap-2 pb-2 text-xs text-muted-foreground">
