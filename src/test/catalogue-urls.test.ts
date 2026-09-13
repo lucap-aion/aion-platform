@@ -165,3 +165,31 @@ describe("choosing the locale to read a catalogue from", () => {
     expect(inLocale(urls, null)).toEqual(urls);
   });
 });
+
+// ── A file is not a page ─────────────────────────────────────────────────────────────────
+describe("assets on the candidate list", () => {
+  it("never ranks an image, a font or a script as a product page", () => {
+    // Both of these scored 5 — the item-code rule saw the digits. A reader with twelve page
+    // reads a run would have spent them on a favicon and a webfont.
+    for (const url of [
+      "https://www.messika.com/astro/favicon/apple-icon-114x114.png",
+      "https://www.vhernier.com/cdn/fonts/montserrat/montserrat_n4.81949fa0ac9fd2021e.woff2",
+      "https://b.com/assets/app-4f2a91.js",
+      "https://b.com/media/catalog/product/A/B/AB123456_V1.jpg?width=265",
+      "https://b.com/sitemap-products-1.xml",
+    ]) expect(productUrlScore(url)).toBe(0);
+  });
+
+  it("keeps them off the list the reader works through", () => {
+    expect(rankCatalogueUrls([
+      "https://b.com/it_it/anello-jaurin017944.html",
+      "https://b.com/favicon-32x32.png",
+      "https://b.com/fonts/brand_400.woff2",
+    ])).toEqual(["https://b.com/it_it/anello-jaurin017944.html"]);
+  });
+
+  it("does not mistake a product page for a file", () => {
+    // A path can carry an extension and still be the page: Cartier's PDPs end in .html.
+    expect(productUrlScore("https://www.cartier.com/en-gb/jewellery/love-ring-b4084600.html")).toBe(5);
+  });
+});

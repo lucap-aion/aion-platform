@@ -24,7 +24,14 @@
  * Deliberately ordered for sites that are NOT Shopify — a Shopify store never reaches this,
  * because its feed is taken whole from /products.json.
  */
+// A file, not a page. These carry digits constantly — apple-icon-114x114.png,
+// montserrat_n4.8194….woff2 — so the item-code rule scored them as products and a reader
+// with a budget of twelve pages a run would spend it on a favicon and a font. Found by
+// pointing the ranking at three sites it had never seen.
+const NOT_A_PAGE = /\.(?:png|jpe?g|gif|webp|avif|svg|ico|bmp|tiff?|woff2?|ttf|otf|eot|css|m?js|map|json|xml|txt|pdf|zip|gz|mp4|webm|mp3|wav|avi|mov)(?:[?#]|$)/i;
+
 export function productUrlScore(url: string): number {
+  if (NOT_A_PAGE.test(url)) return 0;
   let path: string;
   try {
     path = new URL(url).pathname.toLowerCase();
