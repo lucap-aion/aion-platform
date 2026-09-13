@@ -15,6 +15,9 @@ import {
 // Which of a site's pages look like they carry a product, so the page cap cannot cut the
 // catalogue out of a large sitemap.
 import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
+// What the house asked for. Read once, here, and carried on the source so the worker does
+// not refetch robots.txt on every tick.
+import { parseRobots, robotsAllows, rulesToConfig, AGENT_TOKEN, NO_RULES } from "../_shared/robots.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -97,6 +100,16 @@ Deno.serve(async (req: Request) => {
     const jinaHome = jinaHomeRaw ? parseJinaMarkdown(jinaHomeRaw) : { title: "", text: "" };
     const render = jinaHome.text.length > Math.max(rawHome.text.length * 1.4, 500);
 
+    // What this house asked of crawlers. Fetched here rather than in the worker: it is one
+    // request per seed instead of one per tick, and the rules belong with the source.
+    let robots = NO_RULES;
+    try {
+      const res = await fetch(new URL("/robots.txt", origin).href, {
+        headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) robots = parseRobots(await res.text(), AGENT_TOKEN);
+    } catch { /* no robots.txt is permission, not refusal */ }
+
     // Discover page URLs: full sitemap + homepage links (raw + rendered).
     const pageUrls = new Map<string, string>(); // url -> category_hint
     const add = (u: URL) => { if (u.hostname !== origin.hostname) return; const k = stripHash(u.href); if (!pageUrls.has(k)) pageUrls.set(k, ""); };
@@ -115,7 +128,13 @@ Deno.serve(async (req: Request) => {
 
     // One page per locale is one page. Without this the sitemap's market
     // variants each became their own document — see preferCanonicalLocale.
-    const deduped = preferCanonicalLocale([...pageUrls.keys()]);
+    // Drop what the house asked us not to fetch, before anything is ranked or queued. A
+    // sitemap legitimately lists pages robots.txt disallows — they are different files with
+    // different jobs — and the crawl should not be the thing that resolves that in our
+    // favour.
+    const permitted = [...pageUrls.keys()].filter((u) => robotsAllows(robots, u));
+    const refusedByRobots = pageUrls.size - permitted.length;
+    const deduped = preferCanonicalLocale(permitted);
     const collapsed = pageUrls.size - deduped.length;
 
     // Truncating to maxPages used to be `slice(0, maxPages)` — the first five hundred in
@@ -172,7 +191,11 @@ Deno.serve(async (req: Request) => {
     // Persist source config.
     await admin.from("knowledge_sources").upsert({
       brand_id: brandId, kind: "website", target: origin.href, enabled: true,
-      config: { render, boilerplate, max_pages: maxPages, news_enabled: newsPref }, last_seeded_at: new Date().toISOString(),
+      config: {
+        render, boilerplate, max_pages: maxPages, news_enabled: newsPref,
+        ...rulesToConfig(robots),
+      },
+      last_seeded_at: new Date().toISOString(),
     }, { onConflict: "brand_id,kind" });
     if (newsItems.length) {
       await admin.from("knowledge_sources").upsert({
@@ -192,7 +215,15 @@ Deno.serve(async (req: Request) => {
       else console.error("[seed enqueue]", error.message);
     }
 
-    return jsonOk({ brand_id: brandId, base_url: origin.href, render, page_urls: urls.length, locale_variants_collapsed: collapsed, news_items: newsItems.length, boilerplate_lines: boilerplate.length, enqueued });
+    return jsonOk({
+      brand_id: brandId, base_url: origin.href, render, page_urls: urls.length,
+      locale_variants_collapsed: collapsed,
+      // Worth reporting rather than doing quietly: it is the difference between a site with
+      // little on it and a site that asked us to stay out of most of it.
+      refused_by_robots: refusedByRobots,
+      crawl_delay_seconds: robots.crawlDelaySeconds,
+      news_items: newsItems.length, boilerplate_lines: boilerplate.length, enqueued,
+    });
   } catch (e) {
     console.error("[seed-crawl]", e);
     return jsonError(`seed failed: ${e instanceof Error ? e.message : "unknown"}`, 500);

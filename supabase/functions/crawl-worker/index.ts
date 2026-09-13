@@ -12,6 +12,7 @@ import {
   fetchText, jinaRaw, parseJinaMarkdown, extractContent, chunkText, embedDocuments,
   stripLines, categorize, titleFromUrl, sha256, MIN_PAGE_CHARS, MAX_PAGE_CHARS,
 } from "../_shared/crawl.ts";
+import { rulesFromConfig, robotsAllows } from "../_shared/robots.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -69,6 +70,16 @@ Deno.serve(async (req: Request) => {
   const render = !!cfg.render;
   const boilerplate = new Set(cfg.boilerplate ?? []);
 
+  // What the house asked for, parsed at seed time and carried on the source. Enforced here
+  // as well as at seeding because the queue outlives any one seed and can be added to by
+  // hand — the off-domain check a few lines down exists for exactly the same reason.
+  const robots = rulesFromConfig(cfg as Record<string, unknown>);
+  // Seconds between requests, when the house names a figure. Capped: a site asking for
+  // sixty would otherwise spend the whole invocation asleep and fetch one page, and the
+  // batch ends early anyway when the budget runs out.
+  const politeGap = Math.min(10, Math.max(0, robots.crawlDelaySeconds ?? 0)) * 1000;
+  const deadline = Date.now() + 55_000;
+
   // Claim a batch atomically.
   const { data: batch, error: claimErr } = await admin.rpc("claim_crawl_batch", { p_brand_id: brandId, p_limit: limit });
   if (claimErr) return jsonError(`claim failed: ${claimErr.message}`, 500);
@@ -88,8 +99,25 @@ Deno.serve(async (req: Request) => {
 
   let done = 0, skipped = 0, errored = 0, unchanged = 0;
 
+  let fetched = 0;
   for (const it of items) {
     try {
+      // Pace to the gap the house asked for — after the first page, and only between real
+      // fetches, so a batch of skips is not slowed by a rule about requests we never make.
+      if (politeGap && fetched > 0) {
+        if (Date.now() + politeGap > deadline) break;
+        await new Promise((r) => setTimeout(r, politeGap));
+      }
+
+      if (it.kind !== "news" && !robotsAllows(robots, it.url)) {
+        await admin.from("knowledge_crawl_queue")
+          .update({ status: "skipped", processed_at: new Date().toISOString(),
+                    error: "the site's robots.txt asks crawlers not to fetch this path" })
+          .eq("id", it.id);
+        skipped++;
+        continue;
+      }
+
       if (it.kind !== "news" && brandHost && registrableHost(it.url) !== brandHost) {
         await admin.from("knowledge_crawl_queue")
           .update({ status: "skipped", processed_at: new Date().toISOString(),
@@ -98,7 +126,9 @@ Deno.serve(async (req: Request) => {
         skipped++;
         continue;
       }
-      // Fetch + extract.
+      // Fetch + extract. Counted here, past every skip, because the gap the house asked
+      // for is between REQUESTS — a run of skipped rows should not be paced.
+      fetched++;
       let title = it.title ?? "";
       let text = "";
       if (it.kind === "news") {
