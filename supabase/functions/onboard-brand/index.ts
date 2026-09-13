@@ -171,7 +171,7 @@ async function unmetRequirements(
       //
       // What settles it is the crawl running dry.
       const crawlPending = await has(
-        "knowledge_crawl_queue", (q: any) => q.in("status", ["pending", "processing"]),
+        "knowledge_crawl_queue", (q) => q.in("status", ["pending", "processing"]),
       );
       return {
         reason: crawlPending
