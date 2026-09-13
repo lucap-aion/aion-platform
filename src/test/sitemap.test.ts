@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { collectSitemapUrls, spreadAcrossSections } from "../../supabase/functions/_shared/crawl.ts";
+import { collectSitemapUrls, collectSitemap, spreadAcrossSections } from "../../supabase/functions/_shared/crawl.ts";
 
 // A sitemap is the canonical list of every page a site wants found. It is the best source of
 // product URLs on a house with no product feed, and it was read with a plain fetch and
@@ -114,11 +114,22 @@ describe("a house that refuses plain requests", () => {
     expect(String(renders[0][0])).toContain("sitemap_it.xml");
   });
 
-  it("does not render when there is no key", async () => {
-    const fetchSpy = site(ROBOTS_ONLY);
+  it("still renders when no key is configured, because the renderer answers without one", async () => {
+    // It used to require a key and give up silently without one, which reports a missing
+    // piece of OUR configuration as "this house publishes no catalogue".
+    const fetchSpy = site(ROBOTS_ONLY, () => rendered(["https://www.example.com/it_it/ring-1"]));
     vi.stubGlobal("fetch", fetchSpy);
-    expect(await collectSitemapUrls(ORIGIN)).toEqual([]);
-    expect(fetchSpy.mock.calls.filter((c) => String(c[0]).startsWith("https://r.jina.ai/"))).toHaveLength(0);
+    expect(await collectSitemapUrls(ORIGIN)).toEqual(["https://www.example.com/it_it/ring-1"]);
+    const renders = fetchSpy.mock.calls.filter((c) => String(c[0]).startsWith("https://r.jina.ai/"));
+    expect(renders).toHaveLength(1);
+    expect((renders[0][1] as RequestInit | undefined)?.headers).not.toHaveProperty("Authorization");
+  });
+
+  it("says WHY the renderer produced nothing, instead of implying the site has no catalogue", async () => {
+    vi.stubGlobal("fetch", site(ROBOTS_ONLY, () => new Response("", { status: 429 })));
+    const out = await collectSitemap(ORIGIN, 3000, 24, "a-key");
+    expect(out.pages).toEqual([]);
+    expect(out.rendererError).toContain("429");
   });
 
   it("does not render when the cheap pass already worked", async () => {
@@ -144,6 +155,41 @@ describe("a house that refuses plain requests", () => {
       "https://cdn.other.com/asset.png", "https://www.example.com/it_it/ring-1",
     ])));
     expect(await collectSitemapUrls(ORIGIN, 3000, 24, "jina-key")).toEqual(["https://www.example.com/it_it/ring-1"]);
+  });
+
+  it("retries the renderer without the key when the key is the thing being refused", async () => {
+    // A rejected or exhausted key is a fact about OUR configuration, not about the house's
+    // website — and it was reported as the latter. 401 comes back in a quarter of a second,
+    // so the stage that should have spent thirty seconds reading Damiani's sitemap finished
+    // in five and recorded the site as having no catalogue.
+    const calls: { url: string; auth: boolean }[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.startsWith("https://r.jina.ai/")) {
+        return Promise.resolve(url.endsWith("robots.txt")
+          ? ok("Sitemap: https://www.example.com/it.xml\n") : blocked());
+      }
+      const auth = Boolean((init?.headers as Record<string, string>)?.Authorization);
+      calls.push({ url, auth });
+      return Promise.resolve(auth
+        ? new Response("no", { status: 401 })
+        : ok("sitemap https://www.example.com/it_it/ring-20059783 end"));
+    }));
+    const urls = await collectSitemapUrls(ORIGIN, 3000, 24, "expired-key");
+    expect(urls).toEqual(["https://www.example.com/it_it/ring-20059783"]);
+    expect(calls.map((c) => c.auth)).toEqual([true, false]);
+  });
+
+  it("does not retry without the key when the RENDERER is simply down", async () => {
+    // A 500 is not an auth problem; asking again unauthenticated just wastes another call.
+    let renders = 0;
+    vi.stubGlobal("fetch", vi.fn((input: string | URL) => {
+      const url = String(input);
+      if (url.startsWith("https://r.jina.ai/")) { renders++; return Promise.resolve(new Response("", { status: 500 })); }
+      return Promise.resolve(url.endsWith("robots.txt") ? ok("Sitemap: https://www.example.com/it.xml\n") : blocked());
+    }));
+    await collectSitemapUrls(ORIGIN, 3000, 24, "a-key");
+    expect(renders).toBe(1);
   });
 
   it("gives up quietly when even the renderer cannot read it", async () => {

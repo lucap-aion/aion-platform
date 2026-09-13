@@ -34,6 +34,10 @@ import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } fro
 // What a failure actually stops, and why it is not "everything queued behind it".
 import { blockedBy, type StageName } from "../_shared/stage-graph.ts";
 import { rankCatalogueUrls, catalogueSample } from "../_shared/catalogue-urls.ts";
+// The last resort when no page of a site can be read: its own sitemap names the pieces and
+// the packshots, and the item code joins them.
+import { collectSitemap } from "../_shared/crawl.ts";
+import { productsFromSitemap } from "../_shared/sitemap-products.ts";
 // The record's non-visual defaults: focus, FAQ, fee rates, policy prefix.
 import { policyPrefix, productFocus, renderFaqs, customerServiceEmail, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
 // A brand's imagery, held by us rather than hotlinked from a site that will be redesigned.
@@ -762,9 +766,34 @@ async function runStage(
       );
 
       if (structured.found === 0) {
+        // Both page readers have failed. Before calling it a dead end, take what the
+        // sitemap itself names — on a house behind bot protection that is the only part of
+        // the site anyone can reach, and it carries the pieces and their photography.
+        // The read is a ~30s render; if this pass has not got the room, re-queue rather
+        // than start something the runtime will cut in half.
+        if (Date.now() > deadline - 40_000) {
+          return { ok: true, platform: null, products: 0, continue: true,
+            note: "no page of this site could be read; taking the catalogue from its sitemap needs a longer pass than this one had left" };
+        }
+        const salvaged = await salvageFromSitemap(admin, brandId, base);
+        if ("products" in salvaged) {
+          // The record's focus and the claim tiles are read out of the catalogue, which did
+          // not exist a moment ago.
+          const defaults = await fillRecordDefaults(admin, brandId);
+          // Downstream stages gave up while there was nothing to build from.
+          const revived = await reviveSkipped(admin, brandId, "storefront");
+          return {
+            ok: true, platform: blocked ? "blocked" : "none",
+            products: salvaged.products,
+            photographed: salvaged.photographed,
+            record_defaults: defaults.filled,
+            ...(revived.length ? { revived } : {}),
+            note: `no page of this site can be read${blocked ? " — it answers a bot challenge rather than the catalogue" : ""}, so the catalogue was taken from its own sitemap: ${salvaged.products} pieces, ${salvaged.photographed} with photography. There are NO PRICES — a price is only ever on the page — so the demo book and the covered-value model need them from the client. That is what the data request in step 2 asks for.`,
+          };
+        }
         return blocked
           ? { ok: true, platform: "blocked", products: 0,
-              note: `the site refused ${structured.refused} of ${structured.tried} requests — it is behind bot protection that answers a challenge page rather than the catalogue. Nothing can be read from it directly; ask the house for a product feed, or add its pieces by hand.` }
+              note: `the site refused ${structured.refused} of ${structured.tried} requests — it is behind bot protection that answers a challenge page rather than the catalogue. Its sitemap gave nothing either: ${salvaged.why}. Ask the house for a product feed, or add its pieces by hand.` }
           : { ok: true, platform: "none", products: 0,
               note: "no product feed and no structured product data on this site — the demo book will fall back to indexed product pages" };
       }
@@ -1228,6 +1257,61 @@ async function detectShopify(base: string, deadline: number): Promise<{ base: st
 // Is there a catalogue in the page's structured data? One fetch of the homepage
 // is enough to tell: a storefront that publishes Product JSON-LD anywhere
 // publishes it on its landing and category pages.
+/**
+ * The catalogue a sitemap gives up when no page can be read.
+ *
+ * Runs only after the page readers have both failed. damiani.com refuses every plain request
+ * and answers the renderer with a Cloudflare interstitial, so schema.org and OpenGraph both
+ * come back with nothing — while the sitemap it does serve lists 1,243 product URLs and
+ * 1,314 packshots, each carrying the item code that joins them. 844 pieces, 598 of them
+ * photographed, without one page being fetched.
+ *
+ * No PRICE: that lives on the page. Everything downstream that needs one already says so —
+ * the demo book skips for want of prices, and step 2's data request is the conversation
+ * where they arrive. What this buys is the teaser deck, the claim tiles, the product focus
+ * and a Catalogues tab with the house's actual pieces in it, instead of a dead end.
+ */
+async function salvageFromSitemap(
+  admin: ReturnType<typeof createClient>, brandId: number, base: string,
+): Promise<{ products: number; photographed: number } | { why: string }> {
+  let found: Awaited<ReturnType<typeof collectSitemap>>;
+  // A rendered sitemap takes about thirty seconds. Starting one with less than that left
+  // means the invocation is killed mid-read and the row is written by nobody.
+  try {
+    found = await collectSitemap(new URL(base), 4000, 24, JINA_API_KEY);
+  } catch (e) { return { why: `the sitemap could not be read: ${(e as Error).message}` }; }
+  if (!found.images.length && !found.pages.length) {
+    return { why: found.rendererError ?? "the site named no sitemap, and none of the usual paths answered" };
+  }
+
+  const products = productsFromSitemap(found);
+  if (!products.length) {
+    return { why: `the sitemap names ${found.pages.length} pages and ${found.images.length} pictures, none of which look like products` };
+  }
+
+  const now = new Date().toISOString();
+  const rows = products.map((p) => ({
+    brand_id: brandId,
+    handle: p.handle,
+    sku: p.sku,
+    name: p.name,
+    category: p.category,
+    // Deliberately null, not zero: a missing price has to read as missing everywhere
+    // downstream, and a zero would quietly value a diamond necklace at nothing.
+    price: null,
+    available: true,
+    image_url: p.imageUrl,
+    product_url: p.productUrl,
+    updated_at: now,
+  }));
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await admin.from("storefront_products")
+      .upsert(rows.slice(i, i + 200), { onConflict: "brand_id,handle", ignoreDuplicates: false });
+    if (error) return { why: `storage refused the rows: ${error.message}` };
+  }
+  return { products: rows.length, photographed: rows.filter((r) => r.image_url).length };
+}
+
 /**
  * What a refusal looks like.
  *

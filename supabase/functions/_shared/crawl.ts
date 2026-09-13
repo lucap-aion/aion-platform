@@ -143,13 +143,27 @@ export function extractMarkdownLinks(md: string, base: URL): { href: URL; text: 
 const looksLikeSitemap = (u: string) => /\.xml($|[?#])|sitemap/i.test(u);
 
 /**
+ * A picture or an asset, not a page.
+ *
+ * Sitemaps carry both: the image extension lists a product's packshots alongside its URL,
+ * and a rendered sitemap hands them back mixed together because the tags are gone by then.
+ * They are gold for the catalogue and poison for the crawl, which would spend its page
+ * budget fetching JPEGs — so the two are separated here rather than filtered by each caller.
+ */
+const IMAGE_URL = /\.(?:jpe?g|png|webp|avif|gif|svg)(?:$|[?#])/i;
+
+/**
  * The URLs inside one sitemap.
  *
  * `<loc>` when we have the XML. When a renderer fetched it the tags are gone and all that is
  * left is the text, so same-origin absolute URLs are what a sitemap looks like by then.
  */
 function urlsInSitemap(xml: string, origin: URL): string[] {
-  const locs = [...xml.matchAll(/<loc>\s*([\s\S]*?)\s*<\/loc>/gi)].map((m) => decodeEntities(m[1]).trim());
+  // <image:loc> as well as <loc>: the sitemap image extension is how a house that refuses
+  // every page fetch still publishes its product photography. Damiani serves a 403 to every
+  // product page and 1,314 packshot URLs in the sitemap it lets through.
+  const locs = [...xml.matchAll(/<(?:image:)?loc>\s*([\s\S]*?)\s*<\/(?:image:)?loc>/gi)]
+    .map((m) => decodeEntities(m[1]).trim());
   if (locs.length) return locs;
 
   const seen = new Set<string>();
@@ -162,9 +176,23 @@ function urlsInSitemap(xml: string, origin: URL): string[] {
   return out;
 }
 
+/** Pages only — what the crawl should queue. */
 export async function collectSitemapUrls(
   origin: URL, maxUrls = 3000, maxFiles = 24, jinaKey = "",
 ): Promise<string[]> {
+  return (await collectSitemap(origin, maxUrls, maxFiles, jinaKey)).pages;
+}
+
+/**
+ * Everything a sitemap names, pages and pictures kept apart.
+ *
+ * The pages go to the crawl. The pictures are the catalogue's last resort: on a house behind
+ * a bot challenge they are the only product photography anyone can reach, and they join back
+ * to the product pages by the item code both carry.
+ */
+export async function collectSitemap(
+  origin: URL, maxUrls = 3000, maxFiles = 24, jinaKey = "",
+): Promise<{ pages: string[]; images: string[]; rendererError?: string }> {
   const queue: string[] = [];
   const seen = new Set<string>();
   try {
@@ -178,6 +206,14 @@ export async function collectSitemapUrls(
   const offered = [...queue];
 
   const urls: string[] = [];
+  const images: string[] = [];
+  // Pictures go one way, pages the other. Both arrive mixed in a rendered sitemap, and an
+  // image URL in the crawl queue is a page of budget spent fetching a JPEG.
+  const take = (l: string) => {
+    if (IMAGE_URL.test(l)) { if (images.length < maxUrls) images.push(l); return; }
+    if (urls.length < maxUrls) urls.push(l);
+  };
+
   let files = 0;
   while (queue.length && files < maxFiles && urls.length < maxUrls) {
     const sm = queue.shift()!;
@@ -201,27 +237,34 @@ export async function collectSitemapUrls(
         else queue.unshift(l);
       }
     }
-    else { for (const l of locs) { urls.push(l); if (urls.length >= maxUrls) break; } }
+    else { for (const l of locs) take(l); }
   }
 
   // The cheap pass found nothing at all, which on these sites means blocked rather than
   // absent. ONE render, on the first sitemap the site itself named — a rendered fetch costs
   // thirty to sixty seconds, and one of them gave up three thousand Damiani URLs, so paying
   // for more would buy a second locale of the same catalogue at the price of the stage.
-  if (!urls.length && jinaKey) {
+  let rendererError: string | undefined;
+  if (!urls.length) {
     const best = offered.find(looksLikeSitemap) ?? offered[0];
-    if (best) {
+    if (!best) rendererError = "the site named no sitemap to render";
+    else {
       try {
         const rendered = await fetchViaRenderer(best, jinaKey);
         for (const l of urlsInSitemap(rendered, origin)) {
           if (looksLikeSitemap(l)) continue;
-          urls.push(l);
-          if (urls.length >= maxUrls) break;
+          take(l);
         }
-      } catch { /* the site is genuinely unreadable; link-following is all that is left */ }
+        if (!urls.length) rendererError = `rendered ${best} and found no urls in it`;
+      } catch (e) {
+        // REPORTED, not swallowed. A renderer that is down, rate-limited or holding a
+        // rejected key is a fact about us, and it was being reported to an admin as "this
+        // house publishes no catalogue" — a statement about the client, and a wrong one.
+        rendererError = (e as Error).message;
+      }
     }
   }
-  return urls;
+  return { pages: urls, images, ...(rendererError ? { rendererError } : {}) };
 }
 
 /**
@@ -267,10 +310,26 @@ async function fetchSitemap(url: string): Promise<string> {
 
 /** The renderer, asked for text: a sitemap has no layout worth preserving, only URLs. */
 async function fetchViaRenderer(url: string, jinaKey: string): Promise<string> {
-  const res = await fetch("https://r.jina.ai/" + url, {
-    headers: { "Authorization": `Bearer ${jinaKey}`, "X-Return-Format": "text", "Accept": "text/plain" },
+  const call = (withKey: boolean) => fetch("https://r.jina.ai/" + url, {
+    headers: {
+      ...(withKey && jinaKey ? { "Authorization": `Bearer ${jinaKey}` } : {}),
+      "X-Return-Format": "text",
+      "Accept": "text/plain",
+    },
     signal: AbortSignal.timeout(75000),
   });
+
+  let res = await call(true);
+  // A key that is rejected or out of quota is a fact about OUR configuration, not about the
+  // house's website — and it was being reported as the latter. A bad key answers 401 in a
+  // quarter of a second, which is why the stage that should have spent thirty seconds
+  // reading Damiani's sitemap finished in five and said the site had no catalogue.
+  //
+  // The renderer answers unauthenticated as well: slower, rate-limited, and entirely
+  // sufficient. One retry without the key turns a silent wrong answer into a real read.
+  if (!res.ok && jinaKey && [401, 402, 403, 429].includes(res.status)) {
+    res = await call(false);
+  }
   if (!res.ok) throw new Error(`renderer HTTP ${res.status}`);
   return await res.text();
 }
