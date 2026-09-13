@@ -860,10 +860,18 @@ async function runStage(
         ...((indexed ?? 0) > 0 ? await reviveSkipped(admin, brandId, "sources") : []),
       ];
 
+      // On the LAST pass, when there is no more of the site to read: everything that could
+      // be known about this house now is known, which is the moment to go back over the
+      // identity that was read when none of it was.
+      const rereading = pagesLeft === 0 && (indexed ?? 0) > 0
+        ? await rereadIdentityIfThin(admin, brandId)
+        : [];
+
       return {
         ok: true, platform: "structured", base,
         products: count ?? 0,
         ...(revived.length ? { revived } : {}),
+        ...(rereading.length ? { rereading_identity_for: rereading } : {}),
         record_defaults: defaults.filled,
         record_notes: defaults.notes,
         embedded_this_run: Number(r.embedded ?? 0),
@@ -1291,6 +1299,50 @@ async function detectShopify(base: string, deadline: number): Promise<{ base: st
 // Is there a catalogue in the page's structured data? One fetch of the homepage
 // is enough to tell: a storefront that publishes Product JSON-LD anywhere
 // publishes it on its landing and category pages.
+/**
+ * Re-read the brand's identity once the site is actually readable.
+ *
+ * The branding stage runs FIRST, which is when the least is known. On a house that refuses a
+ * plain fetch it runs against a 403: no colours, no typeface, no logo, no portal imagery. On
+ * every house it runs before the crawl has indexed a single legal page, so the registered
+ * office and the legal entity are read from nothing. And it runs before the catalogue
+ * exists, so the claim tiles have no pieces to choose from.
+ *
+ * Nothing ever revisited that. Damiani finished onboarding with no typeface, no colour, one
+ * of six portal images and an empty address — from a site that, once the crawl and the
+ * renderer had caught up, gave all of it.
+ *
+ * Safe to repeat: the stage fills only what is EMPTY, so a value a person chose is never
+ * touched, and a gap that is genuinely unknowable stays a gap. Queued rather than run, so it
+ * takes its turn like everything else.
+ */
+async function rereadIdentityIfThin(
+  admin: ReturnType<typeof createClient>, brandId: number,
+): Promise<string[]> {
+  const { data } = await admin.from("brands")
+    .select("legal_name, email, hq_address, theme_settings, logo_small, auth_background_image, top_banner_image")
+    .eq("id", brandId).maybeSingle();
+  if (!data) return [];
+  const b = data as Record<string, unknown>;
+  const theme = (b.theme_settings ?? {}) as Record<string, unknown>;
+
+  const gaps = [
+    ["a legal entity", !String(b.legal_name ?? "").trim()],
+    ["a customer-care address", !String(b.email ?? "").trim()],
+    ["a registered office", !String(b.hq_address ?? "").trim()],
+    ["a primary colour", !theme.primary_hsl],
+    ["a typeface", !theme.heading_font && !theme.font_url],
+    ["the monogram", !b.logo_small],
+    ["the sign-in background", !b.auth_background_image],
+    ["the dashboard banner", !b.top_banner_image],
+  ].filter(([, missing]) => missing).map(([label]) => label as string);
+
+  if (!gaps.length) return [];
+  const { error } = await admin.rpc("queue_onboarding_stages", { p_brand_id: brandId, p_stages: ["branding"] });
+  if (error) { console.error("[onboard-brand] could not re-read identity", error.message); return []; }
+  return gaps;
+}
+
 /**
  * Is there a product feed at this URL?
  *
