@@ -36,6 +36,8 @@ import { blockedBy } from "../_shared/stage-graph.ts";
 import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
 // The record's non-visual defaults: focus, FAQ, fee rates, policy prefix.
 import { policyPrefix, productFocus, renderFaqs, customerServiceEmail, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
+// A brand's imagery, held by us rather than hotlinked from a site that will be redesigned.
+import { mirrorBrandImages, servedByAion, IMAGE_SLOTS, type ImageSlot } from "../_shared/brand-images.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -527,11 +529,30 @@ async function runStage(
     // The claim tiles would rather have a piece than a campaign crop, and the catalogue is
     // the only place a piece comes from. Done here rather than in the harvester because the
     // harvester only ever sees the website.
-    const pieces = await claimTilePieces(admin, brandId, 4);
+    const pieces = await claimTilePieces(admin, brandId, 6);
     if (pieces[0]) id.theft_image = pieces[0];
     if (pieces[1]) id.damage_image = pieces[1];
     if (pieces[2]) id.faq_image = pieces[2];
     if (pieces[3]) id.feedback_image = pieces[3];
+
+    // The two hero slots want atmosphere, and a homepage campaign shot is the right thing
+    // there — which is fine until the homepage renders its photography in JavaScript and
+    // hands the harvest nothing at all. Pomellato reached a demo that way: a blank sign-in
+    // screen and a blank dashboard banner, on a house with sixty-two photographed pieces in
+    // its own catalogue.
+    //
+    // A piece is not the ideal picture for a 3:1 banner. It is enormously better than a grey
+    // box, the portal crops it to fit, and an admin can drop a campaign shot over it in one
+    // click. Last resort only: the site gave nothing for this slot AND the record is empty.
+    const heroFallbacks = [
+      ["auth_background_image", "sign-in background", pieces[4]],
+      ["top_banner_image", "dashboard banner", pieces[5]],
+    ] as const;
+    for (const [slot, label, piece] of heroFallbacks) {
+      if (!piece || id[slot] || (brand as Record<string, unknown>)[slot]) continue;
+      id[slot] = piece;
+      id.notes.push(`no wide photography on the homepage, so the ${label} is a piece from the brand's own catalogue — worth replacing with a campaign shot`);
+    }
 
     // Only fill what is EMPTY. A logo or colour an admin chose deliberately
     // outranks anything scraped, and overwriting it silently would be worse
@@ -570,6 +591,31 @@ async function runStage(
         (typeof current === "object" && Object.keys(current as object).length === 0);
       if (empty || force) patch[key] = value;
       else kept.push(key);
+    }
+
+    // ── Hold the pictures ourselves ──────────────────────────────────────────────────────
+    // Everything above stored the ADDRESS a picture was found at, on a brand's own CDN. That
+    // survives exactly until the house redesigns, and then a client opens the portal to a
+    // broken monogram and six grey boxes with nothing in AION aware of it. So the bytes are
+    // copied into our own buckets and the record keeps our url.
+    //
+    // This runs over the EFFECTIVE value — what this pass is about to write, or what is
+    // already on the record when this pass kept it. Re-hosting a picture an admin chose is
+    // not overriding them: it is the same image, at an address that cannot be taken away.
+    // It is also the one thing the "Upload logos and imagery" go-live item was waiting on.
+    const effectiveImages: Partial<Record<ImageSlot, string>> = {};
+    for (const slot of IMAGE_SLOTS) {
+      const value = (patch[slot] ?? (brand as Record<string, unknown>)[slot]) as unknown;
+      if (typeof value === "string" && value.trim() && !servedByAion(value)) {
+        effectiveImages[slot] = value.trim();
+      }
+    }
+    if (Object.keys(effectiveImages).length) {
+      const held = await mirrorBrandImages(admin, brandId, effectiveImages, website);
+      for (const [slot, url] of Object.entries(held.urls)) {
+        if (url && url !== (brand as Record<string, unknown>)[slot]) patch[slot] = url;
+      }
+      id.notes.push(...held.notes);
     }
 
     if (Object.keys(patch).length) {
