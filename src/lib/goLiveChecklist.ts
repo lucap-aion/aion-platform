@@ -57,9 +57,23 @@ export const GO_LIVE_CHECKLIST: ChecklistGroup[] = [
       {
         key: "brand_record",
         title: "Create the brand record",
-        detail: "Name, description, website, customer-care address, registered office, status set to verified.",
+        detail: "Name, description, website, customer-care address, registered office.",
         blocking: true,
-        evidence: "description, website, customer-care address and registered office are set, and the status is verified",
+        evidence: "description, website, customer-care address and registered office are set",
+      },
+      {
+        // Split out of "Create the brand record", which used to demand the status as a fifth
+        // field. It is not a field. A record with every box filled in sat unticked under a
+        // sentence listing four things that were all plainly true, and the status — the one
+        // thing that was not — is a decision rather than data: Verified is what PUBLISHES a
+        // brand. The portal's brand picker lists every verified brand to anonymous visitors,
+        // and the admin dashboards, reports, covers and claims all scope to them. So it gets
+        // its own line, and nothing sets it automatically.
+        key: "brand_verified",
+        title: "Verify the brand",
+        detail: "Verified is what publishes it: the portal's brand picker shows every verified brand to anonymous visitors, and the AION dashboards, reports, covers and claims all scope to them. Deliberate, never automatic.",
+        blocking: true,
+        evidence: "the status is Verified",
       },
       {
         key: "assets_collected",

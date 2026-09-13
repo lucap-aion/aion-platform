@@ -177,7 +177,7 @@ export default function AdminBrandDetail() {
         <BrandRecordForm brandId={brand.id} embedded onSaved={() => void load()} />
       )}
       {tab === "cycle" && <CommercialCycle brand={brand} brands={brands} />}
-      {tab === "golive" && <GoLiveChecklist brandId={brand.id} brandName={brand.name} />}
+      {tab === "golive" && <GoLiveChecklist brandId={brand.id} brandName={brand.name} onBrandChanged={load} />}
       {tab === "documents" && (
         <BrandDocuments brandId={brand.id} brandName={brand.name ?? "the brand"} />
       )}

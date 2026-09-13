@@ -4,7 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 // The standalone `toast`, not `useToast().toast` — the hook returns a fresh object every
 // render, so a fetcher that depends on it never stops re-running.
 import { toast } from "@/hooks/use-toast";
-import { Check, Loader2, MessageSquare, X, Sparkles } from "lucide-react";
+import { Check, Loader2, MessageSquare, X, Sparkles, BadgeCheck } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   GO_LIVE_CHECKLIST, checklistProgress, isItemDone, itemBlockedBecause,
@@ -36,7 +39,10 @@ type Row = {
   updated_by: string | null;
 };
 
-export default function GoLiveChecklist({ brandId, brandName }: { brandId: number; brandName: string | null }) {
+export default function GoLiveChecklist(
+  { brandId, brandName, onBrandChanged }:
+  { brandId: number; brandName: string | null; onBrandChanged?: () => void },
+) {
   const [state, setState] = useState<ChecklistState>({});
   const [signals, setSignals] = useState<ChecklistSignals>({});
   const [loading, setLoading] = useState(true);
@@ -45,6 +51,10 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
   const [noteDraft, setNoteDraft] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [admins, setAdmins] = useState<Record<string, string>>({});
+  // The one item on this list that can be closed from here. Everything else is either
+  // observed or a tick; this is a decision, and it is two clicks away on another tab.
+  const [verifying, setVerifying] = useState(false);
+  const [verifySaving, setVerifySaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -117,6 +127,25 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
       toast({ title: "Could not save", description: error.message, variant: "destructive" });
       void load();
     }
+  };
+
+  const markVerified = async () => {
+    setVerifySaving(true);
+    const { error } = await untyped.from("brands").update({ status: "verified" } as never).eq("id", brandId);
+    setVerifySaving(false);
+    setVerifying(false);
+    if (error) {
+      toast({ title: "Could not verify the brand", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({
+      title: `${brandName ?? "The brand"} is verified`,
+      description: "It now appears on the portal's brand picker and in the AION dashboards.",
+    });
+    // Both views are stale: the signal this screen reads, and the status badge in the page
+    // header above it.
+    void load();
+    onBrandChanged?.();
   };
 
   const openNote = (itemKey: string) => {
@@ -255,6 +284,20 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
                           <p className="mt-0.5 text-xs text-muted-foreground/80">Checks for: {item.evidence}</p>
                         ) : null}
 
+                        {/* Publishing the brand is the only item on this list that can be
+                            closed from here. It sits on the Record tab behind a dropdown and
+                            a Save, which is a long way to go for a decision the reader has
+                            just been told is the last thing in the way. */}
+                        {item.key === "brand_verified" && !isDone && (
+                          <button
+                            type="button"
+                            onClick={() => setVerifying(true)}
+                            className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground hover:bg-muted"
+                          >
+                            <BadgeCheck className="h-3.5 w-3.5" /> Mark verified
+                          </button>
+                        )}
+
                         {noteFor === item.key ? (
                           <div className="mt-2 flex items-start gap-2">
                             <textarea
@@ -305,6 +348,36 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
           </div>
         );
       })}
+
+      {/* Named consequences, because this is the switch that makes a brand public and the
+          reader may well be looking at a prospect or a test record. */}
+      <Dialog open={verifying} onOpenChange={(o) => { if (!o) setVerifying(false); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-serif">Verify {brandName ?? "this brand"}?</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 text-left">
+                <p>Verified is what publishes a brand. Once it is set:</p>
+                <ul className="list-disc space-y-1 pl-4">
+                  <li>the portal's brand picker shows it to anonymous visitors</li>
+                  <li>it is counted in the AION dashboards, insights and reports</li>
+                  <li>it becomes selectable when recording covers and claims</li>
+                </ul>
+                <p>Reversible from the Record tab.</p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button type="button" onClick={() => setVerifying(false)}
+              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">Cancel</button>
+            <button type="button" disabled={verifySaving} onClick={() => void markVerified()}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
+              {verifySaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BadgeCheck className="h-3.5 w-3.5" />}
+              Verify
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

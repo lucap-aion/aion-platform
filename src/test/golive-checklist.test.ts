@@ -84,6 +84,22 @@ describe("what the checklist can see for itself", () => {
     for (const item of ALL_ITEMS.filter((i) => i.evidence)) {
       expect(item.evidence!.length).toBeGreaterThan(10);
     }
-    expect(ALL_ITEMS.filter((i) => i.evidence)).toHaveLength(18);
+    expect(ALL_ITEMS.filter((i) => i.evidence)).toHaveLength(19);
+  });
+
+  it("keeps the status out of the record item, because it is not a field", () => {
+    // A brand with description, website, customer-care address and registered office all
+    // set sat unticked and blocking, under a sentence listing four things that were every
+    // one of them true. The fifth clause — "the status is verified" — was the real gap, and
+    // it is a decision rather than data: Verified is what publishes a brand to the portal's
+    // brand picker and the AION dashboards. Conflating the two made the checklist look
+    // broken on exactly the brands where the automation had done its job.
+    const record = ALL_ITEMS.find((i) => i.key === "brand_record")!;
+    const verify = ALL_ITEMS.find((i) => i.key === "brand_verified")!;
+    expect(`${record.detail} ${record.evidence}`.toLowerCase()).not.toContain("verif");
+    expect(verify.blocking).toBe(true);
+    expect(verify.evidence).toBeTruthy();
+    // And it says what verifying DOES, so nobody clicks it on a prospect by accident.
+    expect(verify.detail.toLowerCase()).toContain("anonymous visitors");
   });
 });
