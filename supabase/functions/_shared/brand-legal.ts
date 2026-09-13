@@ -63,20 +63,25 @@ export function nameIsConfirmedBy(legalName: string | null, siteText: string): b
   return siteText.toLowerCase().replace(/\s+/g, " ").includes(needle);
 }
 
+// A dot ends the capture only when it ends a SENTENCE — followed by a space and a capital.
+// "Piazza Damiano Grassi Damiani n. 1" is one address and "n" was all of it that survived a
+// rule that stopped at any dot before a space; "…Valenza (Al) DAMIANI S.p.A." is two
+// sentences and has to be cut between them.
+//
 // How a company says where it is registered, across the languages these houses publish in.
 // The address runs to the first sentence end or opening bracket — the Ferragamo line
 // continues "(hereinafter, …)" and everything from the bracket on is not an address.
 const OFFICE_PATTERNS: { re: RegExp; language: Language }[] = [
-  { re: /(?:with|having)\s+(?:its\s+)?(?:registered|legal)\s+(?:office|seat|address)e?s?\s+(?:at|in)\s+([^.\n(]{6,140})/i, language: "en" },
+  { re: /(?:with|having)\s+(?:its\s+)?(?:registered|legal)\s+(?:office|seat|address)e?s?\s+(?:at|in)\s+((?:[^.\n]|\.(?!\s+[A-Z]|\s*$)){6,180})/i, language: "en" },
   // The connective is optional because a house writes it as a sentence as often as a label:
   // "registered office: 1 Bond Street" and "The registered office is located at 1 Bond
   // Street" are the same statement. LEAD_IN removes whatever copula it turns out to be, and
   // the "must contain a digit" test below still rejects a capture that is not an address.
-  { re: /registered\s+(?:office|seat|address)e?s?\s*(?::|at|in)?\s+([^.\n(]{6,140})/i, language: "en" },
-  { re: /sede\s+legale\s*(?:in|:)?\s+([^.\n(]{6,140})/i, language: "it" },
-  { re: /siège\s+social\s*(?::|à|au)?\s+([^.\n(]{6,140})/i, language: "fr" },
-  { re: /domicilio\s+(?:social|fiscal)\s*(?::|en)?\s+([^.\n(]{6,140})/i, language: "es" },
-  { re: /(?:Sitz|Geschäftsanschrift)\s*(?::|in)\s+([^.\n(]{6,140})/i, language: "de" },
+  { re: /registered\s+(?:office|seat|address)e?s?\s*(?::|at|in)?\s+((?:[^.\n]|\.(?!\s+[A-Z]|\s*$)){6,180})/i, language: "en" },
+  { re: /sede\s+legale\s*(?:in|:)?\s+((?:[^.\n]|\.(?!\s+[A-Z]|\s*$)){6,180})/i, language: "it" },
+  { re: /siège\s+social\s*(?::|à|au)?\s+((?:[^.\n]|\.(?!\s+[A-Z]|\s*$)){6,180})/i, language: "fr" },
+  { re: /domicilio\s+(?:social|fiscal)\s*(?::|en)?\s+((?:[^.\n]|\.(?!\s+[A-Z]|\s*$)){6,180})/i, language: "es" },
+  { re: /(?:Sitz|Geschäftsanschrift)\s*(?::|in)\s+((?:[^.\n]|\.(?!\s+[A-Z]|\s*$)){6,180})/i, language: "de" },
 ];
 
 type Language = "en" | "it" | "fr" | "es" | "de";
@@ -131,20 +136,41 @@ export type RegisteredOffice = {
 export function registeredOfficeFrom(text: string | null | undefined): RegisteredOffice | null {
   const body = String(text ?? "");
   if (!body) return null;
+  // EVERY occurrence of every pattern, scored — not the first that parses.
+  //
+  // Site text states the office once. A SEARCH RESULT states it several times over, across
+  // snippets of wildly different quality: one search for Damiani returned a heading with no
+  // address under it, a snippet the engine had truncated mid-street ("Piazza ani, N.1"),
+  // and one clean sentence carrying the whole thing. First-past-the-post took the truncated
+  // one and would have put it on a contract.
+  const candidates: { office: RegisteredOffice; score: number }[] = [];
+
   for (const { re, language } of OFFICE_PATTERNS) {
-    const m = re.exec(body);
-    if (!m) continue;
-    const raw = tidy(tidy(m[1]).replace(LEAD_IN, "").replace(AFTER_THE_ADDRESS, ""));
-    // "at our offices" and similar: a real address carries a number somewhere.
-    if (!/\d/.test(raw)) continue;
-    const parts = splitAddress(raw);
-    // The address's own words first: a house that writes "75008 Paris, France" has told us,
-    // and no inference beats being told. The language-and-postcode rule is the fallback for
-    // the houses that state their office without naming the country — most Italian ones.
-    const named = raw.split(/\s*,\s*/).map(countryNamed).find(Boolean) ?? null;
-    return { raw, ...parts, country: named ?? countryFrom(language, parts.postcode) };
+    const global = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    for (const m of body.matchAll(global)) {
+      const raw = tidy(cutAtClause(tidy(m[1]).replace(LEAD_IN, "")).replace(AFTER_THE_ADDRESS, ""));
+      // "at our offices" and similar: a real address carries a number somewhere.
+      if (!/\d/.test(raw)) continue;
+      const parts = splitAddress(raw);
+      // A label with no street under it is not an address: a bare "Sede Legale" heading
+      // parses to a town and nothing else, and that is worse than leaving the field empty.
+      if (!parts.street) continue;
+      // The address's own words first: a house that writes "75008 Paris, France" has told
+      // us, and no inference beats being told. Language-and-postcode is the fallback.
+      const named = raw.split(/\s*,\s*/).map(countryNamed).find(Boolean) ?? null;
+      candidates.push({
+        office: { raw, ...parts, country: named ?? countryFrom(language, parts.postcode) },
+        // A postcode is the strongest sign the line is a real address rather than prose.
+        score: (parts.postcode ? 2 : 0) + (parts.city ? 1 : 0) + (named ? 1 : 0),
+      });
+    }
   }
-  return null;
+  if (!candidates.length) return null;
+
+  // Best score, then the SHORTEST raw: a capture that ran on into the next sentence is
+  // longer than one that stopped where the address did.
+  candidates.sort((a, b) => b.score - a.score || a.office.raw.length - b.office.raw.length);
+  return candidates[0].office;
 }
 
 // Countries appear in an address and belong in hq_country. Mapped to one canonical English
@@ -175,7 +201,24 @@ const COUNTRY = /^(?:italy|italia|france|deutschland|germany|spain|españa|switz
 
 // What a company appends after its address, which is not part of it: "…, 75008 Paris,
 // France, registered with the Paris Trade and Companies Register under number 301 29…"
-const AFTER_THE_ADDRESS = /[,;]?\s*(?:registered\s+(?:with|in|at|under)|immatricul[ée]e?\s+au|iscritta\s+al|inscrita\s+en|eingetragen\s+im|r\.?c\.?s\.?\b|vat\b|p\.?\s?iva\b|company\s+(?:no|number)\b)[\s\S]*$/i;
+/**
+ * A bracket that opens a CLAUSE rather than part of the address.
+ *
+ * The capture used to forbid "(" outright, because Ferragamo's line continues "(hereinafter,
+ * …)". But an Italian address carries its province in brackets — "15048 Valenza (AL),
+ * Piazza Damiano Grassi Damiani n. 1" — so forbidding it truncated the line before the
+ * street and threw the street away. Five characters is the rule: "(AL)" is an address,
+ * anything longer is prose.
+ */
+function cutAtClause(raw: string): string {
+  const at = [...raw.matchAll(/\(/g)].find((m) => {
+    const close = raw.indexOf(")", m.index! + 1);
+    return close < 0 || close - m.index! > 6;
+  });
+  return at ? raw.slice(0, at.index!) : raw;
+}
+
+const AFTER_THE_ADDRESS = /[,;]?\s*(?:registered\s+(?:with|in|at|under)|immatricul[ée]e?\s+au|iscritta\s+al|inscrita\s+en|eingetragen\s+im|r\.?c\.?s\.?\b|vat\b|p\.?\s?iva\b|partita\s+iva\b|codice\s+fiscale\b|c\.f\.|company\s+(?:no|number)\b)[\s\S]*$/i;
 
 const POSTCODE_ONLY = /^[A-Z]{0,2}[-\s]?\d{4,6}$/i;
 const POSTCODE_THEN_CITY = /^([A-Z]{0,2}[-\s]?\d{4,6})\s+(.{2,48})$/i;
@@ -192,7 +235,10 @@ const UK_THEN_CITY = /^([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s+(.{2,48})$/i;
  */
 export function splitAddress(raw: string): { street: string | null; postcode: string | null; city: string | null } {
   const cleaned = tidy(raw);
-  let parts = cleaned.split(/\s*,\s*/).map(tidy).filter(Boolean);
+  // A SPACED hyphen is a separator in Italian addresses — "Piazza … N.1 - 15048 Valenza (Al)
+  // - Italia" — while an unspaced one is part of a name, as in "Rue Saint-Honoré". Splitting
+  // on it as well as the comma is what finds the postcode in that line.
+  let parts = cleaned.split(/\s*,\s*|\s+-\s+/).map(tidy).filter(Boolean);
   if (!parts.length) return { street: null, postcode: null, city: null };
 
   // A country belongs in hq_country, not in the street — wherever in the line it sits. It
@@ -219,7 +265,10 @@ export function splitAddress(raw: string): { street: string | null; postcode: st
       return {
         postcode: tidy(both[1]),
         city: cityOf(both[2]),
-        street: joinOrNull(parts.slice(0, i)),
+        // Italian legal text puts the postcode and town FIRST and the street after:
+        // "15048 Valenza (AL), Piazza Damiano Grassi Damiani n. 1". Taking only what came
+        // before the postcode returned no street at all on exactly those addresses.
+        street: joinOrNull(i === 0 ? parts.slice(1) : parts.slice(0, i)),
       };
     }
   }

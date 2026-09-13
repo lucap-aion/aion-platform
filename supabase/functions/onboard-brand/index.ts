@@ -31,6 +31,8 @@ import { harvestBrandIdentity } from "../_shared/brand-identity.ts";
 import { extractProducts } from "../_shared/product-extract.ts";
 import { enrichFromWikidata } from "../_shared/brand-enrich.ts";
 import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } from "../_shared/brand-legal.ts";
+// When the house's own site does not say: a search engine has already read those pages.
+import { searchIdentity } from "../_shared/brand-search.ts";
 // What a failure actually stops, and why it is not "everything queued behind it".
 import { blockedBy, type StageName } from "../_shared/stage-graph.ts";
 import { rankCatalogueUrls, catalogueSample } from "../_shared/catalogue-urls.ts";
@@ -531,22 +533,61 @@ async function runStage(
     // ahead of it. That is worth saying rather than silently returning nothing: running
     // this stage again once the site is indexed is what fills these two fields.
     const siteLegal = await readLegalPages(admin, brandId);
-    const office = registeredOfficeFrom(siteLegal);
-    const legalName = legalNameFromDescription(id.description);
+    let office = registeredOfficeFrom(siteLegal);
+    let legalName = legalNameFromDescription(id.description);
+
+    // The two fields a website is least reliable about, and the two that go onto a contract
+    // and into a Chubb bordereau. Damiani publishes "Sede Legale" as a bare label with the
+    // value in a separate element, so the crawl indexed the label and lost the address;
+    // Wikidata knows its legal FORM and its town and no street. A search engine has already
+    // read those pages and its snippet carries the sentence whole.
+    //
+    // The SITE stays authoritative — this runs only where it said nothing — and the search
+    // is anchored on the house, because a query for one jeweller returns others, each
+    // announcing its own registered office in a sentence that mentions ours.
+    // How much of an address actually came out. A line the reader could only half parse —
+    // no postcode, no street — is worth checking a search against, because the field it
+    // fills goes onto a contract.
+    const parsed = (o: typeof office) =>
+      o ? (o.postcode ? 2 : 0) + (o.street ? 1 : 0) + (o.city ? 1 : 0) : -1;
+
+    let searched: Awaited<ReturnType<typeof searchIdentity>> | null = null;
+    if (parsed(office) < 4 || !legalName) {
+      searched = await searchIdentity(
+        String(brand.name ?? ""),
+        (office?.country ?? id.hq_country ?? wiki?.hq_country ?? null) as string | null,
+        website,
+        JINA_API_KEY,
+      );
+      if (!legalName && searched.legalName) {
+        legalName = searched.legalName;
+        id.notes.push(`legal entity "${searched.legalName}" — the site does not state one, so this came from a search for ${searched.query}. Confirm it before it goes on a contract.`);
+      }
+      if (searched.office && parsed(searched.office) > parsed(office)) {
+        const replaced = office;
+        office = searched.office;
+        id.notes.push(replaced
+          ? `registered office "${searched.office.raw}" — from a search, because the site's own line parsed only as "${replaced.raw}". Confirm it against the client's own records.`
+          : `registered office "${searched.office.raw}" — the site does not state one where the crawl could read it, so this came from a search. Confirm it against the client's own records.`);
+      }
+    }
 
     if (!siteLegal) {
       id.notes.push("no indexed pages yet — the registered office is read from the site's own legal text, so run this again once the crawl has landed");
-    } else if (office) {
+    } else if (office && office !== searched?.office) {
       id.notes.push(`registered office, from the site's own legal text: ${office.raw}`);
-    } else {
-      id.notes.push("the indexed pages do not state a registered office — the data request needs one, so set it by hand on the record");
+    } else if (!office) {
+      id.notes.push("no registered office on the site or in a search — the data request needs one, so set it by hand on the record");
     }
-    if (legalName) {
+    // A name that came from a SEARCH already said so a few lines up; repeating it here as
+    // "NOT found on the brand's own site" would be two notes about one fact, the second of
+    // them alarming and redundant.
+    if (legalName && legalName !== searched?.legalName) {
       id.notes.push(nameIsConfirmedBy(legalName, siteLegal)
         ? `legal entity "${legalName}", confirmed word for word on the brand's own site`
         : `legal entity "${legalName}" — NOT found on the brand's own site, so check it before it goes on a contract`);
-    } else {
-      id.notes.push("no legal entity could be established — the trading name is not one, so the data request needs it filled by hand");
+    } else if (!legalName) {
+      id.notes.push("no legal entity could be established, on the site or in a search — the trading name is not one, so the data request needs it filled by hand");
     }
 
     // The claim tiles would rather have a piece than a campaign crop, and the catalogue is
