@@ -245,6 +245,13 @@ export default function InsurerQuotes({ brands, onChanged }: {
                 <th className="py-2 pr-3 font-medium">Cover</th>
                 <th className="py-2 pr-3 font-medium">Rate</th>
                 <th className="py-2 pr-3 font-medium">Volume band</th>
+                {/* The terms the rate assumes. Both were captured by the form above,
+                    stored, and never shown again — nothing reads claims_allowed or
+                    duration_years anywhere: not compute_business_case, not this table, not
+                    the deck. A one-claim rate and a three-claim rate are different products,
+                    so a figure entered here was being compared against a figure whose terms
+                    nobody could see. */}
+                <th className="py-2 pr-3 font-medium">Terms</th>
                 <th className="py-2 pr-3 font-medium">Quoted for</th>
                 <th className="py-2 pr-3 font-medium">When</th>
                 <th className="py-2 pr-3 font-medium"></th>
@@ -261,6 +268,10 @@ export default function InsurerQuotes({ brands, onChanged }: {
                   <td className="py-2 pr-3 font-medium text-foreground">{(q.rate_of_cogs * 100).toFixed(2)}%</td>
                   <td className="py-2 pr-3 text-muted-foreground">
                     {q.gmv_from == null ? "—" : `${eur0(q.gmv_from)}–${q.gmv_to == null ? "no cap" : eur0(q.gmv_to)}`}
+                  </td>
+                  <td className="py-2 pr-3 text-muted-foreground">
+                    {[q.claims_allowed, q.duration_years ? `${q.duration_years}y` : null]
+                      .filter(Boolean).join(" · ") || "—"}
                   </td>
                   <td className="py-2 pr-3 text-muted-foreground">
                     {q.quoted_for ?? brandName(q.brand_id) ?? "—"}
