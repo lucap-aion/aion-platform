@@ -25,6 +25,9 @@ import JSZip from "npm:jszip@3.10.1";
 import {
   sharedStrings, sheetGrid, extractPerimeter, decodeXml, filledNumericCells, type Sheet,
 } from "../_shared/xlsx-grid.ts";
+// No document leaves here carrying another house's name. The matcher is subtle enough —
+// AION's own advisor is called Riccardo Ferragamo — to live where it can be unit tested.
+import { foreignNamesFound, readableText } from "../_shared/foreign-names.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -199,10 +202,12 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
   // So the test that matters is an invariant: a data REQUEST is a form nobody has filled in,
   // and a blank form has no numbers in it. Any cached numeric value in the workbook we are
   // about to send is somebody's answer, and it is not this prospect's.
-  const leaks = [
-    ...await foreignNamesIn(admin, Number(brand.id), xml),
-    ...await answersLeftIn(zip),
-  ];
+  // The name test now runs for EVERY artefact, inside store(). What stays here is the one
+  // that only makes sense for a form: a data request nobody has filled in has no numbers in
+  // it, so any cached numeric value is somebody else's answer. That is the invariant that
+  // would have caught the leak that actually happened, which left no name behind at all —
+  // the three swaps replaced every string that named them and kept every figure they typed.
+  const leaks = await answersLeftIn(zip);
 
   const out = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
   return await store(admin, brand, "data_request", "xlsx", out,
@@ -214,9 +219,8 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
       review: [
         ...(leaks.length
           ? [`DO NOT SEND — ${leaks.join("; ")}. The template in storage is a filled-in ` +
-             `workbook, or a text slot stopped matching. Run ` +
-             `scripts/blank-data-request-template.py on it, re-upload it to the decks bucket, ` +
-             `and build this again.`]
+             `workbook. Run scripts/blank-data-request-template.py on it, re-upload it to ` +
+             `the decks bucket, and build this again.`]
           : []),
         legalName ? `Confirm "${legalName}" is the entity the pilot is contracted with.` : "No legal entity set — the workbook went out blank there.",
         brandAddress ? "Check the registered address against the client's own records." : "No registered address set — fill it on the brand record or in the field above.",
@@ -224,29 +228,6 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
         ...(missed.length ? [`${missed.length} template slot${missed.length === 1 ? "" : "s"} did not match the workbook — it has been revised since the template was mapped, so check those cells by hand.`] : []),
       ],
     });
-}
-
-/**
- * Other brands' names that appear in a document meant for this one.
- *
- * Trading name and legal entity, for every other brand on the platform. Short names are
- * skipped — a three-letter house name matches half the English language — and the search is
- * case-insensitive on the XML, which is where a swap that did not take would leave it.
- */
-async function foreignNamesIn(
-  admin: ReturnType<typeof createClient>, brandId: number, xml: string,
-): Promise<string[]> {
-  const { data } = await admin.from("brands").select("id, name, legal_name").neq("id", brandId);
-  const haystack = xml.toLowerCase();
-  const found = new Set<string>();
-  for (const b of (data ?? []) as { name: string | null; legal_name: string | null }[]) {
-    for (const raw of [b.name, b.legal_name]) {
-      const needle = (raw ?? "").trim();
-      if (needle.length < 5) continue;
-      if (haystack.includes(needle.toLowerCase())) found.add(needle);
-    }
-  }
-  return [...found].map((n) => `it names ${n}`);
 }
 
 /**
@@ -695,6 +676,22 @@ async function store(
   const path = `brands/${brand.id}/aion-x-${slug}-${kind}.${ext}`;
   const fileName = `AION x ${brand.name} — ${kind.replace(/_/g, " ")}.${ext}`;
 
+  // Every artefact, not just the workbook. The guard used to sit on the data request alone,
+  // because that is where a leak was found — but the intro deck, the operations deck and the
+  // business case are built from the same template store and go to the same prospect, and a
+  // client's name surviving into any of them is the same incident. One check, at the one
+  // point everything passes through, so a new artefact kind cannot be added without it.
+  const { data: houses } = await admin.from("brands").select("name, legal_name").neq("id", brand.id);
+  const foreign = foreignNamesFound(
+    await readableText(bytes, (b) => JSZip.loadAsync(b) as never),
+    (houses ?? []) as { name: string | null; legal_name: string | null }[],
+  ).map((n) => `it names ${n}`);
+  const existing = Array.isArray(extra.review) ? extra.review as string[] : [];
+  const review = foreign.length
+    ? [`DO NOT SEND — ${foreign.join("; ")}. Another house is named in this file. Check the ` +
+       `template in the decks bucket before this goes anywhere near a client.`, ...existing]
+    : existing;
+
   const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType, upsert: true });
   if (error) throw new Error(`upload failed: ${error.message}`);
 
@@ -704,7 +701,14 @@ async function store(
   }, { onConflict: "brand_id,template_key" });
 
   const { data: signed } = await admin.storage.from(BUCKET).createSignedUrl(path, 60 * 60 * 24 * 7, { download: fileName });
-  return { ok: true, kind, brand: brand.name, file_name: fileName, storage_path: path, download_url: signed?.signedUrl ?? null, ...extra };
+  return {
+    ok: true, kind, brand: brand.name, file_name: fileName, storage_path: path,
+    download_url: signed?.signedUrl ?? null,
+    ...extra,
+    // After the spread, so the universal check cannot be overwritten by a caller's own list.
+    leaks: [...foreign, ...(Array.isArray(extra.leaks) ? extra.leaks as string[] : [])],
+    review,
+  };
 }
 
 function escapeXml(s: string): string {
