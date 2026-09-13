@@ -40,8 +40,21 @@ const code = (s: string) =>
   s.replace(/\{\/\*[\s\S]*?\*\/\}/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ")
     .split("\n").map((l) => l.replace(/\/\/.*$/, "")).join("\n");
 
+// The generators of everything a prospect is SENT. Scanned alongside src because a client's
+// name reached a review panel from here: every other house's operations deck carried "SLA
+// figures and voucher duration are placeholders from the Ferragamo booklet".
+//
+// Deliberately not all of supabase/functions: the assistant and analyst prompts name brands
+// as examples of data situations ("empty for brands whose range lives online, e.g. Luisa
+// Beccaria"), which is schema documentation for a model, not text anybody is shown.
+const ARTEFACT_GENERATORS = [
+  "supabase/functions/build-collateral/index.ts",
+  "supabase/functions/brand-deck/index.ts",
+];
+
 describe("no client's data is baked into the interface", () => {
-  const files = sourceFiles("src").map((f) => ({ f, body: code(readFileSync(f, "utf8")) }));
+  const files = [...sourceFiles("src"), ...ARTEFACT_GENERATORS]
+    .map((f) => ({ f, body: code(readFileSync(f, "utf8")) }));
 
   it("finds the files at all, so a passing run means something", () => {
     expect(files.length).toBeGreaterThan(50);

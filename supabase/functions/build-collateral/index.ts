@@ -534,7 +534,10 @@ async function buildOperations(admin: ReturnType<typeof createClient>, brand: Re
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     { review: [
       "Summarises the approved booklet — check it against the latest version before sending.",
-      "SLA figures and voucher duration are placeholders from the Ferragamo booklet; confirm per client.",
+      // Named a client here, on the review panel of every OTHER house's ops deck. The fact
+      // is the same without it, and which house the booklet came from is nobody else's
+      // business — see feedback: no client names in brand-facing material.
+      "SLA figures and voucher duration are carried over from the booklet this was modelled on; confirm them for this client.",
     ] });
 }
 

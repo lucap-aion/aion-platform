@@ -14,6 +14,7 @@ import { extractProducts } from "../_shared/product-extract.ts";
 import { mapShopifyProducts } from "../_shared/shopify-feed.ts";
 import type { FeedVariant, RawShopifyProduct } from "../_shared/shopify-feed.ts";
 import { parseProductFeed } from "../_shared/product-feed.ts";
+import { categoryFromSlug } from "../_shared/sitemap-products.ts";
 import { AION_UA } from "../_shared/robots.ts";
 import { rankCatalogueUrls, preferredLocale, inLocale, localeOf } from "../_shared/catalogue-urls.ts";
 
@@ -137,7 +138,14 @@ async function syncBrand(
     handle: p.handle,
     sku: p.sku,
     name: p.name,
-    category: p.category,
+    // The page's own word for it, and failing that the piece's own name.
+    //
+    // A category is not decoration: the cost table is keyed on it, the go-live check asks
+    // for a cost percentage per category, and an uncategorised catalogue computes a cost of
+    // zero. Buccellati published schema.org Product on 232 pieces and a category on ONE of
+    // them; Pomellato, one of fifty-one. Their names say it perfectly well — "Anello Opera",
+    // "Nudo Classic Ring" — and reading it there costs nothing and overwrites nothing.
+    category: p.category ?? categoryFromSlug(`${p.name} ${p.handle}`),
     collection: p.collection,
     description: p.description,
     price: p.price,
