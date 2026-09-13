@@ -284,8 +284,15 @@ export const ALL_ITEMS: ChecklistItem[] = GO_LIVE_CHECKLIST.flatMap((g) => g.ite
 
 export type ChecklistState = Record<string, { done: boolean; note: string | null; updated_at: string; updated_by: string | null }>;
 
-/** What `brand_golive_signals` found to be true, per item key. */
-export type ChecklistSignals = Record<string, boolean>;
+/**
+ * What `brand_golive_signals` found, per item key.
+ *
+ * `true` is done. A STRING is the reason it is not — "still missing: the status is still
+ * Pending", "3 of 8 are still hotlinked from the brand's own site". The static evidence
+ * phrase on the item could only ever restate the whole requirement, which is how a
+ * checklist with every visible field filled read as inexplicably stuck.
+ */
+export type ChecklistSignals = Record<string, boolean | string>;
 
 /**
  * Is this item done?
@@ -298,6 +305,14 @@ export function isItemDone(
   key: string, state: ChecklistState, signals: ChecklistSignals = {},
 ): boolean {
   return signals[key] === true || state[key]?.done === true;
+}
+
+/** Why the platform says this item is not done, when it has something specific to say. */
+export function itemBlockedBecause(
+  key: string, signals: ChecklistSignals = {},
+): string | null {
+  const signal = signals[key];
+  return typeof signal === "string" && signal.trim() ? signal : null;
 }
 
 /** Done / total, counting only items that still exist in the definition. */

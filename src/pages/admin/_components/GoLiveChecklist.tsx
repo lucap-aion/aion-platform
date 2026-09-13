@@ -7,7 +7,7 @@ import { toast } from "@/hooks/use-toast";
 import { Check, Loader2, MessageSquare, X, Sparkles } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  GO_LIVE_CHECKLIST, checklistProgress, isItemDone,
+  GO_LIVE_CHECKLIST, checklistProgress, isItemDone, itemBlockedBecause,
   type ChecklistState, type ChecklistSignals,
 } from "@/lib/goLiveChecklist";
 
@@ -192,6 +192,9 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
               {group.items.map((item) => {
                 const row = state[item.key];
                 const auto = signals[item.key] === true;
+                // What the platform says is missing, when it can be specific. Beats the
+                // item's own phrase, which can only restate the whole requirement.
+                const because = itemBlockedBecause(item.key, signals);
                 const isDone = isItemDone(item.key, state, signals);
                 const who = row?.updated_by ? admins[row.updated_by] : null;
                 return (
@@ -237,9 +240,9 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
                         <p className="mt-0.5 text-xs text-muted-foreground">{item.detail}</p>
                         {/* The evidence, so "detected" is checkable rather than magic — and so
                             an item that is NOT detected says what would make it so. */}
-                        {item.evidence && (
+                        {(item.evidence || because) && (
                           <p className={`mt-0.5 text-xs ${auto ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground/80"}`}>
-                            {auto ? "✓ " : "Waiting on: "}{item.evidence}
+                            {auto ? `✓ ${item.evidence}` : `Waiting on: ${because ?? item.evidence}`}
                           </p>
                         )}
 
