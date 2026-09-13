@@ -9,6 +9,7 @@
 // Returns: { results: [{ brand_id, matched, updated, cleared, site_skus }] }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { AION_UA } from "../_shared/robots.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -119,7 +120,7 @@ async function fetchStorefrontPrices(base: string): Promise<Map<string, number>>
   const out = new Map<string, number>();
   for (let page = 1; page <= 40; page++) {
     const res = await fetch(`${base}/products.json?limit=250&page=${page}`, {
-      headers: { "User-Agent": "Mozilla/5.0 (AION price sync)" },
+      headers: { "User-Agent": AION_UA },
     });
     if (!res.ok) throw new Error(`storefront ${res.status} on page ${page}`);
     const products = (await res.json())?.products ?? [];

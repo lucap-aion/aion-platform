@@ -21,16 +21,33 @@ export type RobotsRules = {
 
 export const NO_RULES: RobotsRules = { disallow: [], allow: [], crawlDelaySeconds: null };
 
-/**
- * The name we answer to in robots.txt.
- *
- * Note for whoever reads this next: the crawler's full User-Agent still ends "Googlebot/2.1".
- * Claiming to be Googlebot while asking to be treated as ourselves is incoherent, and a
- * house that allowlists Googlebot is being told something untrue — but dropping it may lose
- * access to sites that allow Googlebot and nothing else, so it is a decision with a real
- * downside rather than an oversight to tidy away.
- */
+/** The name we answer to in robots.txt. */
 export const AGENT_TOKEN = "aionknowledgebot";
+
+/**
+ * Who we tell a website we are — one string, used everywhere we read a brand's own site.
+ *
+ * It used to end "Googlebot/2.1", and that token was load-bearing: damiani.com serves search
+ * engines and refuses everyone else, so it was the only reason we could read the site at
+ * all. Measured across eight houses, it changed the answer on exactly one.
+ *
+ * It is gone anyway, for two reasons that point the same way. It is untrue, and a house
+ * being asked to allowlist us deserves to be told what it is allowlisting. And it is
+ * fragile: Cloudflare's verified-bot check validates Googlebot by reverse DNS against
+ * Google's own address ranges, which an edge function will never pass — so the access it
+ * buys lasts exactly until somebody ticks a box, and a pipeline resting on it would fail
+ * without warning and for reasons nobody would find.
+ *
+ * There were also SEVEN of these strings across the pipeline — "AION onboarding", "AION
+ * storefront sync", "AION brand onboarding" — which made us unallowlistable in principle:
+ * there was no single thing to name. Now there is.
+ *
+ * Asset fetches keep their own agents. Pulling a JPEG off a CDN to re-host it in a client's
+ * own portal is a different act from crawling a site, and hotlink protection reads the
+ * header differently.
+ */
+export const AION_UA =
+  "Mozilla/5.0 (compatible; AIONKnowledgeBot/1.0; +https://aioncover.com/bot)";
 
 /**
  * The rules that apply to one agent.

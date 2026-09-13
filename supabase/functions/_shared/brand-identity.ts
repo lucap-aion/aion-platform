@@ -40,7 +40,8 @@ export type BrandIdentity = {
   notes: string[];
 };
 
-const UA = "Mozilla/5.0 (AION brand onboarding)";
+import { AION_UA } from "./robots.ts";
+const UA = AION_UA;
 
 export async function harvestBrandIdentity(website: string, jinaKey = ""): Promise<BrandIdentity> {
   const base = website.startsWith("http") ? website : `https://${website}`;

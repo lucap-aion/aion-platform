@@ -41,6 +41,7 @@ import { productsFromSitemap } from "../_shared/sitemap-products.ts";
 // A product feed the house already publishes — for Google Shopping, for a marketplace. The
 // same catalogue, maintained by them, and the cheapest one there is.
 import { parseProductFeed } from "../_shared/product-feed.ts";
+import { AION_UA } from "../_shared/robots.ts";
 // The record's non-visual defaults: focus, FAQ, fee rates, policy prefix.
 import { policyPrefix, productFocus, renderFaqs, customerServiceEmail, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
 // A brand's imagery, held by us rather than hotlinked from a site that will be redesigned.
@@ -1091,7 +1092,7 @@ async function recoverCatalogueImages(
     const url = urlByTitle.get(row.name);
     if (!url) continue;
     try {
-      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (AION onboarding)" } });
+      const res = await fetch(url, { headers: { "User-Agent": AION_UA } });
       if (!res.ok) continue;
       const html = await res.text();
       const img = html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i)?.[1]
@@ -1271,7 +1272,7 @@ async function detectShopify(base: string, deadline: number): Promise<{ base: st
       // hangs this until the platform kills the whole invocation — and the stage row is
       // already 'running', so it stays 'running' with nothing written and nobody told.
       const res = await fetch(`${c}/products.json?limit=20`, {
-        headers: { "User-Agent": "Mozilla/5.0 (AION onboarding)" },
+        headers: { "User-Agent": AION_UA },
         redirect: "follow",
         signal: AbortSignal.timeout(Math.min(12_000, Math.max(1_000, deadline - Date.now()))),
       });
@@ -1302,7 +1303,7 @@ async function detectFeed(url: string, deadline: number): Promise<number> {
   try {
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (AION onboarding)",
+        "User-Agent": AION_UA,
         "Accept": "application/xml,text/xml,text/csv,text/plain,*/*",
       },
       redirect: "follow",
@@ -1435,7 +1436,7 @@ async function detectStructured(
     try {
       tried++;
       const res = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 (AION onboarding)" },
+        headers: { "User-Agent": AION_UA },
         signal: AbortSignal.timeout(window(6_000)),
       });
       const body = res.ok ? await res.text() : "";

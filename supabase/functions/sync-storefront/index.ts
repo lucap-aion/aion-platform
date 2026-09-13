@@ -14,11 +14,12 @@ import { extractProducts } from "../_shared/product-extract.ts";
 import { mapShopifyProducts } from "../_shared/shopify-feed.ts";
 import type { FeedVariant, RawShopifyProduct } from "../_shared/shopify-feed.ts";
 import { parseProductFeed } from "../_shared/product-feed.ts";
+import { AION_UA } from "../_shared/robots.ts";
 import { rankCatalogueUrls, preferredLocale, inLocale, localeOf } from "../_shared/catalogue-urls.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const JINA_API_KEY = Deno.env.get("JINA_API_KEY") ?? "";
-const UA = "Mozilla/5.0 (AION storefront sync)";
+const UA = AION_UA;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY")!;

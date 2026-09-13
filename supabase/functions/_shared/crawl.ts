@@ -1,8 +1,10 @@
 // Shared crawling / extraction / embedding helpers for the knowledge pipeline
 // (seed-crawl, crawl-worker). Keep dependency-free (Deno std only).
 
-export const UA =
-  "Mozilla/5.0 (compatible; AIONKnowledgeBot/1.0; +https://aioncover.com/bot) Googlebot/2.1";
+import { AION_UA } from "./robots.ts";
+
+/** Re-exported so the crawl's many callers keep one import. */
+export const UA = AION_UA;
 export const EMBED_MODEL = "voyage-3.5";
 export const EMBED_DIMS = 1024;
 const EMBED_BATCH = 128;
