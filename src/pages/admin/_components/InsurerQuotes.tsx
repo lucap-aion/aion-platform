@@ -162,7 +162,7 @@ export default function InsurerQuotes({ brands, onChanged }: {
             </label>
             <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
               Rate, % of COGS
-              <input className={field} inputMode="decimal" placeholder="2.83"
+              <input className={field} inputMode="decimal" placeholder="3.50"
                 value={draft.rate_pct} onChange={(e) => set({ rate_pct: e.target.value })} />
             </label>
           </div>
@@ -177,7 +177,7 @@ export default function InsurerQuotes({ brands, onChanged }: {
             </label>
             <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
               …or legal entity
-              <input className={field} placeholder="Salvatore Ferragamo S.p.A."
+              <input className={field} placeholder="Brand Name S.p.A."
                 value={draft.quoted_for} onChange={(e) => set({ quoted_for: e.target.value })} />
             </label>
             <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">

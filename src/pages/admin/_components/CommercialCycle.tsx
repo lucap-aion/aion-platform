@@ -389,7 +389,7 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
                           label="Legal entity" value={legalName} onChange={setLegalName}
                           onCommit={(v) => void saveBrandField("legal_name", v)}
                           saving={savingField === "legal_name"}
-                          placeholder="Pasquale Bruni S.p.A."
+                          placeholder="Brand Name S.p.A."
                         />
                         <PersistedField
                           label="Registered address" value={address} onChange={setAddress}

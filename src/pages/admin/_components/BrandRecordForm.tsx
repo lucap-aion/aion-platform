@@ -285,7 +285,7 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Commercial</p>
             <div className="grid grid-cols-2 gap-4">
               <FormField label="Legal entity" hint="The entity the programme is contracted with, if not the trading name">
-                <Input disabled={ro} value={editing.legal_name ?? ""} onChange={(e) => set("legal_name", e.target.value)} placeholder="Pasquale Bruni S.p.A." />
+                <Input disabled={ro} value={editing.legal_name ?? ""} onChange={(e) => set("legal_name", e.target.value)} placeholder="Brand Name S.p.A." />
               </FormField>
               <FormField label="Product focus" hint="Categories in scope for the pilot">
                 <Input disabled={ro} value={editing.product_focus ?? ""} onChange={(e) => set("product_focus", e.target.value)} placeholder="High jewellery, EU boutiques" />

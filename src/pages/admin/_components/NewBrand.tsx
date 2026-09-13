@@ -165,7 +165,7 @@ export default function NewBrand() {
         <label className="flex flex-col gap-1.5">
           <span className="text-xs uppercase tracking-wide text-muted-foreground">Brand name</span>
           <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={onEnter}
-            placeholder="Pasquale Bruni" autoComplete="off" spellCheck={false} className={field} />
+            placeholder="Brand name" autoComplete="off" spellCheck={false} className={field} />
         </label>
 
         <label className="flex flex-col gap-1.5">
@@ -186,7 +186,7 @@ export default function NewBrand() {
             value={slugTouched ? slug : effectiveSlug}
             onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }}
             onKeyDown={onEnter}
-            placeholder="pasquale-bruni" autoComplete="off" spellCheck={false} className={field} />
+            placeholder="brand-name" autoComplete="off" spellCheck={false} className={field} />
           <span className="text-xs text-muted-foreground">
             {effectiveSlug
               ? <>Their portal will be <span className="text-foreground">app.aioncover.com/{effectiveSlug}</span>. Follows the name unless you change it.</>
