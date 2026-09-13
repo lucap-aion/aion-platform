@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { collectSitemapUrls } from "../../supabase/functions/_shared/crawl.ts";
+import { collectSitemapUrls, spreadAcrossSections } from "../../supabase/functions/_shared/crawl.ts";
 
 // A sitemap is the canonical list of every page a site wants found. It is the best source of
 // product URLs on a house with no product feed, and it was read with a plain fetch and
@@ -149,5 +149,51 @@ describe("a house that refuses plain requests", () => {
   it("gives up quietly when even the renderer cannot read it", async () => {
     vi.stubGlobal("fetch", site(ROBOTS_ONLY, () => blocked()));
     await expect(collectSitemapUrls(ORIGIN, 3000, 24, "jina-key")).resolves.toEqual([]);
+  });
+});
+
+describe("no one section eats the whole crawl", () => {
+  // Damiani publishes 344 store-locator pages. At a 500-page budget that is 69% of the crawl
+  // spent on boutique addresses, with nothing left for the catalogue or for the policies the
+  // assistant has to answer from.
+  const locators = Array.from({ length: 344 }, (_, i) => `https://www.example.com/it_it/storelocator/shop-${i}`);
+  const rest = [
+    "https://www.example.com/it_it/gioielleria/anelli",
+    "https://www.example.com/it_it/spedizioni-e-resi",
+    "https://www.example.com/it_it/contatti",
+  ];
+
+  it("lets the rest of the site through ahead of one section's overflow", () => {
+    const out = spreadAcrossSections([...locators, ...rest], 500);
+    const firstNonLocator = out.findIndex((u) => !u.includes("/storelocator/"));
+    // A quarter of the budget, and then everything else.
+    expect(firstNonLocator).toBe(125);
+    expect(out.slice(125, 128)).toEqual(rest);
+  });
+
+  it("keeps every url — the overflow queues behind, it is not dropped", () => {
+    const all = [...locators, ...rest];
+    const out = spreadAcrossSections(all, 500);
+    expect(out).toHaveLength(all.length);
+    expect(new Set(out)).toEqual(new Set(all));
+  });
+
+  it("leaves a site with no dominant section in its own order", () => {
+    expect(spreadAcrossSections(rest, 500)).toEqual(rest);
+  });
+
+  it("gives a small budget a floor, so a short crawl is not all one page", () => {
+    // 25% of 12 is 3; the floor keeps it usable.
+    const out = spreadAcrossSections(locators, 12);
+    expect(out.findIndex((u) => u.endsWith("shop-20"))).toBe(20);
+  });
+
+  it("treats each product page as its own section, so products are never capped", () => {
+    const products = Array.from({ length: 300 }, (_, i) => `https://www.example.com/it_it/ring-${i}-2005978${i}`);
+    expect(spreadAcrossSections(products, 500)).toEqual(products);
+  });
+
+  it("does not throw on something that is not a url", () => {
+    expect(() => spreadAcrossSections(["not a url", "also not"], 100)).not.toThrow();
   });
 });

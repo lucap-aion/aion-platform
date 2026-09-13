@@ -224,6 +224,38 @@ export async function collectSitemapUrls(
   return urls;
 }
 
+/**
+ * Reorder so that no one section of a site can eat the whole crawl.
+ *
+ * Damiani publishes three hundred and forty-four store-locator pages. At a budget of five
+ * hundred that is sixty-nine per cent of the crawl spent on boutique addresses, leaving
+ * nothing for the catalogue and not much for the policies the assistant has to answer from.
+ * A house's own section sizes are nobody's decision but theirs, so rather than naming the
+ * sections we distrust, each one is allowed a share and the rest queues behind everything
+ * else — still crawled if the budget reaches them, never at the expense of the first page of
+ * every other section.
+ *
+ * A section is the first two path segments, which on these sites is locale plus area:
+ * /it_it/storelocator holds hundreds, /it_it/<product-slug> holds exactly one.
+ */
+export function spreadAcrossSections(urls: string[], budget: number): string[] {
+  const perSection = Math.max(20, Math.floor(budget * 0.25));
+  const count = new Map<string, number>();
+  const first: string[] = [];
+  const overflow: string[] = [];
+
+  for (const u of urls) {
+    let section = u;
+    try {
+      section = new URL(u).pathname.toLowerCase().split("/").filter(Boolean).slice(0, 2).join("/");
+    } catch { /* keep the whole string; it is its own section */ }
+    const n = (count.get(section) ?? 0) + 1;
+    count.set(section, n);
+    (n <= perSection ? first : overflow).push(u);
+  }
+  return [...first, ...overflow];
+}
+
 async function fetchSitemap(url: string): Promise<string> {
   const res = await fetch(url, { headers: { "User-Agent": UA, "Accept": "application/xml,text/xml,*/*" }, signal: AbortSignal.timeout(12000), redirect: "follow" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

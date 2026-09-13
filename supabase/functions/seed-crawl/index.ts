@@ -11,7 +11,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { originAllowed, originRefused } from "../_shared/origin.ts";
 import {
   UA, fetchText, jinaRaw, parseJinaMarkdown, extractContent, extractLinks,
-  extractMarkdownLinks, collectSitemapUrls, normLine, stripHash, decodeEntities, preferCanonicalLocale } from "../_shared/crawl.ts";
+  extractMarkdownLinks, collectSitemapUrls, spreadAcrossSections, normLine, stripHash, decodeEntities, preferCanonicalLocale } from "../_shared/crawl.ts";
 // Which of a site's pages look like they carry a product, so the page cap cannot cut the
 // catalogue out of a large sitemap.
 import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
@@ -103,7 +103,11 @@ Deno.serve(async (req: Request) => {
     add(origin);
     // The key, so a site that blocks plain requests still gives up its sitemap. Without it
     // the houses that block us are exactly the ones whose catalogue is never found.
-    for (const u of await collectSitemapUrls(origin, maxPages, 24, JINA_API_KEY)) {
+    // Collect far MORE than we will crawl. This asked for exactly maxPages, so the ranking
+    // below could only ever choose among the first five hundred entries the sitemap happened
+    // to list — which for Damiani were store locators, and its catalogue was never a
+    // candidate. Gathering the list is cheap; reading the pages is what costs.
+    for (const u of await collectSitemapUrls(origin, Math.max(3000, maxPages * 6), 24, JINA_API_KEY)) {
       try { add(new URL(u)); } catch { /* skip */ }
     }
     if (rawHomeHtml) for (const { href } of extractLinks(rawHomeHtml, origin)) add(href);
@@ -131,7 +135,10 @@ Deno.serve(async (req: Request) => {
     const keep = new Set(rankCatalogueUrls(deduped).slice(0, productQuota));
     const urls = [
       ...deduped.filter((u) => keep.has(u)),
-      ...deduped.filter((u) => !keep.has(u)),
+      // And the remainder spread across the site's sections, so one enormous one — three
+      // hundred and forty-four boutique addresses, in the case that found this — cannot
+      // take the budget from every other part of the site.
+      ...spreadAcrossSections(deduped.filter((u) => !keep.has(u)), maxPages),
     ].slice(0, maxPages);
 
     // Boilerplate set: sample a few pages, keep lines repeated on >=40%.
