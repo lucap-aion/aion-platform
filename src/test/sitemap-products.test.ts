@@ -145,3 +145,29 @@ describe("one row per piece, whatever the slug carries", () => {
     expect(new Set(handles).size).toBe(handles.length);
   });
 });
+
+describe("houses that are not jewellers", () => {
+  it("reads the categories a leather and fragrance house actually sells", () => {
+    // Ferragamo's catalogue is eyewear, leather and fragrance. A vocabulary of rings and
+    // necklaces left three quarters of it uncategorised — and an uncategorised piece is
+    // costed at zero on every sale.
+    const cases: [string, string][] = [
+      ["Hug handbag (M)", "bags"],
+      ["Varina charm", "charms"],
+      ["Ferragamo Intense Leather - EDP 3.4 fl. Oz.", "fragrance"],
+      ["Signorina Romantica - EDT", "fragrance"],
+      ["Gancini belt", "belts"],
+      ["Silk foulard", "scarves"],
+      ["Vara bow pumps", "shoes"],
+      ["Wallet with Gancini", "wallets"],
+      ["Aviator sunglasses", "eyewear"],
+    ];
+    for (const [name, expected] of cases) expect(categoryFromSlug(name), name).toBe(expected);
+  });
+
+  it("does not let a compound word steal a category", () => {
+    // "handbag" is a bag; "bagatelle" is not.
+    expect(categoryFromSlug("Bagatelle collection")).toBe(null);
+    expect(categoryFromSlug("Ringo pendant")).toBe("pendants");
+  });
+});

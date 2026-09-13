@@ -427,7 +427,13 @@ function htmlToText(html: string): string {
   s = s.replace(/<head[\s\S]*?<\/head>/gi, " ");
   s = s.replace(/<(script|style|noscript|svg|template|iframe)[\s\S]*?<\/\1>/gi, " ");
   s = s.replace(/<!--[\s\S]*?-->/g, " ");
-  s = s.replace(/<\/(p|div|li|h[1-6]|section|article|tr|td)>/gi, "\n");
+  // A table CELL is not a paragraph. Ending every </td> with a newline split "Sede Legale |
+  // Piazza Damiano Grassi Damiani 1" into two lines, and a label with its value on the next
+  // line is a label with no value as far as any reader is concerned — which is how a house
+  // that publishes its registered office plainly came out of the crawl with none. The ROW
+  // still ends a line, so the table's shape survives.
+  s = s.replace(/<\/(p|div|li|h[1-6]|section|article|tr)>/gi, "\n");
+  s = s.replace(/<\/(td|th|dt|dd)>/gi, " ");
   s = s.replace(/<br\s*\/?>/gi, "\n");
   s = s.replace(/<[^>]+>/g, " ");
   s = decodeEntities(s);

@@ -133,8 +133,19 @@ export type RegisteredOffice = {
 };
 
 /** The registered office as the house's own legal text states it, or null. */
+/**
+ * A label alone on its line, with its value on the next.
+ *
+ * Sites lay this out as a table, a definition list, or two stacked divs, and every one of
+ * those arrives as "Sede Legale\nPiazza Damiano Grassi Damiani 1". The office patterns
+ * cannot cross a newline — deliberately, or they would swallow the next paragraph — so the
+ * line is rejoined here first, and only when the line holds the label and nothing else.
+ */
+const LABEL_ALONE =
+  /^[\t ]*((?:sede\s+legale|si[èe]ge\s+social|registered\s+office|registered\s+address|domicilio\s+(?:social|fiscal)|Sitz(?:\s+der\s+Gesellschaft)?|sede\s+social|statutaire\s+zetel)[\t ]*:?)[\t ]*\n[\t ]*/gim;
+
 export function registeredOfficeFrom(text: string | null | undefined): RegisteredOffice | null {
-  const body = String(text ?? "");
+  const body = String(text ?? "").replace(LABEL_ALONE, "$1 ");
   if (!body) return null;
   // EVERY occurrence of every pattern, scored — not the first that parses.
   //
@@ -151,6 +162,11 @@ export function registeredOfficeFrom(text: string | null | undefined): Registere
       const raw = tidy(cutAtClause(tidy(m[1]).replace(LEAD_IN, "")).replace(AFTER_THE_ADDRESS, ""));
       // "at our offices" and similar: a real address carries a number somewhere.
       if (!/\d/.test(raw)) continue;
+      // A digit is not enough. Rejoining a label with the line below it — which is how a
+      // table publishes an office — also joins a heading to whatever prose follows, and
+      // "La nostra storia comincia nel 1924" has a number in it and is not an address.
+      // A real one names a kind of street, or carries a postcode.
+      if (!STREET_WORD.test(raw) && !splitAddress(raw).postcode) continue;
       const parts = splitAddress(raw);
       // A label with no street under it is not an address: a bare "Sede Legale" heading
       // parses to a town and nothing else, and that is worse than leaving the field empty.
@@ -219,6 +235,15 @@ function cutAtClause(raw: string): string {
 }
 
 const AFTER_THE_ADDRESS = /[,;]?\s*(?:registered\s+(?:with|in|at|under)|immatricul[ée]e?\s+au|iscritta\s+al|inscrita\s+en|eingetragen\s+im|r\.?c\.?s\.?\b|vat\b|p\.?\s?iva\b|partita\s+iva\b|codice\s+fiscale\b|c\.f\.|company\s+(?:no|number)\b)[\s\S]*$/i;
+
+/**
+ * The word for a kind of street, in the languages these houses publish in.
+ *
+ * Together with the postcode this is what separates an address from a sentence that happens
+ * to contain a year.
+ */
+const STREET_WORD =
+  /\b(?:via|viale|v\.le|corso|c\.so|piazza|p\.za|piazzale|largo|vicolo|strada|contrada|localit[àa]|rue|avenue|av\.|boulevard|bd|bvd|place|quai|impasse|all[ée]e|chemin|route|street|st\.|road|rd\.|lane|drive|square|avenue|way|calle|avenida|paseo|plaza|carrer|stra(?:ß|ss)e|str\.|platz|weg|gasse|damm|ufer|laan|straat|plein)\b/i;
 
 const POSTCODE_ONLY = /^[A-Z]{0,2}[-\s]?\d{4,6}$/i;
 const POSTCODE_THEN_CITY = /^([A-Z]{0,2}[-\s]?\d{4,6})\s+(.{2,48})$/i;

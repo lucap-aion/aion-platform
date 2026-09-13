@@ -243,3 +243,33 @@ describe("no one section eats the whole crawl", () => {
     expect(() => spreadAcrossSections(["not a url", "also not"], 100)).not.toThrow();
   });
 });
+
+describe("turning a page into text a reader can use", () => {
+  it("keeps a table cell beside its label instead of below it", async () => {
+    // A table CELL is not a paragraph. Ending every </td> with a newline split
+    // "Sede Legale | Piazza Damiano Grassi Damiani 1" into two lines, and a label with its
+    // value on the next line is a label with no value as far as any reader is concerned.
+    const { extractContent } = await import("../../supabase/functions/_shared/crawl.ts");
+    const html = "<html><body><table><tr><td>Sede Legale</td><td>Via Cusani 5, 20121 Milano</td></tr>" +
+      "<tr><td>P. IVA</td><td>01234567890</td></tr></table></body></html>";
+    const { text } = extractContent(html);
+    expect(text).toContain("Sede Legale Via Cusani 5, 20121 Milano");
+    // The ROW still ends a line, so the table's shape survives.
+    expect(text).toMatch(/Milano\s*\n/);
+  });
+
+  it("does the same for a definition list, the other way a house lays this out", async () => {
+    const { extractContent } = await import("../../supabase/functions/_shared/crawl.ts");
+    const { text } = extractContent(
+      "<html><body><dl><dt>Siège social</dt><dd>2 Rue du Pont Neuf, 75001 Paris</dd></dl></body></html>",
+    );
+    expect(text).toContain("Siège social 2 Rue du Pont Neuf, 75001 Paris");
+  });
+
+  it("still breaks a line where a paragraph ends", async () => {
+    // The fix for cells must not run every paragraph on the page together.
+    const { extractContent } = await import("../../supabase/functions/_shared/crawl.ts");
+    const { text } = extractContent("<html><body><p>First.</p><p>Second.</p></body></html>");
+    expect(text).toMatch(/First\.\s*\n\s*Second\./);
+  });
+});

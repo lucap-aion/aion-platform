@@ -216,3 +216,35 @@ describe("a country the house names in the address itself", () => {
       .toBe("Belgium");
   });
 });
+
+describe("a label on one line and its value on the next", () => {
+  it("reads an office laid out as a table", () => {
+    // Sites publish this as a table, a definition list or two stacked divs, and all three
+    // arrive as two lines. The patterns cannot cross a newline — deliberately, or they
+    // would swallow the next paragraph — so a label alone on its line is rejoined first.
+    // This is how a house that publishes its registered office plainly came out of the
+    // crawl with none.
+    const office = registeredOfficeFrom("Dati societari\nSede Legale\nVia Cusani 5, 20121 Milano\nP. IVA 01234567890");
+    expect(office?.street).toBe("Via Cusani 5");
+    expect(office?.city).toBe("Milano");
+    expect(office?.postcode).toBe("20121");
+  });
+
+  it("handles the label with a colon, and the other languages", () => {
+    expect(registeredOfficeFrom("Siège social :\n2 Rue du Pont Neuf, 75001 Paris")?.street)
+      .toBe("2 Rue du Pont Neuf");
+    expect(registeredOfficeFrom("Registered office\n1 Bond Street, SW1A 2HU London")?.street)
+      .toBe("1 Bond Street");
+  });
+
+  it("does not rejoin when the label already has its value beside it", () => {
+    // The common case must not be disturbed by the fix for the uncommon one.
+    expect(registeredOfficeFrom("sede legale in Via Cusani 5, 20121 Milano\nAltro testo")?.street)
+      .toBe("Via Cusani 5");
+  });
+
+  it("does not swallow a paragraph that merely follows a heading", () => {
+    // A label followed by prose is still a label with no address under it.
+    expect(registeredOfficeFrom("Sede Legale\nLa nostra storia comincia nel 1924.")).toBe(null);
+  });
+});

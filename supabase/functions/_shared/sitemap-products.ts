@@ -65,6 +65,21 @@ const CATEGORY_BY_WORD: [RegExp, string][] = [
   [/\b(?:bag|bags|borsa|borse|sac|tote|clutch)\b/i, "bags"],
   [/\b(?:brooch|brooches|spilla|broche)\b/i, "brooches"],
   [/\b(?:tiara|diadema)\b/i, "tiaras"],
+  [/\b(?:charm|charms|ciondoli)\b/i, "charms"],
+  // Not every house is a jeweller. Ferragamo's catalogue is eyewear, leather and fragrance,
+  // and a vocabulary of rings and necklaces left three quarters of it uncategorised — which
+  // means three quarters of it costed at zero.
+  [/\b(?:handbag|handbags|bag|bags|tote|clutch|satchel|shopper|borsa|borse|sac)\b/i, "bags"],
+  [/\b(?:wallet|wallets|cardholder|card\s?holder|portafoglio|purse)\b/i, "wallets"],
+  [/\b(?:belt|belts|cintura|ceinture)\b/i, "belts"],
+  [/\b(?:scarf|scarves|foulard|sciarpa|stole|shawl)\b/i, "scarves"],
+  [/\b(?:sunglasses|eyewear|glasses|occhiali|lunettes)\b/i, "eyewear"],
+  [/\b(?:shoe|shoes|sneaker|sneakers|pump|pumps|loafer|loafers|sandal|sandals|boot|boots|mocassin|scarpe)\b/i, "shoes"],
+  // "EDT 3.4 fl. oz." and "EDP" are how a fragrance is named on a product page.
+  [/\b(?:fragrance|perfume|parfum|profumo|cologne|eau\s+de\s+(?:parfum|toilette|cologne)|edt|edp|edc)\b/i, "fragrance"],
+  [/\b(?:cufflink|cufflinks)\b/i, "cufflinks"],
+  [/\b(?:tie|ties|cravatta|necktie|bow\s?tie)\b/i, "ties"],
+  [/\b(?:keyring|key\s?ring|keychain|portachiavi)\b/i, "keyrings"],
 ];
 
 /** The category a slug names, in the plural form the rest of the catalogue uses. */
