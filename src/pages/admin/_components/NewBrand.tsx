@@ -172,7 +172,7 @@ export default function NewBrand() {
           <span className="text-xs uppercase tracking-wide text-muted-foreground">Website</span>
           <input value={website} onChange={(e) => setWebsite(e.target.value)} onKeyDown={onEnter}
             onBlur={() => setWebsite((w) => (normaliseUrl(w) || w.trim()))}
-            placeholder="pasqualebruni.com" autoComplete="off" spellCheck={false} inputMode="url" className={field} />
+            placeholder="brand.com" autoComplete="off" spellCheck={false} inputMode="url" className={field} />
           <span className="text-xs text-muted-foreground">
             {website.trim() && !urlLooksReal
               ? <span className="text-amber-600">That does not look like a domain yet.</span>

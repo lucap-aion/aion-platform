@@ -10,10 +10,18 @@ import { join } from "node:path";
 // None of it was deliberate; each was written while looking at one brand's data. Which is
 // exactly why it needs a test rather than care.
 
+// Every spelling a house turns up in: the name, the slug and the DOMAIN. The domain is the
+// one that slipped through the first pass of this — the new-brand form suggested
+// "pasqualebruni.com" as the website to type in — because a list of NAMES does not contain
+// it. Matched case-insensitively and without separators, so "Roberto Coin", "roberto-coin"
+// and "robertocoin.com" are all the same house.
 const HOUSES = [
   "Pasquale Bruni", "Roberto Coin", "Pomellato", "Ferragamo", "Salvatore Ferragamo",
-  "Buccellati", "Luisa Beccaria", "Messika", "Damiani", "pasquale-bruni", "roberto-coin",
+  "Buccellati", "Luisa Beccaria", "Messika", "Damiani",
 ];
+
+/** "Roberto-Coin.com" and "robertocoin" collapse to the same thing. */
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -42,8 +50,9 @@ describe("no client's data is baked into the interface", () => {
   it("names no real house in any placeholder, label or default", () => {
     const found: string[] = [];
     for (const { f, body } of files) {
+      const flat = squash(body);
       for (const house of HOUSES) {
-        if (body.includes(house)) found.push(`${f} names ${house}`);
+        if (flat.includes(squash(house))) found.push(`${f} names ${house}`);
       }
     }
     expect(found).toEqual([]);

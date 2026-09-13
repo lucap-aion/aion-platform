@@ -54,8 +54,8 @@ const mount = async () => {
 };
 
 const fill = (name: string, site: string) => {
-  fireEvent.change(screen.getByPlaceholderText("Pasquale Bruni"), { target: { value: name } });
-  fireEvent.change(screen.getByPlaceholderText("pasqualebruni.com"), { target: { value: site } });
+  fireEvent.change(screen.getByPlaceholderText("Brand name"), { target: { value: name } });
+  fireEvent.change(screen.getByPlaceholderText("brand.com"), { target: { value: site } });
 };
 const submit = () => fireEvent.click(screen.getByRole("button", { name: /Create and start/i }));
 
@@ -82,7 +82,7 @@ describe("a new brand starts itself", () => {
   it("refuses an address another brand already answers on", async () => {
     await mount();
     fill("RC Jewels", "rcjewels.example.com");
-    fireEvent.change(screen.getByPlaceholderText("pasquale-bruni"), { target: { value: "rc" } });
+    fireEvent.change(screen.getByPlaceholderText("brand-name"), { target: { value: "rc" } });
     expect(await screen.findByText(/already uses that slug/i)).toBeTruthy();
     submit();
     await waitFor(() => expect(inserted).toHaveLength(0));
@@ -100,7 +100,7 @@ describe("a new brand starts itself", () => {
   it("does not create the brand twice when Enter fires more than once", async () => {
     await mount();
     fill("Pasquale Bruni", "pasqualebruni.com");
-    const nameField = screen.getByPlaceholderText("Pasquale Bruni");
+    const nameField = screen.getByPlaceholderText("Brand name");
     fireEvent.keyDown(nameField, { key: "Enter" });
     fireEvent.keyDown(nameField, { key: "Enter" });
     fireEvent.keyDown(nameField, { key: "Enter" });
@@ -113,10 +113,10 @@ describe("a new brand starts itself", () => {
   it("lets the address be edited without the name overwriting it again", async () => {
     await mount();
     fill("Roberto Coin Milano", "rcmilano.example.com");
-    const slugField = screen.getByPlaceholderText("pasquale-bruni") as HTMLInputElement;
+    const slugField = screen.getByPlaceholderText("brand-name") as HTMLInputElement;
     expect(slugField.value).toBe("roberto-coin-milano");
     fireEvent.change(slugField, { target: { value: "rcm" } });
-    fireEvent.change(screen.getByPlaceholderText("Pasquale Bruni"), { target: { value: "Roberto Coin Milano SpA" } });
+    fireEvent.change(screen.getByPlaceholderText("Brand name"), { target: { value: "Roberto Coin Milano SpA" } });
     expect(slugField.value).toBe("rcm");
     submit();
     await waitFor(() => expect(inserted).toHaveLength(1));
@@ -143,7 +143,7 @@ describe("a new brand starts itself", () => {
 
   it("will not create a brand with no website to discover anything from", async () => {
     await mount();
-    fireEvent.change(screen.getByPlaceholderText("Pasquale Bruni"), { target: { value: "Some House" } });
+    fireEvent.change(screen.getByPlaceholderText("Brand name"), { target: { value: "Some House" } });
     expect(screen.getByRole("button", { name: /Create and start/i }).hasAttribute("disabled")).toBe(true);
     fill("Some House", "not a domain");
     expect(screen.getByRole("button", { name: /Create and start/i }).hasAttribute("disabled")).toBe(true);
