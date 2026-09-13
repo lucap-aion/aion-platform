@@ -232,3 +232,65 @@ describe("brands other than the ones this was tested on", () => {
     expect(policyPrefix("Van Cleef & Arpels", "France")).toBe("VACFR");
   });
 });
+
+// ── The one address a client is meant to write to ────────────────────────────────────────
+describe("taking the best address a house actually publishes", () => {
+  const messika = "https://www.messika.com";
+
+  it("accepts the group domain a house publishes its client address on", () => {
+    // messika.com's own pages give conciergerie@MESSIKAGROUP.com 219 times over. An
+    // exact-label rule threw away the one address on the site a client is meant to use, and
+    // the field went to the data request for a person to fill in by hand.
+    expect(customerServiceEmail("write to conciergerie@messikagroup.com", messika))
+      .toBe("conciergerie@messikagroup.com");
+  });
+
+  it("still refuses a different company whose name merely starts the same way", () => {
+    // "coinbase" is not Roberto Coin, and "messikaland" is nobody.
+    expect(customerServiceEmail("info@coinbase.com", "https://www.robertocoin.com")).toBe(null);
+    expect(customerServiceEmail("info@messikaland.com", messika)).toBe(null);
+  });
+
+  it("refuses an address that reaches the wrong desk, even on the right domain", () => {
+    // A client with a damaged ring must not be sent to a data-protection officer, a press
+    // office, or a mailbox that discards what it receives.
+    for (const bad of ["privacy", "dpo", "legal", "press", "jobs", "noreply", "billing", "webmaster"]) {
+      expect(customerServiceEmail(`${bad}@messika.com`, messika), bad).toBe(null);
+    }
+  });
+
+  it("drops a fragment a line break made of a real address", () => {
+    // Crawling messika.com turned up "rie@messikagroup.com" beside the real one, because a
+    // line break fell inside the word.
+    expect(customerServiceEmail("rie@messikagroup.com conciergerie@messikagroup.com", messika))
+      .toBe("conciergerie@messikagroup.com");
+  });
+
+  it("prefers client care over a shop address, and a shop address over nothing", () => {
+    expect(customerServiceEmail("eshop@messika.com conciergerie@messika.com", messika))
+      .toBe("conciergerie@messika.com");
+    expect(customerServiceEmail("eshop@messika.com", messika)).toBe("eshop@messika.com");
+  });
+
+  it("takes the e-commerce desk when that is the only one published", () => {
+    // pasqualebruni.com publishes three boutique addresses, a whistleblowing line on a law
+    // firm's domain, a PEC address — and ecommerce@, which is the only one a customer
+    // should be given.
+    const site = "https://www.pasqualebruni.com";
+    const text = "whistleblowing@noverim.it boutique.newyork@pasqualebruni.com " +
+      "ecommerce@pasqualebruni.com pasqualebrunispa@pec.pasqualebruni.com";
+    expect(customerServiceEmail(text, site)).toBe("ecommerce@pasqualebruni.com");
+  });
+
+  it("never gives a client a PEC address", () => {
+    // Italy's certified mail: legally binding, read by lawyers and administrators, and on
+    // the house's own domain — so only a rule about the subdomain stops it.
+    expect(customerServiceEmail("info@pec.pasqualebruni.com", "https://www.pasqualebruni.com")).toBe(null);
+  });
+
+  it("keeps refusing a person and a single boutique", () => {
+    // The rule this widening must not undo.
+    expect(customerServiceEmail("douglas.lim@messika.com aspen@messika.com", messika)).toBe(null);
+    expect(customerServiceEmail("boutique.milano@pasqualebruni.com", "https://www.pasqualebruni.com")).toBe(null);
+  });
+});

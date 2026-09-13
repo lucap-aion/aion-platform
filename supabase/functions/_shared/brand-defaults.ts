@@ -275,11 +275,35 @@ const ROLE_PREFIXES = [
   "serviceclient", "service.client", "serviceclients", "relationclient", "relation.client",
   "kundenservice", "kundendienst", "kundenbetreuung",
   "servicioclientes", "servicio.clientes", "atencionalcliente", "atencioncliente",
-  "clientadvisor", "concierge", "boutiqueservice",
+  "clientadvisor", "concierge", "conciergerie", "conciergeservice", "clientele", "clientelling",
+  "boutiqueservice", "sav", "assistenzaclienti", "assistenza.clienti", "servizioclientela",
   "info", "informazioni", "contact", "contacts", "contacto", "contatti", "kontakt",
   "enquiries", "inquiries", "service", "care", "support", "help", "hello", "assistenza",
   "cs", "care.team",
+  // Last, and only because an address is better than none: these reach a shop rather than a
+  // client-care desk, but they reach the house.
+  "eshop", "e-shop", "ecommerce", "e-commerce", "onlineshop", "onlineboutique", "webshop",
+  "shop", "boutiqueonline",
 ];
+
+/**
+ * Addresses that are on the house's own domain and still wrong to publish to a client.
+ *
+ * A blocklist as well as the allowlist above, because the allowlist is edited by people and
+ * "legal" or "press" reads plausible enough to be added to it one day. A client with a
+ * damaged ring must not be sent to a data-protection officer, a press office or a mailbox
+ * that discards what it receives.
+ */
+const NEVER_PUBLISHED = new Set([
+  "privacy", "privacidad", "privacybeleid", "dpo", "gdpr", "rgpd", "datenschutz",
+  "legal", "legale", "compliance", "complaints", "abuse", "security", "postmaster",
+  "webmaster", "hostmaster", "admin", "administrator", "root",
+  "noreply", "no-reply", "no.reply", "donotreply", "do-not-reply", "bounce", "mailer-daemon",
+  "unsubscribe", "newsletter", "marketing", "press", "pressoffice", "ufficiostampa", "media",
+  "jobs", "careers", "recruitment", "recruiting", "hr", "cv",
+  "invoice", "invoices", "billing", "accounts", "accounting", "fatturazione",
+  "amministrazione", "supplier", "suppliers", "vendor", "procurement", "test", "example",
+]);
 
 /**
  * The brand's own customer-service address, from text crawled off its site.
@@ -303,6 +327,20 @@ export function customerServiceEmail(text: string, website: string): string | nu
     return parts[parts.length - (suffixish ? 3 : 2)] ?? null;
   };
 
+  // The same house under a group domain. messika.com publishes its client address as
+  // conciergerie@MESSIKAGROUP.com, and an exact-label rule threw away the one address on the
+  // site that a client is actually meant to write to. Accepted only when the difference is
+  // a corporate or geographic word — so "messikagroup" is Messika and "coinbase" is not
+  // Roberto Coin.
+  const AFFIX = /^(?:group|gruppo|groupe|holding|holdings|spa|srl|sa|sas|intl|international|worldwide|global|italia|italy|france|paris|milano|maison|official|store|shop|boutique|corp|co)$/;
+  const sameHouse = (mailLabel: string | null, brand: string): boolean => {
+    if (!mailLabel) return false;
+    if (mailLabel === brand) return true;
+    const [longer, shorter] = mailLabel.length >= brand.length ? [mailLabel, brand] : [brand, mailLabel];
+    if (shorter.length < 5 || !longer.startsWith(shorter)) return false;
+    return AFFIX.test(longer.slice(shorter.length));
+  };
+
   let brandLabel: string | null;
   try {
     brandLabel = label(new URL(website.startsWith("http") ? website : `https://${website}`).hostname);
@@ -315,9 +353,27 @@ export function customerServiceEmail(text: string, website: string): string | nu
   for (const m of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g)) {
     const address = m[0].toLowerCase().replace(/[.,;:)\]]+$/, "");
     const [prefix, host] = address.split("@");
-    if (!host || label(host) !== brandLabel) continue;
+    if (!host || !sameHouse(label(host), brandLabel)) continue;
+    // PEC is Italy's certified mail: legally binding, monitored by the company's lawyers and
+    // administrators, and the wrong place to send a client with a damaged ring. It sits on
+    // the house's own domain — pasqualebrunispa@pec.pasqualebruni.com — so the domain test
+    // lets it through and only this stops it.
+    if (/(^|\.)pec\./i.test(host)) continue;
+    if (NEVER_PUBLISHED.has(prefix)) continue;
     if (!ROLE_PREFIXES.includes(prefix)) continue;
     found.add(address);
+  }
+  if (!found.size) return null;
+
+  // A prefix that is the TAIL of another on the same domain is a text-extraction artefact,
+  // not an address: crawling messika.com turned up "rie@messikagroup.com" beside
+  // "conciergerie@messikagroup.com", because a line break fell inside the word.
+  for (const a of [...found]) {
+    const [pa, ha] = a.split("@");
+    for (const b of found) {
+      const [pb, hb] = b.split("@");
+      if (ha === hb && pb.length > pa.length && pb.endsWith(pa)) { found.delete(a); break; }
+    }
   }
   if (!found.size) return null;
 
