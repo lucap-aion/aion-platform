@@ -32,7 +32,7 @@ import { extractProducts } from "../_shared/product-extract.ts";
 import { enrichFromWikidata } from "../_shared/brand-enrich.ts";
 import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } from "../_shared/brand-legal.ts";
 // What a failure actually stops, and why it is not "everything queued behind it".
-import { blockedBy } from "../_shared/stage-graph.ts";
+import { blockedBy, type StageName } from "../_shared/stage-graph.ts";
 import { rankCatalogueUrls, catalogueSample } from "../_shared/catalogue-urls.ts";
 // The record's non-visual defaults: focus, FAQ, fee rates, policy prefix.
 import { policyPrefix, productFocus, renderFaqs, customerServiceEmail, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
@@ -160,9 +160,24 @@ async function unmetRequirements(
 
   if (stage === "documents" || stage === "assistant") {
     if (!(await has("brand_knowledge_chunks"))) {
+      // `sources` finishing means the crawl QUEUE has been filled, not that a single page
+      // has been read. seed-crawl returns in seconds; the crawl then works through five
+      // hundred pages on its own once-a-minute tick for the better part of an hour.
+      //
+      // Treating the one as the other made this terminal within seconds of a brand being
+      // created — on EVERY brand — and nothing anywhere reconsiders a terminal skip. Both
+      // stages therefore ended as "skipped: nothing indexed yet" on a site that went on to
+      // index five hundred pages perfectly well.
+      //
+      // What settles it is the crawl running dry.
+      const crawlPending = await has(
+        "knowledge_crawl_queue", (q: any) => q.in("status", ["pending", "processing"]),
+      );
       return {
-        reason: "nothing indexed yet — the crawl has to run first, or there is nothing to write from",
-        terminal: await settled("sources"),
+        reason: crawlPending
+          ? "nothing indexed yet — the crawl is still working through this site's pages"
+          : "nothing indexed yet — the crawl has run and produced nothing to write from",
+        terminal: await settled("sources") && !crawlPending,
       };
     }
   }
@@ -760,9 +775,27 @@ async function runStage(
       // The focus and the claim tiles are read out of the catalogue, which did not exist
       // when the branding stage ran. Cheap and idempotent: it only fills what is empty.
       const defaults = (count ?? 0) > 0 ? await fillRecordDefaults(admin, brandId) : { filled: [], notes: [] };
+
+      // Anything that gave up for want of a catalogue, now that there is one. This pass is
+      // the right place for it: the stage re-queues itself across many minutes while the
+      // read walks the site, so it outlives the crawl as well — which is why the stages
+      // waiting on `sources` are reconsidered here too, rather than at the instant `sources`
+      // reported done with an empty index behind it.
+      // Only when the thing they were waiting for exists, or a stage that will skip again
+      // for the same reason is re-run once a minute for as long as the read lasts.
+      // brand_knowledge_chunks, because that is precisely what `documents` and `assistant`
+      // test for — asking a different table would revive them into the same skip.
+      const { count: indexed } = await admin.from("brand_knowledge_chunks")
+        .select("id", { count: "exact", head: true }).eq("brand_id", brandId);
+      const revived = [
+        ...((count ?? 0) > 0 ? await reviveSkipped(admin, brandId, "storefront") : []),
+        ...((indexed ?? 0) > 0 ? await reviveSkipped(admin, brandId, "sources") : []),
+      ];
+
       return {
         ok: true, platform: "structured", base,
         products: count ?? 0,
+        ...(revived.length ? { revived } : {}),
         record_defaults: defaults.filled,
         record_notes: defaults.notes,
         embedded_this_run: Number(r.embedded ?? 0),
@@ -1126,6 +1159,38 @@ function demoPassword(slug: string, key: string): string {
 // ── Storefront detection ─────────────────────────────────────────────────────
 // Shopify exposes /products.json. Try the site as given and its www/apex twin —
 // robertocoin.com redirects, www.robertocoin.com answers.
+/**
+ * Stages that gave up waiting for something that has since arrived.
+ *
+ * A stage skips TERMINALLY when what it needs is not there and the stage that produces it
+ * has already finished — "no pictures in this brand's catalogue", "nothing indexed yet".
+ * That is the right call at the time and the wrong one five minutes later, because the two
+ * things it waits on both arrive LONG after the stage that produces them reports done: the
+ * crawl indexes pages on its own tick for an hour, and the catalogue read walks a hundred
+ * and seventy-nine pages twelve at a time.
+ *
+ * So Messika's teaser deck and demo book skipped while the catalogue was empty, the
+ * catalogue then filled up to a hundred and seventy-nine pages of real products, and nothing
+ * anywhere was going to reconsider. The sweeper only rescues stages that HUNG.
+ *
+ * Re-queueing is safe: queue_onboarding_stages resets the row, and a stage whose reason
+ * still holds simply skips again.
+ */
+async function reviveSkipped(
+  admin: ReturnType<typeof createClient>, brandId: number, after: StageName,
+): Promise<string[]> {
+  const downstream = blockedBy(after);
+  if (!downstream.length) return [];
+  const { data } = await admin.from("brand_onboarding")
+    .select("stage")
+    .eq("brand_id", brandId).eq("status", "skipped").in("stage", downstream);
+  const stages = ((data ?? []) as { stage: string }[]).map((r) => r.stage);
+  if (!stages.length) return [];
+  const { error } = await admin.rpc("queue_onboarding_stages", { p_brand_id: brandId, p_stages: stages });
+  if (error) { console.error("[onboard-brand] could not revive", error.message); return []; }
+  return stages;
+}
+
 async function detectShopify(base: string, deadline: number): Promise<{ base: string; keepUntyped: boolean } | null> {
   const host = base.replace(/^https?:\/\//, "").replace(/\/$/, "");
   const candidates = host.startsWith("www.")
