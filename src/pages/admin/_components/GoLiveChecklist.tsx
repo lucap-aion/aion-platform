@@ -238,13 +238,22 @@ export default function GoLiveChecklist({ brandId, brandName }: { brandId: numbe
                           )}
                         </div>
                         <p className="mt-0.5 text-xs text-muted-foreground">{item.detail}</p>
-                        {/* The evidence, so "detected" is checkable rather than magic — and so
-                            an item that is NOT detected says what would make it so. */}
-                        {(item.evidence || because) && (
-                          <p className={`mt-0.5 text-xs ${auto ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground/80"}`}>
-                            {auto ? `✓ ${item.evidence}` : `Waiting on: ${because ?? item.evidence}`}
-                          </p>
-                        )}
+                        {/* Three different things to say, and they are not the same sentence.
+                            Done: the evidence, so "detected" is checkable rather than magic.
+                            Blocked with a diagnosis: the diagnosis, in amber, because it is
+                            the one line that tells the reader what to go and do — and it
+                            shows even on an item somebody ticked by hand, since a tick that
+                            disagrees with the platform is exactly the drift worth seeing.
+                            Neither: what the platform is watching for, phrased as a check
+                            rather than as a claim — the evidence is written in the done
+                            tense, and reading it under an empty box looked like a lie. */}
+                        {auto ? (
+                          <p className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-400">✓ {item.evidence}</p>
+                        ) : because ? (
+                          <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-500">{because}</p>
+                        ) : item.evidence ? (
+                          <p className="mt-0.5 text-xs text-muted-foreground/80">Checks for: {item.evidence}</p>
+                        ) : null}
 
                         {noteFor === item.key ? (
                           <div className="mt-2 flex items-start gap-2">
