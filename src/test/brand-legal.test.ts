@@ -119,3 +119,100 @@ describe("splitting an address", () => {
       .toEqual({ street: "Via Cusani 5", postcode: null, city: "Milano" });
   });
 });
+
+// ── What a house writes between the label and the address ────────────────────────────────
+describe("a registered office stated in a sentence, not a field", () => {
+  it("drops the copula a French company writes in front of its address", () => {
+    // messika.com: "Le siège social est situé au 44, avenue des Champs-Élysées, 75008 Paris,
+    // immatriculée au RCS de Paris". The pattern's optional "au" matched nothing, so the
+    // capture began at "est situé" and that phrase went onto the brand record as the
+    // registered address — and from there onto the data request sent to the client.
+    const office = registeredOfficeFrom(
+      "Le siège social est situé au 44, avenue des Champs-Elysées, 75008 Paris, immatriculée au RCS",
+    );
+    expect(office?.street).toBe("44, avenue des Champs-Elysées");
+    expect(office?.postcode).toBe("75008");
+    expect(office?.city).toBe("Paris");
+  });
+
+  it("drops the same phrase in the other languages these houses publish in", () => {
+    expect(registeredOfficeFrom("La sede legale si trova in Via Cusani 5, 20121 Milano")?.street)
+      .toBe("Via Cusani 5");
+    expect(registeredOfficeFrom("The registered office is located at 1 Bond Street, SW1A 2HU London")?.street)
+      .toBe("1 Bond Street");
+    expect(registeredOfficeFrom("El domicilio social se encuentra en Calle Serrano 12, 28001 Madrid")?.street)
+      .toBe("Calle Serrano 12");
+  });
+
+  it("leaves an address that needs no stripping exactly as it was", () => {
+    expect(registeredOfficeFrom("siège social : 2 Rue du Pont Neuf, 75001 Paris")?.street)
+      .toBe("2 Rue du Pont Neuf");
+    expect(registeredOfficeFrom("con sede legale in Via Cusani 5, 20121 Milano")?.street)
+      .toBe("Via Cusani 5");
+  });
+});
+
+describe("the country, when it can be known rather than guessed", () => {
+  it("reads it off the language and the postcode together", () => {
+    // Both halves are needed. France, Italy, Spain and Germany use five digits; every other
+    // country sharing one of those languages — Belgium, Switzerland, Austria, Luxembourg —
+    // uses four. It matters because the country makes the Chubb policy prefix, and without
+    // it Messika came out as MESXX: a placeholder in a bordereau key that nothing flags.
+    expect(registeredOfficeFrom("siège social : 44 avenue des Champs-Elysées, 75008 Paris")?.country).toBe("France");
+    expect(registeredOfficeFrom("con sede legale in Via Cusani 5, 20121 Milano")?.country).toBe("Italy");
+    expect(registeredOfficeFrom("domicilio social: Calle Serrano 12, 28001 Madrid")?.country).toBe("Spain");
+    expect(registeredOfficeFrom("Sitz: Kurfürstendamm 1, 10719 Berlin")?.country).toBe("Germany");
+  });
+
+  it("says nothing when the postcode does not settle it", () => {
+    // Brussels is French-speaking and four digits. Guessing France there would put a wrong
+    // country code into a policy number.
+    expect(registeredOfficeFrom("siège social : 10 Avenue Louise, 1000 Bruxelles")?.country).toBe(null);
+    expect(registeredOfficeFrom("siège social : 5 Rue du Rhône, 1204 Genève")?.country).toBe(null);
+    // English is spoken in too many places for five digits to mean anything.
+    expect(registeredOfficeFrom("registered office: 1 Horse Guards Avenue, SW1A 2HU London")?.country).toBe(null);
+  });
+
+  it("says nothing when there is no postcode at all", () => {
+    expect(registeredOfficeFrom("siège social : 44 avenue des Champs-Elysées Paris")?.country).toBe(null);
+  });
+});
+
+describe("a country the house names in the address itself", () => {
+  it("reads it wherever it sits in the line, and keeps it out of the street", () => {
+    // messika.com's English legal page: "…registered office 44, avenue des Champs-Elysées,
+    // 75008 Paris, France, registered with the Paris Trade and Companies Register under
+    // number 301 29…". The country was dropped only when it was the LAST part, so here it
+    // was neither removed from the address nor read into hq_country — and the policy prefix
+    // came out MESXX, a placeholder in a Chubb bordereau key.
+    const office = registeredOfficeFrom(
+      "registered office 44, avenue des Champs-Elysées, 75008 Paris, France, " +
+      "registered with the Paris Trade and Companies Register under number 301 29",
+    );
+    expect(office?.country).toBe("France");
+    expect(office?.street).toBe("44, avenue des Champs-Elysées");
+    expect(office?.city).toBe("Paris");
+    expect(office?.raw).not.toContain("Trade and Companies Register");
+  });
+
+  it("normalises whatever spelling the house used, because the prefix is built from it", () => {
+    expect(registeredOfficeFrom("sede legale in Via Cusani 5, 20121 Milano, Italia")?.country).toBe("Italy");
+    expect(registeredOfficeFrom("Sitz: Kurfürstendamm 1, 10719 Berlin, Deutschland")?.country).toBe("Germany");
+    expect(registeredOfficeFrom("domicilio social: Calle Serrano 12, 28001 Madrid, España")?.country).toBe("Spain");
+    expect(registeredOfficeFrom("siège social : 5 Rue du Rhône, 1204 Genève, Suisse")?.country).toBe("Switzerland");
+  });
+
+  it("drops the registration clause these pages append after the address", () => {
+    const it = registeredOfficeFrom("sede legale in Via Cusani 5, 20121 Milano, iscritta al Registro Imprese di Milano n. 12345");
+    expect(it?.raw).toBe("Via Cusani 5, 20121 Milano");
+    const fr = registeredOfficeFrom("siège social : 2 Rue du Pont Neuf, 75001 Paris, immatriculée au RCS de Paris");
+    expect(fr?.raw).toBe("2 Rue du Pont Neuf, 75001 Paris");
+  });
+
+  it("prefers what the house says over what the postcode implies", () => {
+    // A French-language page naming Belgium: the postcode rule would have said nothing, and
+    // guessing France off the language would have been wrong.
+    expect(registeredOfficeFrom("siège social : 10 Avenue Louise, 1000 Bruxelles, Belgique")?.country)
+      .toBe("Belgium");
+  });
+});

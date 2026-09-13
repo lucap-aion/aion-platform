@@ -588,7 +588,12 @@ async function runStage(
       ["hq_address", office?.street ?? id.hq_address],
       ["hq_postcode", office?.postcode ?? id.hq_postcode],
       ["hq_city", office?.city ?? id.hq_city ?? wiki?.hq_city],
-      ["hq_country", id.hq_country ?? wiki?.hq_country],
+      // The office's own language and postcode settle the country when they agree, and they
+      // are better evidence than either of the others: schema.org rarely carries a country
+      // and the encyclopaedia describes the group rather than the registered entity. It is
+      // also what makes the Chubb policy prefix — Messika came out MESXX, a placeholder in a
+      // bordereau key, on an address that says 75008 Paris.
+      ["hq_country", office?.country ?? id.hq_country ?? wiki?.hq_country],
       ["description", id.description], ["email", id.email],
       ["logo_big", id.logo_big], ["logo_small", id.logo_small],
       // All six portal slots. Four of them were never in this list, so a brand could finish
@@ -1540,12 +1545,26 @@ async function fillRecordDefaults(
   }
 
   // ── The prefix every policy number carries ──
-  if (isEmpty("chubb_policy_prefix")) {
+  //
+  // Filled when empty, and ALSO when it still ends in XX and the country has since been
+  // found. XX is what this writes when it does not know where a house is registered — it is
+  // never something a person would choose — and it sits in a Chubb bordereau key that
+  // nothing downstream flags, because the go-live check only asks whether a prefix is set.
+  // Messika was MESXX on an address reading 75008 Paris.
+  const currentPrefix = String(brand.chubb_policy_prefix ?? "");
+  const country = (patch.hq_country ?? brand.hq_country) as string | null;
+  const placeholder = /XX\d*$/.test(currentPrefix) && Boolean(country);
+  if (isEmpty("chubb_policy_prefix") || placeholder) {
     const { data: others } = await admin.from("brands").select("chubb_policy_prefix").neq("id", brandId);
     const taken = ((others ?? []) as { chubb_policy_prefix: string | null }[])
       .map((o) => o.chubb_policy_prefix ?? "").filter(Boolean);
-    patch.chubb_policy_prefix = policyPrefix(name, brand.hq_country as string | null, taken);
-    notes.push(`policy prefix ${patch.chubb_policy_prefix} — confirm it with Chubb before the first bordereau`);
+    const next = policyPrefix(name, country, taken);
+    if (next !== currentPrefix) {
+      patch.chubb_policy_prefix = next;
+      notes.push(placeholder
+        ? `policy prefix ${next}, replacing the ${currentPrefix} placeholder now that the country is known — confirm it with Chubb before the first bordereau`
+        : `policy prefix ${next} — confirm it with Chubb before the first bordereau`);
+    }
   }
 
   // ── Fee rates ──
