@@ -5,6 +5,7 @@ import { DEFAULT_MAX_COVERED_VALUE, DEFAULT_MIN_COVERED_VALUE } from "@/lib/cove
 import type { ThemeColors, ThemeFonts } from "@/contexts/TenantContext";
 import { FormField, Input, Select, TextArea, SaveBar } from "./FormField";
 import { ImageUpload } from "./ImageUpload";
+import { ChevronRight } from "lucide-react";
 
 // The brand record, as one form used in two places.
 //
@@ -137,31 +138,44 @@ const fromJsonStr = (s: string): any => {
 };
 
 
-export default function BrandRecordForm({ brandId, initialMode = "edit", onClose, onSaved, embedded = false }: {
+export default function BrandRecordForm({ brandId, initialMode = "edit", onClose, onSaved, onDirtyChange, embedded = false }: {
   brandId?: number;
   initialMode?: Mode;
   onClose?: () => void;
   onSaved?: () => void;
+  /** Told whenever this form starts or stops holding unsaved work. */
+  onDirtyChange?: (dirty: boolean) => void;
   // Inline on a page rather than inside a drawer: no Close button, and the form
   // owns no dismissal of its own.
   embedded?: boolean;
 }) {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [editing, setEditing] = useState<Partial<Brand>>(empty());
+  // What the database last handed us, so "discard" has something to go back to and the page
+  // above can be told there is work to lose. This form is unmounted the moment another tab
+  // is clicked: forty fields, gone, with no warning and nothing to restore them from.
+  const [loaded, setLoaded] = useState<Partial<Brand>>(empty());
+  const [loadedFaq, setLoadedFaq] = useState({ en: "", it: "" });
   const [faqEnStr, setFaqEnStr] = useState("");
   const [faqItStr, setFaqItStr] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(!!brandId);
 
   useEffect(() => {
-    if (!brandId) { setEditing(empty()); setFaqEnStr(""); setFaqItStr(""); setLoading(false); return; }
+    if (!brandId) {
+      setEditing(empty()); setLoaded(empty());
+      setFaqEnStr(""); setFaqItStr(""); setLoadedFaq({ en: "", it: "" });
+      setLoading(false); return;
+    }
     setLoading(true);
     void (async () => {
       const { data } = await supabase.from("brands")
         .select("id, name, slug, description, email, website, hq_country, hq_address, hq_city, hq_postcode, status, logo_small, logo_big, auth_background_image, top_banner_image, theft_image, damage_image, faq_image, feedback_image, faq_en, faq_it, theme_settings, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value, min_covered_value, legal_name, registered_address, product_focus, is_prospect")
         .eq("id", brandId).maybeSingle();
       const b = (data ?? empty()) as Partial<Brand>;
-      setEditing(b); setFaqEnStr(toJsonStr(b.faq_en)); setFaqItStr(toJsonStr(b.faq_it));
+      const en = toJsonStr(b.faq_en), it = toJsonStr(b.faq_it);
+      setEditing(b); setLoaded(b);
+      setFaqEnStr(en); setFaqItStr(it); setLoadedFaq({ en, it });
       setLoading(false);
     })();
   }, [brandId]);
@@ -232,6 +246,24 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
   };
 
   const set = (k: keyof Brand, v: unknown) => setEditing((p) => ({ ...p, [k]: v }));
+
+  // Unsaved work, and whether anybody above needs to know about it.
+  const dirty = !loading && (
+    JSON.stringify(editing) !== JSON.stringify(loaded)
+    || faqEnStr !== loadedFaq.en || faqItStr !== loadedFaq.it
+  );
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  // Leaving the browser entirely is the one exit this component cannot intercept itself.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const discard = () => {
+    setEditing(loaded); setFaqEnStr(loadedFaq.en); setFaqItStr(loadedFaq.it);
+  };
   const ro = mode === "view";
   // A brand being created has no id yet, so uploads get a throwaway key rather
 // than all landing on brands/undefined-*.
@@ -245,7 +277,7 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
           {/* Basic info */}
           <div className="grid grid-cols-2 gap-4">
             <FormField label="Name" required={!ro}><Input disabled={ro} value={editing.name ?? ""} onChange={(e) => set("name", e.target.value)} required={!ro} /></FormField>
-            <FormField label="Slug" required={!ro} hint="Used in URLs"><Input disabled={ro} value={editing.slug ?? ""} onChange={(e) => set("slug", e.target.value)} required={!ro} /></FormField>
+            <FormField label="Portal address" required={!ro} hint="The brand's own URL under app.aioncover.com"><Input disabled={ro} value={editing.slug ?? ""} onChange={(e) => set("slug", e.target.value)} required={!ro} /></FormField>
           </div>
           {/* A textarea, not an input: onboarding writes the encyclopaedia's paragraph about
               the house in here, and a single line showed the first eighty characters of it
@@ -298,6 +330,48 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
             </div>
           </div>
 
+          {/* Fee Rates */}
+          <div className="border-t border-border pt-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Fee Rates</p>
+            <div className="grid grid-cols-4 gap-3">
+              <FormField label="Activation Fee" hint="e.g. 0.05 = 5%">
+                <Input type="number" step="0.0001" disabled={ro} value={editing.activation_fee ?? ""} onChange={(e) => set("activation_fee", e.target.value ? Number(e.target.value) : null)} />
+              </FormField>
+              <FormField label="Insurance Premium" hint="e.g. 0.12 = 12%">
+                <Input type="number" step="0.0001" disabled={ro} value={editing.insurance_premium ?? ""} onChange={(e) => set("insurance_premium", e.target.value ? Number(e.target.value) : null)} />
+              </FormField>
+              <FormField label="AION Premium Fee" hint="On net premium">
+                <Input type="number" step="0.0001" disabled={ro} value={editing.aion_premium_fee ?? ""} onChange={(e) => set("aion_premium_fee", e.target.value ? Number(e.target.value) : null)} />
+              </FormField>
+              <FormField label="Max Covered Value (€)" hint="Retail cap per item; new covers only">
+                <Input type="number" step="1" min="0" disabled={ro} value={editing.max_covered_value ?? ""} placeholder={String(DEFAULT_MAX_COVERED_VALUE)} onChange={(e) => set("max_covered_value", e.target.value ? Number(e.target.value) : null)} />
+              </FormField>
+              <FormField label="Min Covered Value (€)" hint="At or below this retail price a cover is recorded but not activated">
+                <Input type="number" step="1" min="0" disabled={ro} value={editing.min_covered_value ?? ""} placeholder={String(DEFAULT_MIN_COVERED_VALUE)} onChange={(e) => set("min_covered_value", e.target.value !== "" ? Number(e.target.value) : null)} />
+              </FormField>
+            </div>
+          </div>
+
+          {/* Chubb */}
+          <div className="border-t border-border pt-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Chubb Reporting</p>
+            <div className="grid grid-cols-2 gap-4 items-end">
+              <FormField label="Policy Prefix">
+                <Input disabled={ro} value={editing.chubb_policy_prefix ?? ""} onChange={(e) => set("chubb_policy_prefix", e.target.value)} placeholder="e.g. CHB-" />
+              </FormField>
+              <div className="flex items-center gap-2 pb-2">
+                <input
+                  type="checkbox"
+                  id="chubb_reporting"
+                  disabled={ro}
+                  checked={editing.enable_chubb_reporting ?? false}
+                  onChange={(e) => set("enable_chubb_reporting", e.target.checked)}
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary/40"
+                />
+                <label htmlFor="chubb_reporting" className="text-sm font-medium text-foreground">Enable Chubb Reporting</label>
+              </div>
+            </div>
+          </div>
           {/* HQ Address */}
           <div className="border-t border-border pt-4">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Headquarters</p>
@@ -309,6 +383,17 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
             </div>
           </div>
 
+          {/* Everything below dresses the customer portal. It is filled in by onboarding and
+              seldom touched by hand, so it is folded away: the three things a new brand is
+              actually sent here to set — the fees, the Chubb prefix and the ceiling — used to
+              sit underneath forty fields nobody had been asked to look at. */}
+          <details className="border-t border-border pt-4 [&_summary]:list-none">
+            <summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <ChevronRight className="h-3.5 w-3.5 transition-transform [details[open]_&]:rotate-90" />
+              Logos
+              <span className="font-normal normal-case tracking-normal text-[11px]">filled in by onboarding</span>
+            </summary>
+            <div className="pt-3">
           {/* Logos */}
           <div className="border-t border-border pt-4">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Logos</p>
@@ -330,10 +415,20 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
             </div>
           </div>
 
+            </div>
+          </details>
+
+          <details className="border-t border-border pt-4 [&_summary]:list-none">
+            <summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <ChevronRight className="h-3.5 w-3.5 transition-transform [details[open]_&]:rotate-90" />
+              Brand theme colours
+              <span className="font-normal normal-case tracking-normal text-[11px]">only what you change is saved</span>
+            </summary>
+            <div className="pt-3">
           {/* Theme / Brand Colours */}
           <div className="border-t border-border pt-4">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Brand Theme Colours</p>
-            <p className="text-xs text-muted-foreground mb-4">Customise the portal appearance. Leave blank to use AION defaults.</p>
+            <p className="text-xs text-muted-foreground mb-4">Customise the portal appearance. Only the swatches you change are saved; the rest stay on the AION default.</p>
             <div className="grid grid-cols-2 gap-4">
               {([
                 ["primary_hsl",            "Primary (brand colour)"],
@@ -382,6 +477,16 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
             </div>
           </div>
 
+            </div>
+          </details>
+
+          <details className="border-t border-border pt-4 [&_summary]:list-none">
+            <summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <ChevronRight className="h-3.5 w-3.5 transition-transform [details[open]_&]:rotate-90" />
+              Brand fonts
+              <span className="font-normal normal-case tracking-normal text-[11px]"></span>
+            </summary>
+            <div className="pt-3">
           {/* Brand Fonts */}
           <div className="border-t border-border pt-4">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Brand Fonts</p>
@@ -401,6 +506,16 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
             </div>
           </div>
 
+            </div>
+          </details>
+
+          <details className="border-t border-border pt-4 [&_summary]:list-none">
+            <summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <ChevronRight className="h-3.5 w-3.5 transition-transform [details[open]_&]:rotate-90" />
+              Portal images
+              <span className="font-normal normal-case tracking-normal text-[11px]">six sections of the customer portal</span>
+            </summary>
+            <div className="pt-3">
           {/* Portal images */}
           <div className="border-t border-border pt-4">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Portal Images</p>
@@ -452,6 +567,16 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
             </div>
           </div>
 
+            </div>
+          </details>
+
+          <details className="border-t border-border pt-4 [&_summary]:list-none">
+            <summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <ChevronRight className="h-3.5 w-3.5 transition-transform [details[open]_&]:rotate-90" />
+              FAQ content
+              <span className="font-normal normal-case tracking-normal text-[11px]">raw JSON, edited on the Documents tab too</span>
+            </summary>
+            <div className="pt-3">
           {/* FAQ */}
           <div className="border-t border-border pt-4">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">FAQ Content (JSON)</p>
@@ -465,48 +590,9 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
             </div>
           </div>
 
-          {/* Fee Rates */}
-          <div className="border-t border-border pt-4">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Fee Rates</p>
-            <div className="grid grid-cols-4 gap-3">
-              <FormField label="Activation Fee" hint="e.g. 0.05 = 5%">
-                <Input type="number" step="0.0001" disabled={ro} value={editing.activation_fee ?? ""} onChange={(e) => set("activation_fee", e.target.value ? Number(e.target.value) : null)} />
-              </FormField>
-              <FormField label="Insurance Premium" hint="e.g. 0.12 = 12%">
-                <Input type="number" step="0.0001" disabled={ro} value={editing.insurance_premium ?? ""} onChange={(e) => set("insurance_premium", e.target.value ? Number(e.target.value) : null)} />
-              </FormField>
-              <FormField label="AION Premium Fee" hint="On net premium">
-                <Input type="number" step="0.0001" disabled={ro} value={editing.aion_premium_fee ?? ""} onChange={(e) => set("aion_premium_fee", e.target.value ? Number(e.target.value) : null)} />
-              </FormField>
-              <FormField label="Max Covered Value (€)" hint="Retail cap per item; new covers only">
-                <Input type="number" step="1" min="0" disabled={ro} value={editing.max_covered_value ?? ""} placeholder={String(DEFAULT_MAX_COVERED_VALUE)} onChange={(e) => set("max_covered_value", e.target.value ? Number(e.target.value) : null)} />
-              </FormField>
-              <FormField label="Min Covered Value (€)" hint="At or below this retail price a cover is recorded but not activated">
-                <Input type="number" step="1" min="0" disabled={ro} value={editing.min_covered_value ?? ""} placeholder={String(DEFAULT_MIN_COVERED_VALUE)} onChange={(e) => set("min_covered_value", e.target.value !== "" ? Number(e.target.value) : null)} />
-              </FormField>
             </div>
-          </div>
+          </details>
 
-          {/* Chubb */}
-          <div className="border-t border-border pt-4">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Chubb Reporting</p>
-            <div className="grid grid-cols-2 gap-4 items-end">
-              <FormField label="Policy Prefix">
-                <Input disabled={ro} value={editing.chubb_policy_prefix ?? ""} onChange={(e) => set("chubb_policy_prefix", e.target.value)} placeholder="e.g. CHB-" />
-              </FormField>
-              <div className="flex items-center gap-2 pb-2">
-                <input
-                  type="checkbox"
-                  id="chubb_reporting"
-                  disabled={ro}
-                  checked={editing.enable_chubb_reporting ?? false}
-                  onChange={(e) => set("enable_chubb_reporting", e.target.checked)}
-                  className="h-4 w-4 rounded border-border text-primary focus:ring-primary/40"
-                />
-                <label htmlFor="chubb_reporting" className="text-sm font-medium text-foreground">Enable Chubb Reporting</label>
-              </div>
-            </div>
-          </div>
 
           {ro ? (
             <div className="flex justify-between gap-2 pt-4 border-t border-border mt-4">
@@ -514,7 +600,14 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
               <button type="button" onClick={() => { setMode("edit"); }} className="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">Edit</button>
             </div>
           ) : (
-            <SaveBar onCancel={() => onClose?.()} loading={saving} label={mode === "add" ? "Create Brand" : "Save Changes"} />
+            <SaveBar
+              onCancel={embedded ? discard : () => onClose?.()}
+              cancelLabel={embedded ? "Discard changes" : "Cancel"}
+              cancelDisabled={embedded && !dirty}
+              loading={saving}
+              label={mode === "add" ? "Create Brand" : "Save Changes"}
+              note={dirty ? "Unsaved changes" : undefined}
+            />
           )}
         </form>
   );

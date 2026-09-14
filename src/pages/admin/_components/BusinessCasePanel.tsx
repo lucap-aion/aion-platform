@@ -6,7 +6,7 @@ import { untyped } from "@/integrations/supabase/untyped";
 // every render — which for a fetcher that sets a loading flag is an infinite
 // loop that never leaves the spinner. This one is module-scoped and stable.
 import { toast } from "@/hooks/use-toast";
-import { Loader2, Plus, Trash2, Download, AlertTriangle, Calculator, ChevronDown, ChevronRight, Upload, FileSpreadsheet } from "lucide-react";
+import { Loader2, Plus, Trash2, Download, AlertTriangle, Calculator, ChevronDown, ChevronRight, Upload, FileSpreadsheet, Check } from "lucide-react";
 import InsurerQuotes from "./InsurerQuotes";
 import { CATEGORIES, COVERAGES, DAMAGE_SCOPES, type BusinessCase, type Quote, type RateUsed } from "./pricing-model";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -145,6 +145,13 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
   stored?: StoredBusinessCase | null;
   onArtifact?: () => void;
 }) {
+  const quotesRef = useRef<HTMLDivElement | null>(null);
+  // Whether the perimeter on screen is the perimeter on the server. Null before the first
+  // read, so a brand nobody has touched does not claim to have saved anything.
+  const [saveState, setSaveState] = useState<null | "saving" | "saved">(null);
+  // Which combination the reader was sent here to fix. Handed to the quotes panel so it
+  // opens on that category and cover rather than on a blank form.
+  const [openQuoteWith, setOpenQuoteWith] = useState<{ category: string; coverage: string } | null>(null);
   const [months, setMonths] = useState("36");
   const [setupDiscount, setSetupDiscount] = useState(true);
   const [includeApi, setIncludeApi] = useState(false);
@@ -227,6 +234,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
     // A months box mid-edit ("3" on the way to "36") is not worth persisting, and the
     // column is constrained to 1–120 so an out-of-range value would be rejected anyway.
     if (!monthsValid) return;
+    setSaveState("saving");
     const t = setTimeout(() => {
       void (async () => {
         const payload = JSON.parse(perimeterSig) as Record<string, unknown>;
@@ -240,6 +248,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
           return;
         }
         setServerSig(perimeterSig);
+        setSaveState("saved");
       })();
     }, 900);
     return () => clearTimeout(t);
@@ -298,6 +307,13 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
     }
   };
 
+  const jumpToQuotes = (seg: { category: string; coverage: string }) => {
+    setShowQuotes(true);
+    setOpenQuoteWith({ category: seg.category, coverage: seg.coverage });
+    // After the panel has been laid out, not before.
+    requestAnimationFrame(() => quotesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+
   // Any change to the inputs invalidates what is on screen. Keeping stale
   // figures visible next to edited inputs is how a wrong number gets read out.
   const inputs = useMemo(
@@ -305,9 +321,12 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
     [brandId, months, setupDiscount, includeApi, segments],
   );
   const computedFor = useRef<string | null>(null);
+  // Clearing stale figures is right; doing it in silence is not. Half the screen used to
+  // disappear the moment somebody fixed a digit, with nothing to say why.
+  const [staleCleared, setStaleCleared] = useState(false);
   useEffect(() => {
     if (computedFor.current !== null && computedFor.current !== inputs) {
-      setResult(null); setDeck(null); computedFor.current = null;
+      setResult(null); setDeck(null); computedFor.current = null; setStaleCleared(true);
     }
   }, [inputs]);
 
@@ -363,7 +382,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
       const out = await call({ preview: true });
       if (out.ok === false) { toast({ title: "Cannot price this yet", description: out.reason, variant: "destructive" }); setResult(null); return; }
       setResult(out.business_case ?? null);
-      computedFor.current = inputs;
+      computedFor.current = inputs; setStaleCleared(false);
     } catch (e) {
       toast({ title: "Calculation failed", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
     } finally { setBusy(null); }
@@ -375,7 +394,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
       const out = await call({});
       if (out.ok === false) { toast({ title: "Cannot build the deck", description: out.reason, variant: "destructive" }); return; }
       setResult(out.business_case ?? result);
-      computedFor.current = inputs;
+      computedFor.current = inputs; setStaleCleared(false);
       setDeck({ url: String(out.download_url ?? ""), name: String(out.file_name ?? "business case.pptx") });
       toast({ title: "Deck ready" });
       onArtifact?.();
@@ -397,7 +416,13 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           Months modelled
           <input value={months} onChange={(e) => setMonths(e.target.value)} inputMode="numeric"
+            aria-invalid={!monthsValid}
             className={`w-28 ${field} ${monthsValid ? "" : "border-destructive"}`} />
+          {!monthsValid && (
+            <span className="max-w-56 text-[11px] text-destructive">
+              A whole number between 1 and 120. Nothing on this panel is being saved until it is.
+            </span>
+          )}
         </label>
         <label className="flex items-center gap-2 pb-2 text-sm">
           <input type="checkbox" checked={setupDiscount} onChange={(e) => setSetupDiscount(e.target.checked)} />
@@ -416,7 +441,17 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
       <div className="space-y-3 rounded-xl border border-border p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-foreground">Perimeter</h3>
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              Perimeter
+              {saveState && (
+                <span className={`inline-flex items-center gap-1 text-[11px] font-normal ${
+                  saveState === "saving" ? "text-muted-foreground" : "text-emerald-700 dark:text-emerald-400"}`}>
+                  {saveState === "saving"
+                    ? <><Loader2 className="h-3 w-3 animate-spin" /> Saving…</>
+                    : <><Check className="h-3 w-3" /> Saved</>}
+                </span>
+              )}
+            </h3>
             {importedFrom && (
               <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <FileSpreadsheet className="h-3 w-3" />
@@ -530,7 +565,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
             <span>
               No rate on file for{" "}
               {uncovered.map((s) => `${s.category} (${s.coverage === "theft" ? "theft only" : "theft + damage"})`).join(", ")}.
-              {" "}<button onClick={() => setShowQuotes(true)} className="font-medium underline">Add the quote</button>
+              {" "}<button onClick={() => jumpToQuotes(uncovered[0])} className="font-medium underline">Add the quote</button>
               {" "}or this will not price.
             </span>
           </div>
@@ -542,10 +577,14 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
             {busy === "preview" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />} Calculate
           </button>
           <button onClick={() => void buildDeck()} disabled={busy !== null || !result}
-            title={result ? "" : "Calculate first — the deck is built from the figures you have checked"}
             className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm disabled:opacity-50">
             {busy === "deck" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Build deck
           </button>
+          {!result && (
+            <span className="self-center text-xs text-muted-foreground">
+              Calculate first — the deck is built from the figures you have checked.
+            </span>
+          )}
           {deck && (
             <a href={deck.url} target="_blank" rel="noreferrer"
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
@@ -554,6 +593,13 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
           )}
         </div>
       </div>
+
+      {!result && staleCleared && (
+        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+          <Calculator className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>The inputs changed, so the figures below were cleared rather than left to be read out of date. Calculate again.</span>
+        </div>
+      )}
 
       {result && (
         <div className="space-y-4">
@@ -666,7 +712,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
         </div>
       )}
 
-      <div className="rounded-xl border border-border">
+      <div ref={quotesRef} className="rounded-xl border border-border">
         <button onClick={() => setShowQuotes((v) => !v)}
           className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-foreground">
           {showQuotes ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -677,7 +723,8 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
         </button>
         {showQuotes && (
           <div className="border-t border-border p-4">
-            <InsurerQuotes brands={brands} onChanged={() => void loadQuotes()} />
+            <InsurerQuotes brands={brands} brandId={brandId ?? undefined} openWith={openQuoteWith}
+              onChanged={() => void loadQuotes()} />
           </div>
         )}
       </div>

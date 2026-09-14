@@ -11,6 +11,7 @@ import GoLiveChecklist from "./_components/GoLiveChecklist";
 import BrandKnowledge from "@/pages/brand/BrandKnowledge";
 import ShopifyConnection from "./_components/ShopifyConnection";
 import { StatusBadge } from "./_components/AdminTable";
+import ConfirmDialog from "./_components/ConfirmDialog";
 
 // Everything about one brand, in one place.
 //
@@ -54,6 +55,11 @@ export default function AdminBrandDetail() {
   const [brand, setBrand] = useState<Brand | null>(null);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(!isNew);
+  // The record form is unmounted the moment another tab is clicked, and it is forty fields
+  // long. Somebody who filled it in, went to check something on the cycle and came back
+  // found it freshly re-read from the database, with no warning and nothing to restore.
+  const [recordDirty, setRecordDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<Tab | null>(null);
 
   const asked = params.get("tab") as Tab | null;
   // A brand being created has no cycle and no documents yet, so there is only
@@ -76,11 +82,16 @@ export default function AdminBrandDetail() {
 
   // Keeps ?step, so leaving the cycle to check a field on the record and coming
   // back lands you on the step you were reading.
-  const setTab = (t: Tab) => setParams((prev) => {
+  const goToTab = useCallback((t: Tab) => setParams((prev) => {
     const next = new URLSearchParams(prev);
     if (t === "record") next.delete("tab"); else next.set("tab", t);
     return next;
-  }, { replace: true });
+  }, { replace: true }), [setParams]);
+
+  const setTab = (t: Tab) => {
+    if (t !== tab && tab === "record" && recordDirty) { setPendingTab(t); return; }
+    goToTab(t);
+  };
 
   if (isNew) {
     return (
@@ -174,7 +185,8 @@ export default function AdminBrandDetail() {
           alone makes an RPC call, a function call and a handful of table reads;
           mounting all three would fire every one of them to render one. */}
       {tab === "record" && (
-        <BrandRecordForm brandId={brand.id} embedded onSaved={() => void load()} />
+        <BrandRecordForm brandId={brand.id} embedded onSaved={() => void load()}
+          onDirtyChange={setRecordDirty} />
       )}
       {tab === "cycle" && <CommercialCycle brand={brand} brands={brands} />}
       {tab === "golive" && <GoLiveChecklist brandId={brand.id} brandName={brand.name} onBrandChanged={load} />}
@@ -190,6 +202,15 @@ export default function AdminBrandDetail() {
         <BrandKnowledge key={brand.id} brandIdOverride={brand.id} canWriteOverride />
       )}
       {tab === "integrations" && <ShopifyConnection brandId={brand.id} />}
+
+      <ConfirmDialog
+        open={pendingTab !== null}
+        title="Leave the record with unsaved changes?"
+        description="The Record tab is only loaded while you are looking at it, so anything you have typed and not saved is lost when you move away."
+        confirmLabel="Leave and lose them"
+        onConfirm={() => { const t = pendingTab; setPendingTab(null); setRecordDirty(false); if (t) goToTab(t); }}
+        onCancel={() => setPendingTab(null)}
+      />
     </div>
   );
 }

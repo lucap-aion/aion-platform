@@ -86,7 +86,7 @@ export default function NewBrand() {
     if (byHost) return { brand: byHost, on: "website" as const };
     const bySlug = effectiveSlug
       ? existing.find((b) => (b.slug ?? "").toLowerCase() === effectiveSlug) : undefined;
-    if (bySlug) return { brand: bySlug, on: "slug" as const };
+    if (bySlug) return { brand: bySlug, on: "portal address" as const };
     return null;
   }, [existing, url, urlLooksReal, effectiveSlug]);
 
@@ -181,7 +181,7 @@ export default function NewBrand() {
         </label>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-xs uppercase tracking-wide text-muted-foreground">Address</span>
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">Portal address</span>
           <input
             value={slugTouched ? slug : effectiveSlug}
             onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }}

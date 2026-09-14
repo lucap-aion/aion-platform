@@ -60,6 +60,10 @@ export default function DemoPanel({
   // prices in JavaScript. That is a question for the admin, not a failure.
   const needsTicket = (stages?.demo_data?.detail as { needs?: string } | undefined)?.needs === "avg_ticket";
 
+  const nothingToPurge = !!preview
+    && !Object.keys(preview.will_remove ?? {}).length
+    && !preview.will_remove_logins?.length;
+
   const c = counts ?? {};
   const ready = (c.knowledge_chunks ?? 0) > 0 && (c.policies ?? 0) > 0
     && (c.customers ?? 0) > 0 && (c.brand_users ?? 0) > 0;
@@ -183,8 +187,8 @@ export default function DemoPanel({
       )}
 
       {preview ? (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
-          <p className="text-sm font-medium">Hand the account over to {brandName}?</p>
+        <div className={`rounded-lg border p-3 ${nothingToPurge ? "border-border bg-muted/40" : "border-destructive/40 bg-destructive/5"}`}>
+          <p className="text-sm font-medium">Remove the demo data from {brandName}?</p>
           <p className="mt-1 text-xs text-muted-foreground">
             Everything generated for the demo is deleted. Everything harvested from the brand — the
             indexed site, the news, the catalogue, the brand record itself — stays.
@@ -208,7 +212,9 @@ export default function DemoPanel({
             </div>
           </div>
           <div className="mt-3 flex gap-2">
-            <button onClick={() => void confirmPurge()} disabled={busy !== null}
+            {/* Nothing to remove is not a thing to offer to remove. */}
+            <button onClick={() => void confirmPurge()} disabled={busy !== null || nothingToPurge}
+              title={nothingToPurge ? "There is no demo data on this brand" : undefined}
               className="inline-flex items-center gap-2 rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground disabled:opacity-50">
               {busy === "purge" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete the demo data
             </button>

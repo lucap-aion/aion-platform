@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { untyped } from "@/integrations/supabase/untyped";
-import { useToast } from "@/hooks/use-toast";
+import { useToast, toast as showToast } from "@/hooks/use-toast";
 import { useListUrlState } from "@/hooks/useListUrlState";
 import { useNavigate } from "react-router-dom";
 import AdminTable, { StatusBadge } from "./_components/AdminTable";
@@ -91,6 +91,9 @@ const AdminBrands = () => {
   const [deleteTarget, setDeleteTarget] = useState<Brand | null>(null);
   // Brand whose demo-preparation panel is open (lead → demo, in one place).
   const [deleting, setDeleting] = useState(false);
+  const [pipelineFailed, setPipelineFailed] = useState(false);
+  // A live client is not deleted by the same gesture as a test record.
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchData = () => {
@@ -123,7 +126,16 @@ const AdminBrands = () => {
   useEffect(() => {
     void (async () => {
       const { data, error } = await untyped.rpc("commercial_pipeline");
-      if (error) { setPipeline({}); return; }
+      if (error) {
+        // Both cycle columns render "—" on an empty map, which is indistinguishable from a
+        // set of houses nobody has started. Say which of the two it is.
+        setPipeline({}); setPipelineFailed(true);
+        showToast({ title: "Could not read the cycle state",
+                description: `${error.message} — the cycle columns are blank for that reason, not because the deals are untouched.`,
+                variant: "destructive" });
+        return;
+      }
+      setPipelineFailed(false);
       const map: Record<number, PipelineRow> = {};
       for (const r of (data ?? []) as PipelineRow[]) map[r.brand_id] = r;
       setPipeline(map);
@@ -135,8 +147,20 @@ const AdminBrands = () => {
     if (!deleteTarget) return;
     setDeleting(true);
     const { error } = await supabase.from("brands").delete().eq("id", deleteTarget.id);
-    setDeleting(false); setDeleteTarget(null);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    setDeleting(false); setDeleteTarget(null); setDeleteConfirmText("");
+    if (error) {
+      // "update or delete on table brands violates foreign key constraint" is not something
+      // to put in front of anyone, and it is the most likely failure here by far.
+      const fk = /foreign key constraint/i.test(error.message);
+      toast({
+        title: fk ? `${deleteTarget.name} cannot be deleted` : "Could not delete the brand",
+        description: fk
+          ? "It still has covers, clients or claims attached. Those have to go first, and deleting a live programme is rarely what anybody wants — consider leaving it and filtering it out of the list instead."
+          : error.message,
+        variant: "destructive",
+      });
+      return;
+    }
     toast({ title: "Brand deleted" });
     fetchData();
   };
@@ -171,7 +195,6 @@ const AdminBrands = () => {
         onExport={handleExport} exportFilename="brands" exportSchema={BRANDS_SCHEMA}
         onAdd={() => navigate("/admin/brands/new")} addLabel="New Brand"
         rowHref={(row) => `/admin/brands/${(row as unknown as Brand).id}`}
-        onView={(row) => navigate(`/admin/brands/${(row as unknown as Brand).id}`)}
         onEdit={(row) => navigate(`/admin/brands/${(row as unknown as Brand).id}`)}
         onDelete={(row) => setDeleteTarget(row as unknown as Brand)}
         extraRowAction={(row) => {
@@ -224,7 +247,7 @@ const AdminBrands = () => {
           {
             // Not sortable: it is computed by commercial_pipeline() for every brand at once,
             // not a column PostgREST can order the page by.
-            key: "cycle", label: "Stage", sortable: false, width: 200,
+            key: "cycle", label: "Cycle step", sortable: false, width: 200,
             render: (row) => {
               const r = row as unknown as Brand;
               if (!pipeline) return <span className="inline-block h-3.5 w-28 animate-pulse rounded bg-muted" />;
@@ -251,7 +274,9 @@ const AdminBrands = () => {
               if (!pipeline) return <span className="inline-block h-3.5 w-32 animate-pulse rounded bg-muted" />;
               const p = pipeline[r.id];
               const blocking = p && hasCycle(p) ? p.blocking : null;
-              if (!blocking) return <span className="text-muted-foreground">—</span>;
+              if (!blocking) return (
+                <span className="text-muted-foreground">{pipelineFailed ? "unavailable" : "—"}</span>
+              );
               return (
                 <span className="inline-flex min-w-0 items-start gap-1.5 text-amber-700 dark:text-amber-500" title={blocking}>
                   <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -297,12 +322,24 @@ const AdminBrands = () => {
 
       <ConfirmDialog
         open={!!deleteTarget}
-        title="Delete Brand"
-        description={`Delete "${deleteTarget?.name}"? This cannot be undone.`}
+        title={deleteTarget?.is_prospect === false ? `${deleteTarget?.name} is a live client` : `Delete ${deleteTarget?.name}?`}
+        description={deleteTarget?.is_prospect === false
+          ? `This is not a prospect. Deleting it takes its covers, its clients, its claims and everything indexed about it, and none of that comes back. Type ${deleteTarget?.name} below to confirm.`
+          : "This takes the brand and everything attached to it — its catalogue, any demo book of business, and everything indexed from its site. It cannot be undone."}
+        confirmLabel="Delete the brand"
+        confirmDisabled={deleteTarget?.is_prospect === false && deleteConfirmText.trim() !== (deleteTarget?.name ?? "")}
         onConfirm={handleDelete}
-        onCancel={() => setDeleteTarget(null)}
+        onCancel={() => { setDeleteTarget(null); setDeleteConfirmText(""); }}
         loading={deleting}
-      />
+      >
+        {deleteTarget?.is_prospect === false && (
+          <input
+            autoFocus value={deleteConfirmText} onChange={(e) => setDeleteConfirmText(e.target.value)}
+            placeholder={deleteTarget?.name ?? ""}
+            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+          />
+        )}
+      </ConfirmDialog>
     </>
   );
 };

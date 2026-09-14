@@ -6,7 +6,8 @@ import { untyped } from "@/integrations/supabase/untyped";
 // every render — which for a fetcher that sets a loading flag is an infinite
 // loop that never leaves the spinner. This one is module-scoped and stable.
 import { toast } from "@/hooks/use-toast";
-import { Loader2, Plus, Trash2, Check, X } from "lucide-react";
+import { Loader2, Plus, Trash2, Check } from "lucide-react";
+import ConfirmDialog from "./ConfirmDialog";
 import { CATEGORIES, COVERAGES, DAMAGE_SCOPES, type Quote } from "./pricing-model";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -30,8 +31,14 @@ type Draft = {
   claims_allowed: string; source: string; quoted_at: string;
 };
 
-const emptyDraft = (): Draft => ({
-  insurer: "Chubb", quoted_for: "", brand_id: "", category: "jewellery",
+// This panel is always opened from inside ONE brand's pricing step, so a rate typed into it
+// is that brand's rate until somebody says otherwise. It used to default to "not one of
+// ours": a Chubb quote for Ferragamo, entered on Ferragamo's own screen, was recorded as
+// somebody else's and then printed on Ferragamo's deck as "indicative — quoted for a
+// different house". A false sentence, in front of the client, by default.
+const emptyDraft = (brandId?: number, brandName?: string | null): Draft => ({
+  insurer: "Chubb", quoted_for: brandName ?? "", brand_id: brandId ? String(brandId) : "",
+  category: "jewellery",
   coverage: "theft_and_damage", damage_scope: "", rate_pct: "",
   gmv_from: "", gmv_to: "", duration_years: "2",
   claims_allowed: "", source: "", quoted_at: new Date().toISOString().slice(0, 10),
@@ -44,15 +51,31 @@ const num = (s: string): number | null => {
 const eur0 = (n: number | null) =>
   n == null ? null : `€${new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n)}`;
 
-export default function InsurerQuotes({ brands, onChanged }: {
+export default function InsurerQuotes({ brands, brandId, openWith, onChanged }: {
   brands: { id: number; name: string | null }[];
+  /** The house whose pricing step this is. New rates belong to it unless told otherwise. */
+  brandId?: number;
+  /** Open the draft straight away, on the combination that failed to price. */
+  openWith?: { category: string; coverage: string } | null;
   onChanged?: () => void;
 }) {
+  const ownName = brands.find((b) => b.id === brandId)?.name ?? null;
+  const fresh = useCallback(() => emptyDraft(brandId, ownName), [brandId, ownName]);
   const [rows, setRows] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState<Draft>(emptyDraft());
+  const [draft, setDraft] = useState<Draft>(fresh);
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState<Quote | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Arriving from "No rate on file for jewellery (theft + damage)" should not mean finding
+  // this panel, pressing Add, and then re-selecting the two things that just failed.
+  useEffect(() => {
+    if (!openWith) return;
+    setDraft({ ...fresh(), category: openWith.category, coverage: openWith.coverage });
+    setAdding(true);
+  }, [openWith, fresh]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,7 +128,7 @@ export default function InsurerQuotes({ brands, onChanged }: {
     setSaving(false);
     if (error) { toast({ title: "Could not save", description: error.message, variant: "destructive" }); return; }
     toast({ title: "Quote saved" });
-    setDraft(emptyDraft()); setAdding(false);
+    setDraft(fresh()); setAdding(false);
     await load(); onChanged?.();
   };
 
@@ -116,11 +139,19 @@ export default function InsurerQuotes({ brands, onChanged }: {
   };
 
   const remove = async (q: Quote) => {
+    setDeleting(true);
     const { error } = await untyped.from("insurance_quotes").delete().eq("id", q.id);
+    setDeleting(false); setConfirming(null);
     if (error) { toast({ title: "Could not delete", description: error.message, variant: "destructive" }); return; }
     toast({ title: "Quote deleted" });
     await load(); onChanged?.();
   };
+
+  /** What this rate is, in one sentence, for a confirmation that names what it is removing. */
+  const describe = (q: Quote) =>
+    `${(q.rate_of_cogs * 100).toFixed(2)}% of COGS for ${q.category}, ` +
+    `${q.coverage === "theft" ? "theft only" : "theft and damage"}` +
+    `${q.quoted_for ? `, quoted for ${q.quoted_for}` : ""}`;
 
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const field = "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground";
@@ -220,7 +251,7 @@ export default function InsurerQuotes({ brands, onChanged }: {
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save quote
             </button>
-            <button onClick={() => { setAdding(false); setDraft(emptyDraft()); }}
+            <button onClick={() => { setAdding(false); setDraft(fresh()); }}
               className="rounded-lg border border-border px-3 py-1.5 text-sm">Cancel</button>
           </div>
         </div>
@@ -280,11 +311,12 @@ export default function InsurerQuotes({ brands, onChanged }: {
                   <td className="py-2 pr-3 text-muted-foreground">{q.quoted_at ?? "—"}</td>
                   <td className="py-2 pr-3">
                     <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => void toggle(q)} title={q.active ? "Stop using this rate" : "Use this rate again"}
-                        className="rounded p-1 text-muted-foreground hover:text-foreground">
-                        {q.active ? <X className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+                      <button onClick={() => void toggle(q)}
+                        title={q.active ? "Stop pricing from this rate" : "Price from this rate again"}
+                        className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground">
+                        {q.active ? "In use" : "Not in use"}
                       </button>
-                      <button onClick={() => void remove(q)} title="Delete"
+                      <button onClick={() => setConfirming(q)} title="Delete this rate"
                         className="rounded p-1 text-muted-foreground hover:text-destructive">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -296,6 +328,18 @@ export default function InsurerQuotes({ brands, onChanged }: {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirming !== null}
+        title="Delete this rate?"
+        description={confirming
+          ? `${describe(confirming)}. Every brand's business case prices from this table, so any segment that was matching this rate will stop pricing. To stop using it without losing it, set it to "not in use" instead.`
+          : ""}
+        confirmLabel="Delete the rate"
+        loading={deleting}
+        onConfirm={() => confirming && void remove(confirming)}
+        onCancel={() => setConfirming(null)}
+      />
     </div>
   );
 }

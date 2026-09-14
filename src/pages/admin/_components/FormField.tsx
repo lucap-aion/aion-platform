@@ -44,15 +44,25 @@ interface SaveBarProps {
   onCancel: () => void;
   loading?: boolean;
   label?: string;
+  /** What the left-hand button says. "Cancel" means dismiss; "Discard changes" means revert. */
+  cancelLabel?: string;
+  /** Nothing to cancel, so the button says so rather than pretending. */
+  cancelDisabled?: boolean;
+  /** A word about the state of the form, next to the buttons. */
+  note?: string;
 }
-export const SaveBar = ({ onCancel, loading, label = "Save" }: SaveBarProps) => (
-  <div className="flex justify-end gap-2 pt-4 border-t border-border mt-4">
+// Sticky, because the form it closes is long enough that the save button was off-screen for
+// most of the editing — and a save you have to go looking for is a save people skip.
+export const SaveBar = ({ onCancel, loading, label = "Save", cancelLabel = "Cancel", cancelDisabled, note }: SaveBarProps) => (
+  <div className="sticky bottom-0 z-10 -mx-1 mt-4 flex items-center justify-end gap-2 border-t border-border bg-background/95 px-1 py-3 backdrop-blur">
+    {note && <span className="mr-auto text-xs text-muted-foreground">{note}</span>}
     <button
       type="button"
       onClick={onCancel}
-      className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
+      disabled={cancelDisabled}
+      className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
     >
-      Cancel
+      {cancelLabel}
     </button>
     <button
       type="submit"

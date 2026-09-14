@@ -79,11 +79,14 @@ describe("a new brand starts itself", () => {
     await waitFor(() => expect(inserted).toHaveLength(0));
   });
 
-  it("refuses an address another brand already answers on", async () => {
+  it("refuses a portal address another brand already answers on", async () => {
     await mount();
     fill("RC Jewels", "rcjewels.example.com");
     fireEvent.change(screen.getByPlaceholderText("brand-name"), { target: { value: "rc" } });
-    expect(await screen.findByText(/already uses that slug/i)).toBeTruthy();
+    // The field, the hint and the clash banner now all call it the same thing. It used to be
+    // labelled "Address" — which on the very next screen means a street — and the banner
+    // said "slug", a third word for the same idea inside one journey.
+    expect(await screen.findByText(/already uses that portal address/i)).toBeTruthy();
     submit();
     await waitFor(() => expect(inserted).toHaveLength(0));
   });

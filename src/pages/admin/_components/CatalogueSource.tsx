@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { untyped } from "@/integrations/supabase/untyped";
 import { toast } from "@/hooks/use-toast";
-import { Loader2, Check, AlertCircle, Package } from "lucide-react";
+import { Loader2, Check, AlertCircle, Package, RefreshCw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // Where a brand's catalogue comes from.
@@ -31,6 +32,21 @@ export default function CatalogueSource({ brandId, products, onSaved }: {
   const [row, setRow] = useState<Source | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [reading, setReading] = useState(false);
+
+  // The save used to end with "Re-run the Catalogue stage above", and there is no such
+  // control on this panel: "above" meant the pipeline at the top of the tab, past the demo
+  // panel and the whole step list. Until you found it, pasting a URL appeared to do nothing.
+  const readNow = async () => {
+    setReading(true);
+    const { error } = await supabase.functions.invoke("onboard-brand", {
+      body: { brand_id: brandId, action: "start", stages: ["storefront"] },
+    });
+    setReading(false);
+    if (error) { toast({ title: "Could not start the read", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Reading the catalogue", description: "It runs on the server and lands on its own — you can leave the page." });
+    onSaved?.();
+  };
   const [baseUrl, setBaseUrl] = useState("");
   const [keepUntyped, setKeepUntyped] = useState(false);
   const [enabled, setEnabled] = useState(true);
@@ -70,7 +86,7 @@ export default function CatalogueSource({ brandId, products, onSaved }: {
     } as never, { onConflict: "brand_id" });
     setSaving(false);
     if (error) { toast({ title: "Could not save", description: error.message, variant: "destructive" }); return; }
-    toast({ title: "Catalogue source saved", description: "Re-run the Catalogue stage above — it works out whether that URL is a shop or a product feed." });
+    toast({ title: "Catalogue source saved", description: "Read it now to find out whether that URL is a shop or a product feed." });
     await load(); onSaved?.();
   };
 
@@ -93,7 +109,11 @@ export default function CatalogueSource({ brandId, products, onSaved }: {
     );
   }
 
-  const dead = !row || row.platform === "none" || !row.enabled;
+  // Three different states wore the same alarm. Pausing the sync on purpose is not the
+  // same as having no source, and saying "No catalogue source registered" directly under a
+  // line reading "412 products · last synced 12 Mar" is simply false.
+  const paused = !!row && row.enabled === false && row.platform !== "none";
+  const dead = !row || row.platform === "none" || (!row.enabled && !paused);
   const dirty = row ? (baseUrl.trim().replace(/\/+$/, "") !== row.base_url || keepUntyped !== row.keep_untyped || enabled !== row.enabled) : baseUrl.trim() !== "";
 
   return (
@@ -106,11 +126,14 @@ export default function CatalogueSource({ brandId, products, onSaved }: {
         </span>
       </div>
 
-      {dead && (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs">
-          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+      {(dead || paused) && (
+        <div className={`flex items-start gap-2 rounded-lg border p-2.5 text-xs ${
+          paused ? "border-border bg-muted/40" : "border-amber-500/40 bg-amber-500/10"}`}>
+          <AlertCircle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${paused ? "text-muted-foreground" : "text-amber-600"}`} />
           <span>
-            {row?.platform === "blocked"
+            {paused
+              ? "Sync is paused for this brand. The pieces already read stay where they are; nothing new arrives until you switch it back on."
+              : row?.platform === "blocked"
               ? "This site answers a bot challenge rather than its catalogue. Ask the house for its product feed — the file it already publishes for Google Shopping — and paste the URL here."
               : row?.platform === "none"
               ? "No product feed was found on this site. Paste a shop origin, or the product feed the house publishes for Google Shopping — either works."
@@ -134,6 +157,11 @@ export default function CatalogueSource({ brandId, products, onSaved }: {
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           Sync enabled
         </label>
+        <button onClick={() => void readNow()} disabled={saving || reading || !row}
+          title="Runs the catalogue stage for this brand"
+          className="mb-0.5 inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs disabled:opacity-50">
+          {reading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Read it now
+        </button>
         <button onClick={() => void save()} disabled={saving || !dirty}
           className="mb-0.5 inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs disabled:opacity-50">
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save
