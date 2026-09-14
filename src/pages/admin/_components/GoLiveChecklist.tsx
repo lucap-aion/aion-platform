@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 // The standalone `toast`, not `useToast().toast` — the hook returns a fresh object every
 // render, so a fetcher that depends on it never stops re-running.
 import { toast } from "@/hooks/use-toast";
-import { Check, Loader2, MessageSquare, X, Sparkles, BadgeCheck, AlertCircle } from "lucide-react";
+import { Check, Loader2, MessageSquare, X, Sparkles, BadgeCheck } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
@@ -192,14 +192,14 @@ export default function GoLiveChecklist(
           <div className="min-w-0">
             <h3 className="font-serif text-lg text-foreground">
               {blockingLeft > 0
-                ? `${brandName ?? "This brand"} is not ready to go live`
+                ? `Before ${brandName ?? "this brand"} can go live`
                 : left > 0
                 ? `Nothing is blocking ${brandName ?? "this brand"}`
                 : `${brandName ?? "This brand"} is ready`}
             </h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {blockingLeft > 0
-                ? "These have to be true before it can issue a real cover."
+                ? `${blockingLeft} ${blockingLeft === 1 ? "thing has" : "things have"} to be true before it can issue a real cover. A dot means the platform has something specific to say.`
                 : left > 0
                 ? `${left} ${left === 1 ? "item is" : "items are"} still open, none of them blocking.`
                 : "Every item on the list is behind you."}
@@ -225,8 +225,9 @@ export default function GoLiveChecklist(
           <div className="mt-3 flex flex-wrap gap-1.5">
             {blocking.map(({ item, because }) => (
               <button key={item.key} type="button" onClick={() => setFilter("blocking")} title={because ?? item.detail}
-                className="inline-flex items-center gap-1.5 rounded-full border border-destructive/40 bg-destructive/5 px-2.5 py-1 text-[11px] text-destructive hover:bg-destructive/10">
-                <AlertCircle className="h-3 w-3" /> {item.title}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] text-foreground hover:border-foreground/40">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${because ? "bg-amber-500" : "bg-muted-foreground/40"}`} />
+                {item.title}
               </button>
             ))}
           </div>
@@ -316,7 +317,7 @@ export default function GoLiveChecklist(
                             {item.title}
                           </p>
                           {item.blocking && !isDone && (
-                            <span className="rounded bg-destructive/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-destructive">blocking</span>
+                            <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">blocking</span>
                           )}
                           {auto && (
                             <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
