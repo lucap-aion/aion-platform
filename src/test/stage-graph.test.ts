@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { blockedBy, BLOCKS, PIPELINE_ORDER, type StageName } from "../../supabase/functions/_shared/stage-graph.ts";
+import { blockedBy, BLOCKS, PIPELINE_ORDER, revivableStages, type StageName } from "../../supabase/functions/_shared/stage-graph.ts";
 
 // Which stages a failure takes down with it. Getting this too wide is what left Ferragamo
 // with no client documents, no assistant check, no ops deck and no data request — because
@@ -56,5 +56,43 @@ describe("what a failure stops", () => {
     const block = /const ALL_STAGES = \[([\s\S]*?)\] as const;/.exec(src);
     const keys = [...block![1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
     expect([...PIPELINE_ORDER]).toEqual(keys);
+  });
+});
+
+// A house that blocks us entirely broke the chain in a way nothing could see: `demo_data`
+// skipped for want of a catalogue, and `demo_users` was left 'pending' with its queue slot
+// cleared — invisible to the tick, which needs a slot, and to the revive, which needs the
+// row to say 'skipped'. Zegna sat like that indefinitely. These cover the rule that decides
+// what may come back.
+describe("what may be revived once a stage lands", () => {
+  it("brings back a stage that was only ever waiting for it", () => {
+    expect(revivableStages("demo_data", [
+      { stage: "demo_users", detail: { blocked: true, waiting_for: "demo_data" } },
+    ])).toEqual(["demo_users"]);
+  });
+
+  it("brings back the stages a catalogue unblocks", () => {
+    expect(revivableStages("storefront", [
+      { stage: "intro_deck", detail: { terminal: true } },
+      { stage: "demo_data", detail: { terminal: true } },
+    ]).sort()).toEqual(["demo_data", "intro_deck"]);
+  });
+
+  it("never revives a stage held back by policy", () => {
+    expect(revivableStages("storefront", [
+      { stage: "demo_data", detail: { blocked: true, policy: true, reason: "not a prospect" } },
+      { stage: "intro_deck", detail: { terminal: true } },
+    ])).toEqual(["intro_deck"]);
+  });
+
+  it("ignores rows that never depended on the stage that landed", () => {
+    expect(revivableStages("demo_data", [
+      { stage: "documents", detail: { terminal: true } },
+      { stage: "ops_deck", detail: { terminal: true } },
+    ])).toEqual([]);
+  });
+
+  it("treats a missing detail as waiting, not as policy", () => {
+    expect(revivableStages("demo_data", [{ stage: "demo_users" }])).toEqual(["demo_users"]);
   });
 });

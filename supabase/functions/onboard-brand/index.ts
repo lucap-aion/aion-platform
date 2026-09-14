@@ -34,7 +34,7 @@ import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } fro
 // When the house's own site does not say: a search engine has already read those pages.
 import { searchIdentity } from "../_shared/brand-search.ts";
 // What a failure actually stops, and why it is not "everything queued behind it".
-import { blockedBy, type StageName } from "../_shared/stage-graph.ts";
+import { blockedBy, revivableStages, type StageName } from "../_shared/stage-graph.ts";
 import { refusalKeepsSource } from "../_shared/storefront-source.ts";
 import { rankCatalogueUrls, catalogueSample } from "../_shared/catalogue-urls.ts";
 // The last resort when no page of a site can be read: its own sitemap names the pieces and
@@ -275,7 +275,8 @@ Deno.serve(async (req: Request) => {
     const runnable = wanted.filter((s) => demoOk || !(DEMO_STAGES as readonly string[]).includes(s));
     const skipped = wanted.filter((s) => !(runnable as string[]).includes(s));
     for (const s of skipped) {
-      await setStage(admin, brandId, s, "skipped", { blocked: true, reason: demoBlockedForBrandReason(brand) });
+      await setStage(admin, brandId, s, "skipped",
+        { blocked: true, policy: true, reason: demoBlockedForBrandReason(brand) });
     }
     const { error } = await admin.rpc("queue_onboarding_stages", { p_brand_id: brandId, p_stages: runnable });
     if (error) return json({ error: error.message }, 500);
@@ -313,15 +314,31 @@ Deno.serve(async (req: Request) => {
 
         await setStage(admin, brandId, stage, outcomeOf(out, ok), out,
           ok ? null : String((out as { reason?: string }).reason ?? "stage did not complete"));
+
+        // A stage that lands may be exactly what something else gave up waiting for.
+        // Reviving was wired by hand INSIDE the storefront stage and nowhere else, so
+        // `demo_users` never came back after `demo_data` finally ran.
+        const revived = ok ? await reviveSkipped(admin, brandId, stage) : [];
+
         // Cancel only what actually needed this stage. Everything else keeps its place in
         // the queue: a house with no product feed should still get its documents, its
         // assistant check, its ops deck and its data request.
         const blocked = ok ? [] : blockedBy(stage);
         if (blocked.length) {
-          await admin.from("brand_onboarding").update({ queued_at: null })
-            .eq("brand_id", brandId).eq("status", "pending").in("stage", blocked);
+          // SKIPPED, not left pending. Clearing the queue slot and leaving the row
+          // 'pending' hid it twice over: the tick only takes rows that have a queue slot,
+          // and reviveSkipped only takes rows marked 'skipped'. The row was therefore
+          // unreachable by either, for good — Zegna's `demo_users` sat like that while the
+          // brand read as having work still to do and nothing on earth to do it.
+          await admin.from("brand_onboarding").update({
+            status: "skipped", queued_at: null, updated_at: new Date().toISOString(),
+            detail: {
+              blocked: true, waiting_for: stage,
+              reason: `${stage.replace(/_/g, " ")} did not produce what this stage reads, so there was nothing to run on`,
+            },
+          }).eq("brand_id", brandId).eq("status", "pending").in("stage", blocked);
         }
-        return { ok, stage, blocked, result: out };
+        return { ok, stage, blocked, ...(revived.length ? { revived } : {}), result: out };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         await setStage(admin, brandId, stage, "failed", {}, msg);
@@ -388,7 +405,7 @@ Deno.serve(async (req: Request) => {
     }
     if ((DEMO_STAGES as readonly string[]).includes(stage) && !demoAllowedForBrand(brand)) {
       const reason = demoBlockedForBrandReason(brand);
-      await setStage(admin, brandId, stage, "skipped", { blocked: true, reason });
+      await setStage(admin, brandId, stage, "skipped", { blocked: true, policy: true, reason });
       results[stage] = { ok: true, skipped: true, reason };
       continue;
     }
@@ -1318,9 +1335,13 @@ async function reviveSkipped(
   const downstream = blockedBy(after);
   if (!downstream.length) return [];
   const { data } = await admin.from("brand_onboarding")
-    .select("stage")
+    .select("stage, detail")
     .eq("brand_id", brandId).eq("status", "skipped").in("stage", downstream);
-  const stages = ((data ?? []) as { stage: string }[]).map((r) => r.stage);
+  // "It could not run yet" and "it must not run for this house" are both skips, and only
+  // the first one is waiting for anything. A client that never asked for a demo has its
+  // demo stages skipped by policy; reviving those would manufacture a book of invented
+  // customers and covers on a real brand's account the moment its catalogue synced.
+  const stages = revivableStages(after, (data ?? []) as { stage: string; detail: Record<string, unknown> | null }[]);
   if (!stages.length) return [];
   const { error } = await admin.rpc("queue_onboarding_stages", { p_brand_id: brandId, p_stages: stages });
   if (error) { console.error("[onboard-brand] could not revive", error.message); return []; }

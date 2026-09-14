@@ -52,3 +52,26 @@ export function blockedBy(stage: StageName): StageName[] {
   walk(stage);
   return [...out];
 }
+
+/** A skipped row, as much of it as the revive decision needs. */
+export type SkippedRow = { stage: string; detail?: Record<string, unknown> | null };
+
+/**
+ * Of the stages that could not run without `after`, which skipped ones may go back in the
+ * queue now that it has landed.
+ *
+ * Two different things wear the same "skipped" badge. One is "it could not run yet": no
+ * catalogue, nothing indexed, the thing it reads was not there. That one is waiting, and
+ * when the input arrives it should run. The other is "it must not run for this house" —
+ * the demo stages on a brand that is a client rather than a prospect — and it is not
+ * waiting for anything. Reviving that kind would invent a book of customers and covers on
+ * a real client's account the first time its catalogue synced, which is why policy skips
+ * are marked and excluded here rather than sorted out by reading their reason text.
+ */
+export function revivableStages(after: StageName, rows: SkippedRow[]): string[] {
+  const downstream = new Set<string>(blockedBy(after));
+  return rows
+    .filter((r) => downstream.has(r.stage))
+    .filter((r) => (r.detail ?? {}).policy !== true)
+    .map((r) => r.stage);
+}

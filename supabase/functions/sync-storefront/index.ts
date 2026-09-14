@@ -273,6 +273,13 @@ async function syncBrand(
     }));
   }
 
+  // A pass that touched this house is worth recording. Nothing had ever written this
+  // column: it exists, the catalogue panel on the brand page reads it, and so every house
+  // has always read "last synced never" however recently the sync ran — which is exactly
+  // how a working automation is mistaken for one that never starts.
+  await admin.from("storefront_sources")
+    .update({ last_synced_at: new Date().toISOString() }).eq("brand_id", brandId);
+
   const remaining = Math.max(0, remainingBefore - embedded);
   return {
     brand_id: brandId, products: products.length, upserted: rows.length,
