@@ -35,6 +35,7 @@ import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } fro
 import { searchIdentity } from "../_shared/brand-search.ts";
 // What a failure actually stops, and why it is not "everything queued behind it".
 import { blockedBy, type StageName } from "../_shared/stage-graph.ts";
+import { refusalKeepsSource } from "../_shared/storefront-source.ts";
 import { rankCatalogueUrls, catalogueSample } from "../_shared/catalogue-urls.ts";
 // The last resort when no page of a site can be read: its own sitemap names the pieces and
 // the packshots, and the item code joins them.
@@ -767,8 +768,9 @@ async function runStage(
     // and the only source that stays current without us doing anything. Tried first,
     // because it is one request and it settles the question.
     const { data: configured } = await admin.from("storefront_sources")
-      .select("base_url").eq("brand_id", brandId).maybeSingle();
-    const typedIn = String((configured as { base_url?: string } | null)?.base_url ?? "").trim();
+      .select("base_url, platform, enabled").eq("brand_id", brandId).maybeSingle();
+    const prior = configured as { base_url?: string; platform?: string; enabled?: boolean } | null;
+    const typedIn = String(prior?.base_url ?? "").trim();
     if (typedIn && typedIn.replace(/\/+$/, "") !== base.replace(/\/+$/, "")) {
       const items = await detectFeed(typedIn, deadline);
       if (items > 0) {
@@ -829,6 +831,23 @@ async function runStage(
       // downstream mistakes a locked door for an empty shop.
       const blocked = structured.found === 0 && structured.refused > 0 &&
         structured.refused >= Math.ceil(structured.tried / 2);
+
+      // A refusal is a statement about a firewall, not about the house. When we already
+      // hold a catalogue that a working source delivered, it does not get written over —
+      // see the reasoning in _shared/storefront-source.ts.
+      const { count: heldCount } = await admin.from("storefront_products")
+        .select("id", { count: "exact", head: true }).eq("brand_id", brandId);
+      const held = heldCount ?? 0;
+      const priorPlatform = String(prior?.platform ?? "");
+      if (refusalKeepsSource({ blocked, heldProducts: held, prior })) {
+        await admin.from("storefront_sources")
+          .update({ detected_at: new Date().toISOString() })
+          .eq("brand_id", brandId);
+        return {
+          ok: true, platform: priorPlatform, products: held, refused: structured.refused,
+          note: `the site refused ${structured.refused} of ${structured.tried} requests this pass — it is answering a bot challenge rather than the catalogue. The ${held} pieces already read stay, and so does the ${priorPlatform} source that read them: being turned away today is not a finding about this house. If the refusals persist the sync will stop bringing in new pieces, and the fix is the product feed the house publishes for Google Shopping — paste its URL on the catalogue source.`,
+        };
+      }
 
       await admin.from("storefront_sources").upsert(
         {
