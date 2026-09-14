@@ -4,6 +4,8 @@ import {
   ALL_ITEMS,
   checklistProgress,
   isItemDone,
+  filterChecklist,
+  blockingItems,
   type ChecklistState,
 } from "@/lib/goLiveChecklist";
 
@@ -101,5 +103,67 @@ describe("what the checklist can see for itself", () => {
     expect(verify.evidence).toBeTruthy();
     // And it says what verifying DOES, so nobody clicks it on a prospect by accident.
     expect(verify.detail.toLowerCase()).toContain("anonymous visitors");
+  });
+});
+
+
+// The screen lands on what is LEFT rather than on all thirty-three rows, so "which items
+// does each view mean" is a rule, not a detail of the markup.
+describe("what each view shows", () => {
+  const someDone = stateOf(ALL_ITEMS.filter((i) => !i.blocking).map((i) => i.key));
+
+  it("to do hides everything already behind you", () => {
+    const shown = filterChecklist("todo", someDone).flatMap((g) => g.items);
+    expect(shown.length).toBe(ALL_ITEMS.filter((i) => i.blocking).length);
+    expect(shown.every((i) => !isItemDone(i.key, someDone))).toBe(true);
+  });
+
+  it("blocking shows only the items that stop a launch", () => {
+    const shown = filterChecklist("blocking", {}).flatMap((g) => g.items);
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.every((i) => i.blocking === true)).toBe(true);
+  });
+
+  it("everything shows every item whatever its state", () => {
+    const shown = filterChecklist("all", someDone).flatMap((g) => g.items);
+    expect(shown.length).toBe(ALL_ITEMS.length);
+  });
+
+  it("counts an item the platform detected as done, not as work", () => {
+    const key = ALL_ITEMS.find((i) => i.evidence)!.key;
+    const shown = filterChecklist("todo", {}, { [key]: true }).flatMap((g) => g.items);
+    expect(shown.some((i) => i.key === key)).toBe(false);
+  });
+
+  it("marks a group settled only when all of it is done", () => {
+    const group = GO_LIVE_CHECKLIST[0];
+    const all = stateOf(group.items.map((i) => i.key));
+    const groups = filterChecklist("todo", all);
+    expect(groups.find((g) => g.group.key === group.key)!.settled).toBe(true);
+    expect(groups.find((g) => g.group.key !== group.key)!.settled).toBe(false);
+  });
+
+  it("always returns every group, so a settled one can still be opened", () => {
+    expect(filterChecklist("blocking", {}).length).toBe(GO_LIVE_CHECKLIST.length);
+  });
+});
+
+describe("the blocking items named in the header", () => {
+  it("lists only blocking items that are not done", () => {
+    const all = blockingItems({});
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.every((b) => b.item.blocking)).toBe(true);
+  });
+
+  it("puts the ones with a real diagnosis first", () => {
+    const withReason = ALL_ITEMS.find((i) => i.blocking && i.evidence)!;
+    const sorted = blockingItems({}, { [withReason.key]: "still missing: a test credential" });
+    expect(sorted[0].item.key).toBe(withReason.key);
+    expect(sorted[0].because).toBe("still missing: a test credential");
+  });
+
+  it("drops an item once it is ticked", () => {
+    const one = ALL_ITEMS.find((i) => i.blocking)!;
+    expect(blockingItems(stateOf([one.key])).some((b) => b.item.key === one.key)).toBe(false);
   });
 });

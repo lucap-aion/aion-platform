@@ -65,6 +65,14 @@ export default function PipelinePanel({
 
   const visible = PIPELINE_STAGES.filter((s) => demoAllowed || !s.demo);
   const summary = summarisePipeline(stages, visible);
+  // Everything ran and nothing needs anybody. Ten green chips over two rows, above the work
+  // somebody actually opened this tab to do, is a record of the past presented as the
+  // present — so it folds to its one line, and opens again on a click.
+  const settled = summary.total > 0 && !summary.active
+    && summary.failed.length === 0 && summary.asking.length === 0
+    && summary.done === summary.total;
+  const [folded, setFolded] = useState(false);
+  useEffect(() => { setFolded(settled); }, [settled]);
   const at = (s: PipelineStage) => stageDisplayState(stages?.[s.key], busy === s.key);
 
   // Open on the stage that needs a person: a stalled claim first, then the first failure,
@@ -151,6 +159,13 @@ export default function PipelinePanel({
           {summary.total > 0 && (
             <span className="text-xs tabular-nums text-muted-foreground">{summary.done} of {summary.total} done</span>
           )}
+          {settled && (
+            <button onClick={() => setFolded((f) => !f)}
+              aria-expanded={!folded}
+              className="text-xs text-muted-foreground hover:text-foreground">
+              {folded ? "Show stages" : "Hide"}
+            </button>
+          )}
           <button
             onClick={() => void run(visible.map((s) => s.key))}
             disabled={!website || busy !== null || summary.active}
@@ -165,7 +180,7 @@ export default function PipelinePanel({
 
       {/* Indeterminate on purpose: the stages take wildly different times — a crawl is
           minutes, a deck is seconds — so a percentage would be a lie that appears to stall. */}
-      {summary.total > 0 && (
+      {summary.total > 0 && !folded && (
         <div className="mx-4 h-1 overflow-hidden rounded-full bg-primary/15">
           <div
             className={`h-full rounded-full transition-all duration-700 ${
@@ -175,7 +190,7 @@ export default function PipelinePanel({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-1.5 p-4 pt-3">
+      {!folded && <div className="flex flex-wrap gap-1.5 p-4 pt-3">
         {visible.map((s) => {
           const state = at(s);
           return (
@@ -191,9 +206,9 @@ export default function PipelinePanel({
             </button>
           );
         })}
-      </div>
+      </div>}
 
-      {openStage && (
+      {openStage && !folded && (
         <div className="border-t border-border/60 bg-background/60 p-4">
           <div className="flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1">

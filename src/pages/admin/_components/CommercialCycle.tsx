@@ -16,8 +16,8 @@ import CatalogueSource from "./CatalogueSource";
 import BusinessCasePanel, { type StoredBusinessCase } from "./BusinessCasePanel";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  CYCLE_STEPS, STEP_STATES, PIPELINE_STAGES, stepStateLabel, stepIsBuilding,
-  summarisePipeline, type StageState, type StepNumber,
+  CYCLE_STEPS, STEP_STATES, PIPELINE_STAGES, stepIsBuilding, nextAction,
+  summarisePipeline, type StageState, type StepNumber, type NextAction,
 } from "@/lib/commercialCycle";
 
 // The commercial cycle for one brand.
@@ -255,14 +255,42 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
     } finally { setBusy(null); }
   };
 
+  // The build each step performs, by number — so the card at the top can press the same
+  // button the step does, instead of telling somebody to go and find it.
+  const runStep = (n: StepNumber) => {
+    if (n === 1) return void build(1, "brand-deck", {});
+    if (n === 2) return void build(2, "build-collateral", { kind: "data_request" });
+    if (n === 5) return void build(5, "build-collateral", { kind: "operations" });
+    // 3 is an account and 4 is a conversation about numbers: both need their own panel.
+    openStep(n);
+  };
+
   const c = overview?.counts ?? {};
 
+  const next = nextAction({
+    website: brand.website,
+    pipeline,
+    progress: overview?.progress,
+    artifacts: overview?.artifacts,
+    perimeterDeclared: (overview?.business_case?.segments?.length ?? 0) > 0,
+    demoAllowed: demo?.allowed === true,
+    products: c.products ?? 0,
+  });
+
   return (
-    <div className="space-y-5">
-      <p className="max-w-2xl text-sm text-muted-foreground">
-        The five steps from first meeting to operations review, and everything they produce.
-        The order is a default — steps swap around, and nothing here stops you doing them out of sequence.
-      </p>
+    <div className="space-y-4">
+      {/* WHAT TO DO NOW.
+          This screen used to answer "where is this deal" three times over and "what do I do
+          next" nowhere: five collapsed steps, and the only way to find the one waiting on
+          you was to open all of them. */}
+      {!loadingBrand && (
+        <NextCard
+          next={next}
+          busy={busy !== null}
+          onOpen={() => next.step && openStep(next.step)}
+          onBuild={next.kind === "build" && next.step ? () => runStep(next.step as StepNumber) : null}
+        />
+      )}
 
       {/* The pipeline, once. */}
       <PipelinePanel
@@ -275,14 +303,13 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
         onQueued={() => void load()}
       />
 
-      <div className="flex flex-wrap items-center gap-4 rounded-xl border border-border p-4">
+      <div className="flex flex-wrap items-center gap-4 px-1">
         {loadingBrand ? (
           <div className="flex flex-wrap items-center gap-2">
-            {[16, 20, 28, 16, 16].map((w, i) => <Skeleton key={i} className="h-4" style={{ width: `${w * 4}px` }} />)}
+            {[16, 20, 28].map((w, i) => <Skeleton key={i} className="h-4" style={{ width: `${w * 4}px` }} />)}
           </div>
         ) : (
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <CycleProgress progress={overview?.progress} onJump={openStep} />
             <span>{c.products ?? 0} products</span>
             <span>{c.knowledge_chunks ?? 0} chunks indexed</span>
           </div>
@@ -321,8 +348,10 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
           const building = stepIsBuilding(step.n, overview?.stages);
           return (
             <div key={step.n} className={`rounded-xl border ${!loadingBrand && state === "done" ? "border-emerald-500/40" : "border-border"}`}>
-              <button onClick={() => openStep(isOpen ? null : step.n)}
-                className="flex w-full items-start gap-3 p-4 text-left">
+              <div className="flex w-full items-start gap-3 p-4">
+                <button onClick={() => openStep(isOpen ? null : step.n)}
+                  aria-expanded={isOpen}
+                  className="flex min-w-0 flex-1 items-start gap-3 text-left">
                 <span className="mt-0.5 shrink-0">
                   {loadingBrand ? <Skeleton className="h-5 w-5 rounded-full" />
                     : state === "done" ? <Check className="h-5 w-5 text-emerald-600" />
@@ -353,10 +382,39 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
                     )}
                   </div>
                 </div>
-                <span className="mt-0.5 shrink-0 text-muted-foreground">
-                  {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                </span>
-              </button>
+                </button>
+
+                {/* The file and the button that makes it, without opening anything. Getting
+                    the deck to send was four clicks: open the step, read past a status
+                    form, press Build, then find the download. */}
+                <div className="flex shrink-0 items-center gap-2">
+                  {!loadingBrand && art?.download_url && (
+                    <a href={art.download_url} target="_blank" rel="noreferrer" title={art.file_name}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs hover:bg-muted">
+                      <Download className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Download</span>
+                    </a>
+                  )}
+                  {!loadingBrand && step.artifact && (
+                    <button onClick={() => runStep(step.n)}
+                      disabled={busy === `step${step.n}` || building || (step.n === 1 && !brand?.website)}
+                      // Named for what it would do, not for the word on it: "Build" five
+                      // times over tells a screen reader nothing, and while the pipeline
+                      // owns the step the honest name is that it is already happening.
+                      aria-label={building ? `${step.action} — the pipeline is building this` : step.action}
+                      title={building ? "The pipeline is handling this" : step.action}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs disabled:opacity-40">
+                      {busy === `step${step.n}` || building
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <RefreshCw className="h-3.5 w-3.5" />}
+                      <span className="hidden sm:inline">{art ? "Rebuild" : "Build"}</span>
+                    </button>
+                  )}
+                  <button onClick={() => openStep(isOpen ? null : step.n)} aria-label={isOpen ? "Collapse" : "Expand"}
+                    className="p-1 text-muted-foreground hover:text-foreground">
+                    {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
 
               {isOpen && (
                 <div className="space-y-4 border-t border-border p-4">
@@ -480,41 +538,57 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
   );
 }
 
-// How far along this deal is, at a glance.
+// WHAT TO DO NOW, in one line and one button.
 //
-// Five segments, one per step, in the step's own colour. It gives progress its due, it is
-// honest about what is and is not finished, and each segment jumps to its step.
-function CycleProgress({ progress, onJump }: {
-  progress?: Record<string, ProgressRow>;
-  onJump: (step: number) => void;
+// Everything it shows is derived — see nextAction() — so it cannot say something different
+// from the steps underneath it.
+function NextCard({ next, busy, onOpen, onBuild }: {
+  next: NextAction; busy: boolean; onOpen: () => void; onBuild: (() => void) | null;
 }) {
-  const stateOf = (n: number) => progress?.[String(n)]?.state ?? "not_started";
-  const count = (st: string) => CYCLE_STEPS.filter((s) => stateOf(s.n) === st).length;
-  const done = count("done"), active = count("in_progress"), skipped = count("skipped");
+  const tone =
+    next.kind === "blocked" ? "border-amber-500/40 bg-amber-500/5"
+    : next.kind === "done" ? "border-emerald-500/40 bg-emerald-500/5"
+    : next.kind === "waiting" ? "border-primary/30 bg-primary/5"
+    : "border-border bg-muted/30";
 
-  const parts = [
-    done ? `${done} done` : null,
-    active ? `${active} in progress` : null,
-    skipped ? `${skipped} skipped` : null,
-  ].filter(Boolean);
+  const Icon =
+    next.kind === "blocked" ? AlertCircle
+    : next.kind === "waiting" ? Loader2
+    : next.kind === "done" ? Check
+    : next.kind === "record" ? CircleDot
+    : next.kind === "open" ? ChevronRight
+    : FileText;
 
   return (
-    <span className="flex items-center gap-2">
-      <span className="flex items-center gap-0.5" aria-hidden>
-        {CYCLE_STEPS.map((s) => {
-          const st = stateOf(s.n);
-          return (
-            <button key={s.n} onClick={() => onJump(s.n)} title={`${s.n}. ${s.title} — ${stepStateLabel(st)}`}
-              className={`h-1.5 w-5 rounded-full transition-opacity hover:opacity-70 ${
-                st === "done" ? "bg-emerald-500"
-                  : st === "in_progress" ? "bg-primary"
-                  : st === "skipped" ? "bg-muted-foreground/40"
-                  : "bg-border"}`} />
-          );
-        })}
-      </span>
-      <span>{parts.length ? parts.join(" · ") : "not started"}</span>
-    </span>
+    <div className={`flex flex-wrap items-start gap-3 rounded-xl border p-4 ${tone}`}>
+      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${
+        next.kind === "blocked" ? "text-amber-600"
+        : next.kind === "done" ? "text-emerald-600"
+        : next.kind === "waiting" ? "animate-spin text-primary"
+        : "text-muted-foreground"}`} />
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          {next.kind === "done" ? "Finished" : next.kind === "waiting" ? "In progress" : "Next"}
+        </p>
+        <p className="text-sm font-semibold text-foreground">{next.title}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{next.detail}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {onBuild && (
+          <button onClick={onBuild} disabled={busy}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+            Build it
+          </button>
+        )}
+        {next.step !== null && (
+          <button onClick={onOpen}
+            className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-background">
+            Open step {next.step}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -565,13 +639,24 @@ function StepTracker({ step, row, onChange }: {
 
   return (
     <div className="flex flex-wrap items-end gap-3 rounded-lg bg-muted/30 p-3">
-      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+      <div className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
         Status
-        <select value={row?.state ?? "not_started"} onChange={(e) => void onChange(step, { state: e.target.value })}
-          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground">
-          {STEP_STATES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
-      </label>
+        {/* Four states, shown as four choices. A dropdown to change one word costs two
+            clicks and hides the other three. */}
+        <div className="flex flex-wrap gap-1">
+          {STEP_STATES.map((st) => {
+            const on = (row?.state ?? "not_started") === st.value;
+            return (
+              <button key={st.value} type="button" onClick={() => void onChange(step, { state: st.value })}
+                aria-pressed={on}
+                className={`rounded-md border px-2 py-1.5 text-xs normal-case tracking-normal transition-colors ${
+                  on ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"}`}>
+                {st.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
         Date
         <input type="date" value={row?.happened_on ?? ""}
@@ -599,8 +684,6 @@ function StepAction({ produces, busy, disabled, label, onRun, artifact, review, 
   // catalogue: three messages, two of them wrong.
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{produces}</p>
-
       {building && (
         <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5 text-xs">
           <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
@@ -613,23 +696,11 @@ function StepAction({ produces, busy, disabled, label, onRun, artifact, review, 
           <span>{warning}</span>
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2">
-        <button onClick={onRun} disabled={busy || disabled || building}
-          title={building ? "The pipeline is handling this — no need to press anything" : undefined}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
-          {busy || building ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-          {building ? "Building…" : artifact ? `Rebuild ${label.replace(/^Build /, "")}` : label}
-        </button>
-        {artifact?.download_url && (
-          <a href={artifact.download_url} target="_blank" rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm">
-            <Download className="h-4 w-4" /> {artifact.file_name}
-          </a>
-        )}
-        {artifact && artifact.slots_filled > 0 && (
-          <span className="text-xs text-muted-foreground">{artifact.slots_filled} images from their catalogue</span>
-        )}
-      </div>
+      {artifact && artifact.slots_filled > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {artifact.file_name} — {artifact.slots_filled} images from their catalogue.
+        </p>
+      )}
       {review?.length ? (
         <div className="rounded-lg border border-border p-3">
           <p className="text-xs font-medium text-foreground">Before you send it</p>

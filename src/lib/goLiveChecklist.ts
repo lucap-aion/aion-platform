@@ -343,3 +343,60 @@ export function checklistProgress(
     detected: ALL_ITEMS.filter((i) => signals[i.key] === true).length,
   };
 }
+
+// ── What to put in front of somebody ─────────────────────────────────────────
+//
+// The list is thirty-three items and nineteen of them answer themselves. Rendering all of
+// it, always, made the screen a wall: the reader's question is "what is left and what is
+// stopping us", and the answer was somewhere in the middle of six groups of ticked boxes.
+//
+// So the screen filters, and the filtering is here rather than inline in the component
+// because "which items does TO DO mean" is a rule worth being able to test.
+
+export type ChecklistFilter = "todo" | "blocking" | "all";
+
+export const CHECKLIST_FILTERS: readonly { value: ChecklistFilter; label: string }[] = [
+  { value: "todo", label: "To do" },
+  { value: "blocking", label: "Blocking" },
+  { value: "all", label: "Everything" },
+] as const;
+
+export type FilteredGroup = {
+  group: ChecklistGroup;
+  /** The items this filter shows. Empty when the whole group is behind us. */
+  items: ChecklistItem[];
+  done: number;
+  total: number;
+  /** Every item in this group is done — so it can collapse to a single line. */
+  settled: boolean;
+};
+
+/**
+ * The groups as this filter wants them shown.
+ *
+ * Groups are always returned, settled ones included, so the screen can show a house's whole
+ * shape and let a reader open what is already finished. Only `items` changes.
+ */
+export function filterChecklist(
+  filter: ChecklistFilter, state: ChecklistState, signals: ChecklistSignals = {},
+): FilteredGroup[] {
+  return GO_LIVE_CHECKLIST.map((group) => {
+    const done = group.items.filter((i) => isItemDone(i.key, state, signals)).length;
+    const items = group.items.filter((i) => {
+      if (filter === "all") return true;
+      if (isItemDone(i.key, state, signals)) return false;
+      return filter === "todo" ? true : i.blocking === true;
+    });
+    return { group, items, done, total: group.items.length, settled: done === group.items.length };
+  });
+}
+
+/** The blocking items still in the way, most specific diagnosis first. */
+export function blockingItems(
+  state: ChecklistState, signals: ChecklistSignals = {},
+): { item: ChecklistItem; because: string | null }[] {
+  return ALL_ITEMS
+    .filter((i) => i.blocking && !isItemDone(i.key, state, signals))
+    .map((item) => ({ item, because: itemBlockedBecause(item.key, signals) }))
+    .sort((a, b) => Number(Boolean(b.because)) - Number(Boolean(a.because)));
+}

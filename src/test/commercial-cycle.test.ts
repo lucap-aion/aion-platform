@@ -4,7 +4,8 @@ import { resolve } from "node:path";
 import {
   CYCLE_STEPS, PIPELINE_STAGES, pipelineStageKeys, DEMO_STAGE_KEYS,
   stageDisplayState, stepIsBuilding, summarisePipeline, stagesForStep, stepStateLabel, isStalled,
-  type StageState,
+  nextAction, stageByKey,
+  type StageState, type CycleFacts, type PipelineSummary,
 } from "@/lib/commercialCycle";
 
 describe("the stage list is one list", () => {
@@ -208,5 +209,127 @@ describe("step state labels", () => {
     expect(stepStateLabel(undefined)).toBe("Not started");
     expect(stepStateLabel(null)).toBe("Not started");
     expect(stepStateLabel("in_progress")).toBe("In progress");
+  });
+});
+
+
+// ── The one thing to do next ─────────────────────────────────────────────────
+//
+// The screen leads with a single instruction, so the ladder that picks it is the part worth
+// pinning down: a wrong answer here sends somebody to the wrong step.
+
+const idlePipeline: PipelineSummary = {
+  total: 10, done: 10, failed: [], asking: [], running: null, queued: 0, active: false,
+};
+
+const facts = (over: Partial<CycleFacts> = {}): CycleFacts => ({
+  website: "https://example.com",
+  pipeline: idlePipeline,
+  progress: {},
+  artifacts: {},
+  perimeterDeclared: false,
+  demoAllowed: true,
+  products: 500,
+  ...over,
+});
+
+const allBuilt = {
+  intro_teaser: {}, data_request: {}, business_case: {}, operations: {},
+};
+
+describe("what to do next", () => {
+  it("asks for a website before anything else, because everything is built from it", () => {
+    const n = nextAction(facts({ website: "", artifacts: {} }));
+    expect(n.kind).toBe("blocked");
+    expect(n.title).toMatch(/website/i);
+  });
+
+  it("puts a failed stage above work still in flight", () => {
+    const n = nextAction(facts({
+      pipeline: { ...idlePipeline, active: true, queued: 3, failed: [stageByKey("storefront")!] },
+    }));
+    expect(n.kind).toBe("blocked");
+    expect(n.title).toMatch(/catalogue/i);
+    expect(n.step).toBe(3);
+  });
+
+  it("surfaces a stage that stopped to ask something", () => {
+    const n = nextAction(facts({
+      pipeline: { ...idlePipeline, asking: [stageByKey("demo_data")!] },
+    }));
+    expect(n.kind).toBe("blocked");
+    expect(n.title).toMatch(/waiting on you/i);
+  });
+
+  it("says to wait, and does not offer a button, while the pipeline is working", () => {
+    const n = nextAction(facts({
+      pipeline: { ...idlePipeline, done: 4, active: true, running: stageByKey("storefront")! },
+    }));
+    expect(n.kind).toBe("waiting");
+    expect(n.detail).toMatch(/4 of 10/);
+  });
+
+  it("names the first step with nothing to hand over", () => {
+    const n = nextAction(facts());
+    expect(n.kind).toBe("build");
+    expect(n.step).toBe(1);
+    expect(n.title).toBe(CYCLE_STEPS[0].action);
+  });
+
+  it("moves on once a step has its file", () => {
+    const n = nextAction(facts({ artifacts: { intro_teaser: {} } }));
+    expect(n.step).toBe(2);
+  });
+
+  it("asks for the perimeter before the business case, and does not offer to build one", () => {
+    const n = nextAction(facts({ artifacts: { intro_teaser: {}, data_request: {} } }));
+    expect(n.step).toBe(4);
+    expect(n.title).toMatch(/perimeter/i);
+    // There is nothing to build from yet, so the card must not offer a build button.
+    expect(n.kind).toBe("open");
+  });
+
+  it("offers the business case once a perimeter exists", () => {
+    const n = nextAction(facts({
+      artifacts: { intro_teaser: {}, data_request: {} }, perimeterDeclared: true,
+    }));
+    expect(n.step).toBe(4);
+    expect(n.title).toBe(CYCLE_STEPS[3].action);
+  });
+
+  it("stops on a demo with no catalogue behind it", () => {
+    const n = nextAction(facts({ artifacts: { intro_teaser: {}, data_request: {} }, products: 0 }));
+    expect(n.kind).toBe("blocked");
+    expect(n.step).toBe(3);
+  });
+
+  it("does not ask for a catalogue on a brand that may not have a demo at all", () => {
+    const n = nextAction(facts({
+      artifacts: { intro_teaser: {}, data_request: {} }, products: 0, demoAllowed: false,
+    }));
+    expect(n.step).not.toBe(3);
+  });
+
+  it("asks for the meetings to be recorded once every file exists", () => {
+    const n = nextAction(facts({ artifacts: allBuilt, perimeterDeclared: true }));
+    expect(n.kind).toBe("record");
+    expect(n.step).toBe(1);
+  });
+
+  it("skips a step somebody already marked, and points at the next unrecorded one", () => {
+    const n = nextAction(facts({
+      artifacts: allBuilt, perimeterDeclared: true,
+      progress: { "1": { state: "done" }, "2": { state: "skipped" } },
+    }));
+    expect(n.step).toBe(3);
+  });
+
+  it("is finished only when all five are behind you", () => {
+    const n = nextAction(facts({
+      artifacts: allBuilt, perimeterDeclared: true,
+      progress: Object.fromEntries(CYCLE_STEPS.map((s) => [String(s.n), { state: "done" }])),
+    }));
+    expect(n.kind).toBe("done");
+    expect(n.step).toBeNull();
   });
 });

@@ -20,6 +20,8 @@ export type CycleStep = {
   title: string;
   blurb: string;
   produces: string;
+  /** The imperative for this step's build button, and for the next-action card. */
+  action: string;
   /** `brand_deck_outputs.template_key` this step hands over, when it produces a file. */
   artifact: string | null;
 };
@@ -33,6 +35,7 @@ export const CYCLE_STEPS: readonly CycleStep[] = [
     blurb:
       "Intro to the service — objective, value, cost, how it works. Thirty minutes with one or two stakeholders, and it repeats with the others.",
     produces: "A teaser deck rebranded with their own pieces.",
+    action: "Build the intro deck",
     artifact: "intro_teaser",
   },
   {
@@ -41,6 +44,7 @@ export const CYCLE_STEPS: readonly CycleStep[] = [
     blurb:
       "They share an indicative pilot and roll-out perimeter so AION can go to Chubb for a formal quotation.",
     produces: "The data-request workbook, in their name.",
+    action: "Build the data request",
     artifact: "data_request",
   },
   {
@@ -49,6 +53,7 @@ export const CYCLE_STEPS: readonly CycleStep[] = [
     blurb:
       "The platform on their own catalogue, brand side and client side, with a book of business that looks real.",
     produces: "A demo-ready account and logins for both portals.",
+    action: "Set the demo up",
     artifact: null,
   },
   {
@@ -57,6 +62,7 @@ export const CYCLE_STEPS: readonly CycleStep[] = [
     blurb:
       "The business case, on the quotes received so far. A formal Chubb quotation takes one to two months and supersedes it.",
     produces: "The pricing model and a deck built from it.",
+    action: "Build the business case",
     artifact: "business_case",
   },
   {
@@ -64,6 +70,7 @@ export const CYCLE_STEPS: readonly CycleStep[] = [
     title: "Operations review",
     blurb: "How the service works step by step, from the blueprint built across clients.",
     produces: "The ops deck, in the intro deck's own style.",
+    action: "Build the ops deck",
     artifact: "operations",
   },
 ] as const;
@@ -226,5 +233,129 @@ export function summarisePipeline(
     running,
     queued,
     active: !!running || queued > 0,
+  };
+}
+
+// ── The one thing to do next ────────────────────────────────────────────────────────── //
+//
+// The cycle screen could answer "where is this deal" in three different places at once — a
+// stage banner, a row of dots, and a status line inside each of five collapsed steps — and
+// none of them answered the question anyone actually arrives with, which is what to do now.
+// Working it out meant opening all five.
+//
+// This is that answer, as one sentence and one button. It is a pure function of what the
+// overview already returns, so it cannot drift from what the rest of the screen shows.
+
+export type NextActionKind = "blocked" | "waiting" | "build" | "open" | "record" | "done";
+
+export type NextAction = {
+  kind: NextActionKind;
+  /** The step it belongs to, when it belongs to one. */
+  step: StepNumber | null;
+  /** The imperative, in one short line. */
+  title: string;
+  /** Why, or what it is waiting for. */
+  detail: string;
+};
+
+export type CycleFacts = {
+  website: string | null | undefined;
+  pipeline: PipelineSummary;
+  /** Step number as a string -> its recorded state, as the overview returns it. */
+  progress: Record<string, { state: string }> | undefined;
+  /** `brand_deck_outputs.template_key` -> the artefact. Presence is all that matters here. */
+  artifacts: Record<string, unknown> | undefined;
+  /** Whether a pilot perimeter has been declared for the business case. */
+  perimeterDeclared: boolean;
+  /** Whether demo tooling may run for this brand at all. */
+  demoAllowed: boolean;
+  /** Products in the catalogue. The deck and the demo are both built from them. */
+  products: number;
+};
+
+const built = (facts: CycleFacts, key: string | null): boolean =>
+  !!key && !!facts.artifacts?.[key];
+
+export function nextAction(facts: CycleFacts): NextAction {
+  // Nothing at all can be built from a brand with no site, so it outranks everything.
+  if (!String(facts.website ?? "").trim()) {
+    return {
+      kind: "blocked", step: null,
+      title: "Add a website to the brand record",
+      detail: "The deck, the catalogue and the demo are all built from the house's own site.",
+    };
+  }
+
+  // A failure is louder than work in flight: the rest of the pipeline may be moving, but
+  // this one is not going to move again on its own.
+  const failed = facts.pipeline.failed[0];
+  if (failed) {
+    return {
+      kind: "blocked", step: failed.step,
+      title: `${failed.label} failed`,
+      detail: "Open it in the pipeline above to see why, and run it again.",
+    };
+  }
+
+  const asking = facts.pipeline.asking[0];
+  if (asking) {
+    return {
+      kind: "blocked", step: asking.step,
+      title: `${asking.label} is waiting on you`,
+      detail: "It stopped to ask something. Open it in the pipeline above.",
+    };
+  }
+
+  if (facts.pipeline.active) {
+    const { done, total } = facts.pipeline;
+    return {
+      kind: "waiting", step: facts.pipeline.running?.step ?? null,
+      title: facts.pipeline.running ? `Building ${facts.pipeline.running.label.toLowerCase()}` : "The pipeline is working",
+      detail: `${done} of ${total} stages done. This runs on the server — you can leave the page.`,
+    };
+  }
+
+  // Then the first step with nothing to hand over. In cycle order, because that is the
+  // order a deal moves in even though any one step may be taken out of turn.
+  for (const step of CYCLE_STEPS) {
+    if (step.n === 3) {
+      // Step 3 hands over an account rather than a file.
+      if (!facts.demoAllowed || facts.products > 0) continue;
+      return {
+        kind: "blocked", step: 3,
+        title: "No catalogue to demo",
+        detail: "The demo shows their own pieces. Run the Catalogue stage, or add a feed URL on the catalogue source.",
+      };
+    }
+    if (built(facts, step.artifact)) continue;
+    if (step.n === 4 && !facts.perimeterDeclared) {
+      // Not a build: there is nothing to build from yet. The work is in the panel.
+      return {
+        kind: "open", step: 4,
+        title: "Declare the pilot perimeter",
+        detail: "Upload the data request they sent back and the segments are read out of it.",
+      };
+    }
+    return { kind: "build", step: step.n, title: step.action, detail: step.produces };
+  }
+
+  // Everything that can be built has been. What is left is what happened in the room.
+  const unrecorded = CYCLE_STEPS.filter((s) => {
+    const state = facts.progress?.[String(s.n)]?.state ?? "not_started";
+    return state !== "done" && state !== "skipped";
+  });
+  if (unrecorded.length) {
+    const first = unrecorded[0];
+    return {
+      kind: "record", step: first.n,
+      title: `Record where "${first.title}" got to`,
+      detail: "Every file is built. Marking a step is the only thing the platform cannot see for itself.",
+    };
+  }
+
+  return {
+    kind: "done", step: null,
+    title: "All five steps are behind you",
+    detail: "Go-live is the next tab.",
   };
 }

@@ -4,14 +4,15 @@ import { supabase } from "@/integrations/supabase/client";
 // The standalone `toast`, not `useToast().toast` — the hook returns a fresh object every
 // render, so a fetcher that depends on it never stops re-running.
 import { toast } from "@/hooks/use-toast";
-import { Check, Loader2, MessageSquare, X, Sparkles, BadgeCheck } from "lucide-react";
+import { Check, Loader2, MessageSquare, X, Sparkles, BadgeCheck, AlertCircle } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  GO_LIVE_CHECKLIST, checklistProgress, isItemDone, itemBlockedBecause,
-  type ChecklistState, type ChecklistSignals,
+  checklistProgress, isItemDone, itemBlockedBecause, filterChecklist, blockingItems,
+  CHECKLIST_FILTERS,
+  type ChecklistState, type ChecklistSignals, type ChecklistFilter,
 } from "@/lib/goLiveChecklist";
 
 // What has to be true before a brand can issue a real cover — shared across AION admins.
@@ -55,6 +56,9 @@ export default function GoLiveChecklist(
   // observed or a tick; this is a decision, and it is two clicks away on another tab.
   const [verifying, setVerifying] = useState(false);
   const [verifySaving, setVerifySaving] = useState(false);
+  // Lands on what is LEFT. Thirty-three rows of mostly-ticked boxes is not an answer to
+  // "what is stopping us", which is the only question anyone opens this tab with.
+  const [filter, setFilter] = useState<ChecklistFilter>("todo");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -163,182 +167,218 @@ export default function GoLiveChecklist(
   if (loading) {
     return (
       <div className="space-y-3">
-        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
+        <Skeleton className="h-24 w-full rounded-xl" />
+        {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
       </div>
     );
   }
 
   const { done, total, blockingLeft, detected } = checklistProgress(state, signals);
   const pct = total ? Math.round((done / total) * 100) : 0;
+  const blocking = blockingItems(state, signals);
+  const groups = filterChecklist(filter, state, signals);
+  const left = total - done;
+  const counts: Record<ChecklistFilter, number> = { todo: left, blocking: blockingLeft, all: total };
+  const nothingToShow = groups.every((g) => g.items.length === 0);
 
   return (
-    <div className="space-y-6">
-      {/* Where this brand stands */}
+    <div className="space-y-4">
+      {/* WHERE THIS BRAND STANDS.
+          One card, and the blocking items are NAMED in it. The old header said "3 blocking
+          items left" and left the reader to find them among thirty-three rows in six
+          groups, which is the one question this screen exists to answer. */}
       <div className="rounded-xl border border-border p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">Go-live checklist</h3>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="font-serif text-lg text-foreground">
+              {blockingLeft > 0
+                ? `${brandName ?? "This brand"} is not ready to go live`
+                : left > 0
+                ? `Nothing is blocking ${brandName ?? "this brand"}`
+                : `${brandName ?? "This brand"} is ready`}
+            </h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              What has to be true before {brandName ?? "this brand"} can issue a real cover. Shared across AION admins.
+              {blockingLeft > 0
+                ? "These have to be true before it can issue a real cover."
+                : left > 0
+                ? `${left} ${left === 1 ? "item is" : "items are"} still open, none of them blocking.`
+                : "Every item on the list is behind you."}
             </p>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="font-serif text-2xl tabular-nums text-foreground">{done}<span className="text-base text-muted-foreground">/{total}</span></p>
             {detected > 0 && (
-              <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Sparkles className="h-3 w-3 text-primary" />
-                {detected} {detected === 1 ? "item is" : "items are"} confirmed by the platform itself and update as the work lands
+              <p className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <Sparkles className="h-2.5 w-2.5 text-primary" /> {detected} detected
               </p>
             )}
           </div>
-          <div className="text-right">
-            <p className="text-lg font-semibold tabular-nums text-foreground">{done} / {total}</p>
-            {blockingLeft > 0 ? (
-              <p className="text-xs text-destructive">{blockingLeft} blocking {blockingLeft === 1 ? "item" : "items"} left</p>
-            ) : (
-              <p className="text-xs text-emerald-600">nothing blocking left</p>
-            )}
-          </div>
         </div>
+
         <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className={`h-full rounded-full transition-all ${blockingLeft > 0 ? "bg-primary" : "bg-emerald-500"}`}
-            style={{ width: `${pct}%` }}
-          />
+          <div className={`h-full rounded-full transition-all ${blockingLeft > 0 ? "bg-primary" : "bg-emerald-500"}`}
+            style={{ width: `${pct}%` }} />
         </div>
+
+        {/* The blocking items, by name, one click from the thing itself. */}
+        {blocking.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {blocking.map(({ item, because }) => (
+              <button key={item.key} type="button" onClick={() => setFilter("blocking")} title={because ?? item.detail}
+                className="inline-flex items-center gap-1.5 rounded-full border border-destructive/40 bg-destructive/5 px-2.5 py-1 text-[11px] text-destructive hover:bg-destructive/10">
+                <AlertCircle className="h-3 w-3" /> {item.title}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {GO_LIVE_CHECKLIST.map((group) => {
-        const gDone = group.items.filter((i) => isItemDone(i.key, state, signals)).length;
-        return (
-          <div key={group.key}>
-            <div className="flex items-baseline gap-3 border-b border-foreground/80 pb-1.5">
-              <span className="font-mono text-[11px] tracking-widest text-primary">{group.letter}</span>
-              <h4 className="text-sm font-semibold text-foreground">{group.title}</h4>
-              <span className="ml-auto font-mono text-[11px] tabular-nums text-muted-foreground">
-                {gDone}/{group.items.length}
+      {/* WHAT TO SHOW. Lands on what is left, not on everything. */}
+      <div className="flex flex-wrap items-center gap-1">
+        {CHECKLIST_FILTERS.map((f) => (
+          <button key={f.value} type="button" onClick={() => setFilter(f.value)}
+            aria-pressed={filter === f.value}
+            className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+              filter === f.value
+                ? "border-foreground bg-foreground text-background"
+                : "border-border text-muted-foreground hover:text-foreground"}`}>
+            {f.label} <span className="tabular-nums opacity-70">{counts[f.value]}</span>
+          </button>
+        ))}
+      </div>
+
+      {nothingToShow && (
+        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-6 text-center">
+          <Check className="mx-auto h-6 w-6 text-emerald-600" />
+          <p className="mt-2 text-sm font-medium text-foreground">
+            {filter === "blocking" ? "Nothing is blocking this brand." : "Nothing left to do."}
+          </p>
+          <button type="button" onClick={() => setFilter("all")}
+            className="mt-2 text-xs text-muted-foreground underline hover:text-foreground">
+            Show the whole list
+          </button>
+        </div>
+      )}
+
+      {groups.map(({ group, items, done: gDone, total: gTotal, settled }) => {
+        // A group with nothing to show under this filter collapses to its own one line.
+        // Six of those is a summary of the house; six expanded lists is a wall.
+        if (!items.length) {
+          if (nothingToShow) return null;
+          return (
+            <div key={group.key} className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2 text-xs">
+              <span className="font-mono text-[10px] tracking-widest text-muted-foreground">{group.letter}</span>
+              <span className="text-muted-foreground">{group.title}</span>
+              <span className="ml-auto inline-flex items-center gap-1.5 tabular-nums text-muted-foreground">
+                {gDone}/{gTotal}
+                {settled && <Check className="h-3.5 w-3.5 text-emerald-600" />}
               </span>
             </div>
+          );
+        }
+        return (
+          <div key={group.key} className="rounded-xl border border-border">
+            <div className="flex items-baseline gap-3 border-b border-border px-4 py-2.5">
+              <span className="font-mono text-[10px] tracking-widest text-primary">{group.letter}</span>
+              <h4 className="text-sm font-semibold text-foreground">{group.title}</h4>
+              <span className="ml-auto font-mono text-[11px] tabular-nums text-muted-foreground">{gDone}/{gTotal}</span>
+            </div>
 
-            <ul className="divide-y divide-border">
-              {group.items.map((item) => {
+            <ul className="divide-y divide-border/70">
+              {items.map((item) => {
                 const row = state[item.key];
                 const auto = signals[item.key] === true;
-                // What the platform says is missing, when it can be specific. Beats the
-                // item's own phrase, which can only restate the whole requirement.
                 const because = itemBlockedBecause(item.key, signals);
                 const isDone = isItemDone(item.key, state, signals);
                 const who = row?.updated_by ? admins[row.updated_by] : null;
                 return (
-                  <li key={item.key} className="py-3">
+                  <li key={item.key} className="px-4 py-2.5">
                     <div className="flex items-start gap-3">
                       {/* An item the platform can see is not a thing to click: un-ticking a
                           premium that is demonstrably set would be a lie the next reload
-                          corrects. It shows as done, and says why. */}
+                          corrects. */}
                       <button
-                        type="button"
-                        role="checkbox"
-                        aria-checked={isDone}
-                        aria-label={item.title}
-                        aria-disabled={auto}
-                        disabled={auto}
+                        type="button" role="checkbox" aria-checked={isDone} aria-label={item.title}
+                        aria-disabled={auto} disabled={auto}
                         title={auto ? `Confirmed by the platform: ${item.evidence}` : undefined}
                         onClick={() => void save(item.key, { done: !isDone })}
                         className={`mt-0.5 grid h-[18px] w-[18px] shrink-0 place-items-center rounded border transition-colors ${
                           isDone ? "border-emerald-500 bg-emerald-500 text-white" : "border-input bg-background hover:border-primary"
                         } ${auto ? "cursor-default" : ""}`}
                       >
-                        {saving === item.key
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                        {saving === item.key ? <Loader2 className="h-3 w-3 animate-spin" />
                           : isDone ? <Check className="h-3 w-3" /> : null}
                       </button>
 
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className={`text-sm font-medium ${isDone ? "text-muted-foreground line-through" : "text-foreground"}`}>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <p className={`text-sm ${isDone ? "text-muted-foreground line-through" : "font-medium text-foreground"}`}>
                             {item.title}
                           </p>
                           {item.blocking && !isDone && (
-                            <span className="rounded border border-destructive px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-destructive">
-                              blocking
-                            </span>
+                            <span className="rounded bg-destructive/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-destructive">blocking</span>
                           )}
                           {auto && (
-                            <span className="inline-flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
                               <Sparkles className="h-2.5 w-2.5" /> detected
                             </span>
                           )}
+                          <span className="ml-auto flex shrink-0 items-center gap-2">
+                            {row?.updated_at && (
+                              <span className="text-[10px] text-muted-foreground">
+                                {isDone ? "done" : "updated"} {new Date(row.updated_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                                {who ? ` · ${who}` : ""}
+                              </span>
+                            )}
+                            <button type="button" onClick={() => (noteFor === item.key ? setNoteFor(null) : openNote(item.key))}
+                              title={row?.note ? "Edit the note" : "Add a note"}
+                              className={`rounded p-1 hover:bg-muted ${row?.note ? "text-primary" : "text-muted-foreground/60"}`}>
+                              <MessageSquare className="h-3.5 w-3.5" />
+                            </button>
+                          </span>
                         </div>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{item.detail}</p>
-                        {/* Three different things to say, and they are not the same sentence.
-                            Done: the evidence, so "detected" is checkable rather than magic.
-                            Blocked with a diagnosis: the diagnosis, in amber, because it is
-                            the one line that tells the reader what to go and do — and it
-                            shows even on an item somebody ticked by hand, since a tick that
-                            disagrees with the platform is exactly the drift worth seeing.
-                            Neither: what the platform is watching for, phrased as a check
-                            rather than as a claim — the evidence is written in the done
-                            tense, and reading it under an empty box looked like a lie. */}
-                        {auto ? (
-                          <p className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-400">✓ {item.evidence}</p>
-                        ) : because ? (
+
+                        {/* ONE line of explanation, and only the one worth reading.
+                            A diagnosis beats the item's own phrase, which can only restate
+                            the requirement. The "checks for" line is for the full list
+                            only: under a filtered view it is noise between things to do. */}
+                        {because ? (
                           <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-500">{because}</p>
-                        ) : item.evidence ? (
-                          <p className="mt-0.5 text-xs text-muted-foreground/80">Checks for: {item.evidence}</p>
+                        ) : !isDone ? (
+                          <p className="mt-0.5 text-xs text-muted-foreground">{item.detail}</p>
+                        ) : filter === "all" && auto && item.evidence ? (
+                          <p className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-400">✓ {item.evidence}</p>
                         ) : null}
 
-                        {/* Publishing the brand is the only item on this list that can be
-                            closed from here. It sits on the Record tab behind a dropdown and
-                            a Save, which is a long way to go for a decision the reader has
-                            just been told is the last thing in the way. */}
+                        {/* Publishing the brand is the only item here that can be closed
+                            from this screen. It otherwise sits on the Record tab behind a
+                            dropdown and a Save. */}
                         {item.key === "brand_verified" && !isDone && (
-                          <button
-                            type="button"
-                            onClick={() => setVerifying(true)}
-                            className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground hover:bg-muted"
-                          >
+                          <button type="button" onClick={() => setVerifying(true)}
+                            className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground hover:bg-muted">
                             <BadgeCheck className="h-3.5 w-3.5" /> Mark verified
                           </button>
                         )}
 
                         {noteFor === item.key ? (
                           <div className="mt-2 flex items-start gap-2">
-                            <textarea
-                              id={`note-${item.key}`}
-                              autoFocus
-                              rows={2}
-                              value={noteDraft}
+                            <textarea id={`note-${item.key}`} autoFocus rows={2} value={noteDraft}
                               onChange={(e) => setNoteDraft(e.target.value)}
                               placeholder="What is the state of this, and who is waiting on what?"
-                              className="flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-                            />
+                              className="flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-xs" />
                             <button type="button" onClick={() => void commitNote()}
                               className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">Save</button>
-                            <button type="button" onClick={() => setNoteFor(null)}
-                              className="rounded-md border border-border p-1 text-muted-foreground hover:bg-muted" aria-label="Discard note">
+                            <button type="button" onClick={() => setNoteFor(null)} aria-label="Discard note"
+                              className="rounded-md border border-border p-1 text-muted-foreground hover:bg-muted">
                               <X className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         ) : row?.note ? (
                           <button type="button" onClick={() => openNote(item.key)}
-                            className="mt-1.5 block w-full rounded-md border-l-2 border-primary bg-muted/50 px-2.5 py-1.5 text-left text-xs text-foreground">
+                            className="mt-1.5 block w-full rounded-md border-l-2 border-primary bg-muted/40 px-2.5 py-1.5 text-left text-xs text-foreground">
                             {row.note}
                           </button>
                         ) : null}
-
-                        {(row?.updated_at || !row?.note) && (
-                          <div className="mt-1.5 flex items-center gap-3 text-[11px] text-muted-foreground">
-                            {noteFor !== item.key && !row?.note && (
-                              <button type="button" onClick={() => openNote(item.key)}
-                                className="inline-flex items-center gap-1 hover:text-foreground">
-                                <MessageSquare className="h-3 w-3" /> Add a note
-                              </button>
-                            )}
-                            {row?.updated_at && (
-                              <span>
-                                {isDone ? "Done" : "Updated"} {new Date(row.updated_at).toLocaleDateString()}
-                                {who ? ` · ${who}` : ""}
-                              </span>
-                            )}
-                          </div>
-                        )}
                       </div>
                     </div>
                   </li>

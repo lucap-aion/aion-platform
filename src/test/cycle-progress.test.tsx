@@ -75,7 +75,9 @@ describe("the screen shows the pipeline working", () => {
   it("disables the build button while the pipeline owns that step", async () => {
     await mount();
     await screen.findByText(/Setting Ferragamo up/i);
-    const btn = await screen.findByRole("button", { name: /Waiting to start|Building…/i });
+    // The button is on the step row itself now, reachable without opening anything — and
+    // it is named for what it would do, so this finds it the way a screen reader would.
+    const btn = await screen.findByRole("button", { name: /the pipeline is building this/i });
     expect(btn.hasAttribute("disabled")).toBe(true);
   });
 });
