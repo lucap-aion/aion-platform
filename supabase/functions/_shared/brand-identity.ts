@@ -1,4 +1,5 @@
 import { jsonLdNodes } from "./product-extract.ts";
+import { fetchSite } from "./fetch-site.ts";
 import { customerServiceEmail } from "./brand-defaults.ts";
 import {
   imageCandidates, assignPortalImages, namedColours, dominantUsableColour,
@@ -127,7 +128,11 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   let photos = imageCandidates({ html, markdown, origin });
   if (!photos.length && html && jinaKey) {
     // The fetch worked and still produced nothing: a rendered shell. Ask the renderer.
-    markdown = await fetchRendered(base, jinaKey);
+    // The format argument was missing here, so the renderer was asked for
+    // "X-Return-Format: undefined" and this fallback never did what it says:
+    // a house that renders its photography in JavaScript got no portal imagery
+    // at all, which is the exact case the branch exists for.
+    markdown = await fetchRendered(base, jinaKey, "markdown");
     photos = imageCandidates({ html, markdown, origin });
     if (photos.length) out.notes.push("the homepage renders its photography in JavaScript, so the images were read through the renderer");
   }
@@ -379,11 +384,18 @@ async function measureImages(urls: string[]): Promise<SizedImage[]> {
   }));
 }
 
+/**
+ * A page of the house's own site, for reading its identity.
+ *
+ * "could not fetch the homepage" was the branding stage's most common failure
+ * and it was usually a bot wall, not a site that was down. fetchSite goes out
+ * as us first and only falls back to a browser agent on a refusal.
+ */
 async function fetchText(url: string): Promise<string | null> {
+  const got = await fetchSite(url, { timeoutMs: 15_000 });
+  if (!got.response || !got.response.ok) return null;
   try {
-    const res = await fetch(url, { headers: { "User-Agent": UA }, redirect: "follow" });
-    if (!res.ok) return null;
-    return await res.text();
+    return await got.response.text();
   } catch { return null; }
 }
 

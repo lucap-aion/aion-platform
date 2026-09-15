@@ -2,6 +2,7 @@
 // (seed-crawl, crawl-worker). Keep dependency-free (Deno std only).
 
 import { AION_UA } from "./robots.ts";
+import { fetchSite, fetchSiteText } from "./fetch-site.ts";
 
 /** Re-exported so the crawl's many callers keep one import. */
 export const UA = AION_UA;
@@ -69,19 +70,22 @@ export function categorize(url: string, title = "", text = ""): string {
 }
 
 // ── HTTP ──────────────────────────────────────────────────────────────────
+/**
+ * One page of a brand's own site.
+ *
+ * Goes out as AIONKnowledgeBot and stays that way for every house that answers
+ * it, which is most of them. Where a bot wall refuses or drops us, fetchSite
+ * retries the same url as a browser — see _shared/fetch-site.ts for what that
+ * does and does not buy, and for why robots.txt is untouched by it.
+ */
 export async function fetchText(url: string): Promise<string> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), PER_PAGE_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": UA, "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en,it;q=0.8" },
-      signal: ctrl.signal, redirect: "follow",
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const ct = res.headers.get("content-type") ?? "";
-    if (!/text\/html|xhtml|xml/i.test(ct)) throw new Error(`non-html (${ct.split(";")[0]})`);
-    return await res.text();
-  } finally { clearTimeout(t); }
+  const { text } = await fetchSiteText(url, { timeoutMs: PER_PAGE_TIMEOUT_MS });
+  return text;
+}
+
+/** The same fetch, when the caller wants to know which agent got in. */
+export async function fetchTextWithAgent(url: string) {
+  return await fetchSiteText(url, { timeoutMs: PER_PAGE_TIMEOUT_MS });
 }
 
 export async function jinaRaw(url: string, jinaKey: string): Promise<string> {
@@ -198,7 +202,10 @@ export async function collectSitemap(
   const queue: string[] = [];
   const seen = new Set<string>();
   try {
-    const robots = await (await fetch(new URL("/robots.txt", origin).href, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(6000) })).text();
+    const got = await fetchSite(new URL("/robots.txt", origin).href, {
+      accept: "text/plain,*/*", timeoutMs: 6000,
+    });
+    const robots = got.response?.ok ? await got.response.text() : "";
     for (const m of robots.matchAll(/^\s*sitemap:\s*(\S+)/gim)) queue.push(m[1].trim());
   } catch { /* ignore */ }
   for (const p of ["/sitemap.xml", "/sitemap_index.xml", "/sitemap/index.xml"]) queue.push(new URL(p, origin).href);
@@ -302,8 +309,13 @@ export function spreadAcrossSections(urls: string[], budget: number): string[] {
 }
 
 async function fetchSitemap(url: string): Promise<string> {
-  const res = await fetch(url, { headers: { "User-Agent": UA, "Accept": "application/xml,text/xml,*/*" }, signal: AbortSignal.timeout(12000), redirect: "follow" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  // The sitemap is the last route into a house that renders nothing and blocks
+  // everything, so it is worth the browser retry more than any other fetch
+  // here: prada.com drops us on /sitemap_index_0.xml and serves a browser the
+  // 6,961 product URLs behind it.
+  const got = await fetchSite(url, { accept: "application/xml,text/xml,*/*", timeoutMs: 12000 });
+  const res = got.response;
+  if (!res?.ok) throw new Error(got.error ?? "unreachable");
   if (/\.gz($|\?)/i.test(url) || /application\/gzip/i.test(res.headers.get("content-type") ?? "")) {
     return await new Response(res.body!.pipeThrough(new DecompressionStream("gzip"))).text();
   }

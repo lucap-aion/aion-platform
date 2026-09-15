@@ -18,6 +18,7 @@ import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
 // What the house asked for. Read once, here, and carried on the source so the worker does
 // not refetch robots.txt on every tick.
 import { parseRobots, robotsAllows, rulesToConfig, AGENT_TOKEN, NO_RULES } from "../_shared/robots.ts";
+import { fetchSite } from "../_shared/fetch-site.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -104,10 +105,15 @@ Deno.serve(async (req: Request) => {
     // request per seed instead of one per tick, and the rules belong with the source.
     let robots = NO_RULES;
     try {
-      const res = await fetch(new URL("/robots.txt", origin).href, {
-        headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8000),
+      // Through fetchSite, which retries as a browser if we are refused. That
+      // reads oddly until you try it: prada.com drops AIONKnowledgeBot on
+      // /robots.txt itself, so the wall was keeping us from reading the file in
+      // which the house writes what it permits us. We retry to READ the rules,
+      // and then obey them — matched, as always, against our own token.
+      const got = await fetchSite(new URL("/robots.txt", origin).href, {
+        timeoutMs: 8000, accept: "text/plain,*/*",
       });
-      if (res.ok) robots = parseRobots(await res.text(), AGENT_TOKEN);
+      if (got.response?.ok) robots = parseRobots(await got.response.text(), AGENT_TOKEN);
     } catch { /* no robots.txt is permission, not refusal */ }
 
     // Discover page URLs: full sitemap + homepage links (raw + rendered).

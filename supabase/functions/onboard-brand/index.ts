@@ -36,6 +36,8 @@ import { searchIdentity } from "../_shared/brand-search.ts";
 // What a failure actually stops, and why it is not "everything queued behind it".
 import { blockedBy, revivableStages, type StageName } from "../_shared/stage-graph.ts";
 import { refusalKeepsSource } from "../_shared/storefront-source.ts";
+// Honest agent first, browser agent only where a wall refuses us — see the file.
+import { fetchSite } from "../_shared/fetch-site.ts";
 import { rankCatalogueUrls, catalogueSample } from "../_shared/catalogue-urls.ts";
 // The last resort when no page of a site can be read: its own sitemap names the pieces and
 // the packshots, and the item code joins them.
@@ -1177,9 +1179,9 @@ async function recoverCatalogueImages(
     const url = urlByTitle.get(row.name);
     if (!url) continue;
     try {
-      const res = await fetch(url, { headers: { "User-Agent": AION_UA } });
-      if (!res.ok) continue;
-      const html = await res.text();
+      const got = await fetchSite(url, { timeoutMs: 12_000 });
+      if (!got.response?.ok) continue;
+      const html = await got.response.text();
       const img = html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i)?.[1]
         ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image["']/i)?.[1];
       if (!img) continue;
@@ -1360,12 +1362,12 @@ async function detectShopify(base: string, deadline: number): Promise<{ base: st
       // NO timeout here was the bug. A host that accepts the connection and then stalls
       // hangs this until the platform kills the whole invocation — and the stage row is
       // already 'running', so it stays 'running' with nothing written and nobody told.
-      const res = await fetch(`${c}/products.json?limit=20`, {
-        headers: { "User-Agent": AION_UA },
-        redirect: "follow",
-        signal: AbortSignal.timeout(Math.min(12_000, Math.max(1_000, deadline - Date.now()))),
+      const got = await fetchSite(`${c}/products.json?limit=20`, {
+        accept: "application/json,*/*",
+        timeoutMs: Math.min(12_000, Math.max(1_000, deadline - Date.now())),
       });
-      if (!res.ok) continue;
+      const res = got.response;
+      if (!res?.ok) continue;
       const products = (await res.json())?.products;
       if (!Array.isArray(products) || products.length === 0) continue;
       // Some shops leave product_type empty on everything; the sync must not
@@ -1434,16 +1436,12 @@ async function rereadIdentityIfThin(
 async function detectFeed(url: string, deadline: number): Promise<number> {
   if (!/^https?:\/\//i.test(url)) return 0;
   try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": AION_UA,
-        "Accept": "application/xml,text/xml,text/csv,text/plain,*/*",
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(Math.min(20_000, Math.max(2_000, deadline - Date.now()))),
+    const got = await fetchSite(url, {
+      accept: "application/xml,text/xml,text/csv,text/plain,*/*",
+      timeoutMs: Math.min(20_000, Math.max(2_000, deadline - Date.now())),
     });
-    if (!res.ok) return 0;
-    return parseProductFeed(await res.text()).length;
+    if (!got.response?.ok) return 0;
+    return parseProductFeed(await got.response.text()).length;
   } catch {
     return 0;
   }
@@ -1568,13 +1566,13 @@ async function detectStructured(
     if (left() < 3_000) return { found: 0, tried, refused };
     try {
       tried++;
-      const res = await fetch(url, {
-        headers: { "User-Agent": AION_UA },
-        signal: AbortSignal.timeout(window(6_000)),
-      });
-      const body = res.ok ? await res.text() : "";
-      if (looksBlocked(res.status, body)) { refused++; continue; }
-      if (!res.ok) continue;
+      // fetchSite has already retried as a browser if we were refused, so a
+      // 'blocked' verdict here means blocked to anyone, not blocked to us.
+      const got = await fetchSite(url, { timeoutMs: window(6_000) });
+      const res = got.response;
+      const body = res?.ok ? await res.text() : "";
+      if (looksBlocked(res?.status ?? 0, body)) { refused++; continue; }
+      if (!res?.ok) continue;
       const found = extractProducts(body, url).length;
       if (found > 0) return { found, tried, refused };
     } catch { /* a timeout is not a refusal; try the next candidate */ }
