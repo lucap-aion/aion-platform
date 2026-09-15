@@ -350,7 +350,22 @@ export function customerServiceEmail(text: string, website: string): string | nu
   if (!brandLabel || brandLabel.length < 3) return null;
 
   const found = new Set<string>();
-  for (const m of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g)) {
+  // The lookbehind is not decoration: without it this scan is QUADRATIC, and on a
+  // real homepage that means it never returns.
+  //
+  // `[A-Za-z0-9._%+-]+@` has no nested quantifier, so it reads as safe. It is not.
+  // Inside a long run of those characters with no `@` in it — a minified bundle, a
+  // base64 data: URI, the kind of thing a luxury homepage inlines by the hundred
+  // kilobyte — the engine consumes the whole run from position i, fails to find
+  // `@`, advances to i+1 and consumes it all again. Measured on prada.com's
+  // homepage: 120KB takes 2ms, 200KB does not finish. The full 1.1MB page hung the
+  // branding stage until the platform killed the worker, which is invisible from
+  // the outside because the stage row is claimed 'running' before the work starts.
+  //
+  // The lookbehind refuses to start a match in the middle of such a run, so each
+  // character is visited once: the same 1.1MB page scans in 5ms and finds the same
+  // addresses.
+  for (const m of text.matchAll(/(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g)) {
     const address = m[0].toLowerCase().replace(/[.,;:)\]]+$/, "");
     const [prefix, host] = address.split("@");
     if (!host || !sameHouse(label(host), brandLabel)) continue;
