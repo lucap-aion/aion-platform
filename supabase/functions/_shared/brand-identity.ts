@@ -246,8 +246,15 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
     out.found.push(`${why} (${hex})`);
     return true;
   };
-  setColour("background_hsl", named.background, "background colour, named by the site");
-  setColour("foreground_hsl", named.foreground, "text colour, named by the site");
+  // The canvas is NOT harvested, deliberately. A site's own background is the
+  // one colour that cannot be lifted into this portal: it arrives without the
+  // text, card and sidebar colours that make it legible, and taking it gave
+  // Prada a black page with dark type on it. The portal's canvas is AION's —
+  // see THEME_KEYS in src/contexts/TenantContext.tsx — so recording a
+  // background here would only write a value nothing reads.
+  //
+  // Everything the house actually is — its logo, its primary, its typeface,
+  // its photography — is still taken below.
 
   // The primary, in order of how much the site meant it.
   const themeColorUsable = themeColor && canCarryWhiteText(themeColor.trim()) ? themeColor.trim() : null;
@@ -350,9 +357,14 @@ async function fetchStylesheets(html: string, base: string): Promise<string> {
 
   const sheets = await Promise.all(hrefs.map(async (href) => {
     try {
-      const res = await fetch(href, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12000) });
-      if (!res.ok) return "";
-      const text = await res.text();
+      // Through fetchSite. A stylesheet is not an asset being re-hosted, it is
+      // the site's own design being read — it is where the colours and the
+      // typefaces are — so it belongs on the same path as the page it styles.
+      // With a plain AION_UA fetch, prada.com returned nothing and the house
+      // came out of onboarding with one colour, no primary and no typeface.
+      const got = await fetchSite(href, { timeoutMs: 12000, accept: "text/css,*/*" });
+      if (!got.response?.ok) return "";
+      const text = await got.response.text();
       return text.length > MAX_SHEET_BYTES ? text.slice(0, MAX_SHEET_BYTES) : text;
     } catch { return ""; }
   }));

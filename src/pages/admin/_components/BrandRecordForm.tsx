@@ -428,16 +428,14 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
           {/* Theme / Brand Colours */}
           <div className="border-t border-border pt-4">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Brand Theme Colours</p>
-            <p className="text-xs text-muted-foreground mb-4">Customise the portal appearance. Only the swatches you change are saved; the rest stay on the AION default.</p>
+            <p className="text-xs text-muted-foreground mb-4">The brand's own accents. The page itself — background, text, cards, sidebar — stays on the AION palette, so a brand's logo and photography are legible on it by construction.</p>
             <div className="grid grid-cols-2 gap-4">
+              {/* The canvas is not on this list on purpose — see THEME_KEYS in
+                  TenantContext. Offering a background here and then not
+                  applying it would be worse than not offering it. */}
               {([
                 ["primary_hsl",            "Primary (brand colour)"],
-                ["background_hsl",         "Background"],
-                ["foreground_hsl",         "Text"],
-                ["card_hsl",               "Card / Surface"],
                 ["border_hsl",             "Borders"],
-                ["sidebar_background_hsl", "Sidebar Background"],
-                ["muted_hsl",              "Muted"],
                 ["destructive_hsl",        "Destructive / Error"],
               ] as [keyof ThemeColors, string][]).map(([key, label]) => {
                 const ts = editing.theme_settings ?? {};

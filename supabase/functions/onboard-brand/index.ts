@@ -678,6 +678,23 @@ async function runStage(
       const current = (brand as Record<string, unknown>)[key];
       const empty = current == null || current === "" ||
         (typeof current === "object" && Object.keys(current as object).length === 0);
+
+      // theme_settings is a BAG of independent settings, not one value, and
+      // treating it as one meant a single key blocked all the others for good:
+      // Prada carried one harvested colour, so the pass that finally found its
+      // primary and its typefaces threw both away as "already set". Merge it
+      // key by key instead — what the record already says still wins, which is
+      // the rule everywhere else here.
+      if (key === "theme_settings" && !force && !empty) {
+        const merged = { ...(value as Record<string, unknown>), ...(current as Record<string, unknown>) };
+        if (Object.keys(merged).length > Object.keys(current as object).length) {
+          patch[key] = merged;
+        } else {
+          kept.push(key);
+        }
+        continue;
+      }
+
       if (empty || force) patch[key] = value;
       else kept.push(key);
     }
