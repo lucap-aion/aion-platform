@@ -413,27 +413,44 @@ export default function BrandAssistant() {
     (async () => {
       const [brandRes, catRes, polRes] = await Promise.all([
         supabase.from("brands").select("name").eq("id", brandId).maybeSingle(),
-        supabase.from("catalogues").select("name, collection").eq("brand_id", brandId).not("name", "is", null).limit(60),
+        supabase.from("catalogues").select("name, collection, category, price").eq("brand_id", brandId).not("name", "is", null).limit(200),
         supabase.from("policies").select("customer:customer_id(first_name, last_name)").eq("brand_id", brandId).limit(40),
       ]);
       if (!active) return;
       const brandName = (brandRes.data?.name as string | undefined) ?? null;
-      const cats = (catRes.data as { name: string | null; collection: string | null }[] | null) ?? [];
-      // A PIECE, not a collection. This preferred `collection` and the two
-      // suggestions it feeds are written about a garment — "materials,
-      // craftsmanship and care", "build a full look around it" — so Prada,
-      // whose collection field carries the gender bucket, opened its assistant
-      // offering to build a look around "Uomo". Collections here are as often a
-      // department or an internal season code (P26) as they are a named line,
-      // which is the same reason the assistant's own prompt refuses to say
-      // "our P22 collection" out loud.
+      // types.ts does not know catalogues.price — the generated types predate the
+      // catalogue price sync, and the column has been there since. Verified
+      // against the live schema rather than assumed.
+      const cats = (catRes.data as unknown as { name: string | null; collection: string | null; category: string | null; price: number | null }[] | null) ?? [];
+      // A PIECE, and a piece worth opening with. Two wrong answers got us here.
       //
-      // The longest name is a cheap proxy for the most descriptive one:
-      // "Piumino medio in Re-Nylon" reads in both sentences, "Chawan" does not.
-      const product = cats
-        .map((c) => (c.name ?? "").trim())
-        .filter((n) => n.length > 8)
-        .sort((a, b) => b.length - a.length)[0] ?? null;
+      // It preferred `collection`, and the suggestions it feeds are written
+      // about a garment — "materials, craftsmanship and care", "build a full
+      // look around it" — so Prada, whose collection field carries the gender
+      // bucket, opened its assistant offering to build a look around "Uomo".
+      //
+      // Then it took the longest NAME as a proxy for the most descriptive one,
+      // and Prada opened offering to build a full look around "Set di due
+      // poggia bacchette in porcellana". Length is not significance.
+      //
+      // What a house leads with is a piece you wear or carry, and rarely its
+      // cheapest: prefer the signature categories, then the highest-priced
+      // piece in them whose name is a sentence you can say out loud.
+      const SIGNATURE = ["borse", "abbigliamento", "calzature", "piccola pelletteria", "gioielli"];
+      const speakable = (n: string) => n.length >= 8 && n.length <= 46;
+      const ranked = cats
+        .map((c) => ({
+          name: (c.name ?? "").trim(),
+          price: Number(c.price) || 0,
+          rank: SIGNATURE.indexOf((c.category ?? "").trim().toLowerCase()),
+        }))
+        .filter((c) => speakable(c.name))
+        .sort((a, b) => {
+          const ar = a.rank < 0 ? SIGNATURE.length : a.rank;
+          const br = b.rank < 0 ? SIGNATURE.length : b.rank;
+          return ar - br || b.price - a.price;
+        });
+      const product = ranked[0]?.name ?? null;
       let customer: string | null = null;
       for (const p of (polRes.data as { customer: { first_name: string | null; last_name: string | null } | { first_name: string | null; last_name: string | null }[] | null }[] | null) ?? []) {
         const c = Array.isArray(p.customer) ? p.customer[0] : p.customer;
@@ -1136,9 +1153,10 @@ export default function BrandAssistant() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKeyDown}
-                placeholder={tt(locale,
-                  "Ask, say how a visit went, or attach a photo to identify a piece…",
-                  "Chiedi, racconta com'è andata una visita, o allega una foto per identificare un capo…")}
+                // Short on purpose: rows={1} clips whatever does not fit one
+                // line, and at 390px the long version was cut mid-word. What
+                // the assistant can do is said in the heading above it.
+                placeholder={tt(locale, "Ask, or say how a visit went…", "Chiedi, o racconta una visita…")}
                 rows={1}
                 disabled={loading || recording}
                 className="min-w-0 flex-1 resize-none rounded-3xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
