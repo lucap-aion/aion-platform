@@ -1116,23 +1116,35 @@ export default function BrandAssistant() {
               >
                 <FileSpreadsheet className="h-4 w-4" />
               </button>
+              {/* While recording the text field is disabled and useless, and on a
+                  360px screen the three buttons leave it about 130px — not
+                  enough for "Sto registrando 0:12", which is the one thing you
+                  need to see. So it becomes the recording itself. */}
+              {recording ? (
+                <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-3xl border border-destructive/40 bg-destructive/5 px-4">
+                  <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-destructive" />
+                  <span className="truncate text-sm text-foreground">
+                    {tt(locale, "Recording", "Sto registrando")}
+                  </span>
+                  <span className="ml-auto shrink-0 font-mono text-sm tabular-nums text-foreground">
+                    {mmss(recordSeconds)}
+                  </span>
+                </div>
+              ) : (
               <textarea
                 ref={taRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKeyDown}
-                placeholder={recording
-                  // The count is the whole feedback: on a shop floor you are not
-                  // watching the screen, and it is how you know it heard you.
-                  ? `${tt(locale, "Recording", "Sto registrando")} ${mmss(recordSeconds)}`
-                  : tt(locale,
-                    "Ask, say how a visit went, or attach a photo to identify a piece…",
-                    "Chiedi, racconta com'è andata una visita, o allega una foto per identificare un capo…")}
+                placeholder={tt(locale,
+                  "Ask, say how a visit went, or attach a photo to identify a piece…",
+                  "Chiedi, racconta com'è andata una visita, o allega una foto per identificare un capo…")}
                 rows={1}
                 disabled={loading || recording}
-                className="flex-1 resize-none rounded-3xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+                className="min-w-0 flex-1 resize-none rounded-3xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
                 style={{ maxHeight: 160 }}
               />
+              )}
               {/* One button, three jobs — the arrangement every messaging app
                   has taught people: with nothing to send it offers the
                   microphone, the moment there is something it becomes send,
@@ -1425,12 +1437,15 @@ const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, 
  * that client's history.
  */
 const VoiceBubble = ({ url, seconds, locale }: { url: string; seconds: number; locale: string }) => (
-  <div className="flex max-w-[80%] items-center gap-2 rounded-2xl rounded-tr-md bg-primary px-3 py-2 text-primary-foreground">
+  // min-w-0 on the flex child is what lets the player shrink: without it a
+  // 210px audio element inside 80% of a 360px screen pushes the duration off
+  // the edge.
+  <div className="flex w-full max-w-[86%] items-center gap-2 rounded-2xl rounded-tr-md bg-primary px-3 py-2 text-primary-foreground sm:max-w-[80%]">
     <Mic className="h-3.5 w-3.5 shrink-0 opacity-80" />
     <audio
       src={url}
       controls
-      className="h-8 max-w-[210px]"
+      className="h-8 min-w-0 flex-1"
       aria-label={locale === "it" ? "Messaggio vocale" : "Voice message"}
     />
     <span className="shrink-0 font-mono text-[11px] tabular-nums opacity-80">{mmss(seconds)}</span>
