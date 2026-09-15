@@ -29,6 +29,9 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY")!;
+// Whisper. Claude takes no audio, so a voice message has to become text before
+// the conversation can do anything with it.
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
 
 // Upgraded to Sonnet for far better synthesis, tool use, and selling instinct.
 // Override per-env with ASSISTANT_MODEL; followups use a cheap fast model.
@@ -951,6 +954,59 @@ const TOOLS = [
 const BRAND_TOOL_NAMES = new Set(["search_knowledge", "lookup_knowledge_card", "shipping_estimate", "run_sql", "generate_report", "report_knowledge_gap", "escalate_to_aion", "file_visit_note"]);
 const ADMIN_TOOL_NAMES = new Set(["run_sql", "search_knowledge", "lookup_knowledge_card", "render_chart", "generate_daily_chubb_export", "generate_monthly_internal_report"]);
 
+/**
+ * A voice message, turned into words.
+ *
+ * The recording is in the private visit_audio bucket, put there by the browser
+ * that made it. It is fetched with the service client because a signed URL for
+ * something we are about to read ourselves is ceremony, and it never leaves
+ * this function except as text.
+ *
+ * `prompt` is not decoration: Whisper leans on it for proper nouns, and a shop
+ * floor is nothing but proper nouns — the house, its pieces, its clients.
+ */
+async function transcribeVoice(
+  admin: ReturnType<typeof createClient>,
+  audioPath: string,
+  hints: { brandName: string | null; locale: string },
+): Promise<{ text: string; error: string | null }> {
+  if (!OPENAI_API_KEY) return { text: "", error: "no transcription key configured" };
+
+  const { data: file, error: dlErr } = await admin.storage.from("visit_audio").download(audioPath);
+  if (dlErr || !file) return { text: "", error: dlErr?.message ?? "recording not found" };
+
+  const form = new FormData();
+  form.append("file", file, audioPath.split("/").pop() ?? "voice.webm");
+  form.append("model", "whisper-1");
+  // Said, not guessed: the browser knows which language the associate is
+  // speaking far better than the audio does in the first two seconds.
+  form.append("language", hints.locale === "it" ? "it" : "en");
+  form.append(
+    "prompt",
+    [
+      hints.brandName ? `A sales associate at ${hints.brandName} describing what just happened with a client in the boutique.` : "",
+      "Proper nouns matter: client names, product names, sizes, colours, prices.",
+    ].filter(Boolean).join(" "),
+  );
+
+  try {
+    const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+      body: form,
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!res.ok) {
+      const detail = (await res.text()).slice(0, 200);
+      return { text: "", error: `transcription failed (HTTP ${res.status}) ${detail}` };
+    }
+    const out = await res.json();
+    return { text: String(out?.text ?? "").trim(), error: null };
+  } catch (e) {
+    return { text: "", error: e instanceof Error ? e.message : "transcription failed" };
+  }
+}
+
 Deno.serve(async (req: Request) => {
   // Refuse a browser origin that isn't ours before doing anything else.
   if (!originAllowed(req)) return originRefused();
@@ -1028,7 +1084,13 @@ Deno.serve(async (req: Request) => {
     brandName = (Array.isArray(rel) ? rel[0]?.name : rel?.name) ?? null;
   }
 
-  const question = String(body.question ?? "").trim();
+  // A voice message arrives as a path, not as words. The transcript becomes the
+  // question for this turn and is emitted to the client, so the bubble the
+  // associate just sent can show what we heard — and they can see immediately
+  // if a client's name came through wrong.
+  const audioPath = typeof body.audio_path === "string" ? body.audio_path.trim() : "";
+  let question = String(body.question ?? "").trim();
+  let voiceError: string | null = null;
   const history = Array.isArray(body.history) ? body.history : [];
   // The thread this turn belongs to, so an escalation can be read in context.
   const chatId = typeof body.chat_id === "string" && body.chat_id ? body.chat_id : null;
@@ -1045,7 +1107,7 @@ Deno.serve(async (req: Request) => {
     : null;
   // A photo or a spreadsheet alone is a valid turn; text is only required when
   // there's no attachment.
-  if (!question && !image && !sheet?.text) return jsonError("question or attachment is required", 400);
+  if (!question && !image && !sheet?.text && !audioPath) return jsonError("question or attachment is required", 400);
 
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
   const encoder = new TextEncoder();
@@ -1071,12 +1133,18 @@ Deno.serve(async (req: Request) => {
       ] as Anthropic.ContentBlockParam[]
     : userText;
 
+  // A voice message has no text yet — the transcript is pushed as the latest
+  // user turn inside the stream, once we have actually heard it. Appending an
+  // empty one here would leave the model reading a blank turn followed by the
+  // real one.
+  const awaitingVoice = !!audioPath && !question;
+
   const messages: Anthropic.MessageParam[] = [
     ...history.map((m: { role?: string; content?: string }) => ({
       role: (m.role === "assistant" ? "assistant" : "user") as "assistant" | "user",
       content: String(m.content ?? ""),
     })),
-    { role: "user" as const, content: latestContent },
+    ...(awaitingVoice ? [] : [{ role: "user" as const, content: latestContent }]),
   ];
 
   // Role-switch the whole persona. Brand users get the sales-floor SYSTEM; AION
@@ -1166,6 +1234,33 @@ Deno.serve(async (req: Request) => {
       };
 
       try {
+        // A voice message becomes the question before anything else runs. Doing
+        // it inside the stream rather than before it means the associate sees
+        // "listening to your message" instead of a silent wait on a 90-second
+        // call, and a failure arrives as a sentence instead of a dead request.
+        if (audioPath && !question) {
+          emit("activity", { label: locale === "it" ? "Ascolto il messaggio…" : "Listening to your message…" });
+          const heard = await transcribeVoice(serviceClient, audioPath, { brandName, locale });
+          if (heard.text) {
+            question = heard.text;
+            // The client shows this under the voice bubble: what we heard, in
+            // their own words, so a half-caught client name is caught HERE and
+            // not three screens later in that client's record.
+            emit("transcript", { text: heard.text, audio_path: audioPath });
+            messages.push({ role: "user", content: heard.text });
+          } else {
+            voiceError = heard.error ?? "nothing was said";
+            emit("error", {
+              message: locale === "it"
+                ? `Non sono riuscito a leggere il messaggio vocale: ${voiceError}`
+                : `I couldn't read that voice message: ${voiceError}`,
+            });
+            emit("done", {});
+            controller.close();
+            return;
+          }
+        }
+
         // Visual search: if a photo was attached, match it against the brand's
         // catalogue-image embeddings, show the pieces as cards, and hand the
         // model the ranked candidates so it can identify + confirm.

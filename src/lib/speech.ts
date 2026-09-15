@@ -147,3 +147,91 @@ export function createDictation(lang: string, listener: Listener): Dictation {
     text: () => finalText,
   };
 }
+
+
+// ── Recording, for a message that is sent as a voice message ────────────────
+//
+// The dictation above turns speech into text in the browser. This does not: it
+// captures the audio and hands it over, because the transcription belongs in
+// the backend — one engine, one quality, the same on every phone in every
+// boutique, instead of whatever the handset's browser happens to implement.
+//
+// It also means the associate sends what they SAID. The words come back as a
+// transcript under the message, which is the moment to notice that a client's
+// name was misheard.
+
+export type Recording = {
+  blob: Blob;
+  seconds: number;
+  mimeType: string;
+};
+
+export type Recorder = {
+  stop: () => Promise<Recording | null>;
+  cancel: () => void;
+};
+
+/** The first container this browser will actually give us. */
+function pickMimeType(): string {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    // Safari records mp4/aac and nothing else.
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+  ];
+  for (const t of candidates) {
+    try {
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) return t;
+    } catch { /* older browsers throw rather than answer */ }
+  }
+  return "";
+}
+
+export const isRecordingSupported = () =>
+  typeof MediaRecorder !== "undefined" &&
+  typeof navigator !== "undefined" &&
+  !!navigator.mediaDevices?.getUserMedia;
+
+/**
+ * Start recording. Resolves once the microphone is actually open, so the UI
+ * does not show "recording" over a permission prompt the person has not
+ * answered yet.
+ */
+export async function startRecording(): Promise<Recorder> {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  const mimeType = pickMimeType();
+  const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  const chunks: BlobPart[] = [];
+  const startedAt = Date.now();
+
+  rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+  rec.start();
+
+  // Whatever happens next, the microphone light goes off.
+  const release = () => { for (const t of stream.getTracks()) t.stop(); };
+
+  return {
+    stop: () =>
+      new Promise<Recording | null>((resolve) => {
+        if (rec.state === "inactive") { release(); resolve(null); return; }
+        rec.onstop = () => {
+          release();
+          const type = rec.mimeType || mimeType || "audio/webm";
+          const blob = new Blob(chunks, { type });
+          resolve(blob.size > 0 ? { blob, seconds: Math.round((Date.now() - startedAt) / 1000), mimeType: type } : null);
+        };
+        rec.stop();
+      }),
+    cancel: () => {
+      try { if (rec.state !== "inactive") rec.stop(); } catch { /* already stopped */ }
+      release();
+    },
+  };
+}
+
+/** The file extension a container should be stored under. */
+export const extensionFor = (mimeType: string) =>
+  mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";

@@ -18,7 +18,7 @@ import {
   Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown, LifeBuoy, Check,
   Mic, Square,
 } from "lucide-react";
-import { createDictation, isDictationSupported, dictationLang, type Dictation } from "@/lib/speech";
+import { startRecording, isRecordingSupported, extensionFor, type Recorder } from "@/lib/speech";
 import VisitCard, { type Visit } from "@/components/visits/VisitCard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -60,7 +60,16 @@ type AssistantMessage = {
 };
 
 type Message =
-  | { role: "user"; content: string; image?: string; file?: string }
+  | {
+    role: "user";
+    content: string;
+    image?: string;
+    file?: string;
+    // A voice message: what was sent, before anyone knows what it says. `url`
+    // is a local object URL so it plays back instantly and never needs signing;
+    // `content` fills in when the transcript comes back from the server.
+    voice?: { url: string; seconds: number };
+  }
   | AssistantMessage;
 
 // Read an image file and downscale to a modest JPEG data URL. Keeps the upload
@@ -285,42 +294,76 @@ export default function BrandAssistant() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   // ── Talking to it ──────────────────────────────────────────────────────────
-  // Dictation fills the box; it does NOT send. On a shop floor the difference
-  // matters: the manager glances at what was heard before it goes anywhere, and
-  // a half-heard client name is caught here rather than in the client's record.
-  const [listening, setListening] = useState(false);
-  const dictation = useRef<Dictation | null>(null);
-  const dictationBase = useRef("");
-  const micSupported = isDictationSupported();
+  // The microphone RECORDS; it does not transcribe. The words are produced by
+  // the server, from the audio, so every boutique gets the same engine on
+  // whatever handset it happens to be holding — and the associate sends what
+  // they actually said, with the transcript arriving underneath it a second
+  // later. That second is the point: it is when a half-caught client name is
+  // noticed, before it reaches that client's record.
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const recorder = useRef<Recorder | null>(null);
+  const recordTimer = useRef<number | null>(null);
+  const micSupported = isRecordingSupported();
 
+  const clearRecordTimer = () => {
+    if (recordTimer.current) { window.clearInterval(recordTimer.current); recordTimer.current = null; }
+  };
 
-  const stopDictation = useCallback(() => {
-    dictation.current?.stop();
-    dictation.current = null;
-    setListening(false);
+  const beginRecording = useCallback(async () => {
+    try {
+      const r = await startRecording();
+      recorder.current = r;
+      setRecordSeconds(0);
+      setRecording(true);
+      recordTimer.current = window.setInterval(() => setRecordSeconds((n) => n + 1), 1000);
+    } catch (e) {
+      const denied = e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError");
+      toast.error(denied
+        ? tt(locale, "The browser blocked the microphone.", "Il browser ha bloccato il microfono.")
+        : tt(locale, "Couldn't start recording.", "Non sono riuscito ad avviare la registrazione."));
+    }
+  }, [locale]);
+
+  const cancelRecording = useCallback(() => {
+    clearRecordTimer();
+    recorder.current?.cancel();
+    recorder.current = null;
+    setRecording(false);
+    setRecordSeconds(0);
   }, []);
 
-  const startDictation = useCallback(() => {
-    dictationBase.current = input.trim() ? `${input.trim()} ` : "";
-    const d = createDictation(dictationLang(locale), {
-      onTranscript: (full, partial) => {
-        setInput(`${dictationBase.current}${full}${partial ? ` ${partial}` : ""}`.trim());
-      },
-      onError: (code) => {
-        if (code === "denied") {
-          toast.error(tt(locale, "The browser blocked the microphone.", "Il browser ha bloccato il microfono."));
-        } else if (code === "unsupported") {
-          toast.error(tt(locale, "This browser can't listen — type instead.", "Questo browser non ascolta — scrivi."));
-        }
-        stopDictation();
-      },
-    });
-    dictation.current = d;
-    setListening(true);
-    d.start();
-  }, [input, locale, stopDictation]);
+  // Deliberately NOT a useCallback: it calls `send`, which is rebuilt every
+  // render and closes over the current message list. Memoising this would pin
+  // the FIRST `send` — and with it an empty conversation — so a voice message
+  // sent after a few turns would have wiped them.
+  const finishRecording = async () => {
+    clearRecordTimer();
+    const r = recorder.current;
+    recorder.current = null;
+    setRecording(false);
+    setRecordSeconds(0);
+    if (!r) return;
 
-  useEffect(() => () => { dictation.current?.stop(); }, []);
+    const rec = await r.stop();
+    // Under a second is a mis-tap, not a message.
+    if (!rec || rec.seconds < 1) return;
+
+    const brand = profile?.brand_id;
+    if (!brand) return;
+    const path = `${brand}/${crypto.randomUUID()}.${extensionFor(rec.mimeType)}`;
+    const { error } = await supabase.storage
+      .from("visit_audio")
+      .upload(path, rec.blob, { contentType: rec.mimeType, upsert: false });
+    if (error) {
+      toast.error(tt(locale, "Couldn't send the recording.", "Non sono riuscito a inviare la registrazione.") + ` ${error.message}`);
+      return;
+    }
+    // A local URL, so the bubble plays back without a round trip or a signature.
+    void send("", { path, url: URL.createObjectURL(rec.blob), seconds: rec.seconds });
+  };
+
+  useEffect(() => () => { clearRecordTimer(); recorder.current?.cancel(); }, []);
 
   const [image, setImage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -643,11 +686,13 @@ export default function BrandAssistant() {
   };
 
   // ── Send ─────────────────────────────────────────────────────────────────
-  const send = async (question: string) => {
+  const send = async (question: string, voice?: { path: string; url: string; seconds: number }) => {
     const text = question.trim();
     const attached = image; // a photo alone is a valid turn (visual search)
     const attachedSheet = sheet; // an Excel/CSV alone is a valid turn (analyse it)
-    if ((!text && !attached && !attachedSheet) || loading) return;
+    // A voice message is a valid turn with no text at all — the words arrive
+    // from the server.
+    if ((!text && !attached && !attachedSheet && !voice) || loading) return;
     setInput("");
     setImage(null);
     setSheet(null);
@@ -658,7 +703,13 @@ export default function BrandAssistant() {
         : { role: "assistant", content: m.summary },
     );
 
-    setMessages([...messages, { role: "user", content: text, image: attached ?? undefined, file: attachedSheet?.name }, emptyAssistant()]);
+    setMessages([...messages, {
+      role: "user",
+      content: text,
+      image: attached ?? undefined,
+      file: attachedSheet?.name,
+      voice: voice ? { url: voice.url, seconds: voice.seconds } : undefined,
+    }, emptyAssistant()]);
     setLoading(true);
     // Abort any prior in-flight stream; a chat switch will abort this one so its
     // answer never bleeds into (or gets saved to) another conversation.
@@ -695,7 +746,7 @@ export default function BrandAssistant() {
         signal: ac.signal,
         // brand_id is used only when the caller is an admin (e.g. viewing-as a
         // brand user); real brand users are pinned to their own brand server-side.
-        body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id, chat_id: chatId ?? undefined, image: attached ?? undefined, spreadsheet: attachedSheet ? { name: attachedSheet.name, text: attachedSheet.text } : undefined }),
+        body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id, chat_id: chatId ?? undefined, image: attached ?? undefined, spreadsheet: attachedSheet ? { name: attachedSheet.name, text: attachedSheet.text } : undefined, audio_path: voice?.path }),
       });
 
       if (!res.ok || !res.body) {
@@ -720,6 +771,29 @@ export default function BrandAssistant() {
           const frame = buffer.slice(0, idx);
           buffer = buffer.slice(idx + 2);
           const { event, data } = parseSse(frame);
+          // The words the server heard belong to the message the associate
+          // SENT, not to the answer — they go under their own bubble, which is
+          // where a misheard client name gets noticed.
+          if (event === "transcript") {
+            const heard = String((data as { text?: string })?.text ?? "").trim();
+            if (heard) {
+              setMessages((prev) => {
+                const out = [...prev];
+                for (let i = out.length - 1; i >= 0; i--) {
+                  if (out[i].role === "user") {
+                    out[i] = { ...(out[i] as Extract<Message, { role: "user" }>), content: heard };
+                    break;
+                  }
+                }
+                return out;
+              });
+            }
+            continue;
+          }
+          if (event === "activity") {
+            patch((m) => ({ ...m, activity: String((data as { label?: string })?.label ?? "") || m.activity }));
+            continue;
+          }
           if (event) handleEvent(event, data, patch, locale);
         }
       }
@@ -940,7 +1014,7 @@ export default function BrandAssistant() {
             <div className="mx-auto flex max-w-3xl flex-col gap-6">
               {messages.map((m, i) =>
                 m.role === "user"
-                  ? <UserBubble key={i} text={m.content} image={m.image} file={m.file} />
+                  ? <UserBubble key={i} text={m.content} image={m.image} file={m.file} voice={m.voice} locale={locale} />
                   : <AssistantBlock
                       key={i}
                       message={m}
@@ -1047,13 +1121,15 @@ export default function BrandAssistant() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKeyDown}
-                placeholder={listening
-                  ? tt(locale, "Listening…", "Ti ascolto…")
+                placeholder={recording
+                  // The count is the whole feedback: on a shop floor you are not
+                  // watching the screen, and it is how you know it heard you.
+                  ? `${tt(locale, "Recording", "Sto registrando")} ${mmss(recordSeconds)}`
                   : tt(locale,
                     "Ask, say how a visit went, or attach a photo to identify a piece…",
                     "Chiedi, racconta com'è andata una visita, o allega una foto per identificare un capo…")}
                 rows={1}
-                disabled={loading}
+                disabled={loading || recording}
                 className="flex-1 resize-none rounded-3xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
                 style={{ maxHeight: 160 }}
               />
@@ -1062,34 +1138,47 @@ export default function BrandAssistant() {
                   microphone, the moment there is something it becomes send,
                   and while it is listening it is the way to stop. Same place,
                   same shape, so the thumb never has to look. */}
+              {/* While recording, a way out that is not "send": a mis-tap or a
+                  sentence started wrong should be throwable away, and on a shop
+                  floor that has to be one obvious tap. */}
+              {recording && (
+                <button
+                  type="button"
+                  onClick={cancelRecording}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label={tt(locale, "Discard", "Scarta")}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
-                  if (listening) { stopDictation(); return; }
+                  if (recording) { void finishRecording(); return; }
                   if (hasContent) { void send(input); return; }
-                  startDictation();
+                  void beginRecording();
                 }}
                 disabled={loading || (!hasContent && !micSupported)}
                 className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
-                  listening
+                  recording
                     ? "bg-destructive text-destructive-foreground"
                     : "bg-primary text-primary-foreground hover:bg-primary/90"
                 }`}
-                aria-label={listening
-                  ? tt(locale, "Stop", "Ferma")
+                aria-label={recording
+                  ? tt(locale, "Send the recording", "Invia la registrazione")
                   : hasContent
                     ? tt(locale, "Send", "Invia")
-                    : tt(locale, "Hold a moment and talk", "Parla")}
-                title={hasContent || listening ? undefined : tt(
+                    : tt(locale, "Record a voice message", "Registra un messaggio vocale")}
+                title={hasContent || recording ? undefined : tt(
                   locale,
-                  "Speak instead of typing — say how a visit went and it will file it.",
-                  "Parla invece di scrivere — racconta com'è andata una visita e la registra.",
+                  "Send a voice message — say how a visit went and it will file it.",
+                  "Manda un messaggio vocale — racconta com'è andata una visita e la registra.",
                 )}
               >
                 {loading
                   ? <Loader2 className="h-4 w-4 animate-spin" />
-                  : listening
-                    ? <Square className="h-4 w-4" />
+                  : recording
+                    ? <ArrowUp className="h-4 w-4" />
                     : hasContent
                       ? <ArrowUp className="h-4 w-4" />
                       : <Mic className="h-4 w-4" />}
@@ -1324,8 +1413,36 @@ const EmptyState = ({ locale, prompts, onPick }: { locale: string; prompts: Sugg
   </div>
 );
 
-const UserBubble = ({ text, image, file }: { text: string; image?: string; file?: string }) => (
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+/**
+ * A voice message, and underneath it what we heard.
+ *
+ * Both, deliberately. The recording is what the associate actually sent and is
+ * the only thing that cannot be got back; the transcript is what the rest of
+ * the system will act on. Showing the words under the bubble is what turns a
+ * misheard client name into a two-second correction instead of a wrong entry in
+ * that client's history.
+ */
+const VoiceBubble = ({ url, seconds, locale }: { url: string; seconds: number; locale: string }) => (
+  <div className="flex max-w-[80%] items-center gap-2 rounded-2xl rounded-tr-md bg-primary px-3 py-2 text-primary-foreground">
+    <Mic className="h-3.5 w-3.5 shrink-0 opacity-80" />
+    <audio
+      src={url}
+      controls
+      className="h-8 max-w-[210px]"
+      aria-label={locale === "it" ? "Messaggio vocale" : "Voice message"}
+    />
+    <span className="shrink-0 font-mono text-[11px] tabular-nums opacity-80">{mmss(seconds)}</span>
+  </div>
+);
+
+const UserBubble = ({ text, image, file, voice, locale }: {
+  text: string; image?: string; file?: string;
+  voice?: { url: string; seconds: number }; locale: string;
+}) => (
   <div className="flex flex-col items-end gap-1.5">
+    {voice && <VoiceBubble url={voice.url} seconds={voice.seconds} locale={locale} />}
     {image && (
       <img src={image} alt="" className="max-h-56 max-w-[80%] rounded-2xl rounded-tr-md border border-border object-cover" />
     )}
@@ -1336,9 +1453,17 @@ const UserBubble = ({ text, image, file }: { text: string; image?: string; file?
       </div>
     )}
     {text && (
-      <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">
-        {text}
-      </div>
+      voice
+        ? (
+          <p className="max-w-[80%] whitespace-pre-wrap text-right text-xs italic leading-relaxed text-muted-foreground">
+            {text}
+          </p>
+        )
+        : (
+          <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">
+            {text}
+          </div>
+        )
     )}
   </div>
 );
