@@ -16,7 +16,10 @@ import AssistantMarkdown from "@/components/assistant/AssistantMarkdown";
 import {
   ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
   Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown, LifeBuoy, Check,
+  Mic, Square,
 } from "lucide-react";
+import { createDictation, isDictationSupported, dictationLang, type Dictation } from "@/lib/speech";
+import VisitCard, { type Visit } from "@/components/visits/VisitCard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -50,6 +53,9 @@ type AssistantMessage = {
   activity: string | null;
   followups: string[];
   report: ReportPayload | null;
+  // A visit the assistant filed from what the associate just told it. Renders
+  // as a card in this message, with its own confirm button.
+  visit: Visit | null;
   streaming: boolean;
 };
 
@@ -257,6 +263,7 @@ const emptyAssistant = (): AssistantMessage => ({
   activity: null,
   followups: [],
   report: null,
+  visit: null,
   streaming: true,
 });
 
@@ -277,6 +284,43 @@ export default function BrandAssistant() {
   const [chatId, setChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  // ── Talking to it ──────────────────────────────────────────────────────────
+  // Dictation fills the box; it does NOT send. On a shop floor the difference
+  // matters: the manager glances at what was heard before it goes anywhere, and
+  // a half-heard client name is caught here rather than in the client's record.
+  const [listening, setListening] = useState(false);
+  const dictation = useRef<Dictation | null>(null);
+  const dictationBase = useRef("");
+  const micSupported = isDictationSupported();
+
+  const stopDictation = useCallback(() => {
+    dictation.current?.stop();
+    dictation.current = null;
+    setListening(false);
+  }, []);
+
+  const startDictation = useCallback(() => {
+    dictationBase.current = input.trim() ? `${input.trim()} ` : "";
+    const d = createDictation(dictationLang(locale), {
+      onTranscript: (full, partial) => {
+        setInput(`${dictationBase.current}${full}${partial ? ` ${partial}` : ""}`.trim());
+      },
+      onError: (code) => {
+        if (code === "denied") {
+          toast.error(tt(locale, "The browser blocked the microphone.", "Il browser ha bloccato il microfono."));
+        } else if (code === "unsupported") {
+          toast.error(tt(locale, "This browser can't listen — type instead.", "Questo browser non ascolta — scrivi."));
+        }
+        stopDictation();
+      },
+    });
+    dictation.current = d;
+    setListening(true);
+    d.start();
+  }, [input, locale, stopDictation]);
+
+  useEffect(() => () => { dictation.current?.stop(); }, []);
+
   const [image, setImage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<SheetAttachment | null>(null);
@@ -373,6 +417,10 @@ export default function BrandAssistant() {
         activity: null,
         followups: Array.isArray(a.followups) ? a.followups : [],
         report: a.report && Array.isArray((a.report as ReportPayload).sections) && (a.report as ReportPayload).sections.length > 0 ? a.report : null,
+        // Never restored from history. The card is a decision to be made now;
+        // reopening a chat from last week must not offer to confirm a visit
+        // that was confirmed, corrected or thrown away days ago.
+        visit: null,
         streaming: false,
       };
     });
@@ -977,14 +1025,36 @@ export default function BrandAssistant() {
               >
                 <FileSpreadsheet className="h-4 w-4" />
               </button>
+              {micSupported && (
+                <button
+                  type="button"
+                  onClick={() => (listening ? stopDictation() : startDictation())}
+                  disabled={loading}
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${
+                    listening
+                      ? "animate-pulse border-destructive bg-destructive text-destructive-foreground"
+                      : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                  aria-label={listening ? tt(locale, "Stop", "Ferma") : tt(locale, "Speak", "Parla")}
+                  title={tt(
+                    locale,
+                    "Speak instead of typing — tell it what just happened with a client and it will file the visit.",
+                    "Parla invece di scrivere — racconta com'è andata con un cliente e registra la visita.",
+                  )}
+                >
+                  {listening ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                </button>
+              )}
               <textarea
                 ref={taRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKeyDown}
-                placeholder={tt(locale,
-                  "Ask, attach a photo to identify a piece, or a file to ask about…",
-                  "Chiedi, allega una foto per identificare un capo o un file su cui fare domande…")}
+                placeholder={listening
+                  ? tt(locale, "Listening…", "Ti ascolto…")
+                  : tt(locale,
+                    "Ask, say how a visit went, or attach a photo to identify a piece…",
+                    "Chiedi, racconta com'è andata una visita, o allega una foto per identificare un capo…")}
                 rows={1}
                 disabled={loading}
                 className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
@@ -1109,6 +1179,8 @@ function handleEvent(
     patch((m) => ({ ...m, activity: label }));
   } else if (event === "text_delta") {
     patch((m) => ({ ...m, summary: m.summary + (data?.text ?? ""), activity: null }));
+  } else if (event === "visit") {
+    patch((m) => ({ ...m, visit: (data?.visit ?? null) as Visit | null, activity: null }));
   } else if (event === "report") {
     patch((m) => ({ ...m, report: (data ?? null) as ReportPayload | null, activity: null }));
   } else if (event === "followups") {
@@ -1259,7 +1331,7 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
   message: AssistantMessage; locale: string; isLast: boolean; onFollowup: (q: string) => void; onFeedback?: (rating: 1 | -1) => void;
   onEscalate?: () => void; escalated?: boolean;
 }) => {
-  const { summary, sources, columns, rows, activity, followups, report, streaming } = message;
+  const { summary, sources, columns, rows, activity, followups, report, visit, streaming } = message;
   const [voted, setVoted] = useState<1 | -1 | null>(null);
   // Drop technical columns (ids/uuids) before showing anything to the associate.
   const displayCols = columns.filter((c) => !isHiddenColumn(c));
@@ -1276,7 +1348,7 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
   const hasMdTable = /(^|\n)\s*\|?[\s:|-]*-{3,}[\s:|-]*\|/.test(summary);
   const showTable = !streaming && rows.length >= 6 && displayCols.length > 0 && !hasImageCol && !hasMdTable;
   const hasReport = !!report && Array.isArray(report.sections) && report.sections.length > 0;
-  const hasAnything = summary.trim() || sources.length > 0 || showGrid || showTable || hasReport;
+  const hasAnything = summary.trim() || sources.length > 0 || showGrid || showTable || hasReport || !!visit;
 
   if (!hasAnything && streaming) {
     return (
@@ -1306,6 +1378,10 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
       )}
 
       {hasReport && report && <ReportView report={report} locale={locale} />}
+
+      {/* A visit the assistant just filed from what was said. Draft until the
+          manager confirms it right here. */}
+      {visit && <VisitCard visit={visit} locale={locale} />}
 
       {/* Pieces → big-image card grid (photos can't be duplicated in prose, so
           it always renders); multi-row numeric data → compact table with the

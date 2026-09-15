@@ -21,11 +21,16 @@
 import Anthropic from "npm:@anthropic-ai/sdk@0.32.1";
 import { originAllowed, originRefused } from "../_shared/origin.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+// The same chunker and the same embedding model the knowledge base uses, so a
+// visit is retrieved beside the house's own documents rather than in a lane of
+// its own.
+import { chunkText, embedDocuments } from "../_shared/crawl.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
+const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY") ?? "";
 
 // One short extraction per visit — a few hundred tokens. Override per env.
 const MODEL = Deno.env.get("VISIT_MODEL") ?? "claude-opus-5";
@@ -140,6 +145,118 @@ const isoDate = (v: unknown): string | null => {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 };
 
+/**
+ * A visit, written the way a colleague would recount it.
+ *
+ * Deliberately prose and not a field dump: this text is what gets embedded, and
+ * "outcome: not_purchased" retrieves nothing, while "she did not buy — it was
+ * too heavy for the travelling she does" answers a question somebody will
+ * actually ask. The objection is quoted, never paraphrased, for the same reason
+ * it is free text in the table.
+ */
+function visitAsProse(v: Record<string, unknown>, shopName: string | null): string {
+  const when = String(v.visited_at ?? "").slice(0, 10);
+  const who = v.customer_said ? String(v.customer_said) : "A client with no name on record";
+  const outcome = v.outcome === "purchased"
+    ? "bought"
+    : v.outcome === "undecided"
+    ? "left undecided"
+    : "left without buying";
+
+  const items = Array.isArray(v.items) ? v.items as Record<string, unknown>[] : [];
+  const tried = items
+    .map((it) => [it.product, it.size ? `size ${it.size}` : null, it.colour, it.reaction]
+      .filter(Boolean).join(", "))
+    .filter(Boolean);
+
+  const lines = [
+    `Boutique visit on ${when}${shopName ? ` at ${shopName}` : ""}. ${who} ${outcome}.`,
+    v.summary ? String(v.summary) : "",
+    tried.length ? `What was shown or tried on: ${tried.join("; ")}.` : "",
+    v.objection ? `Why it did not close, in the manager's words: "${String(v.objection)}".` : "",
+    v.occasion ? `The occasion was ${String(v.occasion)}.` : "",
+    v.follow_up ? `What was promised: ${String(v.follow_up)}${v.follow_up_due ? ` by ${String(v.follow_up_due)}` : ""}.` : "",
+    Array.isArray(v.tags) && v.tags.length ? `Tags: ${(v.tags as string[]).join(", ")}.` : "",
+    v.transcript ? `\nThe manager's own account: ${String(v.transcript)}` : "",
+  ].filter(Boolean);
+
+  return lines.join("\n\n");
+}
+
+/**
+ * Put a confirmed visit into the knowledge base, replacing the one it had.
+ *
+ * Best effort on purpose: the visit is already saved and confirmed by the time
+ * this runs, and an embedding provider having a bad minute must not turn a
+ * manager's confirmation into an error they have to understand.
+ */
+async function indexVisitAsKnowledge(
+  service: ReturnType<typeof createClient>,
+  visit: Record<string, unknown>,
+): Promise<{ indexed: boolean; reason?: string }> {
+  if (!VOYAGE_API_KEY) return { indexed: false, reason: "no embedding key" };
+  const visitId = String(visit.id);
+  const brandId = Number(visit.brand_id);
+
+  let shopName: string | null = null;
+  if (visit.shop_id != null) {
+    const { data: shop } = await service
+      .from("shops").select("name").eq("id", visit.shop_id).maybeSingle();
+    shopName = (shop as { name?: string } | null)?.name ?? null;
+  }
+
+  const content = visitAsProse(visit, shopName);
+  if (content.trim().length < 40) return { indexed: false, reason: "too little to index" };
+
+  const title = `Visit — ${visit.customer_said ?? "walk-in"} — ${String(visit.visited_at ?? "").slice(0, 10)}`;
+
+  // Replace rather than accumulate: a corrected card must not leave its earlier
+  // reading in the index to be retrieved later as if it were true.
+  await service.from("brand_knowledge_docs").delete().eq("visit_id", visitId);
+
+  const { data: doc, error: docErr } = await service
+    .from("brand_knowledge_docs")
+    .insert({
+      brand_id: brandId,
+      visit_id: visitId,
+      title: title.slice(0, 200),
+      // Its own category: this is neither policy nor storytelling, and a head of
+      // CRM filtering the knowledge page deserves to see where it came from.
+      category: "floor",
+      source_type: "visit",
+      content,
+      char_count: content.length,
+      status: "processing",
+      created_by: (visit.recorded_by as string | null) ?? null,
+    })
+    .select("id")
+    .single();
+  if (docErr || !doc) return { indexed: false, reason: docErr?.message ?? "doc insert failed" };
+
+  const docId = (doc as { id: string }).id;
+  try {
+    const chunks = chunkText(content);
+    if (!chunks.length) throw new Error("no chunkable content");
+    const embeddings = await embedDocuments(chunks, VOYAGE_API_KEY);
+    const rows = chunks.map((c, i) => ({
+      doc_id: docId, brand_id: brandId, chunk_index: i,
+      content: c, token_count: Math.round(c.length / 4), embedding: embeddings[i],
+    }));
+    const { error: insErr } = await service.from("brand_knowledge_chunks").insert(rows);
+    if (insErr) throw new Error(insErr.message);
+    await service.from("brand_knowledge_docs")
+      .update({ status: "ready", chunk_count: chunks.length, error: null })
+      .eq("id", docId);
+    return { indexed: true };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "unknown";
+    await service.from("brand_knowledge_docs")
+      .update({ status: "error", error: reason.slice(0, 500) })
+      .eq("id", docId);
+    return { indexed: false, reason };
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (!originAllowed(req)) return originRefused();
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -164,6 +281,49 @@ Deno.serve(async (req: Request) => {
     body = await req.json();
   } catch {
     return jsonError("invalid JSON body");
+  }
+
+  // ── Confirming a card ──────────────────────────────────────────────────────
+  // The manager has read what we made of their note and is saying it is right.
+  // That is the moment the visit becomes true, and therefore the moment it is
+  // worth remembering: the row goes to 'confirmed' and the same account is
+  // written into the knowledge base, where the assistant retrieves it beside
+  // the house's own documents. A draft is never indexed.
+  if (body.action === "confirm") {
+    const visitId = text(body.visit_id, 60);
+    if (!visitId) return jsonError("visit_id is required");
+
+    const patch: Record<string, unknown> = {
+      status: "confirmed",
+      needs_review: false,
+      confirmed_at: new Date().toISOString(),
+    };
+    // Only the fields a manager can actually correct on the card.
+    for (const f of ["outcome", "summary", "objection", "follow_up", "customer_id"]) {
+      if (f in body) patch[f] = body[f] === "" ? null : body[f];
+    }
+    if ("follow_up_due" in body) patch.follow_up_due = isoDate(body.follow_up_due);
+
+    // Through the caller's client: RLS decides whether this visit is theirs.
+    const { data: saved, error } = await userClient
+      .from("store_visits")
+      .update(patch)
+      .eq("id", visitId)
+      .select()
+      .maybeSingle();
+    if (error) return jsonError(`could not confirm: ${error.message}`, 500);
+    if (!saved) return jsonError("no such visit", 404);
+
+    // Best effort, deliberately: the visit is confirmed and saved by now, and a
+    // bad minute at the embedding provider must not turn a manager's
+    // confirmation into an error they are asked to understand.
+    const indexed = await indexVisitAsKnowledge(
+      serviceClient,
+      saved as unknown as Record<string, unknown>,
+    ).catch((e) => ({ indexed: false, reason: e instanceof Error ? e.message : "unknown" }));
+    if (!indexed.indexed) console.warn("[visit-note index]", indexed.reason);
+
+    return jsonOk({ visit: saved, knowledge: indexed });
   }
 
   const transcript = text(body.transcript, 8000);

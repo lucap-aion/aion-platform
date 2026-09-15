@@ -721,6 +721,31 @@ const TOOLS = [
     },
   },
   {
+    name: "file_visit_note",
+    description:
+      "Call this when the associate is TELLING YOU what just happened with a " +
+      "client in the boutique, rather than asking you something: who came in, " +
+      "what they tried, whether they bought, why they didn't, what was promised. " +
+      "It is the shop floor's own record and the only place a visit that ended " +
+      "WITHOUT a sale is ever written down. Pass their account word for word — " +
+      "do not summarise it, do not tidy the client's objection into a category, " +
+      "and do not invent a detail they did not say. The card you get back is a " +
+      "DRAFT shown to them to confirm or correct, so say in ONE short line what " +
+      "you filed and let them check it — do not read the card back to them, it " +
+      "is on their screen. If they are ASKING about past visits, that is run_sql " +
+      "on store_visits, not this.",
+    input_schema: {
+      type: "object",
+      properties: {
+        account: {
+          type: "string",
+          description: "The associate's account of the visit, verbatim, in the language they said it.",
+        },
+      },
+      required: ["account"],
+    },
+  },
+  {
     name: "escalate_to_aion",
     description:
       "Call this when the associate asks about AION itself rather than about " +
@@ -923,7 +948,7 @@ const TOOLS = [
 // analyst toolkit (charts + Chubb/monthly exports). generate_report is brand-only
 // (the admin UI renders 'chart'/'report_files', not the 'report' object);
 // shipping_estimate is a trunk-show/brand tool.
-const BRAND_TOOL_NAMES = new Set(["search_knowledge", "lookup_knowledge_card", "shipping_estimate", "run_sql", "generate_report", "report_knowledge_gap", "escalate_to_aion"]);
+const BRAND_TOOL_NAMES = new Set(["search_knowledge", "lookup_knowledge_card", "shipping_estimate", "run_sql", "generate_report", "report_knowledge_gap", "escalate_to_aion", "file_visit_note"]);
 const ADMIN_TOOL_NAMES = new Set(["run_sql", "search_knowledge", "lookup_knowledge_card", "render_chart", "generate_daily_chubb_export", "generate_monthly_internal_report"]);
 
 Deno.serve(async (req: Request) => {
@@ -1354,6 +1379,42 @@ Deno.serve(async (req: Request) => {
                 tool_use_id: block.id,
                 content: "Noted — it will appear on the brand's list of knowledge to add. Tell the associate you don't have it and suggest who can.",
               });
+            } else if (block.name === "file_visit_note") {
+              // Reuses the visit-note function rather than repeating its
+              // structuring: same prompt, same catalogue match, same draft, and
+              // the same RLS, because the caller's own token is forwarded.
+              const account = String((block.input as { account?: string })?.account ?? "").trim();
+              try {
+                const res = await fetch(`${SUPABASE_URL}/functions/v1/visit-note`, {
+                  method: "POST",
+                  headers: { "Authorization": authHeader, "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+                  body: JSON.stringify({ brand_id: brandId, transcript: account, source: "voice" }),
+                });
+                const out = await res.json().catch(() => ({}));
+                const visit = (out as { visit?: Record<string, unknown> })?.visit ?? null;
+                if (!res.ok || !visit) {
+                  toolResults.push({
+                    type: "tool_result", tool_use_id: block.id, is_error: true,
+                    content: `could not file the visit: ${(out as { error?: string })?.error ?? `HTTP ${res.status}`}`,
+                  });
+                } else {
+                  // The card renders in the chat, with its own confirm button.
+                  emit("visit", { visit });
+                  toolResults.push({
+                    type: "tool_result", tool_use_id: block.id,
+                    content: JSON.stringify({
+                      filed: true, status: "draft",
+                      outcome: visit.outcome, matched_client: visit.customer_said ?? null,
+                      note: "A draft card is now on the associate's screen for them to confirm or correct. Say in ONE line what you filed.",
+                    }),
+                  });
+                }
+              } catch (e) {
+                toolResults.push({
+                  type: "tool_result", tool_use_id: block.id, is_error: true,
+                  content: `could not file the visit: ${e instanceof Error ? e.message : "unknown"}`,
+                });
+              }
             } else if (block.name === "escalate_to_aion") {
               // Best-effort, like the gap log: the associate's answer must never
               // wait on, or fail because of, our own inbox.
