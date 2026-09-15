@@ -35,13 +35,41 @@ function fmtPeriodLabel(key: string | null | undefined): string {
   return key;
 }
 
-// Collapse singular/plural to the same bucket and display in plural.
-// "BRACELET"/"BRACELETS" -> "BRACELETS"; non-English / single-letter / "—" pass through.
-function normalizeCategory(raw: string | null | undefined): string {
+// Collapse singular/plural into one bucket, and label it the way the BRAND
+// spells it.
+//
+// The old version manufactured the plural — strip a trailing S, add one back —
+// which is a no-op on Roberto Coin, whose categories are already English
+// plurals (COLLARS, EARRINGS, RINGS), and nonsense on anyone else: Prada's
+// charts read ABBIGLIAMENTOS, BORSES, GIOIELLIS, TAVOLAS. The comment claimed
+// non-English passed through; the code had no such test.
+//
+// The bucketing is still worth having — Roberto Coin really does carry both
+// BRACELETS (24) and BRACELET (1) — so the key still collapses a trailing S.
+// What changed is the label: it is the spelling that actually occurs most in
+// the data, so BRACELET/BRACELETS shows as BRACELETS and ABBIGLIAMENTO shows
+// as ABBIGLIAMENTO. Nothing is invented.
+function categoryKey(raw: string | null | undefined): string {
   const v = (raw ?? "").trim().toUpperCase();
   if (!v || v === "—" || v.length < 3) return v || "—";
-  const base = v.endsWith("S") ? v.slice(0, -1) : v;
-  return `${base}S`;
+  return v.endsWith("S") ? v.slice(0, -1) : v;
+}
+
+/** key → the spelling the brand uses most for it. */
+function categoryLabels(raws: (string | null | undefined)[]): Map<string, string> {
+  const counts = new Map<string, Map<string, number>>();
+  for (const raw of raws) {
+    const v = (raw ?? "").trim().toUpperCase() || "—";
+    const key = categoryKey(raw);
+    const seen = counts.get(key) ?? new Map<string, number>();
+    seen.set(v, (seen.get(v) ?? 0) + 1);
+    counts.set(key, seen);
+  }
+  const out = new Map<string, string>();
+  for (const [key, seen] of counts) {
+    out.set(key, [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0]);
+  }
+  return out;
 }
 
 function getWeek(ds: string) {
@@ -178,7 +206,7 @@ interface PolicyRow {
   customer_id: string;
   shop_id: number;
   shops: { name: string } | null;
-  catalogues: { category: string } | null;
+  catalogues: { category: string | null; collection: string | null } | null;
 }
 
 interface ProfileRow {
@@ -785,8 +813,14 @@ export default function AdminInsights({ lockedBrandId, lockedBrandName }: AdminI
         city: p.shops?.city ?? null,
         customerId: p.customer_id,
         regDate: profileRegMap.get(p.customer_id) || null,
-        category: normalizeCategory(p.catalogues?.category || p.catalogues?.collection || "—"),
+        category: categoryKey(p.catalogues?.category || p.catalogues?.collection || "—"),
       }));
+
+      // Relabel each bucket with the brand's own spelling of it.
+      const labels = categoryLabels(
+        (polData as PolicyRow[]).map((p) => p.catalogues?.category || p.catalogues?.collection || "—"),
+      );
+      for (const row of processed) row.category = labels.get(row.category) ?? row.category;
 
       setRawPolicies(processed);
       setRawProfiles(profData as ProfileRow[]);
@@ -1937,8 +1971,12 @@ function ProfitabilityTab({
           cogs: manufacturingCost(p),
           selling_price: Number(p.selling_price) || 0,
           shop_name: p.shops?.name || "—",
-          category: normalizeCategory(p.catalogues?.category || p.catalogues?.collection || "—"),
+          category: categoryKey(p.catalogues?.category || p.catalogues?.collection || "—"),
         }));
+        const labels = categoryLabels(
+          (all as any[]).map((p) => p.catalogues?.category || p.catalogues?.collection || "—"),
+        );
+        for (const row of mapped) row.category = labels.get(row.category) ?? row.category;
         setPolicies(mapped);
       } finally {
         if (!cancelled) setLoading(false);
