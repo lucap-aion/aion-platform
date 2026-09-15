@@ -372,11 +372,15 @@ async function measureImages(urls: string[]): Promise<SizedImage[]> {
     const stated = sizeFromUrl(url);
     if (stated) return { url, ...stated };
     try {
-      const res = await fetch(url, {
-        headers: { "User-Agent": UA, Range: "bytes=0-2047" },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!res.ok && res.status !== 206) return { url };
+      // Through fetchSite, so a house that drops our agent still gets measured.
+      // It was a plain fetch with AION_UA, and on prada.com every one of the
+      // fourteen candidates came back unreachable — which does not fail loudly,
+      // it just means assignPortalImages has no shapes to sort by and falls back
+      // to document order. The stage then reported "0 of 14 measured" and filled
+      // all six slots with 4:5 packshots, including the wide ones.
+      const got = await fetchSite(url, { timeoutMs: 8000, accept: "image/*,*/*" });
+      const res = got.response;
+      if (!res || (!res.ok && res.status !== 206)) return { url };
       const bytes = new Uint8Array(await res.arrayBuffer());
       const dims = dimensionsFromHeader(bytes);
       return dims ? { url, ...dims } : { url };

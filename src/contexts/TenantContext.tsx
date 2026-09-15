@@ -98,6 +98,68 @@ function deriveDarkVariant(key: keyof ThemeColors, hsl: string): string {
   }
 }
 
+/**
+ * A background is never applied on its own.
+ *
+ * Each theme key used to be written independently, which is fine for a primary
+ * colour and catastrophic for a canvas: a brand that supplies only
+ * `background_hsl` gets `--background` changed and `--foreground`, `--card`,
+ * `--sidebar-background` and `--border` left at their light-mode defaults. Prada
+ * onboarded with exactly one colour harvested from its own CSS — pure black —
+ * and the result was dark text on a black page, a white sidebar and grey cards.
+ * The brand had not done anything wrong; the theme was simply incoherent.
+ *
+ * So when a brand sets a DARK background and has not said what goes on top of
+ * it, the companions are derived from it. Anything the brand set explicitly is
+ * left alone — this fills silence, it does not overrule a choice.
+ *
+ * Only for dark backgrounds: a light canvas is what the defaults already assume,
+ * and deriving companions there would replace a designed palette with an
+ * arithmetic one for no gain.
+ */
+function darkCanvasCompanions(
+  bgHsl: string,
+  explicit: Set<keyof ThemeColors>,
+): string {
+  const [h, s, l] = parseHsl(bgHsl);
+  if (l >= 35) return "";
+
+  const sub = (max: number) => Math.min(s, max);
+  const lines: string[] = [];
+  const put = (cssVar: string, value: string) => { lines.push(`  ${cssVar}: ${value};\n`); };
+
+  if (!explicit.has("foreground_hsl")) {
+    put("--foreground", formatHsl(h, sub(12), 95));
+  }
+  if (!explicit.has("card_hsl")) {
+    // Lifted off the canvas rather than tinted, so a card reads as a surface.
+    put("--card", formatHsl(h, sub(10), l + 7));
+    put("--popover", formatHsl(h, sub(10), l + 7));
+    put("--card-foreground", formatHsl(h, sub(12), 95));
+    put("--popover-foreground", formatHsl(h, sub(12), 95));
+  }
+  if (!explicit.has("sidebar_background_hsl")) {
+    put("--sidebar-background", formatHsl(h, sub(10), l + 4));
+    put("--sidebar-foreground", formatHsl(h, sub(10), 88));
+    put("--sidebar-accent", formatHsl(h, sub(10), l + 10));
+    put("--sidebar-accent-foreground", formatHsl(h, sub(10), 95));
+  }
+  if (!explicit.has("border_hsl")) {
+    put("--border", formatHsl(h, sub(8), l + 16));
+    put("--input", formatHsl(h, sub(8), l + 16));
+    put("--sidebar-border", formatHsl(h, sub(8), l + 14));
+  }
+  if (!explicit.has("muted_hsl")) {
+    put("--muted", formatHsl(h, sub(8), l + 12));
+    put("--muted-foreground", formatHsl(h, sub(8), 62));
+    put("--secondary", formatHsl(h, sub(8), l + 12));
+    put("--secondary-foreground", formatHsl(h, sub(8), 88));
+  }
+  put("--accent", formatHsl(h, sub(10), l + 12));
+  put("--accent-foreground", formatHsl(h, sub(10), 95));
+  return lines.join("");
+}
+
 const STYLE_TAG_ID = "aion-tenant-theme";
 
 /** Font settings stored alongside colours in theme_settings JSON */
@@ -297,6 +359,15 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
       for (const cssVar of DARK_CSS_MAP[key]) {
         darkVars += `  ${cssVar}: ${darkVal};\n`;
       }
+    }
+
+    // Fill in whatever a lone background left unreadable. Appended after the
+    // brand's own values so an explicit choice always wins.
+    const bg = tenant.themeColors.background_hsl;
+    if (bg) {
+      const explicit = new Set(keys);
+      lightVars += darkCanvasCompanions(bg, explicit);
+      darkVars += darkCanvasCompanions(deriveDarkVariant("background_hsl", bg), explicit);
     }
 
     tag.textContent = `:root {\n${lightVars}}\n.dark {\n${darkVars}}`;
