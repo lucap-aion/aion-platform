@@ -118,6 +118,11 @@ export async function fetchSite(
   }
 
   const refusedAs = first.res ? `HTTP ${first.res.status}` : (first.err ?? "connection dropped");
+  // Let go of the refusal's body before asking again. An unread response body is
+  // an open resource in Deno, and this is the one path that makes two requests
+  // for one page — leaking half of them would be a slow strangle of the worker,
+  // visible only as a stage that says 'running' and never says anything else.
+  try { await first.res?.body?.cancel(); } catch { /* already gone */ }
   const second = await attempt("browser");
   if (second.res?.ok) {
     return { response: second.res, agent: "browser", refusedAs, error: null };
