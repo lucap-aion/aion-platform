@@ -208,6 +208,22 @@ Schema (your brand only):
 - feedback(id, user_id->profiles.id, satisfaction_rate, recommendation_rate,
     peace_of_mind_rate, comment) — rates 1-5.
 - shops(id, name, city, country).
+- store_visits(id, brand_id, shop_id->shops.id, recorded_by->profiles.id,
+    customer_id->profiles.id, customer_said, match_confidence, visited_at,
+    transcript, outcome, summary, items jsonb, objection, occasion, sentiment,
+    follow_up, follow_up_due, tags text[], status, needs_review) — the note a
+    store manager DICTATED after a client walked out, structured. This is the
+    only table that knows about a visit which ended WITHOUT a purchase, so every
+    question of the shape "who came in and did not buy", "why are we losing
+    sales", "who do I need to call back" is answered HERE and nowhere else.
+    outcome: purchased / not_purchased / undecided. objection = why it did not
+    close, in the manager's own words — quote it, never rephrase it into a
+    category. items = what was actually tried on, with a sku when we could match
+    it. customer_id NULL is normal and meaningful: a walk-in nobody has a name
+    for yet. status 'draft' means the manager has NOT confirmed the card — treat
+    a draft as hearsay, say so if you use one, and prefer confirmed rows.
+    follow_up_due is the promise that was made; overdue ones are the first thing
+    to raise on a quiet morning.
 - events(id, name, city, country, venue, start_date, end_date, status, pr_agency,
     pr_cost, venue_cost, shipping_cost, other_cost, guests_invited, guests_attended,
     revenue) — TRUNK SHOWS / brand events, past and planned. status:

@@ -115,6 +115,29 @@ feedback(id int PK, brand_id -> brands.id, user_id -> profiles.id,
 support_messages(id int PK, brand_id -> brands.id, customer_id -> profiles.id,
                  message, created_at)
 
+store_visits(id uuid PK, brand_id -> brands.id, shop_id -> shops.id,
+             recorded_by -> profiles.id, customer_id -> profiles.id,
+             customer_said, match_confidence, visited_at, source, transcript,
+             language, outcome, summary, items jsonb, objection, occasion,
+             sentiment, follow_up, follow_up_due date, tags text[], status,
+             needs_review bool, confirmed_at, created_at)
+   -- Dictated by a store manager in the minute after a client left the boutique.
+   -- outcome: 'purchased' | 'not_purchased' | 'undecided'.
+   -- THE ONLY RECORD OF A VISIT THAT DID NOT BECOME A SALE. Nothing else in this
+   --   database sees a client who walked out: covers, policies and orders all
+   --   start at the purchase. So lost-sale analysis, objection frequency and
+   --   follow-up backlog can only come from here.
+   -- customer_id IS NULL means an unmatched walk-in, NOT a data error. Count
+   --   those separately rather than dropping them from a funnel.
+   -- status 'draft' = the manager has not confirmed the assistant's reading of
+   --   their note. Exclude drafts from anything numeric unless asked, and say
+   --   that you did.
+   -- objection is free text on purpose. To theme it, read the rows and group
+   --   them — do not GROUP BY objection and report the raw strings as if they
+   --   were categories.
+   -- items is jsonb: [{product, sku, size, colour, reaction}]. Use
+   --   jsonb_array_elements(items) to reach inside it.
+
 reports(id int PK, brand_id -> brands.id, created_by -> profiles.id, name, url,
         type, direction, source, start_date, end_date, uploaded_to_chubb bool,
         uploaded_to_chubb_at, uploaded_to_chubb_by, created_at)

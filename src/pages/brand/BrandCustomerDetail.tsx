@@ -2,7 +2,7 @@ import { useState } from "react";
 import SignedImage from "@/components/SignedImage";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin, Sparkles } from "lucide-react";
+import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin, Sparkles, Mic, CalendarClock } from "lucide-react";
 import { format } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -63,6 +63,34 @@ const BrandCustomerDetail = () => {
       return data || [];
     },
     enabled: !!customerId && !!profile?.brand_id,
+  });
+
+  // The boutique's own memory of this person. Confirmed notes only: a draft is
+  // one manager's unreviewed dictation, and a client card is the last place to
+  // show something nobody has checked.
+  const { data: visits } = useQuery({
+    queryKey: ["brand-customer-visits", customerId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("store_visits" as never)
+        .select("id, visited_at, outcome, summary, objection, follow_up, follow_up_due, items")
+        .eq("customer_id", customerId!)
+        .eq("status", "confirmed")
+        .order("visited_at", { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{
+        id: string;
+        visited_at: string;
+        outcome: string | null;
+        summary: string | null;
+        objection: string | null;
+        follow_up: string | null;
+        follow_up_due: string | null;
+        items: Array<{ product?: string | null; size?: string | null }> | null;
+      }>;
+    },
+    enabled: !!customerId,
   });
 
   const { data: crossSell } = useQuery({
@@ -173,6 +201,55 @@ const BrandCustomerDetail = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main content */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Visits — what the floor remembers. Deliberately above Covers: a
+              purchase is already everywhere in this app, and the visit that did
+              not end in one exists nowhere else. */}
+          {!!visits?.length && (
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+              <div className="glass-card overflow-hidden">
+                <div className="px-6 py-4 border-b border-border/50 flex items-center gap-2">
+                  <Mic className="h-4 w-4 text-primary" />
+                  <h2 className="text-base font-semibold text-foreground">
+                    In the boutique ({visits.length})
+                  </h2>
+                </div>
+                <div className="divide-y divide-border">
+                  {visits.map((v) => (
+                    <div key={v.id} className="px-6 py-4">
+                      <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span>{fmt(v.visited_at)}</span>
+                        {v.outcome === "purchased" && <span className="text-emerald-600">· bought</span>}
+                        {v.outcome === "not_purchased" && <span>· left without buying</span>}
+                        {v.outcome === "undecided" && <span className="text-amber-600">· still thinking</span>}
+                      </div>
+                      {v.summary && (
+                        <p className="text-sm leading-relaxed text-foreground">{v.summary}</p>
+                      )}
+                      {v.objection && (
+                        <p className="mt-1 text-xs italic text-muted-foreground">"{v.objection}"</p>
+                      )}
+                      {(v.items ?? []).length > 0 && (
+                        <p className="mt-1.5 text-xs text-muted-foreground">
+                          {(v.items ?? [])
+                            .map((it) => [it.product, it.size].filter(Boolean).join(" "))
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                      )}
+                      {v.follow_up && (
+                        <p className="mt-2 flex items-center gap-1.5 text-xs text-foreground/80">
+                          <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
+                          {v.follow_up}
+                          {v.follow_up_due ? ` — ${v.follow_up_due}` : ""}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* Covers */}
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
             <div className="glass-card overflow-hidden">

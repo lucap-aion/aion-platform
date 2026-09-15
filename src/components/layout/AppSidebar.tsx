@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import SignedImage from "@/components/SignedImage";
-import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, MessageSquare, Library } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, MessageSquare, Library, Mic } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useTenant } from "@/contexts/TenantContext";
@@ -69,6 +69,10 @@ const brandPaths = [
   // "Ask the data" (/ai-query) retired for brand users — the merged Assistant
   // now handles data questions too, scoped to the brand. One entry only.
   { path: "/assistant", icon: MessageSquare, labelKey: "nav.assistant" },
+  // The shop floor's own entry: recorded in the boutique, read by the CRM
+  // team. It sits next to the assistant because it is the same act — talking
+  // to AION instead of typing into a system.
+  { path: "/visits", icon: Mic, labelKey: "nav.visits" },
   { path: "/knowledge", icon: Library, labelKey: "nav.knowledge" },
   { path: "/customers", icon: Users, labelKey: "nav.customers" },
   { path: "/covers", icon: Shield, labelKey: "nav.covers" },
