@@ -365,6 +365,17 @@ export default function BrandAssistant() {
 
   useEffect(() => () => { clearRecordTimer(); recorder.current?.cancel(); }, []);
 
+  // The box is rows={1} with a maxHeight and nothing ever resized it, so
+  // anything past the first line was simply clipped — the placeholder on a
+  // phone, and a typed-out visit note on any screen. Grow it to fit, up to the
+  // cap it already declared.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [input]);
+
   const [image, setImage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<SheetAttachment | null>(null);
@@ -1153,10 +1164,11 @@ export default function BrandAssistant() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={onKeyDown}
-                // Short on purpose: rows={1} clips whatever does not fit one
-                // line, and at 390px the long version was cut mid-word. What
-                // the assistant can do is said in the heading above it.
-                placeholder={tt(locale, "Ask, or say how a visit went…", "Chiedi, o racconta una visita…")}
+                // Measured, not guessed: at 390px the two attachment buttons,
+                // the action button and the gaps leave the field about 180px of
+                // text — roughly 25 characters. What the assistant can do is
+                // said in full in the heading above it.
+                placeholder={tt(locale, "Ask, or record a note…", "Chiedi o registra…")}
                 rows={1}
                 disabled={loading || recording}
                 className="min-w-0 flex-1 resize-none rounded-3xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
