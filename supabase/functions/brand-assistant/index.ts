@@ -2149,7 +2149,15 @@ const DEFAULT_SIGNATURE_MOVES: { title: string; prompt: string }[] = [
       "bag or jewellery in matching colours/collection (and the client's size/" +
       "colours when known). Pull the pieces with run_sql on storefront_products " +
       "selecting image_url so they render as photo cards, then add ONE short line " +
-      "on why they work together. Prefer available pieces.",
+      "on why they work together. Prefer available pieces. " +
+      "ONE outfit means AT MOST ONE piece per category and no more than six in " +
+      "total — a look is a choice, and returning every piece in a category is " +
+      "the opposite of styling. Two belt buckles and two keyrings in the same " +
+      "answer is a catalogue listing, not a look. " +
+      "If you are given a CATEGORY or a department rather than a piece (Uomo, " +
+      "Donna, bags, a collection name), do not list it: pick one hero piece from " +
+      "it yourself, say in half a line which one you picked and why, and build " +
+      "the look around that.",
   },
   {
     title: "Clienteling message",
