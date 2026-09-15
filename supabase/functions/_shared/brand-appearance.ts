@@ -166,9 +166,35 @@ export type SizedImage = { url: string; width?: number; height?: number };
  * rejected — it sorts in the middle, because a picture with no measurements is still better
  * than an empty box.
  */
-const SLOT_SHAPES: { slot: keyof PortalImages; want: number; minWidth?: number }[] = [
-  { slot: "auth_background_image", want: 1.8, minWidth: 1000 },
-  { slot: "top_banner_image", want: 3.0, minWidth: 900 },
+/**
+ * `maxCost`, where it is set, is a slot that would rather be EMPTY than wrong.
+ *
+ * The two a client sees first are the login screen and the banner across the
+ * top, and both are wide. Ranking alone cannot protect them: it picks the best
+ * of what it has, and a homepage sometimes offers nothing but 4:5 packshots —
+ * prada.com offers 88 of them and nothing else, because its campaign
+ * photography is not in the markup at all. Ranked without a floor, all six
+ * slots filled with the same shape and a handbag on a white sweep ended up
+ * stretched behind the sign-in form.
+ *
+ * AION's own default hero is a real photograph. Losing to it is not a failure,
+ * and the go-live checklist already asks a human to look at the imagery — which
+ * is how the two live brands got theirs: Roberto Coin's and Luisa Beccaria's
+ * login images were chosen and uploaded by somebody, not scraped.
+ *
+ * The floor applies only to a picture whose shape we KNOW. An unmeasured one is
+ * still allowed through: refusing those would blank the login screen of every
+ * house we cannot measure, which is a far bigger change than the one this is
+ * for, and a picture of unknown shape has always been treated as neither good
+ * nor bad. What is rejected is a shape we measured and can see is wrong.
+ */
+const SLOT_SHAPES: { slot: keyof PortalImages; want: number; minWidth?: number; maxCost?: number }[] = [
+  // ~1.15 to ~2.8 — landscape. Rejects a measured portrait or square.
+  { slot: "auth_background_image", want: 1.8, minWidth: 1000, maxCost: 0.45 },
+  // ~1.7 to ~5.2 — a true banner.
+  { slot: "top_banner_image", want: 3.0, minWidth: 900, maxCost: 0.55 },
+  // The tiles take what there is. A packshot beside "my piece was stolen" is
+  // not a compromise, it is the right picture.
   { slot: "theft_image", want: 1.0 },
   { slot: "damage_image", want: 1.0 },
   { slot: "faq_image", want: 1.5 },
@@ -210,17 +236,36 @@ export function assignPortalImages(
     if (url && !used.has(url)) { out[slot as keyof PortalImages] = url; used.add(url); }
   }
 
-  for (const { slot, want, minWidth } of SLOT_SHAPES) {
+  for (const { slot, want, minWidth, maxCost } of SLOT_SHAPES) {
     if (out[slot]) continue;
     const ranked = pool
       .filter((c) => !used.has(c.url))
       // A hero slot would rather be empty than hold a thumbnail stretched over a screen —
       // but only when the width is actually known.
       .filter((c) => !(minWidth && c.width && c.width < minWidth))
-      .map((c) => ({ c, cost: shapeCost(c, want), area: (c.width ?? 0) * (c.height ?? 0) }))
-      .sort((a, b) => a.cost - b.cost || b.area - a.area);
-    const pick = ranked[0]?.c;
-    if (pick) { out[slot] = pick.url; used.add(pick.url); }
+      .map((c) => ({
+        c,
+        cost: shapeCost(c, want),
+        area: (c.width ?? 0) * (c.height ?? 0),
+        measured: aspect(c) != null,
+      }))
+      // Drop what we measured and know is wrong for a floored slot, so it cannot
+      // come back as the least-bad option.
+      .filter((r) => !(maxCost != null && r.measured && r.cost > maxCost))
+      .sort((a, b) => {
+        // A picture we have seen the shape of beats one we have not, but only
+        // where the slot cares about shape enough to have a floor: an unmeasured
+        // candidate costs a middling 0.6 and would otherwise outrank every
+        // measured portrait, which is exactly how a packshot reached the banner.
+        if (maxCost != null && a.measured !== b.measured) return a.measured ? -1 : 1;
+        return a.cost - b.cost || b.area - a.area;
+      });
+    // Nothing left that the slot can honestly use: leave it empty and let the
+    // AION default stand.
+    const best = ranked[0];
+    if (!best) continue;
+    out[slot] = best.c.url;
+    used.add(best.c.url);
   }
   return out;
 }

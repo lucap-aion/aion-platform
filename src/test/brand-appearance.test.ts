@@ -221,3 +221,39 @@ describe("the typefaces", () => {
     expect(declaredFontFamilies(css)).toEqual(["Ferragamo Sans", "Didot"]);
   });
 });
+
+describe("a hero slot would rather be empty than wrong", () => {
+  // prada.com offers 88 pictures and every one of them is a 4:5 packshot: its
+  // campaign photography is not in the markup at all. Ranked without a floor,
+  // the best of a bad pool still wins, and a handbag on a white sweep ends up
+  // stretched behind the sign-in form.
+  const packshots = [
+    { url: "bag-1.jpg", width: 2400, height: 3000 },
+    { url: "bag-2.jpg", width: 2400, height: 3000 },
+    { url: "shoe-1.jpg", width: 2400, height: 3000 },
+  ];
+
+  it("refuses a measured portrait for the login screen and the banner", () => {
+    const out = assignPortalImages(packshots);
+    expect(out.auth_background_image).toBeUndefined();
+    expect(out.top_banner_image).toBeUndefined();
+    // The tiles still take them — a packshot beside "my piece was stolen" is
+    // the right picture, not a compromise.
+    expect(out.theft_image).toBeDefined();
+    expect(out.damage_image).toBeDefined();
+  });
+
+  it("takes a landscape one when the house actually offers one", () => {
+    const out = assignPortalImages([
+      ...packshots,
+      { url: "campaign.jpg", width: 2400, height: 1350 },
+    ]);
+    expect(out.auth_background_image).toBe("campaign.jpg");
+  });
+
+  it("does not judge a picture it could not measure", () => {
+    // Refusing these would blank the login of every house we cannot measure.
+    const out = assignPortalImages(["unknown-1.jpg", "unknown-2.jpg"]);
+    expect(out.auth_background_image).toBe("unknown-1.jpg");
+  });
+});

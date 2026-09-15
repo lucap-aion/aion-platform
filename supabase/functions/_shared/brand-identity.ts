@@ -138,7 +138,12 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   }
   // Measured, so each slot can be given a picture the right shape for it rather than the
   // next one in document order. See assignPortalImages.
-  const sized = await measureImages(photos.slice(0, 14));
+  // 14 was chosen when measuring mostly failed; it now succeeds, and it is a
+  // 2KB range request per picture, run in parallel. It matters because an
+  // UNMEASURED candidate is not judged by a slot's shape floor — so with 88
+  // pictures and 14 measured, the other 74 walked into the banner slot through
+  // the gap marked "unknown".
+  const sized = await measureImages(photos.slice(0, 40));
   const portal = assignPortalImages(sized);
   Object.assign(out, portal);
   const slotsFilled = Object.keys(portal).length;
