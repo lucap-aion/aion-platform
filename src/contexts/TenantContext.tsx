@@ -114,6 +114,67 @@ function deriveDarkVariant(key: keyof ThemeColors, hsl: string): string {
   }
 }
 
+/**
+ * The brand's colour, spread thinly across the surfaces.
+ *
+ * A primary that only paints buttons leaves the rest of the portal looking like
+ * AION with someone else's logo on it. So the brand's HUE is carried into the
+ * cards, the muted fills, the borders and the sidebar accents — and its
+ * SATURATION and LIGHTNESS are not.
+ *
+ * That split is the whole safety argument, and it is what makes this different
+ * from the canvas colours that had to be taken away. Every surface below is
+ * pinned into a narrow near-white band (and, in dark mode, a narrow near-black
+ * one) whatever colour the brand supplies: Pomellato's deep red, Pasquale
+ * Bruni's near-black and Prada's slate all come out as a tint you notice only
+ * when you put two brands side by side. Text is never touched at all. So the
+ * contrast between text and surface cannot move, no matter what a brand sets —
+ * it is the same guarantee as before, made by construction rather than by
+ * checking.
+ *
+ * Anything the brand set explicitly still wins; this only fills what it left
+ * unsaid.
+ */
+function brandTint(primaryHsl: string, explicit: Set<keyof ThemeColors>, dark: boolean): string {
+  const [h, s] = parseHsl(primaryHsl);
+  // A brand's own saturation is usually far too strong for a surface. Borrow the
+  // hue, keep a whisper of the intensity.
+  const tint = (maxSat: number, lightness: number) =>
+    formatHsl(h, Math.min(s, maxSat), lightness);
+
+  const lines: string[] = [];
+  const put = (cssVar: string, value: string) => { lines.push(`  ${cssVar}: ${value};\n`); };
+
+  if (dark) {
+    put("--card", tint(10, 11));
+    put("--popover", tint(10, 11));
+    put("--muted", tint(10, 16));
+    put("--secondary", tint(10, 16));
+    put("--accent", tint(14, 20));
+    put("--sidebar-background", tint(10, 9));
+    put("--sidebar-accent", tint(14, 18));
+    if (!explicit.has("border_hsl")) {
+      put("--border", tint(12, 22));
+      put("--input", tint(12, 22));
+      put("--sidebar-border", tint(12, 20));
+    }
+  } else {
+    put("--card", tint(8, 99));
+    put("--popover", tint(8, 99));
+    put("--muted", tint(12, 96));
+    put("--secondary", tint(12, 96));
+    put("--accent", tint(16, 94));
+    put("--sidebar-background", tint(8, 99));
+    put("--sidebar-accent", tint(16, 94));
+    if (!explicit.has("border_hsl")) {
+      put("--border", tint(14, 90));
+      put("--input", tint(14, 90));
+      put("--sidebar-border", tint(14, 88));
+    }
+  }
+  return lines.join("");
+}
+
 const STYLE_TAG_ID = "aion-tenant-theme";
 
 /** Font settings stored alongside colours in theme_settings JSON */
@@ -313,6 +374,16 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
       for (const cssVar of DARK_CSS_MAP[key]) {
         darkVars += `  ${cssVar}: ${darkVal};\n`;
       }
+    }
+
+    // The brand's hue, thinly, on the surfaces it is safe to tint. Appended
+    // after the brand's own values so an explicit choice still wins, and never
+    // touching the text colours or the page canvas.
+    const primary = tenant.themeColors.primary_hsl;
+    if (primary) {
+      const explicit = new Set(keys);
+      lightVars += brandTint(primary, explicit, false);
+      darkVars += brandTint(deriveDarkVariant("primary_hsl", primary), explicit, true);
     }
 
     tag.textContent = `:root {\n${lightVars}}\n.dark {\n${darkVars}}`;

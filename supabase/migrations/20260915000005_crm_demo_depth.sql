@@ -148,7 +148,10 @@ begin
     values
       (v_id, v_fn, v_ln, v_email,
        (v_place ->> 'dial') || ' ' || (300 + floor(random() * 699))::text || ' ' || lpad(floor(random() * 9999999)::text, 7, '0'),
-       p_brand_id, null, 'active',
+       -- 'customer', not null: a generated client is a client, and the NULL
+       -- this used to copy from the base generator cost three bugs in a day
+       -- (see 20260915000006).
+       p_brand_id, 'customer', 'active',
        (v_place -> 'cities' ->> floor(random() * jsonb_array_length(v_place -> 'cities'))::int),
        v_place ->> 'country', v_place ->> 'nat',
        (date '1960-01-01' + (random() * 16000)::int),

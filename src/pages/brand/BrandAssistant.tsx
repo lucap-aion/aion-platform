@@ -376,8 +376,21 @@ export default function BrandAssistant() {
       if (!active) return;
       const brandName = (brandRes.data?.name as string | undefined) ?? null;
       const cats = (catRes.data as { name: string | null; collection: string | null }[] | null) ?? [];
-      const withCollection = cats.find((c) => c.collection && c.collection.trim());
-      const product = (withCollection?.collection ?? cats[0]?.name ?? null)?.trim() || null;
+      // A PIECE, not a collection. This preferred `collection` and the two
+      // suggestions it feeds are written about a garment — "materials,
+      // craftsmanship and care", "build a full look around it" — so Prada,
+      // whose collection field carries the gender bucket, opened its assistant
+      // offering to build a look around "Uomo". Collections here are as often a
+      // department or an internal season code (P26) as they are a named line,
+      // which is the same reason the assistant's own prompt refuses to say
+      // "our P22 collection" out loud.
+      //
+      // The longest name is a cheap proxy for the most descriptive one:
+      // "Piumino medio in Re-Nylon" reads in both sentences, "Chawan" does not.
+      const product = cats
+        .map((c) => (c.name ?? "").trim())
+        .filter((n) => n.length > 8)
+        .sort((a, b) => b.length - a.length)[0] ?? null;
       let customer: string | null = null;
       for (const p of (polRes.data as { customer: { first_name: string | null; last_name: string | null } | { first_name: string | null; last_name: string | null }[] | null }[] | null) ?? []) {
         const c = Array.isArray(p.customer) ? p.customer[0] : p.customer;
