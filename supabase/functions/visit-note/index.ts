@@ -187,12 +187,14 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
   const isAdmin = !!adminRow;
 
-  // A brand's CLIENTS are profiles of that brand too. They must never file a
-  // visit — RLS would refuse them anyway, but an explicit 403 beats a policy
-  // violation surfacing as "could not save".
+  // A brand's CLIENTS are profiles of that brand too, and they must never file
+  // a visit. Tested as an ALLOWLIST, not as "not a customer": the demo
+  // generator inserts clients with role NULL, so a not-a-customer test lets
+  // every one of them through (see 20260915000003).
+  const STAFF_ROLES = ["brand", "brand_admin", "brand_user"];
   if (!isAdmin) {
     if (!profile) return jsonError("admin or brand role required", 403);
-    if ((profile as { role: string | null }).role === "customer") {
+    if (!STAFF_ROLES.includes(String((profile as { role: string | null }).role ?? ""))) {
       return jsonError("admin or brand role required", 403);
     }
   }
@@ -299,11 +301,14 @@ Deno.serve(async (req: Request) => {
     const first = parts[0] ?? "";
     const last = parts.length > 1 ? parts[parts.length - 1] : "";
 
+    // Clients are role 'customer' OR role NULL — the generated ones carry no
+    // role at all, and filtering on 'customer' alone silently matches nobody
+    // in exactly the accounts a demo runs in.
     const { data: candidates } = await userClient
       .from("profiles")
       .select("id, first_name, last_name")
       .eq("brand_id", brandId)
-      .eq("role", "customer")
+      .or("role.is.null,role.eq.customer")
       .ilike("last_name", last ? `%${last}%` : `%${first}%`)
       .limit(10);
 
