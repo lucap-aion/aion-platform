@@ -293,6 +293,7 @@ export default function BrandAssistant() {
   const dictationBase = useRef("");
   const micSupported = isDictationSupported();
 
+
   const stopDictation = useCallback(() => {
     dictation.current?.stop();
     dictation.current = null;
@@ -327,6 +328,9 @@ export default function BrandAssistant() {
   const [readingDoc, setReadingDoc] = useState(false);
   const sheetRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
+  // Whether the composer has anything to send. It is what decides which job the
+  // one action button is doing, so it lives next to the things it reads.
+  const hasContent = !!input.trim() || !!image || !!sheet;
   const dragDepth = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1002,7 +1006,7 @@ export default function BrandAssistant() {
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={loading}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
                 aria-label={tt(locale, "Attach a photo", "Allega una foto")}
                 title={tt(locale, "Attach a photo of a piece", "Allega la foto di un pezzo")}
               >
@@ -1019,32 +1023,12 @@ export default function BrandAssistant() {
                 type="button"
                 onClick={() => sheetRef.current?.click()}
                 disabled={loading}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
                 aria-label={tt(locale, "Attach an Excel or CSV", "Allega un Excel o CSV")}
                 title={tt(locale, "Attach a file to ask about — PDF, Word, PowerPoint, Excel or CSV. Used for this chat only, not added to the knowledge base.", "Allega un file su cui fare domande — PDF, Word, PowerPoint, Excel o CSV. Solo per questa chat, non aggiunto alla knowledge base.")}
               >
                 <FileSpreadsheet className="h-4 w-4" />
               </button>
-              {micSupported && (
-                <button
-                  type="button"
-                  onClick={() => (listening ? stopDictation() : startDictation())}
-                  disabled={loading}
-                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${
-                    listening
-                      ? "animate-pulse border-destructive bg-destructive text-destructive-foreground"
-                      : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
-                  }`}
-                  aria-label={listening ? tt(locale, "Stop", "Ferma") : tt(locale, "Speak", "Parla")}
-                  title={tt(
-                    locale,
-                    "Speak instead of typing — tell it what just happened with a client and it will file the visit.",
-                    "Parla invece di scrivere — racconta com'è andata con un cliente e registra la visita.",
-                  )}
-                >
-                  {listening ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                </button>
-              )}
               <textarea
                 ref={taRef}
                 value={input}
@@ -1057,17 +1041,45 @@ export default function BrandAssistant() {
                     "Chiedi, racconta com'è andata una visita, o allega una foto per identificare un capo…")}
                 rows={1}
                 disabled={loading}
-                className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+                className="flex-1 resize-none rounded-3xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
                 style={{ maxHeight: 160 }}
               />
+              {/* One button, three jobs — the arrangement every messaging app
+                  has taught people: with nothing to send it offers the
+                  microphone, the moment there is something it becomes send,
+                  and while it is listening it is the way to stop. Same place,
+                  same shape, so the thumb never has to look. */}
               <button
                 type="button"
-                onClick={() => void send(input)}
-                disabled={loading || (!input.trim() && !image && !sheet)}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
-                aria-label={tt(locale, "Send", "Invia")}
+                onClick={() => {
+                  if (listening) { stopDictation(); return; }
+                  if (hasContent) { void send(input); return; }
+                  startDictation();
+                }}
+                disabled={loading || (!hasContent && !micSupported)}
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+                  listening
+                    ? "bg-destructive text-destructive-foreground"
+                    : "bg-primary text-primary-foreground hover:bg-primary/90"
+                }`}
+                aria-label={listening
+                  ? tt(locale, "Stop", "Ferma")
+                  : hasContent
+                    ? tt(locale, "Send", "Invia")
+                    : tt(locale, "Hold a moment and talk", "Parla")}
+                title={hasContent || listening ? undefined : tt(
+                  locale,
+                  "Speak instead of typing — say how a visit went and it will file it.",
+                  "Parla invece di scrivere — racconta com'è andata una visita e la registra.",
+                )}
               >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+                {loading
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : listening
+                    ? <Square className="h-4 w-4" />
+                    : hasContent
+                      ? <ArrowUp className="h-4 w-4" />
+                      : <Mic className="h-4 w-4" />}
               </button>
             </div>
           </div>
