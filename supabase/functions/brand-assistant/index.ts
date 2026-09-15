@@ -1483,7 +1483,18 @@ Deno.serve(async (req: Request) => {
                 const res = await fetch(`${SUPABASE_URL}/functions/v1/visit-note`, {
                   method: "POST",
                   headers: { "Authorization": authHeader, "apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json" },
-                  body: JSON.stringify({ brand_id: brandId, transcript: account, source: "voice" }),
+                  // The recording travels with the note it produced. Without
+                  // this the audio sat in the bucket referenced by nothing, and
+                  // store_visits.audio_path — the column the private bucket was
+                  // built for — stayed empty on exactly the visits that had one.
+                  // It is also the only part of a visit that cannot be
+                  // reconstructed: the transcript is a reading of it.
+                  body: JSON.stringify({
+                    brand_id: brandId,
+                    transcript: account,
+                    source: audioPath ? "voice" : "typed",
+                    audio_path: audioPath || undefined,
+                  }),
                 });
                 const out = await res.json().catch(() => ({}));
                 const visit = (out as { visit?: Record<string, unknown> })?.visit ?? null;
