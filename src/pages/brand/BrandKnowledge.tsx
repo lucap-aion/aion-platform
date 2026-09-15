@@ -66,10 +66,18 @@ const classifyFailure = (error: string | null): FailKind => {
   return "other";
 };
 
-const FAIL_COPY: Record<FailKind, { en: string; it: string; blocking?: boolean }> = {
+const FAIL_COPY: Record<FailKind, { en: string; it: string; admin_en?: string; admin_it?: string; blocking?: boolean }> = {
+  // Two audiences, two slices of the same truth. A brand opening this page is
+  // being told the state of OUR supplier's billing, which is not theirs to
+  // know, act on, or explain to their own team — and "out of credit" reads as
+  // an outage in the product they are being sold. They get the consequence:
+  // these pages of their site are built in a way we cannot read yet. AION's own
+  // people get the cause, because they are the ones who can fix it.
   render_quota: {
-    en: "the page renderer is out of credit — JavaScript-heavy pages can't be read until it's topped up",
-    it: "il renderer ha esaurito il credito — le pagine in JavaScript non possono essere lette finché non viene ricaricato",
+    en: "built in JavaScript — we can't read these pages yet",
+    it: "costruite in JavaScript — non riusciamo ancora a leggerle",
+    admin_en: "the page renderer is out of credit — JavaScript-heavy pages can't be read until it's topped up",
+    admin_it: "il renderer ha esaurito il credito — le pagine in JavaScript non possono essere lette finché non viene ricaricato",
     blocking: true,
   },
   rate_limited: { en: "the site rate-limited us — retry later", it: "il sito ha limitato le richieste — riprova più tardi" },
@@ -117,7 +125,7 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   brandIdOverride?: number | null;
   canWriteOverride?: boolean;
 } = {}) {
-  const { profile, canWrite: canWriteProfile } = useAuth();
+  const { profile, canWrite: canWriteProfile, isRealAdmin } = useAuth();
   const { locale } = useLanguage();
   const brandId = brandIdOverride ?? profile?.brand_id ?? null;
   const canWrite = canWriteOverride ?? canWriteProfile;
@@ -523,9 +531,13 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
           <span>
             <strong>{tt(locale, "Some pages can't be read right now.", "Alcune pagine non possono essere lette.")}</strong>{" "}
-            {tt(locale,
-              `${blockingFailure[1]} page${blockingFailure[1] > 1 ? "s" : ""} need JavaScript rendering and the renderer is out of credit. Until it is topped up those pages — often the brand story and lookbooks — stay out of the knowledge base, and the Assistant will not know them.`,
-              `${blockingFailure[1]} pagine richiedono il rendering JavaScript e il renderer ha esaurito il credito. Finché non viene ricaricato quelle pagine — spesso la storia del brand e i lookbook — restano fuori dalla knowledge base e l'Assistente non le conoscerà.`)}
+            {isRealAdmin
+              ? tt(locale,
+                `${blockingFailure[1]} page${blockingFailure[1] > 1 ? "s" : ""} need JavaScript rendering and the renderer is out of credit. Until it is topped up those pages — often the brand story and lookbooks — stay out of the knowledge base, and the Assistant will not know them.`,
+                `${blockingFailure[1]} pagine richiedono il rendering JavaScript e il renderer ha esaurito il credito. Finché non viene ricaricato quelle pagine — spesso la storia del brand e i lookbook — restano fuori dalla knowledge base e l'Assistente non le conoscerà.`)
+              : tt(locale,
+                `${blockingFailure[1]} page${blockingFailure[1] > 1 ? "s" : ""} of your site are built so that the text only appears once a browser runs them, and we can't read those yet — so they stay out of the knowledge base and the Assistant does not know them. We're working on it; nothing for you to do.`,
+                `${blockingFailure[1]} pagine del vostro sito sono costruite in modo che il testo compaia solo quando un browser le esegue, e quelle non riusciamo ancora a leggerle — quindi restano fuori dalla knowledge base e l'Assistente non le conosce. Ce ne stiamo occupando noi, non serve che facciate nulla.`)}
           </span>
         </div>
       )}
@@ -577,7 +589,11 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
               {failureGroups.map(([kind, n]) => (
                 <li key={kind} className={FAIL_COPY[kind].blocking ? "text-amber-700 dark:text-amber-500" : "text-muted-foreground"}>
                   <span className="font-medium">{n}</span>{" "}
-                  {tt(locale, `page${n > 1 ? "s" : ""} — ${FAIL_COPY[kind].en}`, `pagine — ${FAIL_COPY[kind].it}`)}
+                  {tt(
+                    locale,
+                    `page${n > 1 ? "s" : ""} — ${(isRealAdmin && FAIL_COPY[kind].admin_en) || FAIL_COPY[kind].en}`,
+                    `pagine — ${(isRealAdmin && FAIL_COPY[kind].admin_it) || FAIL_COPY[kind].it}`,
+                  )}
                 </li>
               ))}
             </ul>
