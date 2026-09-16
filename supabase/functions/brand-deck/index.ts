@@ -300,6 +300,7 @@ Deno.serve(async (req: Request) => {
     categories: wanted,
     slides_cobranded: cobrand.slides,
     logo_source: cobrand.source,
+    anchor_found_by_shape: cobrand.foundByShape,
     text_edits: applied,
     storage_path: outPath,
     file_name: fileName,
@@ -316,7 +317,10 @@ Deno.serve(async (req: Request) => {
           (cobrand.source === "logo_small"
             ? " It used the small logo — usually the monogram rather than the wordmark, because the main logo is a vector. A wordmark reads better in a lockup: put a PNG or JPEG one on the brand record and rebuild."
             : " Check it reads well at that size.") +
-          (cobrand.skipped.length ? ` Not placed on ${cobrand.skipped.join(", ")} — no room beside the mark there, so do those by hand.` : "")
+          (cobrand.skipped.length ? ` Not placed on ${cobrand.skipped.join(", ")} — no room beside the mark there, so do those by hand.` : "") +
+          (cobrand.foundByShape
+            ? ` On ${cobrand.foundByShape} of them the AION mark was found by its shape rather than by the template's logo_anchor, which means the anchor is stale — check deck_templates.logo_anchor against the media in this template.`
+            : "")
         : `NO BRAND LOGO on any slide — ${cobrand.reason}. The deck carries only AION's mark, which is most of what makes it look generic. Put a PNG or JPEG logo on the brand record and rebuild.`,
       wanted.length
         ? `Product slots were filled from ${wanted.join(", ")}.` +
@@ -354,7 +358,7 @@ Deno.serve(async (req: Request) => {
 // logo at all.
 async function coBrandSlides(
   zip: JSZip, anchorMedia: string, brand: Record<string, unknown>, brandId: number,
-): Promise<{ slides: number; source: string; reason: string; skipped: string[] }> {
+): Promise<{ slides: number; source: string; reason: string; skipped: string[]; foundByShape: number }> {
   const candidates: [string, unknown][] = [["logo_big", brand.logo_big], ["logo_small", brand.logo_small]];
   let logo: { bytes: Uint8Array; ext: string; w: number; h: number } | null = null;
   let source = "";
@@ -374,7 +378,7 @@ async function coBrandSlides(
     if (!size) { reason = `${field} is a ${got.image.ext.toUpperCase()} whose dimensions could not be read`; continue; }
     logo = { ...got.image, ...size }; source = field; break;
   }
-  if (!logo) return { slides: 0, source: "", reason, skipped: [] };
+  if (!logo) return { slides: 0, source: "", reason, skipped: [], foundByShape: 0 };
 
   const anchorName = anchorMedia.replace("ppt/media/", "");
   const logoName = `brand${brandId}_logo.${logo.ext}`;
@@ -383,6 +387,7 @@ async function coBrandSlides(
   const aspect = logo.w / logo.h;
 
   let placed = 0;
+  let foundByShape = 0;
   const skipped: string[] = [];
   for (let n = 1; n <= 60; n++) {
     const relPath = `ppt/slides/_rels/slide${n}.xml.rels`;
@@ -391,12 +396,26 @@ async function coBrandSlides(
     const xml = await zip.file(slidePath)?.async("string");
     if (!rels || !xml) continue;
 
+    const pics = xml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) ?? [];
+
+    // The AION mark on this slide, by its relationship to a known media part.
     const anchorRel = new RegExp(`Id="([^"]+)"[^>]*Target="[^"]*${anchorName.replace(".", "\\.")}"`).exec(rels)
       ?? new RegExp(`Target="[^"]*${anchorName.replace(".", "\\.")}"[^>]*Id="([^"]+)"`).exec(rels);
-    if (!anchorRel) continue;
+    let pic = anchorRel ? pics.find((p) => p.includes(`r:embed="${anchorRel[1]}"`)) : undefined;
 
-    const pic = (xml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) ?? [])
-      .find((p) => p.includes(`r:embed="${anchorRel[1]}"`));
+    // Failing that, by its SHAPE.
+    //
+    // `logo_anchor` names a media part — "ppt/media/image2.png" — and a media part's name is
+    // an accident of whichever deck was uploaded. Swap the teaser for a new version and every
+    // filename changes, so the anchor matches nothing, so the brand's logo silently stops
+    // appearing on any slide and the deck goes back to looking exactly as generic as it did
+    // before any of this was built. The failure is invisible: the build still succeeds.
+    //
+    // A wordmark in the corner of a slide is recognisable without knowing its name: it is
+    // wide, it is short, and it sits in the bottom margin. That is a description of the thing
+    // rather than of the file it happens to live in, so it survives the swap.
+    if (!pic) { pic = pics.find(looksLikeCornerMark); if (pic) foundByShape++; }
+
     if (!pic) continue;
     const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(pic);
     const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(pic);
@@ -423,9 +442,32 @@ async function coBrandSlides(
     placed++;
   }
   return {
-    slides: placed, source, skipped,
+    slides: placed, source, skipped, foundByShape,
     reason: placed ? "" : "no slide carries the AION wordmark to place it against",
   };
+}
+
+/**
+ * Does this picture look like the wordmark in the corner of a slide?
+ *
+ * Wide, short, and in the bottom band of the page. Deliberately narrow: a photograph that
+ * happens to be letterboxed is excluded by the height cap, and a picture in the middle of the
+ * slide by the bottom-band test. Getting this wrong puts a brand logo next to a photograph in
+ * the middle of a slide, so it would rather match nothing.
+ */
+function looksLikeCornerMark(picXml: string): boolean {
+  const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(picXml);
+  const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(picXml);
+  if (!off || !ext) return false;
+  const y = Number(off[2]), cx = Number(ext[1]), cy = Number(ext[2]);
+  if (!cx || !cy) return false;
+  const aspect = cx / cy;
+  return (
+    aspect >= 2 && aspect <= 8 &&        // a wordmark, not a monogram and not a banner
+    cy <= SLIDE_H * 0.09 &&              // small
+    cx <= SLIDE_W * 0.25 &&              // and narrow, in the page's terms
+    y >= SLIDE_H * 0.82                  // in the bottom margin
+  );
 }
 
 type Box = { x: number; y: number; cx: number; cy: number };
