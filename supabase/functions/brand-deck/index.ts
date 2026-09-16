@@ -38,11 +38,14 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import JSZip from "npm:jszip@3.10.1";
 import { focusMatcher } from "../_shared/brand-defaults.ts";
 import { sniffFormat, imageSize, EMBEDDABLE, MEDIA_TYPES } from "../_shared/image-bytes.ts";
+import { findBrandPhotos, type FoundPhoto, type PhotoRole } from "../_shared/brand-photos.ts";
+import { fetchSite } from "../_shared/fetch-site.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
+const JINA_API_KEY = Deno.env.get("JINA_API_KEY") ?? "";
 const BUCKET = "decks";
 // 16:9 at 13.33in × 7.5in — the teaser's own slide size, used to place the co-branding
 // lockup and to refuse a placement that would run off the page.
@@ -151,6 +154,69 @@ Deno.serve(async (req: Request) => {
     : await pickBrandImages(admin, brandId, slots.length, wanted);
   const campaign = campaignImages(brand);
 
+  // ── Photographs, off the house's own site ──────────────────────────────────
+  // The portal's two hero images were the only non-packshot pictures available, and for a
+  // house that publishes them as AVIF, or publishes none on its homepage, that is nothing —
+  // which is how four of six slots on Prada's deck kept the template's stock photography.
+  //
+  // The crawl already knows where the rest are. It enqueues every page on the site, and these
+  // houses file this material where the URL says so: /store-locator, /pradasphere/campaigns,
+  // /world, /lookbook. Read the best few of those pages and take the photographs off them.
+  //
+  // Only when a role actually needs it, because each page and each measurement is a request.
+  const photoRoles = [...new Set(slots
+    .map((s) => (s.role ?? "product").toLowerCase())
+    .filter((r): r is PhotoRole => r === "store" || r === "ambassador" || r === "lifestyle")
+    // A role the brief has already answered for every one of its slots needs no searching.
+    .filter((r) => slots.some((s) => (s.role ?? "").toLowerCase() === r && !given.has(s.slide))))];
+
+  let found: FoundPhoto[] = [];
+  const photoNotes: string[] = [];
+  if (photoRoles.length && body.find_photos !== false) {
+    // The crawl queue, not a fresh crawl: these URLs were discovered and robots-checked when
+    // the site was indexed.
+    const { data: crawled } = await admin.from("knowledge_crawl_queue")
+      .select("url, title").eq("brand_id", brandId).limit(2000);
+    const pages = (crawled ?? []) as { url: string; title: string | null }[];
+    if (pages.length) {
+      const out = await findBrandPhotos({
+        pages, roles: photoRoles,
+        readPage: async (url) => {
+          const got = await fetchSite(url, { timeoutMs: 12_000 });
+          const html = got.response?.ok ? await got.response.text().catch(() => null) : null;
+          // A campaign page that renders its photography in JavaScript answers a plain fetch
+          // with a shell: Prada's returned exactly one picture, and it was not a photograph.
+          // The renderer is what the crawler already uses for these pages, and it answers in
+          // markdown, whose image links imageUrlsFrom also reads.
+          const thin = !html || (html.match(/<img\b/gi) ?? []).length < 3;
+          if (thin && JINA_API_KEY) {
+            const rendered = await fetchRendered(url);
+            if (rendered) return (html ?? "") + "\n" + rendered;
+          }
+          return html;
+        },
+        // The HEADER, not the file. Dimensions and format live in the first bytes, and a
+        // campaign page lists dozens of pictures — downloading each in full to measure it
+        // would cost more than building the deck.
+        readImageHead: async (url) => {
+          const got = await fetchSite(url, { timeoutMs: 8_000, accept: "image/*,*/*" });
+          const res = got.response;
+          if (!res || (!res.ok && res.status !== 206)) return null;
+          try { return new Uint8Array(await res.arrayBuffer()); } catch { return null; }
+        },
+      });
+      found = out.photos;
+      photoNotes.push(...out.notes);
+    } else {
+      photoNotes.push("nothing indexed for this brand yet, so there were no pages to look for photographs on");
+    }
+  }
+  // Each slot takes a different picture: the same portrait three times is worse than two
+  // slots left as the template had them.
+  const takenPhotos = new Set<string>();
+  const nextPhoto = (role: PhotoRole): FoundPhoto | null =>
+    found.find((p) => p.role === role && !takenPhotos.has(p.url)) ?? null;
+
   let nextProduct = 0;
   const unfilled: string[] = [];
   const plan = slots.map((s) => {
@@ -158,16 +224,26 @@ Deno.serve(async (req: Request) => {
     const explicit = given.get(s.slide);
     if (explicit) return { ...s, image_url: explicit, piece_name: null, from: "given" };
 
-    if (role === "store") {
-      unfilled.push(`slide ${s.slide}: a boutique photograph with the brand's sign legible — nothing derivable, supply one`);
-      return { ...s, image_url: null, piece_name: null, from: "none" };
-    }
-    if (role === "ambassador" || role === "lifestyle") {
-      // Round-robin over whatever campaign photography exists, so two ambassador slots do
-      // not end up as the same picture twice when there are two to choose from.
-      const url = campaign.length ? campaign[roleOrdinal(slots, s) % campaign.length] : null;
-      if (url) return { ...s, image_url: url, piece_name: null, from: "campaign" };
-      unfilled.push(`slide ${s.slide}: ${role === "ambassador" ? "a campaign portrait" : "people wearing the pieces"} — this house published no campaign photography we could mirror`);
+    if (role === "store" || role === "ambassador" || role === "lifestyle") {
+      const photo = nextPhoto(role);
+      if (photo) {
+        takenPhotos.add(photo.url);
+        return { ...s, image_url: photo.url, piece_name: null, from: "site", source_page: photo.page };
+      }
+      // The portal's own hero images, for the two roles they can serve. A store is never one
+      // of them — onboarding chooses those for a portal header, not for a boutique.
+      if (role !== "store") {
+        const url = campaign.length ? campaign[roleOrdinal(slots, s) % campaign.length] : null;
+        if (url && !takenPhotos.has(url)) {
+          takenPhotos.add(url);
+          return { ...s, image_url: url, piece_name: null, from: "campaign" };
+        }
+      }
+      unfilled.push(`slide ${s.slide}: ${
+        role === "store" ? "a boutique photograph with the brand's sign legible"
+          : role === "ambassador" ? "a campaign portrait"
+          : "people wearing the pieces"
+      } — none found on this house's own site, so supply one`);
       return { ...s, image_url: null, piece_name: null, from: "none" };
     }
     const piece = products.length ? products[nextProduct++ % products.length] : null;
@@ -192,7 +268,10 @@ Deno.serve(async (req: Request) => {
   if (dlErr || !file) return json({ error: `template not readable: ${dlErr?.message ?? "missing"}` }, 500);
 
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
-  const filled: { media: string; slide: number; role: string; from: string; image_url: string; bytes: number }[] = [];
+  const filled: {
+    media: string; slide: number; role: string; from: string;
+    source_page: string | null; image_url: string; bytes: number;
+  }[] = [];
 
   for (const [i, s] of plan.entries()) {
     if (!s.image_url) continue;   // a slot the brief could not fill — reported, not faked
@@ -225,7 +304,13 @@ Deno.serve(async (req: Request) => {
         if (!rels) { unfilled.push(`slide ${s.slide}: the slide has no relationships file to repoint`); continue; }
         zip.file(relPath, rels.replaceAll(`../media/${oldName}`, `../media/${newName}`));
       }
-      filled.push({ media: s.media, slide: s.slide, role: s.role ?? "product", from: s.from, image_url: s.image_url, bytes: img.bytes.byteLength });
+      filled.push({
+        media: s.media, slide: s.slide, role: s.role ?? "product", from: s.from,
+        // Which page a photograph came off, so a choice nobody agrees with can be traced
+        // and overridden rather than argued about.
+        source_page: (s as { source_page?: string }).source_page ?? null,
+        image_url: s.image_url, bytes: img.bytes.byteLength,
+      });
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
       console.warn("[brand-deck] slot", s.media, why);
@@ -322,6 +407,7 @@ Deno.serve(async (req: Request) => {
     slots: filled,
     unfilled,
     categories: wanted,
+    photos_found: found.length,
     slides_cobranded: cobrand.slides,
     logo_source: cobrand.source,
     anchor_found_by_shape: cobrand.foundByShape,
@@ -351,6 +437,12 @@ Deno.serve(async (req: Request) => {
         ? `Product slots were filled from ${wanted.join(", ")}.` +
           (filled.some((f) => f.role === "product" && f.from === "catalogue") ? "" : " NOTE: too few pieces in those categories, so the whole catalogue was used instead — check what landed on the slides.")
         : "No categories asked for and none on the brand record, so product slots took the most valuable pieces in the catalogue. Give a focus if the deck should show one part of the range.",
+      ...(filled.some((f) => f.from === "site")
+        ? [`${filled.filter((f) => f.from === "site").length} photograph${filled.filter((f) => f.from === "site").length === 1 ? " was" : "s were"} taken off the house's own site — ` +
+           filled.filter((f) => f.from === "site").map((f) => `slide ${f.slide} from ${f.source_page}`).join("; ") +
+           ". Open each one on the slide: the page said what it was about, nothing here looked at the picture."]
+        : []),
+      ...(photoNotes.length ? [`Looking for photography: ${photoNotes.join("; ")}.`] : []),
       ...(unfilled.length
         ? [`${unfilled.length} slot${unfilled.length === 1 ? " is" : "s are"} still the template's own photograph: ${unfilled.join("; ")}. Supply them with brief.images and rebuild.`]
         : []),
@@ -650,6 +742,27 @@ function crossXml(n: number, box: Box): string {
 }
 
 
+
+/**
+ * One page, through the renderer.
+ *
+ * The same service the crawler uses for sites that answer a plain fetch with a shell. Asked
+ * for markdown rather than html: for these sites the html it returns is as empty as the
+ * original, and the markdown carries the picture URLs.
+ */
+async function fetchRendered(url: string): Promise<string> {
+  try {
+    const res = await fetch("https://r.jina.ai/" + url, {
+      headers: {
+        ...(JINA_API_KEY ? { Authorization: `Bearer ${JINA_API_KEY}` } : {}),
+        Accept: "text/plain",
+        "X-Return-Format": "markdown",
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+    return res.ok ? await res.text() : "";
+  } catch { return ""; }
+}
 
 /**
  * Campaign photography this house has published, as the brand record already holds it.
