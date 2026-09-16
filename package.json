@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:assistant": "node scripts/eval-assistant.mjs",
-    "typecheck:functions": "./scripts/typecheck-functions.sh"
+    "typecheck:functions": "./scripts/typecheck-functions.sh",
+    "demo:video": "node scripts/demo-video.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
