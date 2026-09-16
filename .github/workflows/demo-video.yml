@@ -1,0 +1,100 @@
+# The assistant demo film, made without anybody's laptop.
+#
+# The recorder needs a browser and a video encoder. A GitHub runner has both — Chromium
+# through Playwright, ffmpeg preinstalled — so the film can be made on demand, or on a
+# schedule, by something that is not a person's Mac.
+#
+# It fetches the brand's demo login and posts the finished film back to the decks bucket
+# itself, where it appears in the commercial cycle's artefact list. The only things this
+# workflow has to be told are which brand, and the two secrets that let it talk to the
+# platform at all.
+#
+# Secrets required (Settings → Secrets and variables → Actions):
+#   AION_FUNCTIONS_BASE   https://<project>.supabase.co/functions/v1
+#   AION_BATCH_SECRET     the KNOWLEDGE_BATCH_SECRET the functions check
+#   AION_ANON_KEY         the project's anon key (the gateway wants a JWT)
+#   AION_PORTAL_BASE      https://dev.app.aioncover.com
+
+name: Demo video
+
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: "Brand slug, as in /<slug>/assistant"
+        required: true
+        type: string
+      brand_id:
+        description: "Brand id — used to fetch the demo login and to file the film"
+        required: true
+        type: string
+      questions:
+        description: "How many questions to ask"
+        required: false
+        default: "3"
+        type: string
+      speed:
+        description: "Playback speed. 1.5 reads well; 2 is a blur"
+        required: false
+        default: "1.5"
+        type: string
+      ask:
+        description: 'Override the questions, pipe separated. Empty = the brand''s own opening prompts'
+        required: false
+        default: ""
+        type: string
+      upload:
+        description: "File it against the brand as well as attaching it here"
+        required: false
+        default: true
+        type: boolean
+
+# One film per brand at a time. Two runs would drive the same demo login in two browsers and
+# interleave their questions into each other's transcript.
+concurrency:
+  group: demo-video-${{ inputs.slug }}
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    # A slow answer is normal; a hung one should not hold a runner all day.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      # Chromium only. The other two engines are a few hundred megabytes this never opens.
+      - run: npx playwright install --with-deps chromium
+
+      - name: Record
+        env:
+          AION_FUNCTIONS_BASE: ${{ secrets.AION_FUNCTIONS_BASE }}
+          AION_BATCH_SECRET: ${{ secrets.AION_BATCH_SECRET }}
+          AION_ANON_KEY: ${{ secrets.AION_ANON_KEY }}
+        run: |
+          node scripts/demo-video.mjs \
+            --slug "${{ inputs.slug }}" \
+            --brand-id "${{ inputs.brand_id }}" \
+            --base "${{ secrets.AION_PORTAL_BASE }}" \
+            --questions "${{ inputs.questions }}" \
+            --speed "${{ inputs.speed }}" \
+            ${{ inputs.ask != '' && format('--ask "{0}"', inputs.ask) || '' }} \
+            --out "AION-${{ inputs.slug }}-assistant.mp4" \
+            ${{ inputs.upload && '--upload' || '' }}
+
+      # Also attached here, so a failed upload does not lose the recording — it is the
+      # expensive part of this job.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: demo-video-${{ inputs.slug }}
+          path: AION-*.mp4
+          if-no-files-found: warn
+          retention-days: 30

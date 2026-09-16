@@ -30,25 +30,36 @@
 
 import { chromium } from "playwright-core";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// Playwright's own Chromium when it is installed (`npx playwright install chromium`), which
+// is what a CI runner has; a local Chrome otherwise, which is what a laptop has. Nothing here
+// is tied to a particular machine — the point is that this runs unattended.
+const LOCAL_CHROME = [
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/usr/bin/google-chrome",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/chromium",
+];
 const SIZE = { width: 1440, height: 900 };
 
 /**
- * What the film shows.
+ * What the film asks.
  *
- * The founder's own four, in the order that tells a story: who matters, what to say to them,
- * a policy question no CRM can answer on its own, and a plan. Each one needs the client data
- * and the knowledge base in the same answer, which is the thing worth filming.
+ * Read off the assistant's own opening screen, which is already per-brand: those prompts are
+ * built from a real product, a real client and the house's name, so Ferragamo's film asks
+ * about a Ferragamo piece and Prada's about a Prada one. Filming a question the product
+ * itself offers is also the honest version — it is a path a user has, not one invented for
+ * the camera.
+ *
+ * `--ask "one|two"` overrides, for a film that has to make a particular point.
  */
-const QUESTIONS = [
+const FALLBACK_QUESTIONS = [
   "Chi sono i 10 top client dell'ultimo trimestre e cosa consiglieresti di comprare a ciascuno?",
   "Devo scrivere una newsletter: a chi scriveresti e perché proprio a loro?",
   "Mi daresti la policy di reso per un cliente che vive in Polonia e ha acquistato in Brasile?",
-  "Mi creeresti la struttura per un trunk show a Londra — chi invitare, cosa portare, come gestirlo?",
 ];
 
 const arg = (name, fallback) => {
@@ -57,23 +68,75 @@ const arg = (name, fallback) => {
 };
 
 const slug = arg("slug");
-const email = arg("email");
-const password = arg("password");
+// The login can be given, or fetched. Fetching is what lets this run unattended: the demo
+// accounts are created by onboarding and live in the stage row, and build-collateral hands
+// them back to an admin or a batch caller — the same audience that already reads them off
+// the screen to give to a prospect.
+const brandId = arg("brand-id");
+const functionsBase = arg("functions-base", process.env.AION_FUNCTIONS_BASE ?? "");
+const batchSecret = arg("batch-secret", process.env.AION_BATCH_SECRET ?? "");
+const anonKey = arg("anon-key", process.env.AION_ANON_KEY ?? "");
+let email = arg("email");
+let password = arg("password");
 const base = arg("base", "https://dev.app.aioncover.com");
 const out = arg("out", `AION-${slug}-assistant.mp4`);
-// How many questions to ask. Four answers is about two minutes once compressed.
-const count = Number(arg("questions", QUESTIONS.length));
+// Three answers is a shade over ninety seconds at this speed. Four ran to two minutes, which
+// is longer than a demo video earns.
+const count = Number(arg("questions", 3));
+const asked = (arg("ask", "") || "").split("|").map((q) => q.trim()).filter(Boolean);
+// 1.5×, not 2×. Fast enough not to be a wait, slow enough to read an answer as it arrives —
+// at 2× the streaming text was a blur, which defeats the point of filming it.
+const speed = Number(arg("speed", 1.5));
+
+/** build-collateral, as a batch caller. */
+async function callCollateral(payload) {
+  const res = await fetch(`${functionsBase}/build-collateral`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(anonKey ? { Authorization: `Bearer ${anonKey}` } : {}),
+      ...(batchSecret ? { "x-batch-secret": batchSecret } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok || out.error || out.ok === false) {
+    throw new Error(out.error ?? out.reason ?? `HTTP ${res.status}`);
+  }
+  return out;
+}
+
+const canCallBack = Boolean(functionsBase && batchSecret && brandId);
+
+if ((!email || !password) && canCallBack) {
+  const login = await callCollateral({ brand_id: Number(brandId), kind: "demo_login" });
+  email = login.email;
+  password = login.password;
+  console.log(`using the demo login for ${login.brand}`);
+}
 
 if (!slug || !email || !password) {
-  console.error("usage: demo-video.mjs --slug <brand> --email <demo login> --password <…> [--base url] [--out file.mp4]");
+  console.error(
+    "usage: demo-video.mjs --slug <brand> (--email … --password … | --brand-id N with\n" +
+    "       --functions-base/--batch-secret, or AION_FUNCTIONS_BASE/AION_BATCH_SECRET)\n" +
+    "       [--base url] [--ask \"q1|q2\"] [--questions 3] [--speed 1.5] [--out file.mp4] [--upload]",
+  );
   process.exit(2);
 }
-if (!existsSync(CHROME)) { console.error(`Chrome not found at ${CHROME}`); process.exit(2); }
+const chromePath = LOCAL_CHROME.find((p) => existsSync(p));
 
 const work = mkdtempSync(join(tmpdir(), "aion-demo-"));
 console.log(`recording ${slug} → ${out}`);
 
-const browser = await chromium.launch({ executablePath: CHROME, headless: true });
+// No executablePath means Playwright's own download, which is the CI case.
+const browser = await chromium.launch(chromePath ? { executablePath: chromePath, headless: true } : { headless: true })
+  .catch((e) => {
+    console.error(
+      "could not start a browser. Install one with `npx playwright install chromium`, " +
+      `or put Chrome somewhere this looks (${LOCAL_CHROME[0]}).\n${e.message}`,
+    );
+    process.exit(2);
+  });
 const context = await browser.newContext({
   viewport: SIZE,
   // Playwright writes one webm per page, closed when the context closes.
@@ -111,20 +174,37 @@ try {
 
   const composer = page.locator("textarea").first();
 
-  for (const question of QUESTIONS.slice(0, count)) {
+  // The brand's own opening prompts, before anything is typed — they disappear with the first
+  // answer. Anything long enough to be a question; the screen also carries short UI labels.
+  const onScreen = asked.length ? [] : await page
+    .locator("main button, [role='main'] button")
+    .allInnerTexts()
+    .then((all) => all.map((t) => t.replace(/\s+/g, " ").trim()).filter((t) => t.length > 40))
+    .catch(() => []);
+
+  // Spread across the list, not the first three off the top. The opening prompts are grouped
+  // by kind — the product ones first, then the client and planning ones — so taking the top
+  // three films two variations on the same handbag. Evenly spaced gives the range the
+  // assistant actually has, which is the thing being demonstrated.
+  const pool = asked.length ? asked : onScreen.length ? onScreen : FALLBACK_QUESTIONS;
+  const questions = asked.length ? pool.slice(0, count) : spread(pool, count);
+  console.log(`asking ${questions.length}: ${questions.map((q) => q.slice(0, 48) + "…").join(" / ")}`);
+
+  for (const question of questions) {
+    // The composer is disabled while an answer is generating, so waiting for it to come back
+    // IS waiting for the assistant to finish. Before typing as well as after, because the
+    // first question can arrive while the page is still settling.
+    await waitComposerReady(page);
     await composer.click();
     // Typed, not pasted. The film is about a person using this.
     await composer.type(question, { delay: 18 });
     await page.waitForTimeout(400);
-    // The transcript as it stands with the question in it and no answer yet. Everything the
-    // wait below does is measured against this.
-    const baseline = await transcriptLength(page);
     await composer.press("Enter");
 
     // Wait for the answer to finish rather than for a fixed time: these vary from eight
     // seconds to the better part of a minute, and a fixed wait either cuts an answer in half
     // or films a still frame.
-    await settled(page, baseline);
+    await settled(page);
     await page.waitForTimeout(1200);
   }
 
@@ -145,12 +225,12 @@ if (!webm) { console.error("no video was recorded"); process.exit(1); }
 
 // ── Cut ────────────────────────────────────────────────────────────────────
 // Sped up, not trimmed. Cutting the waits out would be the same lie as rendering the thing:
-// what it takes to answer is part of what is being shown. 2× keeps it honest and watchable,
-// and the frame rate is raised to match so the result does not stutter.
+// what it takes to answer is part of what is being shown. The frame rate is raised to match
+// so the result does not stutter.
 console.log("encoding…");
 execFileSync("ffmpeg", [
   "-y", "-i", webm,
-  "-filter:v", "setpts=0.5*PTS,fps=30,scale=1440:-2:flags=lanczos",
+  "-filter:v", `setpts=${(1 / speed).toFixed(4)}*PTS,fps=30,scale=1440:-2:flags=lanczos`,
   "-an",
   "-c:v", "libx264", "-preset", "slow", "-crf", "22", "-pix_fmt", "yuv420p",
   "-movflags", "+faststart",
@@ -164,50 +244,74 @@ const seconds = Number(execFileSync("ffprobe", [
 ]).toString().trim());
 console.log(`${out} — ${Math.round(seconds)}s`);
 
+// Put it where the rest of the commercial pack lives, so it appears in the cycle's artefact
+// list with a working link rather than on whichever machine happened to make it.
+if (process.argv.includes("--upload")) {
+  if (!canCallBack) {
+    console.error("--upload needs --brand-id and the functions base + batch secret");
+    process.exit(2);
+  }
+  const stored = await callCollateral({
+    brand_id: Number(brandId),
+    kind: "upload_demo_video",
+    seconds: Math.round(seconds),
+    file_base64: readFileSync(out).toString("base64"),
+  });
+  console.log(`uploaded → ${stored.storage_path}`);
+}
+
 /**
  * Wait until the assistant has finished answering.
  *
- * Two conditions, and the first is the one the first version was missing. "The page has not
- * changed for a couple of seconds" is true BEFORE the answer starts as well as after it ends:
- * the first attempt filmed the login, the question, the word "Thinking…", and stopped — nine
- * seconds of a demo video in which nothing is demonstrated.
+ * By asking the product, not by guessing. The composer carries `disabled={loading || …}`, so
+ * it is disabled for exactly as long as an answer is being generated and enabled again the
+ * moment it is not. That is the authoritative signal and it costs nothing to read.
  *
- * So: wait for the transcript to grow past where it was when the question was sent, and only
- * then start counting quiet. A spinner would not do instead — the answer streams, so the page
- * is "loading" for almost all of it.
+ * Two earlier versions of this were wrong in opposite directions. Watching the page for a
+ * fixed quiet period returned BEFORE the answer began — nine seconds of login, question and
+ * the word "Thinking…". Watching for the transcript to stop growing returned in the middle of
+ * one, because an answer that stops to query the CRM is quiet for several seconds and then
+ * carries on; the next question then hit a disabled composer and the run died with a click
+ * timeout after filming two thirds of a film.
  */
-async function settled(page, baseline, { quietMs = 2500, capMs = 180_000, minGrowth = 120 } = {}) {
-  const started = Date.now();
-  let last = baseline;
-  let lastChange = Date.now();
-  let answering = false;
+async function waitComposerReady(page, timeoutMs = 180_000) {
+  // The `null` is not decoration. waitForFunction's signature is (fn, arg, options), so
+  // passing the options object second makes it the function's ARGUMENT and leaves the
+  // timeout at Playwright's 30-second default. That is how a 180-second cap silently became
+  // 30, and two of three answers were reported as "did not finish inside the cap".
+  await page.waitForFunction(() => {
+    const t = document.querySelector("textarea");
+    return Boolean(t) && !t.disabled && !t.readOnly;
+  }, null, { timeout: timeoutMs });
+}
 
-  while (Date.now() - started < capMs) {
-    const length = await transcriptLength(page).catch(() => last);
-    if (length !== last) {
-      // "Thinking…" is a change too, and a short one. The threshold is what tells an answer
-      // apart from a status word.
-      if (length > baseline + minGrowth) answering = true;
-      last = length;
-      lastChange = Date.now();
-    } else if (answering && Date.now() - lastChange > quietMs) {
-      return;
-    }
-    await page.waitForTimeout(500);
+async function settled(page, { capMs = 180_000, settleMs = 900 } = {}) {
+  // It can take a moment for `loading` to go true after Enter; if it never does, the enabled
+  // wait below returns immediately and the pause covers a short answer.
+  await page.waitForFunction(() => {
+    const t = document.querySelector("textarea");
+    return Boolean(t) && t.disabled;
+  }, null, { timeout: 15_000 }).catch(() => {});
+
+  try {
+    await waitComposerReady(page, capMs);
+  } catch {
+    console.warn("  (an answer did not finish inside the cap — filmed what there was)");
   }
-  console.warn(answering
-    ? "  (an answer was still being written at the cap — filmed what there was)"
-    : "  (no answer arrived inside the cap — the assistant may be failing)");
+  // Let the last of the answer paint before the next question starts typing over it.
+  await page.waitForTimeout(settleMs);
 }
 
-/**
- * How much text is on the page.
- *
- * A function declaration, not a const arrow: this file uses it in the recording loop above
- * and defines it down here with the other helpers, and `const` is not hoisted — the first run
- * died with "Cannot access 'transcriptLength' before initialization" after driving the whole
- * session, which is an expensive way to find a temporal dead zone.
- */
-function transcriptLength(page) {
-  return page.evaluate(() => document.body.innerText.length);
+/** `count` items spread evenly across a list, in order, without repeats. */
+function spread(items, count) {
+  if (items.length <= count) return items;
+  const step = items.length / count;
+  const picked = [];
+  for (let i = 0; i < count; i++) {
+    const item = items[Math.min(items.length - 1, Math.floor(i * step))];
+    if (!picked.includes(item)) picked.push(item);
+  }
+  return picked;
 }
+
+

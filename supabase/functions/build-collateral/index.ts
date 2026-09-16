@@ -100,7 +100,11 @@ Deno.serve(async (req: Request) => {
     // The one kind that is not about this brand — a template is shared. brand_id is still
     // required by the handler above, which is harmless and keeps one auth path.
     if (kind === "upload_template") return json(await uploadTemplate(admin, body));
-    return json({ error: "kind must be list | data_request | read_data_request | business_case | operations | upload_template" }, 400);
+    // The two halves of an unattended demo film: what to log in as, and where to put the
+    // result. See demoLogin.
+    if (kind === "demo_login") return json(await demoLogin(admin, brand));
+    if (kind === "upload_demo_video") return json(await uploadDemoVideo(admin, brand, body));
+    return json({ error: "kind must be list | data_request | read_data_request | business_case | operations | upload_template | demo_login | upload_demo_video" }, 400);
   } catch (e) {
     console.error("[build-collateral]", e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
@@ -748,6 +752,74 @@ function looksLikeCornerMark(picXml: string): boolean {
   if (!cx || !cy) return false;
   const aspect = cx / cy;
   return aspect >= 2 && aspect <= 8 && cy <= 6858000 * 0.09 && cx <= 12192000 * 0.25 && y >= 6858000 * 0.82;
+}
+
+// ── 5. The demo film, made by something that is not a laptop ────────────────
+//
+// Recording the assistant needs a browser and a video encoder, which edge functions do not
+// have — so the recorder is a script, and for it to run unattended on a CI runner it needs
+// two things from here: the demo login for the brand, and somewhere to put the film.
+//
+// The login is not a new secret. onboard-brand's demo_users stage creates these accounts and
+// writes them into the stage row, where every AION admin already reads them off the screen to
+// hand to a prospect. This returns the same thing to the same audience — admin or batch — and
+// nothing else. They are throwaway accounts on demo brands; if that ever stops being true,
+// this is the first thing to take away.
+async function demoLogin(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>) {
+  const { data: row } = await admin.from("brand_onboarding")
+    .select("detail").eq("brand_id", brand.id).eq("stage", "demo_users").maybeSingle();
+  const accounts = (row?.detail as { accounts?: Record<string, { email: string; password: string; portal: string }> } | null)?.accounts;
+  const brandAdmin = accounts?.brand_admin ?? accounts?.sales_associate;
+  if (!brandAdmin?.email) {
+    return { ok: false, reason: "no demo logins for this brand — run the Demo logins stage first" };
+  }
+  return {
+    ok: true, kind: "demo_login", brand: brand.name, slug: brand.slug,
+    email: brandAdmin.email, password: brandAdmin.password, portal: brandAdmin.portal,
+  };
+}
+
+/**
+ * The finished film, stored where every other piece of the pack is.
+ *
+ * Registered in brand_deck_outputs like a deck, so it appears in the commercial cycle's
+ * artefact list with a fresh signed link and nobody has to be told where it went.
+ */
+const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
+
+async function uploadDemoVideo(
+  admin: ReturnType<typeof createClient>, brand: Record<string, unknown>, body: Record<string, unknown>,
+) {
+  const b64 = String(body.file_base64 ?? "").replace(/^data:[^;]*;base64,/, "");
+  if (!b64) return { ok: false, reason: "attach the mp4" };
+
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(b64);
+    if (binary.length > MAX_VIDEO_BYTES) {
+      return { ok: false, reason: `that file is ${Math.round(binary.length / 1024 / 1024)}MB — the limit is 120MB` };
+    }
+    // Preallocated, not Uint8Array.from with a mapper: a large file decoded an element at a
+    // time is what ran the worker out of memory on the template upload.
+    bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  } catch {
+    return { ok: false, reason: "could not decode the upload" };
+  }
+  // An MP4 starts with a box length and "ftyp". Cheap, and it stops a failed run uploading
+  // its own error page as a film.
+  const ftyp = String.fromCharCode(...bytes.slice(4, 8));
+  if (ftyp !== "ftyp") return { ok: false, reason: "that is not an MP4" };
+
+  return await store(admin, brand, "demo_video", "mp4", bytes, "video/mp4", {
+    seconds: Number(body.seconds ?? 0) || null,
+    review: [
+      "Watch it before sending: it is a recording of the live demo brand, so it shows whatever " +
+      "that brand's data currently says.",
+      "The assistant's answers are generated, and a demo film is the one place a wrong figure " +
+      "travels without anybody present to correct it.",
+    ],
+  });
 }
 
 // ── PPTX rendering ──────────────────────────────────────────────────────────
