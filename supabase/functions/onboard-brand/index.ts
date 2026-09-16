@@ -22,6 +22,7 @@
 //         stages?: string[], options?: { customers, policies, avg_ticket } }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import Anthropic from "npm:@anthropic-ai/sdk@0.32.1";
 import { originAllowed, originRefused } from "../_shared/origin.ts";
 import {
   demoToolsEnabled, isNonProduction,
@@ -49,10 +50,14 @@ import { parseProductFeed } from "../_shared/product-feed.ts";
 import { AION_UA } from "../_shared/robots.ts";
 // The record's non-visual defaults: focus, FAQ, fee rates, policy prefix.
 import { policyPrefix, productFocus, focusBreakdown, renderFaqs, customerServiceEmail, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
+import { catalogueDigest, decideFocus } from "../_shared/focus-ai.ts";
 // A brand's imagery, held by us rather than hotlinked from a site that will be redesigned.
 import { mirrorBrandImages, servedByAion, IMAGE_SLOTS, type ImageSlot } from "../_shared/brand-images.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+// Cheap, fast, and the whole job is picking one or two labels off a summary.
+const FOCUS_MODEL = Deno.env.get("FOCUS_MODEL") ?? "claude-sonnet-4-6";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
@@ -1783,6 +1788,26 @@ async function claimTilePieces(
   return out;
 }
 
+/**
+ * Ask the model which categories a pilot should cover.
+ *
+ * Small budget on purpose: the answer is two labels and a sentence, and a branding run that
+ * hangs on this is worse than one that falls back to counting. Everything about the fallback
+ * is in decideFocus — this just asks, and is allowed to throw.
+ */
+async function askForFocus(prompt: string): Promise<string> {
+  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+  const res = await anthropic.messages.create({
+    model: FOCUS_MODEL,
+    max_tokens: 400,
+    system:
+      "You classify a luxury house's catalogue for an insurance pilot. You answer with JSON " +
+      "and nothing else, using only the categories you are given.",
+    messages: [{ role: "user", content: prompt }],
+  }, { timeout: 25_000 });
+  return res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+}
+
 /** A catalogue row, as the product focus reads it. */
 type FocusRow = {
   name: string | null; category: string | null; collection: string | null; price: number | null;
@@ -1848,17 +1873,34 @@ async function fillRecordDefaults(
   // `product_focus_manual` is what makes re-reading safe. An admin who types a focus owns it
   // — this is a commercial judgement about which categories a pilot covers, and the catalogue
   // is only a sample of a website — and their wording is never overwritten.
+  //
+  // READ, not counted. Counting words answers "which of our category words appear most" and
+  // the question is "which categories should a pilot cover": Ferragamo files 354 accessories
+  // and 60 watches, so counting says bags and accessories where the house's own answer is
+  // bags and watches. Scarves are numerous and cheap; watches are few, dear and a different
+  // risk. The model gets the shelves with their counts AND their value, a sample of names
+  // across the price range, and what the counting pass thought — and has to answer in the
+  // same fixed vocabulary, or it is ignored. See _shared/focus-ai.ts.
   if (!brand.product_focus_manual) {
     const breakdown = focusBreakdown(evidence);
-    const focus = productFocus(evidence);
-    if (focus && focus !== brand.product_focus) {
-      patch.product_focus = focus;
-      const workings = breakdown
-        .map((b) => `${b.focus} ${b.products}/${rows.length}`).join(", ");
-      notes.push(brand.product_focus
-        ? `product focus re-read from ${rows.length} catalogue pieces: ${focus} (was "${brand.product_focus}") — ${workings}`
-        : `product focus read from the catalogue: ${focus} — ${workings}`);
-    } else if (!focus && rows.length === 0) {
+    const digest = catalogueDigest(name, brand.description as string | null, rows, evidence);
+    const decision = await decideFocus(
+      digest,
+      evidence,
+      ANTHROPIC_API_KEY
+        ? (prompt) => askForFocus(prompt)
+        : null,
+    );
+
+    if (decision && decision.focus !== brand.product_focus) {
+      patch.product_focus = decision.focus;
+      const workings = breakdown.map((b) => `${b.focus} ${b.products}/${rows.length}`).join(", ");
+      notes.push(
+        `product focus ${decision.source === "ai" ? "read" : "counted"} from ${rows.length} catalogue pieces: ` +
+        `${decision.focus}${brand.product_focus ? ` (was "${brand.product_focus}")` : ""} — ${decision.reason}` +
+        (workings ? `. Counting alone would have said: ${workings}` : ""),
+      );
+    } else if (!decision && rows.length === 0) {
       notes.push("product focus left blank — no catalogue to read it from yet");
     }
   }
