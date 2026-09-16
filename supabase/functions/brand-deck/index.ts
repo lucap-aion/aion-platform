@@ -28,18 +28,30 @@
 // it), the image is added as a new part and the slide's relationship is
 // repointed at it.
 //
-// Auth: AION admin, or batch. Body: { brand_id, template_key?, image_urls?, dry_run? }
+// Auth: AION admin, or batch.
+// Body: { brand_id, template_key?, dry_run?,
+//         brief?: { categories?: string[],            // "for Prada it has to be bags"
+//                   images?: [{ slide, url }] },      // an exact photograph for one slide
+//         image_urls?, text_edits? }
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import JSZip from "npm:jszip@3.10.1";
+import { focusMatcher } from "../_shared/brand-defaults.ts";
+import { sniffFormat, imageSize, EMBEDDABLE, MEDIA_TYPES } from "../_shared/image-bytes.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
 const BUCKET = "decks";
-// 16:9 at 13.33in — the teaser's own slide size, used to mirror across the page.
+// 16:9 at 13.33in × 7.5in — the teaser's own slide size, used to place the co-branding
+// lockup and to refuse a placement that would run off the page.
 const SLIDE_W = 12192000;
+const SLIDE_H = 6858000;
+// Half a centimetre. Nothing is placed closer to an edge than the AION mark itself sits.
+const MARGIN = 180000;
+// The deck's ink. Same value as the generated decks in build-collateral.
+const LOCKUP_INK = "262626";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -47,7 +59,14 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-type Slot = { media: string; slide: number; role: string; note?: string };
+// What a slot is FOR, which is what decides where its picture comes from.
+//   product      a piece from the catalogue, filtered to the brief's categories
+//   ambassador   the face of the house — campaign photography
+//   lifestyle    people wearing the pieces — campaign photography
+//   store        a boutique with the sign legible; nothing can derive this, so it is asked for
+//   hero         the older, unspecific role. Treated as `product`.
+type SlotRole = "product" | "ambassador" | "lifestyle" | "store" | "hero";
+type Slot = { media: string; slide: number; role: SlotRole | string; note?: string };
 type TextSlot = { find: string; replace_with: string; note?: string };
 
 Deno.serve(async (req: Request) => {
@@ -78,7 +97,8 @@ Deno.serve(async (req: Request) => {
   // A read that failed is not a brand that does not exist — see the same fix in
   // onboard-brand. 503 says "try again", which is what the tick does.
   const { data: brand, error: brandErr } = await admin.from("brands")
-    .select("id, name, slug, logo_big, logo_small").eq("id", brandId).maybeSingle();
+    .select("id, name, slug, logo_big, logo_small, product_focus, top_banner_image, auth_background_image")
+    .eq("id", brandId).maybeSingle();
   if (brandErr) return json({ error: `could not read brand ${brandId}: ${brandErr.message}` }, 503);
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
 
@@ -89,29 +109,104 @@ Deno.serve(async (req: Request) => {
   const slots = (tpl.slots ?? []) as Slot[];
   const textSlots = (tpl.text_slots ?? []) as TextSlot[];
 
-  // ── Pick the pieces ────────────────────────────────────────────────────────
-  const picked = Array.isArray(body.image_urls) && body.image_urls.length
-    ? (body.image_urls as string[])
-    : await pickBrandImages(admin, brandId, slots.length);
+  // ── The imagery brief ──────────────────────────────────────────────────────
+  //
+  // A slot is not "an image": slide 4 wants a boutique with the sign above the door, slide 9
+  // wants people wearing the pieces, slides 2 and 10 want the face of the house. Filling all
+  // six from the same ranked list of packshots is what made a generated deck read as a
+  // catalogue with an AION cover on it.
+  //
+  // So each slot now says what it is for, and each ROLE is filled from a different place:
+  //
+  //   product      the catalogue, filtered to the categories the brief asks for. "For Prada
+  //                they have to be images of bags" is this filter — a house's catalogue is
+  //                mostly whatever the crawler reached, so the brief, not the ranking,
+  //                decides which part of it the deck shows.
+  //   ambassador   campaign photography, which for these houses is the homepage shot that
+  //                onboarding already mirrored into the brand's own storage.
+  //   lifestyle    the same source. People wearing the pieces is campaign photography.
+  //   store        NOTHING, ever, automatically. A boutique with a legible sign is not in a
+  //                catalogue and is not on a homepage in any way this could recognise, and a
+  //                packshot in that slot is worse than the stock photograph it replaces
+  //                because it looks deliberate. It is named in the review notes instead.
+  //
+  // `images` overrides all of it, per slide: an admin who has the right photograph pastes it
+  // and this gets out of the way. That is the input the brief above is a fallback for.
+  const brief = (body.brief ?? {}) as {
+    categories?: string[];
+    images?: { slide: number; url: string }[];
+  };
+  // Defaults to the brand's own product focus, so "bags" does not have to be typed again for
+  // a house whose record already says bags.
+  const wanted = (brief.categories?.length
+    ? brief.categories
+    : String(brand.product_focus ?? "").split(",").map((c) => c.trim()).filter(Boolean))
+    .map((c) => c.toLowerCase());
 
-  if (picked.length === 0) {
-    return json({ ok: false, reason: "no catalogue images for this brand yet — run the storefront stage, or pass image_urls explicitly" });
+  const given = new Map<number, string>(
+    (brief.images ?? []).filter((i) => i?.slide && i?.url).map((i) => [Number(i.slide), String(i.url)]));
+
+  const products = Array.isArray(body.image_urls) && body.image_urls.length
+    ? (body.image_urls as string[])
+    : await pickBrandImages(admin, brandId, slots.length, wanted);
+  const campaign = campaignImages(brand);
+
+  let nextProduct = 0;
+  const unfilled: string[] = [];
+  const plan = slots.map((s) => {
+    const role = (s.role ?? "product").toLowerCase();
+    const explicit = given.get(s.slide);
+    if (explicit) return { ...s, image_url: explicit, from: "given" };
+
+    if (role === "store") {
+      unfilled.push(`slide ${s.slide}: a boutique photograph with the brand's sign legible — nothing derivable, supply one`);
+      return { ...s, image_url: null, from: "none" };
+    }
+    if (role === "ambassador" || role === "lifestyle") {
+      // Round-robin over whatever campaign photography exists, so two ambassador slots do
+      // not end up as the same picture twice when there are two to choose from.
+      const url = campaign.length ? campaign[roleOrdinal(slots, s) % campaign.length] : null;
+      if (url) return { ...s, image_url: url, from: "campaign" };
+      unfilled.push(`slide ${s.slide}: ${role === "ambassador" ? "a campaign portrait" : "people wearing the pieces"} — this house published no campaign photography we could mirror`);
+      return { ...s, image_url: null, from: "none" };
+    }
+    const url = products.length ? products[nextProduct++ % products.length] : null;
+    if (!url) unfilled.push(`slide ${s.slide}: a piece from the catalogue — none read yet`);
+    return { ...s, image_url: url, from: url ? "catalogue" : "none" };
+  });
+
+  if (plan.every((p) => !p.image_url)) {
+    return json({
+      ok: false,
+      reason: products.length === 0 && campaign.length === 0
+        ? "nothing to put in this deck — no catalogue images and no campaign photography for this brand yet. Run the storefront stage, or pass brief.images explicitly."
+        : "no slot could be filled from the brief",
+      unfilled,
+    });
   }
 
-  const plan = slots.map((s, i) => ({ ...s, image_url: picked[i % picked.length] }));
-  if (body.dry_run === true) return json({ ok: true, brand: brand.name, plan });
+  if (body.dry_run === true) return json({ ok: true, brand: brand.name, categories: wanted, plan, unfilled });
 
   // ── Rewrite the deck ───────────────────────────────────────────────────────
   const { data: file, error: dlErr } = await admin.storage.from(BUCKET).download(tpl.storage_path);
   if (dlErr || !file) return json({ error: `template not readable: ${dlErr?.message ?? "missing"}` }, 500);
 
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
-  const filled: { media: string; slide: number; image_url: string; bytes: number }[] = [];
+  const filled: { media: string; slide: number; role: string; from: string; image_url: string; bytes: number }[] = [];
 
   for (const [i, s] of plan.entries()) {
+    if (!s.image_url) continue;   // a slot the brief could not fill — reported, not faked
     try {
-      const img = await fetchImage(s.image_url);
-      if (!img) continue;
+      // A slot that cannot be filled says so. It used to `continue` in silence, which is how
+      // a deck could come back "5 of 6 filled" with no hint that the sixth was an AVIF
+      // nothing can embed — the slide kept the template's stock photograph and looked, to
+      // anyone who did not count, like a finished deck.
+      const got = await fetchImageOrWhyNot(s.image_url);
+      if (!got.image) {
+        unfilled.push(`slide ${s.slide}: ${s.from === "campaign" ? "the campaign photograph" : "the picture chosen for it"} was not usable — ${got.why ?? "unknown"}`);
+        continue;
+      }
+      const img = got.image;
 
       const ext = img.ext;
       const oldName = s.media.replace("ppt/media/", "");
@@ -121,15 +216,20 @@ Deno.serve(async (req: Request) => {
       if (oldName.split(".").pop()?.toLowerCase() === ext) {
         zip.file(s.media, img.bytes);
       } else {
+        // A part whose extension the package does not declare makes the whole file invalid,
+        // not just this picture — PowerPoint offers to repair it.
+        await declareMedia(zip, ext);
         zip.file(`ppt/media/${newName}`, img.bytes);
         const relPath = `ppt/slides/_rels/slide${s.slide}.xml.rels`;
         const rels = await zip.file(relPath)?.async("string");
-        if (!rels) continue;
+        if (!rels) { unfilled.push(`slide ${s.slide}: the slide has no relationships file to repoint`); continue; }
         zip.file(relPath, rels.replaceAll(`../media/${oldName}`, `../media/${newName}`));
       }
-      filled.push({ media: s.media, slide: s.slide, image_url: s.image_url, bytes: img.bytes.byteLength });
+      filled.push({ media: s.media, slide: s.slide, role: s.role ?? "product", from: s.from, image_url: s.image_url, bytes: img.bytes.byteLength });
     } catch (e) {
-      console.warn("[brand-deck] slot", s.media, e instanceof Error ? e.message : e);
+      const why = e instanceof Error ? e.message : String(e);
+      console.warn("[brand-deck] slot", s.media, why);
+      unfilled.push(`slide ${s.slide}: ${why}`);
     }
   }
 
@@ -142,10 +242,8 @@ Deno.serve(async (req: Request) => {
   // in text anywhere; the identity is entirely carried by that mark.
   //
   // So rather than replace AION's mark (this is still AION's deck, about AION's
-  // service), the brand's logo is mirrored opposite it — the bottom-left /
-  // bottom-right lockup a co-branded deck normally uses. Position and height are
-  // read off the AION mark on each slide rather than hardcoded, so the template
-  // can move without this drifting.
+  // service), the brand's logo is set WITH it as one lockup: under it on the title
+  // slide, beside it with a × between them on every other. See coBrandSlides.
   const cobrand = await coBrandSlides(zip, tpl.logo_anchor ?? "ppt/media/image2.png", brand, brandId);
 
   // ── Optional text edits ────────────────────────────────────────────────────
@@ -197,6 +295,9 @@ Deno.serve(async (req: Request) => {
     slug,
     slots_filled: filled.length,
     slots_total: slots.length,
+    slots: filled,
+    unfilled,
+    categories: wanted,
     slides_cobranded: cobrand.slides,
     logo_source: cobrand.source,
     text_edits: applied,
@@ -211,29 +312,49 @@ Deno.serve(async (req: Request) => {
     // as this fills.
     review: [
       cobrand.slides > 0
-        ? `${brand.name}'s logo is on ${cobrand.slides} slide${cobrand.slides === 1 ? "" : "s"}, opposite the AION mark.` +
+        ? `${brand.name}'s logo is on ${cobrand.slides} slide${cobrand.slides === 1 ? "" : "s"} — under the AION mark on the title slide, beside it as AION × ${brand.name} on the rest.` +
           (cobrand.source === "logo_small"
-            ? " It used the small logo — usually the monogram rather than the wordmark, because the main logo is a vector. A wordmark reads better here: put a PNG or JPEG one on the brand record and rebuild."
-            : " Check it reads well at that size.")
+            ? " It used the small logo — usually the monogram rather than the wordmark, because the main logo is a vector. A wordmark reads better in a lockup: put a PNG or JPEG one on the brand record and rebuild."
+            : " Check it reads well at that size.") +
+          (cobrand.skipped.length ? ` Not placed on ${cobrand.skipped.join(", ")} — no room beside the mark there, so do those by hand.` : "")
         : `NO BRAND LOGO on any slide — ${cobrand.reason}. The deck carries only AION's mark, which is most of what makes it look generic. Put a PNG or JPEG logo on the brand record and rebuild.`,
-      `${filled.length} of ${slots.length} imagery slots filled from their catalogue. A deck branded by hand replaces around 37 images — the icons, diagrams, lifestyle photography and the pioneer logo wall on slide 9 are all still AION's originals and need doing by hand.`,
+      wanted.length
+        ? `Product slots were filled from ${wanted.join(", ")}.` +
+          (filled.some((f) => f.role === "product" && f.from === "catalogue") ? "" : " NOTE: too few pieces in those categories, so the whole catalogue was used instead — check what landed on the slides.")
+        : "No categories asked for and none on the brand record, so product slots took the most valuable pieces in the catalogue. Give a focus if the deck should show one part of the range.",
+      ...(unfilled.length
+        ? [`${unfilled.length} slot${unfilled.length === 1 ? " is" : "s are"} still the template's own photograph: ${unfilled.join("; ")}. Supply them with brief.images and rebuild.`]
+        : []),
+      `${filled.length} of ${slots.length} imagery slots filled. A deck branded by hand replaces around 37 images — the icons, diagrams and the pioneer logo wall are all still AION's originals and need doing by hand.`,
       "Check every swapped image on the slide — crops and aspect ratios differ from the originals.",
       "Neither this deck nor the hand-branded reference names the brand in text anywhere; the identity is carried by imagery, so the imagery is what has to be right.",
     ],
   });
 });
 
-// Put the brand's logo opposite the AION wordmark, on every slide that has one.
+// Put the brand's logo with the AION wordmark, as one lockup, on every slide that has one.
 //
-// Anchored off the AION mark itself: find the picture that embeds the anchor
-// media on a slide, read its position and height, and mirror it across the slide
-// with the SAME height and the same bottom edge. Width comes from the logo's own
-// pixel dimensions, never from the anchor's box — a square monogram forced into
-// the wordmark's 3.5:1 slot would be stretched to nearly twice its width, and a
-// distorted logo is worse than no logo.
+// Anchored off the AION mark itself: find the picture that embeds the anchor media on a
+// slide, read its position and height, and place the brand's logo against it. Position and
+// height are read per slide rather than hardcoded, so the template can move without this
+// drifting.
+//
+// Two placements, because the title slide is not the other eleven:
+//
+//   slide 1       the brand's logo UNDER AION's, centred on it and smaller. It is AION's
+//                 deck and AION's title slide; the brand is who it is for.
+//   every other   the brand's logo NEXT TO AION's along the bottom, with a × between them:
+//                 the AION × Brand lockup a co-branded deck carries on every page.
+//
+// It used to MIRROR the brand's logo to the opposite side of the page, which is a normal
+// co-branding layout and was the wrong one here: the two marks read as two unrelated
+// sponsors, and on the slides where AION's mark sits inboard the mirrored copy landed on top
+// of the slide number. Width still comes from the logo's own pixel dimensions, never from the
+// anchor's box — a square monogram stretched into a wordmark's 3.5:1 slot is worse than no
+// logo at all.
 async function coBrandSlides(
   zip: JSZip, anchorMedia: string, brand: Record<string, unknown>, brandId: number,
-): Promise<{ slides: number; source: string; reason: string }> {
+): Promise<{ slides: number; source: string; reason: string; skipped: string[] }> {
   const candidates: [string, unknown][] = [["logo_big", brand.logo_big], ["logo_small", brand.logo_small]];
   let logo: { bytes: Uint8Array; ext: string; w: number; h: number } | null = null;
   let source = "";
@@ -245,19 +366,24 @@ async function coBrandSlides(
     // rasteriser in this runtime. Say which field was unusable rather than
     // failing silently on the brand whose only logo is a vector.
     if (/\.svg(\?|$)/i.test(url)) { reason = `${field} is an SVG, which cannot be embedded without rasterising it`; continue; }
-    const img = await fetchImage(url);
-    if (!img) { reason = `${field} could not be downloaded`; continue; }
-    const size = imageSize(img.bytes);
-    if (!size) { reason = `${field} is not a readable PNG or JPEG`; continue; }
-    logo = { ...img, ...size }; source = field; break;
+    const got = await fetchImageOrWhyNot(url);
+    if (!got.image) { reason = `${field} was unusable: ${got.why ?? "unknown"}`; continue; }
+    const size = imageSize(got.image.bytes);
+    // Dimensions are not decoration here: the width of the logo in the lockup comes from its
+    // own aspect ratio, and guessing one stretches a monogram into a wordmark's slot.
+    if (!size) { reason = `${field} is a ${got.image.ext.toUpperCase()} whose dimensions could not be read`; continue; }
+    logo = { ...got.image, ...size }; source = field; break;
   }
-  if (!logo) return { slides: 0, source: "", reason };
+  if (!logo) return { slides: 0, source: "", reason, skipped: [] };
 
   const anchorName = anchorMedia.replace("ppt/media/", "");
   const logoName = `brand${brandId}_logo.${logo.ext}`;
+  await declareMedia(zip, logo.ext);
   zip.file(`ppt/media/${logoName}`, logo.bytes);
+  const aspect = logo.w / logo.h;
 
   let placed = 0;
+  const skipped: string[] = [];
   for (let n = 1; n <= 60; n++) {
     const relPath = `ppt/slides/_rels/slide${n}.xml.rels`;
     const slidePath = `ppt/slides/slide${n}.xml`;
@@ -276,53 +402,126 @@ async function coBrandSlides(
     const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(pic);
     if (!off || !ext) continue;
 
-    const ax = Number(off[1]), ay = Number(off[2]);
-    const acx = Number(ext[1]), acy = Number(ext[2]);
-    // Same height, own aspect ratio, right edge mirroring the anchor's left margin.
-    const cy = acy;
-    const cx = Math.round(cy * (logo.w / logo.h));
-    const x = Math.max(ax + acx + cy, SLIDE_W - ax - cx);
+    const anchor = { x: Number(off[1]), y: Number(off[2]), cx: Number(ext[1]), cy: Number(ext[2]) };
+    const spot = n === 1 ? underTheMark(anchor, aspect) : besideTheMark(anchor, aspect);
+    if (!spot) {
+      // Better a slide with only AION's mark than a logo half off the page or sitting on
+      // top of the artwork. Named, so the review notes can say which slide to do by hand.
+      skipped.push(`slide ${n}`);
+      continue;
+    }
 
     const relId = `rIdLogo${n}`;
     zip.file(relPath, rels.replace("</Relationships>",
       `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${logoName}"/></Relationships>`));
     zip.file(slidePath, xml.replace("</p:spTree>",
+      (spot.cross ? crossXml(n, spot.cross) : "") +
       `<p:pic><p:nvPicPr><p:cNvPr id="${900 + n}" name="Brand logo"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>` +
       `<p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>` +
-      `<p:spPr><a:xfrm><a:off x="${x}" y="${ay}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+      `<p:spPr><a:xfrm><a:off x="${spot.x}" y="${spot.y}"/><a:ext cx="${spot.cx}" cy="${spot.cy}"/></a:xfrm>` +
       `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic></p:spTree>`));
     placed++;
   }
-  return { slides: placed, source, reason: placed ? "" : "no slide carries the AION wordmark to mirror" };
+  return {
+    slides: placed, source, skipped,
+    reason: placed ? "" : "no slide carries the AION wordmark to place it against",
+  };
 }
 
-// Intrinsic pixel dimensions, straight from the file header. PNG keeps them in
-// the IHDR chunk; JPEG in whichever SOF marker comes first.
-function imageSize(b: Uint8Array): { w: number; h: number } | null {
-  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
-  if (b.length > 24 && b[0] === 0x89 && b[1] === 0x50) {
-    return { w: dv.getUint32(16), h: dv.getUint32(20) };
+type Box = { x: number; y: number; cx: number; cy: number };
+type Placement = Box & { cross?: Box };
+
+/**
+ * Title slide: under AION's mark, centred on it, smaller than it.
+ *
+ * 55% of the height, which is small enough to read as "for" rather than as "with" and large
+ * enough to be legible at the back of a room.
+ */
+function underTheMark(anchor: Box, aspect: number): Placement | null {
+  const cy = Math.round(anchor.cy * 0.55);
+  const cx = Math.round(cy * aspect);
+  const gap = Math.round(anchor.cy * 0.5);
+  const y = anchor.y + anchor.cy + gap;
+  if (y + cy > SLIDE_H - MARGIN) return null;
+  // Centred on the mark's centre, not on the page: the mark is what it hangs from.
+  const x = Math.round(anchor.x + (anchor.cx - cx) / 2);
+  if (x < MARGIN || x + cx > SLIDE_W - MARGIN) return null;
+  return { x, y, cx, cy };
+}
+
+/**
+ * Every other slide: beside AION's mark, with a × between them.
+ *
+ * Slightly shorter than AION's mark and vertically centred on it, which is how an "A × B"
+ * lockup reads as one object rather than as two logos that happen to be adjacent.
+ */
+function besideTheMark(anchor: Box, aspect: number): Placement | null {
+  const cy = Math.round(anchor.cy * 0.85);
+  const cx = Math.round(cy * aspect);
+  const gap = Math.round(anchor.cy * 0.8);
+  const crossW = Math.round(anchor.cy * 1.1);
+
+  const crossX = anchor.x + anchor.cx + gap;
+  const x = crossX + crossW + gap;
+  if (x + cx > SLIDE_W - MARGIN) return null;
+
+  const y = Math.round(anchor.y + (anchor.cy - cy) / 2);
+  return {
+    x, y, cx, cy,
+    // The × box is as tall as the AION mark and shares its top edge; the glyph is centred
+    // inside it, so it lands on the optical centre of both marks.
+    cross: { x: crossX, y: anchor.y, cx: crossW, cy: anchor.cy },
+  };
+}
+
+/** The × of "AION × Brand". A text box, so it takes the deck's own ink colour and font. */
+function crossXml(n: number, box: Box): string {
+  // Sized off the box rather than fixed: the mark is a different height on a title slide
+  // than on a content slide, and a 12pt × next to a large wordmark reads as a smudge.
+  const sz = Math.max(800, Math.min(2400, Math.round((box.cy / 12700) * 100 * 0.55)));
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${940 + n}" name="Lockup x"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>` +
+    `<p:spPr><a:xfrm><a:off x="${box.x}" y="${box.y}"/><a:ext cx="${box.cx}" cy="${box.cy}"/></a:xfrm>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>` +
+    `<p:txBody><a:bodyPr wrap="none" lIns="0" rIns="0" tIns="0" bIns="0" anchor="ctr"/><a:lstStyle/>` +
+    `<a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-GB" sz="${sz}" dirty="0">` +
+    `<a:solidFill><a:srgbClr val="${LOCKUP_INK}"/></a:solidFill>` +
+    `<a:latin typeface="Montserrat"/><a:cs typeface="Montserrat"/></a:rPr>` +
+    `<a:t>×</a:t></a:r></a:p></p:txBody></p:sp>`;
+}
+
+
+
+/**
+ * Campaign photography this house has published, as the brand record already holds it.
+ *
+ * Onboarding measures the homepage's imagery, keeps the two big editorial shots for the
+ * portal's hero slots and mirrors the bytes into AION storage. Those two are the only
+ * pictures of this house that are NOT packshots, so they are what an ambassador or a
+ * lifestyle slot gets. The top banner first: it is the wider crop, and these slots are wide.
+ */
+function campaignImages(brand: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const url of [brand.top_banner_image, brand.auth_background_image]) {
+    if (typeof url === "string" && url && !out.includes(url)) out.push(url);
   }
-  if (b.length > 4 && b[0] === 0xff && b[1] === 0xd8) {
-    let i = 2;
-    while (i + 9 < b.length) {
-      if (b[i] !== 0xff) { i++; continue; }
-      const marker = b[i + 1];
-      // SOF0-SOF15, excluding the non-frame markers in that range.
-      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-        return { h: dv.getUint16(i + 5), w: dv.getUint16(i + 7) };
-      }
-      i += 2 + dv.getUint16(i + 2);
-    }
-  }
-  return null;
+  return out;
+}
+
+/** Which one of its kind this slot is — the first ambassador slot, the second, and so on. */
+function roleOrdinal(slots: Slot[], slot: Slot): number {
+  const role = (slot.role ?? "product").toLowerCase();
+  return slots.filter((s) => (s.role ?? "product").toLowerCase() === role).indexOf(slot);
 }
 
 // Hero slots want a tall editorial shot; product slots want the pieces that
 // carry the house. Both come from the brand's own catalogue.
-async function pickBrandImages(admin: ReturnType<typeof createClient>, brandId: number, want: number): Promise<string[]> {
+async function pickBrandImages(
+  admin: ReturnType<typeof createClient>, brandId: number, want: number, categories: string[] = [],
+): Promise<string[]> {
+  // Read wider than the slots need, because the category filter below throws most of it
+  // away: asking for 24 rows and then keeping only the bags leaves a deck with two pictures.
   const { data } = await admin.from("storefront_products")
-    .select("image_url, price, available, category")
+    .select("image_url, price, available, category, collection, name")
     .eq("brand_id", brandId)
     .not("image_url", "is", null)
     // `category <> 'HOME'` is NULL for a product with no category, and NULL is not TRUE, so
@@ -332,11 +531,28 @@ async function pickBrandImages(admin: ReturnType<typeof createClient>, brandId: 
     // its intro deck went red.
     .or("category.is.null,category.neq.HOME")
     .order("price", { ascending: false, nullsFirst: false })
-    .limit(Math.max(want * 4, 24));
+    .limit(600);
+
+  const rows = (data ?? []) as {
+    image_url: string; category: string | null; collection: string | null; name: string | null;
+  }[];
+
+  // The brief's categories, as patterns. An unrecognised word is dropped with the others
+  // still applied; if NOTHING is recognised the filter is not applied at all, because
+  // returning an empty deck for a typo is the wrong failure.
+  const matchers = categories.map(focusMatcher).filter(Boolean) as RegExp[];
+  const inScope = matchers.length
+    ? rows.filter((r) => matchers.some((m) =>
+        m.test([r.category, r.collection].filter(Boolean).join(" ")) || m.test(r.name ?? "")))
+    : rows;
+  // A category the catalogue barely has is still the category that was asked for, but a deck
+  // built from two pictures repeated six times is not a deck. Fall back, visibly: the caller
+  // reports what each slot was filled from.
+  const source = inScope.length >= Math.min(want, 3) ? inScope : rows;
 
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const r of (data ?? []) as { image_url: string }[]) {
+  for (const r of source) {
     if (seen.has(r.image_url)) continue;
     seen.add(r.image_url);
     out.push(r.image_url);
@@ -345,17 +561,52 @@ async function pickBrandImages(admin: ReturnType<typeof createClient>, brandId: 
   return out;
 }
 
-async function fetchImage(url: string): Promise<{ bytes: Uint8Array; ext: string } | null> {
-  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (AION deck builder)" } });
-  if (!res.ok) return null;
-  const type = (res.headers.get("content-type") ?? "").toLowerCase();
-  const ext = type.includes("png") ? "png"
-    : type.includes("webp") ? "webp"
-    : type.includes("jpeg") || type.includes("jpg") ? "jpeg"
-    : url.split("?")[0].split(".").pop()?.toLowerCase() === "png" ? "png" : "jpeg";
+/**
+ * [Content_Types].xml has to name every extension in the package.
+ *
+ * A .webp part in a package that declares only png and jpeg is not a picture that fails to
+ * render — it is an invalid package, and PowerPoint offers to repair the file. The teaser
+ * declares what the teaser happens to contain, so anything new has to add itself.
+ */
+async function declareMedia(zip: JSZip, ext: string): Promise<void> {
+  const type = MEDIA_TYPES[ext];
+  if (!type) return;
+  const path = "[Content_Types].xml";
+  const xml = await zip.file(path)?.async("string");
+  if (!xml) return;
+  if (new RegExp(`<Default[^>]*Extension="${ext}"`, "i").test(xml)) return;
+  zip.file(path, xml.replace(/<Types\b([^>]*)>/, `<Types$1><Default Extension="${ext}" ContentType="${type}"/>`));
+}
+
+type Fetched = { bytes: Uint8Array; ext: string };
+
+async function fetchImage(url: string): Promise<Fetched | null> {
+  return (await fetchImageOrWhyNot(url)).image;
+}
+
+/** The same, but able to say what was wrong — which is what the review notes need. */
+async function fetchImageOrWhyNot(url: string): Promise<{ image: Fetched | null; why?: string }> {
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (AION deck builder)" } });
+  } catch (e) {
+    return { image: null, why: `could not be downloaded (${e instanceof Error ? e.message : "network error"})` };
+  }
+  if (!res.ok) return { image: null, why: `the server answered ${res.status}` };
+
   const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.byteLength < 1024) return null; // a tracking pixel or an error page
-  return { bytes, ext };
+  if (bytes.byteLength < 1024) return { image: null, why: "it is under 1KB — a tracking pixel or an error page" };
+
+  const format = sniffFormat(bytes);
+  if (!format) return { image: null, why: "it is not an image file, whatever the server called it" };
+  if (!EMBEDDABLE.has(format)) {
+    return {
+      image: null,
+      why: `it is ${format.toUpperCase()}, which PowerPoint cannot display and nothing here can convert — ` +
+        `re-save it as a PNG or JPEG on the brand record`,
+    };
+  }
+  return { image: { bytes, ext: format } };
 }
 
 function escapeXml(s: string): string {

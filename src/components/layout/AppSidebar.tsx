@@ -111,7 +111,15 @@ const AppSidebar = () => {
   const { profile, signOut, user } = useAuth();
   const navigate = useNavigate();
   const slugPrefix = useAuthSlug();
-  const paths = mode === "customer" ? customerPaths : brandPaths;
+  // An assistant-only demo keeps the two screens the demo is about and drops the insurance
+  // programme's own. Home goes with them: that page is covers, open claims, renewals and
+  // recent claims, so keeping it would put the product we are not demonstrating on the first
+  // screen the prospect sees. Still one section, still this order; the flag only removes.
+  const assistantOnlyPaths = new Set(["/assistant", "/knowledge"]);
+  const paths = mode === "customer"
+    ? customerPaths
+    : tenant.assistantOnly ? brandPaths.filter((p) => assistantOnlyPaths.has(p.path)) : brandPaths;
+  // Team is about who can log in, which is still a fair question in an assistant demo.
   const masterLinks = (mode === "brand" && canWrite)
     ? brandMasterPaths.map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }))
     : [];

@@ -28,6 +28,9 @@ import {
 // No document leaves here carrying another house's name. The matcher is subtle enough —
 // AION's own advisor is called Riccardo Ferragamo — to live where it can be unit tested.
 import { foreignNamesFound, readableText } from "../_shared/foreign-names.ts";
+import { stackSegments, rewriteSharedStrings } from "../_shared/data-request-layout.ts";
+import { opsBooklet, type Slide } from "../_shared/ops-booklet.ts";
+import { slideXml } from "../_shared/pptx-slides.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -42,7 +45,11 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+/** The business case's own shape: a title and a column of bullets. */
 type SlideSpec = { title: string; bullets: string[] };
+/** …rendered through the same renderer as the booklet, as its simplest slide kind. */
+const asSlides = (specs: SlideSpec[]): Slide[] =>
+  specs.map((s) => ({ kind: "bullets", title: s.title, bullets: s.bullets.filter(Boolean) }));
 
 Deno.serve(async (req: Request) => {
   // Refuse a browser origin that isn't ours before doing anything else.
@@ -166,9 +173,34 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
   };
 
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
-  const path = "xl/sharedStrings.xml";
-  let xml = await zip.file(path)?.async("string");
-  if (!xml) throw new Error("workbook has no shared strings");
+
+  // ── The Data sheet, laid out down the page ─────────────────────────────────
+  // "I would put segment 2 below segment 1 and push down product mix (in case there are
+  // other segments)." The template has the two segments side by side, which has a hard
+  // ceiling of two; stacked, it holds as many as the pilot has. Done before the string
+  // swaps, because restacking APPENDS to the string table and the swaps then run over the
+  // whole of it — including the headings this just invented.
+  const layoutNotes: string[] = [];
+  const dataPath = await sheetPathNamed(zip, /^data$/i);
+  const ssPath = "xl/sharedStrings.xml";
+  let ssXml = await zip.file(ssPath)?.async("string");
+  if (!ssXml) throw new Error("workbook has no shared strings");
+
+  if (dataPath) {
+    const sheetXml = await zip.file(dataPath)?.async("string");
+    if (sheetXml) {
+      const shared = sharedStrings(ssXml);
+      const stacked = stackSegments(sheetXml, shared, Number(body.segment_blocks ?? 2));
+      zip.file(dataPath, stacked.xml);
+      ssXml = rewriteSharedStrings(ssXml, stacked.shared, stacked.shared.slice(shared.length));
+      layoutNotes.push(...stacked.notes);
+    }
+  } else {
+    layoutNotes.push("no sheet called \"Data\" in the template, so the segment layout was left alone");
+  }
+
+  const path = ssPath;
+  let xml = ssXml;
 
   const applied: string[] = [];
   const missed: string[] = [];
@@ -224,10 +256,38 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
           : []),
         legalName ? `Confirm "${legalName}" is the entity the pilot is contracted with.` : "No legal entity set — the workbook went out blank there.",
         brandAddress ? "Check the registered address against the client's own records." : "No registered address set — fill it on the brand record or in the field above.",
-        focus ? `Product focus: ${focus}.` : "No product focus set — the client will not know which categories the pilot covers.",
+        focus
+          ? `Product focus: ${focus}. It is the brand record's, so check it is the perimeter you mean — the record's is read off the catalogue unless somebody has typed it.`
+          : "No product focus set — the client will not know which categories the pilot covers.",
+        ...layoutNotes,
         ...(missed.length ? [`${missed.length} template slot${missed.length === 1 ? "" : "s"} did not match the workbook — it has been revised since the template was mapped, so check those cells by hand.`] : []),
       ],
     });
+}
+
+/**
+ * Where a named sheet's XML lives in the package.
+ *
+ * Through the relationship ids, because sheet1.xml is not reliably the first tab and the tab
+ * ORDER in workbook.xml has nothing to do with the file names. Rewriting the wrong sheet
+ * would put the segment blocks on the company-structure tab.
+ */
+async function sheetPathNamed(zip: JSZip, name: RegExp): Promise<string | null> {
+  const workbookXml = (await zip.file("xl/workbook.xml")?.async("string")) ?? "";
+  const relsXml = (await zip.file("xl/_rels/workbook.xml.rels")?.async("string")) ?? "";
+  const targets = new Map<string, string>();
+  for (const m of relsXml.matchAll(/<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"[^>]*\/?>/g)) {
+    targets.set(m[1], m[2].replace(/^\/?xl\//, "").replace(/^\.\//, ""));
+  }
+  for (const m of workbookXml.matchAll(/<sheet\s([^>]*?)\/?>/g)) {
+    const attrs = m[1] ?? "";
+    const sheetName = decodeXml(/\bname="([^"]*)"/.exec(attrs)?.[1] ?? "");
+    if (!name.test(sheetName.trim())) continue;
+    const rid = /\br:id="([^"]+)"/.exec(attrs)?.[1] ?? "";
+    const target = targets.get(rid);
+    if (target) return `xl/${target}`;
+  }
+  return null;
 }
 
 /**
@@ -450,7 +510,7 @@ async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: 
     }) },
   ];
 
-  const out = await renderDeck(admin, slides);
+  const out = await renderDeck(admin, asSlides(slides));
   return await store(admin, brand, "business_case", "pptx", out,
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     {
@@ -474,70 +534,39 @@ async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: 
 }
 
 // ── 3. Operations deck ──────────────────────────────────────────────────────
-// Faithful to the approved booklet: the same six sections in the same order,
-// with the client's name in place of the previous one. It is a summary of the
-// booklet for a meeting, not a replacement for it.
+// THE BOOKLET, not a summary of it.
+//
+// What this generated before was seven slides of bullets distilled from the approved
+// operations booklet, and the distillation threw away everything an operations team needs:
+// the fourteen steps of activation, the twelve of a claim, the insurer's SLAs, the
+// communications plan, the month-end money. So the booklet was being sent by hand instead,
+// which is the definition of an automation that is not used.
+//
+// The content now IS the booklet — section for section, figure for figure, in its own
+// Italian — with the house's legal entity and short name in place of the one it was written
+// for. Drawn with the slide shapes in _shared/pptx-slides.ts: numbered flows as numbered
+// flows, the four actors and the comms plan as tables, the two warnings as callouts.
 async function buildOperations(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>) {
-  const B = String(brand.name ?? "the brand").toUpperCase();
-  const slides: SlideSpec[] = [
-    { title: `AION Cover × ${brand.name} — come funziona`, bullets: [
-      "Servizio di copertura assicurativa integrato su furto e danni accidentali",
-      "Modello CLIP (Contractual Liability Insurance Policy)",
-      "Attivazione semplice per il cliente finale",
-      "Gestione centralizzata su piattaforma white-label AION",
-      "Conformità alle normative assicurative e GDPR",
-    ] },
-    { title: "I quattro attori", bullets: [
-      "Chubb — definisce termini e condizioni, approva i sinistri, fattura al brand",
-      `${B} — racconta il servizio al cliente, raccoglie i dati, gestisce la relazione`,
-      "AION Cover — piattaforma, verifica dei sinistri, bordereau, raccomandazioni",
-      "Cliente finale — si registra, attiva la copertura, apre gli eventuali sinistri",
-    ] },
-    { title: "Attivazione della polizza", bullets: [
-      "Chubb e AION concordano i campi obbligatori dei bordereaux",
-      `${B} raccoglie i dati del cliente e del prodotto al momento dell'acquisto`,
-      "Il cliente riceve l'invito e attiva l'account sulla piattaforma",
-      "La copertura decorre dall'attivazione, per la durata concordata",
-    ] },
-    { title: "Apertura e gestione dei sinistri", bullets: [
-      "Il cliente apre il sinistro sulla piattaforma (furto o danno accidentale)",
-      "AION verifica la completezza della documentazione",
-      "Chubb analizza e approva o rigetta, entro gli SLA concordati",
-      `${B} mantiene la relazione diretta con il cliente`,
-      "Processo speculare a quello della garanzia legale",
-    ] },
-    { title: "Sostituzione del prodotto — voucher", bullets: [
-      "Codice alfanumerico univoco e nominale per il beneficiario",
-      "Utilizzabile su uno o più SKU nei punti vendita concordati",
-      "Durata: 6 mesi o 1 anno dalla data di emissione",
-      "Valore pari al prezzo pubblico del prodotto al momento dell'acquisto",
-      "Riporta traffico in boutique e risolve i prodotti fuori produzione",
-    ] },
-    { title: "Comunicazioni e ciclo attivo/passivo", bullets: [
-      "Piano delle comunicazioni al cliente concordato con il brand",
-      "Chubb emette fattura al brand entro il 15 del mese successivo",
-      "AION fattura setup, service e activation fee secondo contratto",
-      "Reportistica e bordereau condivisi periodicamente",
-    ] },
-    { title: "Setup — cosa serve", bullets: [
-      "Preparazione roll-out plan — 0,5 giorni",
-      "Legal: FAQ e T&C — 2 giorni",
-      "Ops: flusso email e definizione processi — 3 giorni",
-      "Piattaforma: colori, immagini, branding — 0,5 giorni",
-      "Comunicazione e formazione — 1 giorno",
-      "Totale indicativo: 7 giorni team business",
-    ] },
-  ];
+  // The booklet speaks in two registers and needs both names. The legal entity signs and is
+  // paid; the short name does things in a process line. Falling back to the trading name for
+  // the entity is fine HERE — unlike the data request, this document is not a contract and an
+  // ops booklet addressed to "Pomellato" is not a misstatement of who signed.
+  const legalName = String(brand.legal_name ?? "").trim() || String(brand.name ?? "").trim();
+  const shortName = String(brand.name ?? "").trim() || legalName;
+  const slides = opsBooklet({ legalName, shortName });
 
   const out = await renderDeck(admin, slides);
   return await store(admin, brand, "operations", "pptx", out,
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    { review: [
-      "Summarises the approved booklet — check it against the latest version before sending.",
+    { slides: slides.length, review: [
+      `The approved booklet, ${slides.length} slides, with ${legalName} in place of the house it was written for. Read it through before sending — it carries the booklet's own figures.`,
       // Named a client here, on the review panel of every OTHER house's ops deck. The fact
       // is the same without it, and which house the booklet came from is nobody else's
       // business — see feedback: no client names in brand-facing material.
-      "SLA figures and voucher duration are carried over from the booklet this was modelled on; confirm them for this client.",
+      "SLA figures, the 2/10/15 working-day claim timings, the 15th and 20th of the month and the voucher duration are the booklet's; confirm they hold for this client before the deck goes out.",
+      ...(String(brand.legal_name ?? "").trim()
+        ? []
+        : [`No legal entity on the record, so the trading name "${shortName}" is used where the booklet names the contracting party. Set it on the brand record if this deck is going to a legal or finance team.`]),
     ] });
 }
 
@@ -545,7 +574,7 @@ async function buildOperations(admin: ReturnType<typeof createClient>, brand: Re
 // Slides are generated INTO the teaser package: theme, masters and layouts stay,
 // only the slide list is replaced. That is what makes these decks look like the
 // intro deck instead of like default PowerPoint.
-async function renderDeck(admin: ReturnType<typeof createClient>, slides: SlideSpec[]): Promise<Uint8Array> {
+async function renderDeck(admin: ReturnType<typeof createClient>, slides: Slide[]): Promise<Uint8Array> {
   const { data: file, error } = await admin.storage.from(BUCKET).download(STYLE_TEMPLATE);
   if (error || !file) {
     throw new Error(
@@ -620,55 +649,11 @@ async function renderDeck(admin: ReturnType<typeof createClient>, slides: SlideS
   return await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }
 
-// The AION look does not come from the slide master — the teaser sets it on each
-// slide: a cream background (FAF7F2) and the wordmark bottom-left. Generated
-// slides that only reference the layout inherit PowerPoint's blue default
-// instead, which is what the first render showed. So set both explicitly, with
-// the wordmark at the same coordinates the teaser uses.
-const BG = "FAF7F2";
-const MARK = { x: 848926, y: 6455335, cx: 627631, cy: 178973 };
-
-// The teaser's typography does not come from its theme either — the theme says Arial, and
-// every slide in the hand-built deck overrides it: Georgia for the headings, Montserrat for
-// the body. Generated slides that set neither inherited Arial, so the ops deck and the
-// business case were recognisably NOT the intro deck the moment you put them side by side,
-// which is the one thing they are supposed to be.
-const HEADING = "Georgia";
-const BODY = "Montserrat";
-const INK = "262626";
-
-function slideXml(s: SlideSpec, markRelId: string | null): string {
-  const run = (t: string, face: string, size?: number) =>
-    `<a:r><a:rPr lang="en-GB" dirty="0"${size ? ` sz="${size}"` : ""}>` +
-    `<a:solidFill><a:srgbClr val="${INK}"/></a:solidFill>` +
-    `<a:latin typeface="${face}"/><a:cs typeface="${face}"/>` +
-    `</a:rPr><a:t>${escapeXml(t)}</a:t></a:r>`;
-  const para = (t: string, face: string, size?: number) => `<a:p>${run(t, face, size)}</a:p>`;
-  const bullets = s.bullets.filter(Boolean).map((b) => para(b, BODY, 1600)).join("") || para("", BODY, 1600);
-  const mark = markRelId
-    ? `<p:pic><p:nvPicPr><p:cNvPr id="4" name="AION"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>` +
-      `<p:blipFill><a:blip r:embed="${markRelId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>` +
-      `<p:spPr><a:xfrm><a:off x="${MARK.x}" y="${MARK.y}"/><a:ext cx="${MARK.cx}" cy="${MARK.cy}"/></a:xfrm>` +
-      `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`
-    : "";
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ` +
-    `xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ` +
-    `xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">` +
-    `<p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="${BG}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree>` +
-    `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>` +
-    `<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>` +
-    `<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>` +
-    `<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title 1"/>` +
-    `<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
-    `<p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr/>` +
-    `<p:txBody><a:bodyPr/><a:lstStyle/>${para(s.title, HEADING)}</p:txBody></p:sp>` +
-    `<p:sp><p:nvSpPr><p:cNvPr id="3" name="Content Placeholder 2"/>` +
-    `<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
-    `<p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr/>` +
-    `<p:txBody><a:bodyPr/><a:lstStyle/>${bullets}</p:txBody></p:sp>` + mark +
-    `</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
-}
+// The look, the geometry and every slide shape now live in _shared/pptx-slides.ts, which is
+// where the operations booklet's tables, numbered flows and callouts are drawn. The constants
+// that used to sit here — the cream ground, the wordmark's coordinates, Georgia and Montserrat
+// over the theme's Arial — moved with them, so the business case and the booklet cannot drift
+// apart the next time one of them is adjusted.
 
 // ── Shared ──────────────────────────────────────────────────────────────────
 async function store(

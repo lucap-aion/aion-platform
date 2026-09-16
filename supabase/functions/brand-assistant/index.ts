@@ -2053,7 +2053,12 @@ async function lexicalByTerms(
       const doc = Array.isArray(r.brand_knowledge_docs) ? r.brand_knowledge_docs[0] : r.brand_knowledge_docs;
       if (!seen.has(r.id)) {
         seen.set(r.id, {
-          id: r.id, doc_id: r.doc_id, content: r.content,
+          // `chunk_id`, not `id`. The merge below dedupes the lexical hits against the
+          // vector ones on chunk_id, and this side was emitting a field KMatch does not
+          // have — so every lexical row had chunk_id === undefined, nothing ever matched,
+          // and a chunk found by BOTH searches was still added twice. Which is the exact
+          // bug the comment at that merge says was fixed: it was fixed on one side only.
+          chunk_id: r.id, doc_id: r.doc_id, content: r.content,
           doc_title: doc?.title ?? "", source_url: doc?.source_url ?? null,
           category: doc?.category ?? "other",
           // Scored as a solid match: the question literally names it. The rerank

@@ -16,7 +16,7 @@ import AssistantMarkdown from "@/components/assistant/AssistantMarkdown";
 import {
   ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
   Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown, LifeBuoy, Check,
-  Mic, Square,
+  Mic, Square, CalendarDays,
 } from "lucide-react";
 import { startRecording, isRecordingSupported, extensionFor, type Recorder } from "@/lib/speech";
 import VisitCard, { type Visit } from "@/components/visits/VisitCard";
@@ -1401,14 +1401,37 @@ function buildSuggestions(
         ? tt(locale, `Build a full look around ${product} — coordinating accessories, shoes and bag.`, `Completa il look attorno a ${product} — accessori, scarpe e borsa coordinati.`)
         : tt(locale, "Build a full look around a hero piece — coordinating accessories, shoes and bag.", "Completa il look attorno a un capo — accessori, scarpe e borsa coordinati."),
     },
+    // The four below came from the founder's own demo notes. They are here because of what
+    // they ask ACROSS: a ranked client list and a recommendation off the back of it, a
+    // segment chosen for a reason, a policy answer that depends on two countries, and a
+    // plan. Each one needs the CRM and the knowledge base in the same answer, which is the
+    // thing being demonstrated and the thing a single-source question never shows.
     {
       icon: Users,
-      text: customer
-        ? tt(locale, `What has ${customer} bought, and what's their average ticket?`, `Cosa ha comprato ${customer} e qual è il suo scontrino medio?`)
-        : tt(locale, "Look up a client — what have they bought and their average ticket?", "Cerca un cliente — cosa ha comprato e il suo scontrino medio?"),
+      text: tt(locale,
+        "Who are our top 10 clients of the last quarter, and what would you suggest each of them buys next?",
+        "Chi sono i 10 top client dell'ultimo trimestre e cosa consiglieresti di comprare a ciascuno?"),
     },
     {
       icon: Send,
+      text: tt(locale,
+        "I need to send a newsletter — who would you write to, and why them?",
+        "Devo scrivere una newsletter: a chi scriveresti e perché proprio a loro?"),
+    },
+    {
+      icon: ScrollText,
+      text: tt(locale,
+        "What is the return policy for a client who lives in Poland and bought in Brazil?",
+        "Mi daresti la policy di reso per un cliente che vive in Polonia e ha acquistato in Brasile?"),
+    },
+    {
+      icon: CalendarDays,
+      text: tt(locale,
+        "Draft the structure for a trunk show in London — who to invite, what to bring, how to run it.",
+        "Mi creeresti la struttura per un trunk show a Londra — chi invitare, cosa portare, come gestirlo?"),
+    },
+    {
+      icon: MessageSquarePlus,
       text: customer
         ? tt(locale, `Draft a ready-to-send message to ${customer} about our new arrivals.`, `Scrivi un messaggio pronto da inviare a ${customer} sui nuovi arrivi.`)
         : tt(locale, "Draft a ready-to-send clienteling message for a client about new arrivals.", "Scrivi un messaggio clienteling pronto da inviare a una cliente sui nuovi arrivi."),
@@ -1418,10 +1441,6 @@ function buildSuggestions(
       text: brandName
         ? tt(locale, `Tell me ${brandName}'s story, values and tone of voice.`, `Raccontami la storia di ${brandName}, i valori e il tone of voice.`)
         : tt(locale, "Tell me our brand story, values and tone of voice.", "Raccontami la storia del brand, i valori e il tone of voice."),
-    },
-    {
-      icon: ScrollText,
-      text: tt(locale, "What's our return and exchange policy, and who do I escalate to?", "Qual è la policy di reso e cambio, e a chi mi rivolgo?"),
     },
   ];
 }

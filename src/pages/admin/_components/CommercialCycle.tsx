@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import PipelinePanel from "./PipelinePanel";
 import DemoPanel from "./DemoPanel";
+import DeckBrief, { type Brief } from "./DeckBrief";
 import CatalogueSource from "./CatalogueSource";
 import BusinessCasePanel, { type StoredBusinessCase } from "./BusinessCasePanel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -184,6 +185,11 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
     }, { replace: true });
   }, [setParams]);
 
+  // The intro deck's brief: which categories the product slides draw from, and any exact
+  // photograph supplied for a slot nothing can derive. Per build, not saved — the durable
+  // answer to "this house is bags" is the product focus on the record.
+  const [brief, setBrief] = useState<Brief>({});
+
   const isRaster = (u: string | null | undefined) => !!u && !/\.svg(\?|$)/i.test(u);
   const hasRasterLogo = isRaster(brand?.logo_big) || isRaster(brand?.logo_small);
   const artifactFor = (n: StepNumber) => {
@@ -258,7 +264,7 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
   // The build each step performs, by number — so the card at the top can press the same
   // button the step does, instead of telling somebody to go and find it.
   const runStep = (n: StepNumber) => {
-    if (n === 1) return void build(1, "brand-deck", {});
+    if (n === 1) return void build(1, "brand-deck", { brief });
     if (n === 2) return void build(2, "build-collateral", { kind: "data_request" });
     if (n === 5) return void build(5, "build-collateral", { kind: "operations" });
     // 3 is an account and 4 is a conversation about numbers: both need their own panel.
@@ -422,6 +428,13 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
                     ? <Skeleton className="h-16 w-full rounded-lg" />
                     : <StepTracker step={step.n} row={p} onChange={setProgress} />}
 
+                  {/* The same product focus step 2 puts on the data request, so the deck and
+                      the workbook cannot disagree about which categories the pilot is about.
+                      Editing it in step 2 changes what the deck draws from. */}
+                  {step.n === 1 && !loadingBrand && (
+                    <DeckBrief focus={focus || null} value={brief} onChange={setBrief} />
+                  )}
+
                   {step.n === 1 && (loadingBrand ? <StepSkeleton /> :
                     <StepAction
                       produces={step.produces}
@@ -429,7 +442,7 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
                       disabled={!brand?.website}
                       building={building}
                       label="Build intro deck"
-                      onRun={() => void build(1, "brand-deck", {})}
+                      onRun={() => void build(1, "brand-deck", { brief })}
                       artifact={art}
                       review={review[1]}
                       warning={(c.products ?? 0) === 0

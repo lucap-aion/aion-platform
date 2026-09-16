@@ -1,5 +1,12 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { isBrandRole, isCustomerRole, useAuth } from "@/contexts/AuthContext";
+import { useTenant } from "@/contexts/TenantContext";
+
+// In an assistant-only demo these are the screens that stay. Everything else under a brand
+// slug belongs to the insurance programme and is sent back to the assistant — the sidebar
+// already hides it, and this is what makes a typed URL, a bookmark or a link inside a page
+// behave the same way. Profile and logout are not product, so they stay reachable.
+const ASSISTANT_ONLY_PATHS = [/\/assistant(\/|$)/, /\/knowledge(\/|$)/, /\/profile(\/|$)/];
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -13,6 +20,7 @@ const getSlugPrefix = () => {
 
 const ProtectedRoute = ({ children, mode }: ProtectedRouteProps) => {
   const { user, profile, loading } = useAuth();
+  const { assistantOnly } = useTenant();
   const location = useLocation();
 
   if (loading) {
@@ -34,6 +42,11 @@ const ProtectedRoute = ({ children, mode }: ProtectedRouteProps) => {
 
   if (mode === "brand" && !isBrandRole(profile?.role)) {
     return <Navigate to={`${getSlugPrefix()}/home`} replace />;
+  }
+
+  if (mode === "brand" && assistantOnly
+      && !ASSISTANT_ONLY_PATHS.some((re) => re.test(location.pathname))) {
+    return <Navigate to={`${getSlugPrefix()}/assistant`} replace />;
   }
 
   return <>{children}</>;

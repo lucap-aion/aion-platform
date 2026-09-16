@@ -94,27 +94,35 @@ export const STANDARD_FEE_RATES = {
 // ── Product focus ───────────────────────────────────────────────────────────────────────── //
 
 // What a house sells, in the words the pricing model and the data request already use.
-// Ordered: the first match wins the singular/plural forms used in the FAQ.
+//
+// Ordered, and the order is load-bearing twice over: the first match wins the singular/plural
+// forms used in the FAQ, and a product that matches two categories is counted under the first
+// of them, so a diamond watch is a watch only if nothing above it claimed it first.
+//
+// The patterns have to read SHELF LABELS, not just English product names. These catalogues
+// are scraped in the house's own market: prada.com files 82 pieces under "Accessori" and 62
+// under "Abbigliamento", and an Accessories pattern that knew every word for a scarf but not
+// the word "accessori" scored those 82 pieces at zero.
 const CATEGORY_WORDS: { focus: string; en: string; enSingular: string; it: string; itSingular: string; match: RegExp }[] = [
   { focus: "High jewellery", en: "jewellery", enSingular: "piece of jewellery", it: "gioielli", itSingular: "gioiello",
-    match: /jewel|jewellery|jewelry|gioiell|anello|ring|necklace|bracelet|earring|collana|bracciale|orecchin|pendant|charm|high jewel/i },
+    match: /jewel|jewellery|jewelry|gioiell|anello|ring|necklace|bracelet|earring|collana|bracciale|orecchin|pendant|charm|high jewel|joaillerie|bijou/i },
   { focus: "Watches", en: "watches", enSingular: "watch", it: "orologi", itSingular: "orologio",
-    match: /watch|orolog|timepiece|chronograph/i },
+    match: /watch|orolog|timepiece|chronograph|horlogerie|\bmontres?\b/i },
   { focus: "Bags and leather goods", en: "bags and leather goods", enSingular: "bag", it: "borse e pelletteria", itSingular: "borsa",
-    match: /\bbag|handbag|borsa|borse|leather good|pellett|tote|clutch|backpack|wallet|portafogl/i },
+    match: /\bbag|handbag|borsa|borse|borsett|leather good|pellett|maroquinerie|tote|clutch|backpack|wallet|portafogl/i },
   { focus: "Ready-to-wear", en: "garments", enSingular: "garment", it: "capi", itSingular: "capo",
-    match: /ready.?to.?wear|\brtw\b|apparel|abbigliament|dress|abito|coat|cappotto|knitwear|maglieria/i },
+    match: /ready.?to.?wear|\brtw\b|apparel|abbigliament|pr[eê]t.?[àa].?porter|dress|abito|coat|cappotto|knitwear|maglieria/i },
   { focus: "Shoes", en: "shoes", enSingular: "pair of shoes", it: "calzature", itSingular: "paio di scarpe",
-    match: /\bshoe|sneaker|loafer|pump|sandal|scarp|calzatur|boot|stivale/i },
+    match: /\bshoe|sneaker|loafer|pump|sandal|scarp|calzatur|chaussure|boot|stivale/i },
   { focus: "Eyewear", en: "eyewear", enSingular: "pair of glasses", it: "occhiali", itSingular: "paio di occhiali",
     match: /eyewear|sunglass|occhial|\bframes?\b/i },
   // Beyond the five obvious ones. A silversmith is not a hypothetical: one of the houses
   // onboarded here sells table silver next to its jewellery, and with no match at all the
   // focus stayed blank and the FAQ said "pieces".
   { focus: "Silver and tableware", en: "silver pieces", enSingular: "piece", it: "argenti", itSingular: "pezzo",
-    match: /\bsilver\b|silverware|argenteria|argenti\b|tableware|centrepiece|centerpiece|candelab|posate|vassoi|tray\b/i },
+    match: /\bsilver\b|silverware|argenteria|argenti\b|tableware|\btavola\b|porcellana|centrepiece|centerpiece|candelab|posate|vassoi|tray\b/i },
   { focus: "Accessories", en: "accessories", enSingular: "accessory", it: "accessori", itSingular: "accessorio",
-    match: /\bscarf|scarves|foulard|\btie\b|cravatt|\bbelt|cintur|\bglove|guanti|\bhat\b|cappell|cufflink|gemell/i },
+    match: /accessor(?:y|ies|i|io)\b|accessoire|\bscarf|scarves|foulard|\btie\b|cravatt|\bbelt|cintur|\bglove|guanti|\bhat\b|cappell|cufflink|gemell/i },
   { focus: "Fragrance and beauty", en: "fragrances", enSingular: "fragrance", it: "profumi", itSingular: "profumo",
     match: /fragrance|perfume|profum|eau de (?:parfum|toilette)|cologne|\bbeauty\b|skincare|cosmetic/i },
   { focus: "Writing instruments", en: "writing instruments", enSingular: "pen", it: "strumenti di scrittura", itSingular: "penna",
@@ -124,53 +132,172 @@ const CATEGORY_WORDS: { focus: string; en: string; enSingular: string; it: strin
 /** The neutral wording, for a house whose catalogue says nothing recognisable. */
 const GENERIC_CATEGORY = { en: "pieces", enSingular: "piece", it: "articoli", itSingular: "articolo" };
 
+/** One row of the catalogue, as the focus reads it. */
+export type FocusProduct = {
+  name?: string | null;
+  /** storefront_products.category — the house's own shelf label. */
+  category?: string | null;
+  collection?: string | null;
+  /** Retail price, for the value column of the breakdown. Never for the ranking — see below. */
+  price?: number | null;
+};
+
 export type FocusEvidence = {
-  /** storefront_products.category and .collection, and product names. */
+  /** The catalogue, a row per piece. The evidence that counts. */
+  products?: FocusProduct[];
+  /** Flat forms, for callers with no per-product rows: each entry counts as one piece. */
   categories?: (string | null)[];
   names?: (string | null)[];
   /** The brand's own description, as a last resort. */
   description?: string | null;
 };
 
+/** What share of the catalogue each category is, biggest first. */
+export type FocusShare = {
+  focus: string;
+  /** Pieces counted under this category. */
+  products: number;
+  /** Its share of the whole catalogue, 0–1. */
+  share: number;
+  /** Their retail value, where the catalogue carries prices. Reported, never ranked on. */
+  value: number;
+  /** How many of them were placed by their shelf label rather than by their name. */
+  fromShelf: number;
+};
+
+// A share this small is a long tail, not a focus — but only once there are enough pieces for
+// a share to mean anything. Below that, everything the catalogue says is worth saying.
+const MIN_SHARE = 0.08;
+const ENOUGH_TO_HAVE_A_TAIL = 25;
+
 /**
- * Which categories this house actually sells, for the "product focus" on the record and the
- * category wording in the FAQ.
+ * Which categories this house actually sells, for the "product focus" on the record, the
+ * category wording in the FAQ, and the pieces the intro deck puts on a slide.
  *
- * Read from the catalogue first, because it is evidence rather than marketing: a hundred
- * product names carry the word "ring" far more reliably than a description written for
- * search results. Two matches at most — a data request naming six categories is not a focus.
+ * Read from the catalogue, because that is evidence rather than marketing. Two categories at
+ * most — a data request naming six categories is not a focus.
+ *
+ * Counted PER PIECE, which is the whole of the fix here. It used to count regex hits across
+ * the catalogue mashed into one string, and that is not the same question: Prada files 21
+ * pieces under the collection "Profumi e beauty", a label that matches the fragrance pattern
+ * twice, so 21 lipsticks and candles outscored every handbag in the catalogue and the house
+ * came out as "Eyewear, Fragrance and beauty". A piece now votes once, for the first category
+ * that claims it, and the ranking is the number of pieces — which is a sentence somebody can
+ * check ("82 of 260 are accessories") rather than a number nobody can.
+ *
+ * Ranked on pieces, NOT on value, deliberately. Value is the more flattering number and the
+ * less honest one: a catalogue read is a sample of a website, prices are missing on a third
+ * of the rows on some houses, and one €400,000 necklace would decide the focus on its own.
+ * The value is carried in the breakdown so a person can see it and overrule this.
  */
 export function productFocus(evidence: FocusEvidence): string | null {
-  const found = matchedCategories(evidence);
+  const found = focusBreakdown(evidence);
   return found.length ? found.slice(0, 2).map((c) => c.focus).join(", ") : null;
+}
+
+/**
+ * The same reading, with its workings — which categories, how many pieces each, what share
+ * of the catalogue and what they are worth.
+ *
+ * This is what the screen shows next to the field. A focus nobody can check is a focus nobody
+ * corrects, and this one goes out on a data request telling a client which categories the
+ * pilot covers.
+ */
+export function focusBreakdown(evidence: FocusEvidence): FocusShare[] {
+  const rows = catalogueRows(evidence);
+
+  if (rows.length) {
+    const tally = new Map<string, FocusShare>();
+    for (const row of rows) {
+      const placed = placeProduct(row);
+      if (!placed) continue;
+      const t = tally.get(placed.category.focus)
+        ?? { focus: placed.category.focus, products: 0, share: 0, value: 0, fromShelf: 0 };
+      t.products += 1;
+      t.value += Number(row.price) > 0 ? Number(row.price) : 0;
+      if (placed.byShelf) t.fromShelf += 1;
+      tally.set(placed.category.focus, t);
+    }
+    if (tally.size) {
+      const floor = rows.length >= ENOUGH_TO_HAVE_A_TAIL ? MIN_SHARE : 0;
+      return [...tally.values()]
+        .map((t) => ({ ...t, share: t.products / rows.length }))
+        .filter((t) => t.share >= floor)
+        .sort((a, b) => b.products - a.products || b.value - a.value);
+    }
+  }
+
+  // No catalogue yet, or nothing in it recognisable: fall back to the description, which is
+  // at least the house's own words about itself. No shares — there is nothing to be a share
+  // of — and the order is the vocabulary's own.
+  return CATEGORY_WORDS
+    .filter((c) => c.match.test(evidence.description ?? ""))
+    .map((c) => ({ focus: c.focus, products: 0, share: 0, value: 0, fromShelf: 0 }));
+}
+
+/**
+ * The pattern that recognises one named category, for a caller that wants only that part of
+ * a catalogue — "for Prada they have to be images of bags".
+ *
+ * Takes what a person would actually type or what the record already holds: the full focus
+ * label ("Bags and leather goods"), a word from it ("bags"), or the house's own shelf word
+ * ("borse"). Returns null for something it does not recognise rather than a pattern that
+ * matches everything, because a filter nobody understands is worse than no filter.
+ */
+export function focusMatcher(wanted: string): RegExp | null {
+  const q = (wanted ?? "").trim().toLowerCase();
+  if (!q) return null;
+  const exact = CATEGORY_WORDS.find((c) => c.focus.toLowerCase() === q);
+  if (exact) return new RegExp(exact.match.source, "i");
+  // A word from the label: "bags" → "Bags and leather goods", "jewellery" → "High jewellery".
+  const named = CATEGORY_WORDS.find((c) => {
+    const label = c.focus.toLowerCase();
+    return label.split(/[^a-z]+/).filter((w) => w.length > 3).some((w) => q.includes(w) || w.includes(q));
+  });
+  if (named) return new RegExp(named.match.source, "i");
+  // Last: the vocabulary itself, so a shelf word typed straight in still resolves.
+  const byWord = CATEGORY_WORDS.find((c) => c.match.test(q));
+  return byWord ? new RegExp(byWord.match.source, "i") : null;
 }
 
 /** The words for this house's pieces, in both languages, for the FAQ. */
 export function categoryWords(evidence: FocusEvidence): typeof GENERIC_CATEGORY {
-  const [first] = matchedCategories(evidence);
+  const [top] = focusBreakdown(evidence);
+  const first = top && CATEGORY_WORDS.find((c) => c.focus === top.focus);
   return first
     ? { en: first.en, enSingular: first.enSingular, it: first.it, itSingular: first.itSingular }
     : GENERIC_CATEGORY;
 }
 
-function matchedCategories(evidence: FocusEvidence): typeof CATEGORY_WORDS {
-  const haystacks = [
-    ...(evidence.categories ?? []).filter(Boolean) as string[],
-    ...(evidence.names ?? []).filter(Boolean) as string[],
-  ];
-  const catalogue = haystacks.join(" \n");
+/**
+ * The catalogue as a list of pieces, however the caller happened to supply it.
+ *
+ * `products` is the real shape. The flat `categories` / `names` arrays are what callers with
+ * no per-product rows pass, and each entry stands in for one piece — which is the honest
+ * reading of a bare list and keeps the unit tests speaking in product names.
+ */
+function catalogueRows(evidence: FocusEvidence): FocusProduct[] {
+  if (evidence.products?.length) return evidence.products;
+  return [
+    ...(evidence.categories ?? []).filter(Boolean).map((c) => ({ category: c })),
+    ...(evidence.names ?? []).filter(Boolean).map((n) => ({ name: n })),
+  ] as FocusProduct[];
+}
 
-  // Score by how many rows mention it, so a house with three bags and four hundred rings
-  // reads as a jeweller.
-  const scored = CATEGORY_WORDS
-    .map((c) => ({ c, hits: (catalogue.match(new RegExp(c.match.source, "gi")) ?? []).length }))
-    .filter((s) => s.hits > 0)
-    .sort((a, b) => b.hits - a.hits);
-  if (scored.length) return scored.map((s) => s.c);
-
-  // No catalogue yet: fall back to the description, which is at least the house's own words.
-  const described = CATEGORY_WORDS.filter((c) => c.match.test(evidence.description ?? ""));
-  return described;
+/**
+ * The one category a piece counts under.
+ *
+ * The house's own shelf label first, and only then the product name. A label is a
+ * classification somebody made on purpose; a name is prose, and prose about a handbag says
+ * "in pelle" while prose about a loafer says it too. Where the label places a piece, the name
+ * does not get a vote.
+ */
+function placeProduct(row: FocusProduct): { category: typeof CATEGORY_WORDS[number]; byShelf: boolean } | null {
+  const shelf = [row.category, row.collection].filter(Boolean).join(" ");
+  const onShelf = shelf ? CATEGORY_WORDS.find((c) => c.match.test(shelf)) : undefined;
+  if (onShelf) return { category: onShelf, byShelf: true };
+  const byName = row.name ? CATEGORY_WORDS.find((c) => c.match.test(row.name!)) : undefined;
+  return byName ? { category: byName, byShelf: false } : null;
 }
 
 // ── The customer FAQ ────────────────────────────────────────────────────────────────────── //

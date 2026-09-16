@@ -5,6 +5,8 @@ import { DEFAULT_MAX_COVERED_VALUE, DEFAULT_MIN_COVERED_VALUE } from "@/lib/cove
 import type { ThemeColors, ThemeFonts } from "@/contexts/TenantContext";
 import { FormField, Input, Select, TextArea, SaveBar } from "./FormField";
 import { ImageUpload } from "./ImageUpload";
+import CategoryFees from "./CategoryFees";
+import CatalogueEvidence from "./CatalogueEvidence";
 import { ChevronRight } from "lucide-react";
 
 // The brand record, as one form used in two places.
@@ -111,6 +113,9 @@ export interface Brand {
   legal_name: string | null;
   registered_address: string | null;
   product_focus: string | null;
+  // True once a person has typed the focus. Onboarding re-reads the catalogue on every run
+  // and would otherwise overwrite their wording with its own — see the migration.
+  product_focus_manual: boolean | null;
   is_prospect: boolean | null;
 }
 
@@ -128,7 +133,8 @@ export const empty = (): Partial<Brand> => ({
   enable_chubb_reporting: false, chubb_policy_prefix: "",
   activation_fee: null, insurance_premium: null, aion_premium_fee: null,
   max_covered_value: null, min_covered_value: null,
-  legal_name: "", registered_address: "", product_focus: "", is_prospect: true,
+  legal_name: "", registered_address: "", product_focus: "", product_focus_manual: false,
+  is_prospect: true,
 });
 
 const toJsonStr = (v: any) => v ? JSON.stringify(v, null, 2) : "";
@@ -170,7 +176,7 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
     setLoading(true);
     void (async () => {
       const { data } = await supabase.from("brands")
-        .select("id, name, slug, description, email, website, hq_country, hq_address, hq_city, hq_postcode, status, logo_small, logo_big, auth_background_image, top_banner_image, theft_image, damage_image, faq_image, feedback_image, faq_en, faq_it, theme_settings, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value, min_covered_value, legal_name, registered_address, product_focus, is_prospect")
+        .select("id, name, slug, description, email, website, hq_country, hq_address, hq_city, hq_postcode, status, logo_small, logo_big, auth_background_image, top_banner_image, theft_image, damage_image, faq_image, feedback_image, faq_en, faq_it, theme_settings, enable_chubb_reporting, chubb_policy_prefix, activation_fee, insurance_premium, aion_premium_fee, max_covered_value, min_covered_value, legal_name, registered_address, product_focus, product_focus_manual, is_prospect")
         .eq("id", brandId).maybeSingle();
       const b = (data ?? empty()) as Partial<Brand>;
       const en = toJsonStr(b.faq_en), it = toJsonStr(b.faq_it);
@@ -233,6 +239,12 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
       legal_name: editing.legal_name || null,
       registered_address: editing.registered_address || null,
       product_focus: editing.product_focus || null,
+      // Typing in the field is what claims it. Not a checkbox the person has to find: the
+      // act of correcting a wrong focus IS the statement that this one is theirs, and a
+      // correction that onboarding silently undid on the next run is the bug this closes.
+      product_focus_manual: (editing.product_focus || null) !== (loaded.product_focus || null)
+        ? true
+        : editing.product_focus_manual ?? false,
       is_prospect: editing.is_prospect ?? false,
     };
     const { error } = mode === "add"
@@ -319,10 +331,20 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
               <FormField label="Legal entity" hint="The entity the programme is contracted with, if not the trading name">
                 <Input disabled={ro} value={editing.legal_name ?? ""} onChange={(e) => set("legal_name", e.target.value)} placeholder="Brand Name S.p.A." />
               </FormField>
-              <FormField label="Product focus" hint="Categories in scope for the pilot">
+              <FormField
+                label="Product focus"
+                hint={editing.product_focus_manual
+                  ? "Set by hand — onboarding will not overwrite it"
+                  : "Read from the catalogue on every onboarding run; type over it to own it"}
+              >
                 <Input disabled={ro} value={editing.product_focus ?? ""} onChange={(e) => set("product_focus", e.target.value)} placeholder="High jewellery, EU boutiques" />
               </FormField>
             </div>
+            {/* The workings, because this line goes out on a data request telling a client
+                which categories the pilot covers, and it reads as a fact rather than as a
+                reading of a part-scraped website. Seeing "82 of 260 pieces are Accessori"
+                is what turns "that is wrong" into a correction somebody can make. */}
+            {brandId ? <CatalogueEvidence brandId={brandId} focus={editing.product_focus ?? null} /> : null}
             <div className="mt-3">
               <FormField label="Registered address" hint="Only when it differs from the headquarters below">
                 <Input disabled={ro} value={editing.registered_address ?? ""} onChange={(e) => set("registered_address", e.target.value)} />
@@ -350,6 +372,29 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
                 <Input type="number" step="1" min="0" disabled={ro} value={editing.min_covered_value ?? ""} placeholder={String(DEFAULT_MIN_COVERED_VALUE)} onChange={(e) => set("min_covered_value", e.target.value !== "" ? Number(e.target.value) : null)} />
               </FormField>
             </div>
+
+            {/* Per category, because a house does not have one rate. A bag and a watch are
+                different risks and are quoted differently, and with a single set of rates on
+                the record that difference lived in somebody's head. Saved as you leave each
+                cell — this is its own table, not part of the form's payload. */}
+            {brandId ? (
+              <div className="mt-5">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Per-category rates
+                </p>
+                <CategoryFees
+                  brandId={brandId}
+                  readOnly={ro}
+                  brandRates={{
+                    insurance_premium: editing.insurance_premium ?? null,
+                    activation_fee: editing.activation_fee ?? null,
+                    aion_premium_fee: editing.aion_premium_fee ?? null,
+                    min_covered_value: editing.min_covered_value ?? DEFAULT_MIN_COVERED_VALUE,
+                    max_covered_value: editing.max_covered_value ?? DEFAULT_MAX_COVERED_VALUE,
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
 
           {/* Chubb */}
@@ -400,14 +445,30 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
             <div className="grid grid-cols-2 gap-4">
               <FormField label="Logo (icon)" hint="Small square, used in navigation">
                 {ro ? (
-                  editing.logo_small ? <img src={editing.logo_small} alt="" className="h-14 rounded-lg border border-border object-contain" /> : <span className="text-sm text-muted-foreground">—</span>
+                  editing.logo_small
+                    ? (
+                      // Openable in view mode too — checking a logo means looking at the file.
+                      <a href={editing.logo_small!} target="_blank" rel="noreferrer" title="Open the full-size file"
+                        className="inline-flex h-16 w-32 cursor-zoom-in items-center justify-center overflow-hidden rounded-lg border border-border bg-white">
+                        <img src={editing.logo_small} alt="" className="max-h-full max-w-full object-contain" />
+                      </a>
+                    )
+                    : <span className="text-sm text-muted-foreground">—</span>
                 ) : (
                   <ImageUpload value={editing.logo_small} onChange={(url) => set("logo_small", url)} bucket="brand_logos" path={`brands/${brandKey}-icon`} />
                 )}
               </FormField>
               <FormField label="Logo (full)" hint="Full logo, used in portal header">
                 {ro ? (
-                  editing.logo_big ? <img src={editing.logo_big} alt="" className="h-14 rounded-lg border border-border object-contain" /> : <span className="text-sm text-muted-foreground">—</span>
+                  editing.logo_big
+                    ? (
+                      // Openable in view mode too — checking a logo means looking at the file.
+                      <a href={editing.logo_big!} target="_blank" rel="noreferrer" title="Open the full-size file"
+                        className="inline-flex h-16 w-32 cursor-zoom-in items-center justify-center overflow-hidden rounded-lg border border-border bg-white">
+                        <img src={editing.logo_big} alt="" className="max-h-full max-w-full object-contain" />
+                      </a>
+                    )
+                    : <span className="text-sm text-muted-foreground">—</span>
                 ) : (
                   <ImageUpload value={editing.logo_big} onChange={(url) => set("logo_big", url)} bucket="brand_logos" path={`brands/${brandKey}-full`} />
                 )}

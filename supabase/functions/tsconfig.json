@@ -1,0 +1,33 @@
+{
+  // Edge functions were in no tsconfig at all.
+  //
+  // Nothing typechecked this directory: `tsc -p tsconfig.app.json` covers src/, eslint's
+  // typescript rules are switched off here, and `supabase functions deploy` bundles without
+  // checking. A live crash has shipped through that gap before, and it happened again while
+  // this file was being written — a refactor moved two helpers out of brand-deck into a
+  // shared module and left the calls behind, which is a one-line compiler error and was
+  // instead a 500 on a deployed function.
+  //
+  // Checked with `npm run typecheck:functions`. The Deno-isms this cannot resolve — the
+  // `npm:` and `jsr:` specifiers, and the `Deno` global — are filtered by that script rather
+  // than papered over here, so a real error in the same run still shows up.
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    // Deno imports its own source by full path, which plain tsc rejects without this.
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    // Deliberately not `strict`. The aim is to catch what the runtime would have thrown —
+    // a name that does not exist, a call with the wrong arity, a property that was renamed —
+    // not to start a strictness migration across every function in one go.
+    "strict": false,
+    "noUnusedLocals": false,
+    "noImplicitAny": false
+  },
+  "include": ["**/*.ts"]
+}

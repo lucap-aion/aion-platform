@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "eval:assistant": "node scripts/eval-assistant.mjs"
+    "eval:assistant": "node scripts/eval-assistant.mjs",
+    "typecheck:functions": "./scripts/typecheck-functions.sh"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

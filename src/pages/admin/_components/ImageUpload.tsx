@@ -4,6 +4,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, X, ImageIcon } from "lucide-react";
 
+// A light chequerboard, so a white logo on a transparent background is visible rather than
+// being an empty box that reads as a failed upload.
+const CHEQUER =
+  "linear-gradient(45deg, #e9e9e9 25%, transparent 25%), " +
+  "linear-gradient(-45deg, #e9e9e9 25%, transparent 25%), " +
+  "linear-gradient(45deg, transparent 75%, #e9e9e9 75%), " +
+  "linear-gradient(-45deg, transparent 75%, #e9e9e9 75%)";
+
 interface ImageUploadProps {
   value: string | null | undefined;
   onChange: (url: string | null) => void;
@@ -54,19 +62,41 @@ export const ImageUpload = ({
     }
   };
 
-  const shapeClass = previewShape === "round" ? "rounded-full" : "rounded-lg";
+  // An avatar and a logo want opposite things. A round avatar is a face: a square box, and
+  // cropping to fill it is right. A logo is a wordmark of unknown proportions: a wide box, and
+  // cropping it is how you end up unable to tell whether it is the right logo at all.
+  const round = previewShape === "round";
+  const shapeClass = round ? "rounded-full h-16 w-16" : "rounded-lg h-16 w-32";
+  const fitClass = round ? "h-full w-full object-cover" : "max-h-full max-w-full object-contain";
 
   return (
     <div className="flex items-center gap-4">
-      {/* Preview */}
-      <div className="relative shrink-0 h-16 w-16">
-        <div className={`h-16 w-16 border border-border ${shapeClass} overflow-hidden bg-muted flex items-center justify-center`}>
+      {/* Preview.
+          `object-cover` in a 64px square, which is what this was, crops a logo to its middle:
+          a brand wordmark is around 6:1, so all anybody saw of PRADA's logo was a slice of the
+          A. "Both logos cannot be opened and I cannot check if they are correct" was exactly
+          that — the file was right and the preview could not show it.
+          So: contain, not cover; a wide box, because a wordmark is wide; a chequerboard behind
+          it, because these arrive transparent and half of them are white; and the whole thing
+          is a link, because the only way to really check a logo is to open it. */}
+      <div className="relative shrink-0">
+        <a
+          href={value || undefined}
+          target="_blank"
+          rel="noreferrer"
+          title={value ? "Open the full-size file" : undefined}
+          onClick={(e) => { if (!value) e.preventDefault(); }}
+          className={`flex items-center justify-center overflow-hidden border border-border ${shapeClass} ${value ? "cursor-zoom-in" : "cursor-default"}`}
+          style={value && !round ? { backgroundColor: "#fff", backgroundImage: CHEQUER, backgroundSize: "12px 12px", backgroundPosition: "0 0, 0 6px, 6px -6px, -6px 0px" } : undefined}
+        >
           {value ? (
-            <img src={value} alt="" className="h-full w-full object-cover" />
+            <img src={value} alt="" className={fitClass} />
           ) : (
-            <ImageIcon className="h-6 w-6 text-muted-foreground/50" />
+            <span className="flex h-full w-full items-center justify-center bg-muted">
+              <ImageIcon className="h-6 w-6 text-muted-foreground/50" />
+            </span>
           )}
-        </div>
+        </a>
         {value && !disabled && (
           <button
             type="button"

@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { AlertCircle, Copy, Loader2, Trash2 } from "lucide-react";
+import { untyped } from "@/integrations/supabase/untyped";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { StageState } from "@/lib/commercialCycle";
 
@@ -38,6 +39,37 @@ export default function DemoPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [avgTicket, setAvgTicket] = useState("");
   const [preview, setPreview] = useState<PurgePreview | null>(null);
+  // Undefined until read. A toggle that renders "off" before it knows is a toggle somebody
+  // flips twice.
+  const [assistantOnly, setAssistantOnly] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const { data } = await untyped.from("brands")
+        .select("demo_assistant_only").eq("id", brandId).maybeSingle();
+      if (live) setAssistantOnly((data as { demo_assistant_only?: boolean } | null)?.demo_assistant_only === true);
+    })();
+    return () => { live = false; };
+  }, [brandId]);
+
+  const setAssistantOnlyMode = async (next: boolean) => {
+    setBusy("scope");
+    const { error } = await untyped.from("brands")
+      .update({ demo_assistant_only: next }).eq("id", brandId);
+    setBusy(null);
+    if (error) {
+      toast({ title: "Could not change the demo scope", description: error.message, variant: "destructive" });
+      return;
+    }
+    setAssistantOnly(next);
+    toast({
+      title: next ? "Assistant-only demo" : "Full portal",
+      description: next
+        ? `${brandName}'s portal now shows the assistant and the knowledge base only.`
+        : `${brandName}'s portal shows every screen again.`,
+    });
+  };
 
   const call = async (payload: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("onboard-brand", {
@@ -160,6 +192,44 @@ export default function DemoPanel({
           </div>
         </div>
       )}
+
+      {/* What the prospect will see when they log in.
+          "If we give them the AI assistant to test, I'd make sure only the relevant content
+          is there — I'd take out the Cover, Claim etc." Those screens are the insurance
+          programme, and in a meeting about the assistant they are four entries of a product
+          that is not being discussed, seeded with claims for a programme nobody has bought. */}
+      <div className="rounded-lg border border-border p-3">
+        <p className="text-sm font-medium">What the demo shows</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {([
+            { value: false, label: "Full portal", hint: "Every screen — covers, claims, clients, boutiques, insights, assistant" },
+            { value: true, label: "Assistant + knowledge only", hint: "The assistant and the knowledge base. Nothing else is reachable, typed URLs included" },
+          ] as const).map((opt) => {
+            const on = assistantOnly === opt.value;
+            return (
+              <button
+                key={String(opt.value)}
+                type="button"
+                title={opt.hint}
+                disabled={assistantOnly === null || busy !== null}
+                onClick={() => void setAssistantOnlyMode(opt.value)}
+                className={`rounded-lg border px-3 py-2 text-sm transition-colors disabled:opacity-50 ${
+                  on ? "border-primary bg-primary/10 font-medium text-foreground" : "border-border text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {busy === "scope" && !on ? <Loader2 className="h-4 w-4 animate-spin" /> : opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {assistantOnly === null
+            ? "Reading the current setting…"
+            : assistantOnly
+              ? "Covers, claims, clients, boutiques and insights are hidden for every user of this brand — including the brand's own logins. Switch back before a programme goes live."
+              : "The prospect sees the whole platform."}
+        </p>
+      </div>
 
       {accounts && (
         <div className="rounded-lg border border-border p-3">

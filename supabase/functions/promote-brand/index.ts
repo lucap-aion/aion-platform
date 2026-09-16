@@ -181,7 +181,12 @@ async function buildPlan(
     target_state: existing
       ? { exists: true, id: existing.id, name: existing.name, ...targetCounts,
           note: "the brand already exists on the target — promoting UPDATES it and adds missing knowledge/products; it does not delete anything" }
-      : { exists: false, note: "the brand will be created on the target with a new id" },
+      // `id` and `name` are present on BOTH branches, as null, so that the caller can read
+      // plan.target_state.id after checking .exists. A union where one arm simply lacks the
+      // field cannot be narrowed on a boolean, so that read was a type error sitting on top
+      // of correct code — and it was the error hiding the rest of this directory's output.
+      : { exists: false, id: null, name: null,
+          note: "the brand will be created on the target with a new id" },
   };
 }
 

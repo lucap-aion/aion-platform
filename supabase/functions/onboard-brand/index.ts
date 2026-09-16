@@ -48,7 +48,7 @@ import { productsFromSitemap } from "../_shared/sitemap-products.ts";
 import { parseProductFeed } from "../_shared/product-feed.ts";
 import { AION_UA } from "../_shared/robots.ts";
 // The record's non-visual defaults: focus, FAQ, fee rates, policy prefix.
-import { policyPrefix, productFocus, renderFaqs, customerServiceEmail, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
+import { policyPrefix, productFocus, focusBreakdown, renderFaqs, customerServiceEmail, STANDARD_FEE_RATES } from "../_shared/brand-defaults.ts";
 // A brand's imagery, held by us rather than hotlinked from a site that will be redesigned.
 import { mirrorBrandImages, servedByAion, IMAGE_SLOTS, type ImageSlot } from "../_shared/brand-images.ts";
 
@@ -1783,6 +1783,11 @@ async function claimTilePieces(
   return out;
 }
 
+/** A catalogue row, as the product focus reads it. */
+type FocusRow = {
+  name: string | null; category: string | null; collection: string | null; price: number | null;
+};
+
 async function fillRecordDefaults(
   admin: ReturnType<typeof createClient>, brandId: number,
 ): Promise<{ filled: string[]; notes: string[] }> {
@@ -1803,15 +1808,21 @@ async function fillRecordDefaults(
   if (!name) return { filled: [], notes };
 
   // What the catalogue says this house sells. Evidence, not marketing — see productFocus.
-  const { data: products } = await admin.from("storefront_products")
-    .select("name, category, collection, image_url, price")
-    .eq("brand_id", brandId).limit(400);
-  const rows = (products ?? []) as { name: string | null; category: string | null; collection: string | null; image_url: string | null; price: number | null }[];
-  const evidence = {
-    categories: rows.flatMap((r) => [r.category, r.collection]),
-    names: rows.map((r) => r.name),
-    description: brand.description as string | null,
-  };
+  //
+  // The WHOLE catalogue, not the first 400 rows. The focus is a share — "374 of 1,783 pieces
+  // are bags" — and a share of an arbitrary prefix of the catalogue is not the same number:
+  // these feeds arrive grouped by section, so the first 400 rows of a house with nine
+  // sections are two of them.
+  const rows: FocusRow[] = [];
+  for (let from = 0; from < 5000; from += 1000) {
+    const { data: page } = await admin.from("storefront_products")
+      .select("name, category, collection, price")
+      .eq("brand_id", brandId).range(from, from + 999);
+    const got = (page ?? []) as FocusRow[];
+    rows.push(...got);
+    if (got.length < 1000) break;
+  }
+  const evidence = { products: rows, description: brand.description as string | null };
 
   const patch: Record<string, unknown> = {};
   const isEmpty = (key: string) => {
@@ -1825,12 +1836,29 @@ async function fillRecordDefaults(
   };
 
   // ── What they sell ──
-  if (isEmpty("product_focus")) {
+  //
+  // Re-read every time, not only when the column is empty — unless a person has set it.
+  //
+  // The catalogue is not there when branding first runs: the stage order puts the storefront
+  // read before this, but a site with no feed is read page by page by the crawler for the
+  // next hour, so the focus was decided on whatever dozen products existed in minute one and
+  // then frozen, because `isEmpty` never fired again. Prada was written as "Eyewear,
+  // Fragrance and beauty" off a handful of rows and stayed that way at 260 pieces.
+  //
+  // `product_focus_manual` is what makes re-reading safe. An admin who types a focus owns it
+  // — this is a commercial judgement about which categories a pilot covers, and the catalogue
+  // is only a sample of a website — and their wording is never overwritten.
+  if (!brand.product_focus_manual) {
+    const breakdown = focusBreakdown(evidence);
     const focus = productFocus(evidence);
-    if (focus) {
+    if (focus && focus !== brand.product_focus) {
       patch.product_focus = focus;
-      notes.push(`product focus read from the catalogue: ${focus}`);
-    } else if (rows.length === 0) {
+      const workings = breakdown
+        .map((b) => `${b.focus} ${b.products}/${rows.length}`).join(", ");
+      notes.push(brand.product_focus
+        ? `product focus re-read from ${rows.length} catalogue pieces: ${focus} (was "${brand.product_focus}") — ${workings}`
+        : `product focus read from the catalogue: ${focus} — ${workings}`);
+    } else if (!focus && rows.length === 0) {
       notes.push("product focus left blank — no catalogue to read it from yet");
     }
   }
