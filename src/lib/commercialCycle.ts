@@ -276,6 +276,15 @@ export type CycleFacts = {
 const built = (facts: CycleFacts, key: string | null): boolean =>
   !!key && !!facts.artifacts?.[key];
 
+/** The prompt for a step whose file exists but which nobody has marked. */
+function recordAction(step: CycleStep): NextAction {
+  return {
+    kind: "record", step: step.n,
+    title: `Record where "${step.title}" got to`,
+    detail: "Its file is built. Whether the meeting happened is the one thing the platform cannot see for itself.",
+  };
+}
+
 export function nextAction(facts: CycleFacts): NextAction {
   // Nothing at all can be built from a brand with no site, so it outranks everything.
   if (!String(facts.website ?? "").trim()) {
@@ -315,42 +324,50 @@ export function nextAction(facts: CycleFacts): NextAction {
     };
   }
 
-  // Then the first step with nothing to hand over. In cycle order, because that is the
-  // order a deal moves in even though any one step may be taken out of turn.
+  // Then the first step that is not behind you, in cycle order.
+  //
+  // "Behind you" means a PERSON said so — the status on the step, set to done or skipped.
+  // Not "its file exists". Those are different facts and conflating them is what made this
+  // card point at step 4 on a brand where steps 1, 2 and 3 were all still Not started: the
+  // pipeline had built the deck and the workbook by itself, the card read that as progress,
+  // and it proposed declaring a pilot perimeter for a house nobody had met yet.
+  //
+  // A file is an asset. A step is something that happened in a room. The platform can see
+  // the first and never the second, which is exactly why the tracker exists — so the tracker
+  // is what this reads.
   for (const step of CYCLE_STEPS) {
-    if (step.n === 3) {
-      // Step 3 hands over an account rather than a file.
-      if (!facts.demoAllowed || facts.products > 0) continue;
-      return {
-        kind: "blocked", step: 3,
-        title: "No catalogue to demo",
-        detail: "The demo shows their own pieces. Run the Catalogue stage, or add a feed URL on the catalogue source.",
-      };
-    }
-    if (built(facts, step.artifact)) continue;
-    if (step.n === 4 && !facts.perimeterDeclared) {
-      // Not a build: there is nothing to build from yet. The work is in the panel.
-      return {
-        kind: "open", step: 4,
-        title: "Declare the pilot perimeter",
-        detail: "Upload the data request they sent back and the segments are read out of it.",
-      };
-    }
-    return { kind: "build", step: step.n, title: step.action, detail: step.produces };
-  }
+    const state = facts.progress?.[String(step.n)]?.state ?? "not_started";
+    const settled = state === "done" || state === "skipped";
 
-  // Everything that can be built has been. What is left is what happened in the room.
-  const unrecorded = CYCLE_STEPS.filter((s) => {
-    const state = facts.progress?.[String(s.n)]?.state ?? "not_started";
-    return state !== "done" && state !== "skipped";
-  });
-  if (unrecorded.length) {
-    const first = unrecorded[0];
-    return {
-      kind: "record", step: first.n,
-      title: `Record where "${first.title}" got to`,
-      detail: "Every file is built. Marking a step is the only thing the platform cannot see for itself.",
-    };
+    // Step 3 hands over an account rather than a file.
+    if (step.n === 3) {
+      // A brand that may not have a demo at all does not owe anyone a demo step.
+      if (!facts.demoAllowed) continue;
+      if (facts.products === 0) {
+        return {
+          kind: "blocked", step: 3,
+          title: "No catalogue to demo",
+          detail: "The demo shows their own pieces. Run the Catalogue stage, or add a feed URL on the catalogue source.",
+        };
+      }
+      if (settled) continue;
+      return recordAction(step);
+    }
+
+    if (!built(facts, step.artifact)) {
+      if (step.n === 4 && !facts.perimeterDeclared) {
+        // Not a build: there is nothing to build from yet. The work is in the panel.
+        return {
+          kind: "open", step: 4,
+          title: "Declare the pilot perimeter",
+          detail: "Upload the data request they sent back and the segments are read out of it.",
+        };
+      }
+      return { kind: "build", step: step.n, title: step.action, detail: step.produces };
+    }
+
+    // The file is there. What is missing is whether the step actually happened.
+    if (!settled) return recordAction(step);
   }
 
   return {

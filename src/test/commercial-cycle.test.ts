@@ -237,6 +237,10 @@ const allBuilt = {
   intro_teaser: {}, data_request: {}, business_case: {}, operations: {},
 };
 
+/** Steps somebody has actually marked. A file existing is not the same fact. */
+const marked = (...steps: number[]) =>
+  Object.fromEntries(steps.map((n) => [String(n), { state: "done" }]));
+
 describe("what to do next", () => {
   it("asks for a website before anything else, because everything is built from it", () => {
     const n = nextAction(facts({ website: "", artifacts: {} }));
@@ -276,13 +280,31 @@ describe("what to do next", () => {
     expect(n.title).toBe(CYCLE_STEPS[0].action);
   });
 
-  it("moves on once a step has its file", () => {
+  it("asks for a built step to be marked before it moves on", () => {
+    // The deck existing does not mean the meeting happened — the pipeline builds it by
+    // itself. This is the case that had the card proposing step 4 on a brand where nobody
+    // had met anyone: files built, tracker untouched.
     const n = nextAction(facts({ artifacts: { intro_teaser: {} } }));
+    expect(n.kind).toBe("record");
+    expect(n.step).toBe(1);
+  });
+
+  it("moves on once a step has its file AND somebody marked it", () => {
+    const n = nextAction(facts({ artifacts: { intro_teaser: {} }, progress: marked(1) }));
+    expect(n.kind).toBe("build");
     expect(n.step).toBe(2);
   });
 
+  it("never proposes a later step over an earlier one nobody has recorded", () => {
+    // Every file built by the pipeline, nothing marked: the answer is step 1, not step 4.
+    const n = nextAction(facts({ artifacts: allBuilt }));
+    expect(n.step).toBe(1);
+  });
+
   it("asks for the perimeter before the business case, and does not offer to build one", () => {
-    const n = nextAction(facts({ artifacts: { intro_teaser: {}, data_request: {} } }));
+    const n = nextAction(facts({
+      artifacts: { intro_teaser: {}, data_request: {} }, progress: marked(1, 2, 3),
+    }));
     expect(n.step).toBe(4);
     expect(n.title).toMatch(/perimeter/i);
     // There is nothing to build from yet, so the card must not offer a build button.
@@ -292,13 +314,16 @@ describe("what to do next", () => {
   it("offers the business case once a perimeter exists", () => {
     const n = nextAction(facts({
       artifacts: { intro_teaser: {}, data_request: {} }, perimeterDeclared: true,
+      progress: marked(1, 2, 3),
     }));
     expect(n.step).toBe(4);
     expect(n.title).toBe(CYCLE_STEPS[3].action);
   });
 
   it("stops on a demo with no catalogue behind it", () => {
-    const n = nextAction(facts({ artifacts: { intro_teaser: {}, data_request: {} }, products: 0 }));
+    const n = nextAction(facts({
+      artifacts: { intro_teaser: {}, data_request: {} }, products: 0, progress: marked(1, 2),
+    }));
     expect(n.kind).toBe("blocked");
     expect(n.step).toBe(3);
   });
@@ -306,6 +331,7 @@ describe("what to do next", () => {
   it("does not ask for a catalogue on a brand that may not have a demo at all", () => {
     const n = nextAction(facts({
       artifacts: { intro_teaser: {}, data_request: {} }, products: 0, demoAllowed: false,
+      progress: marked(1, 2),
     }));
     expect(n.step).not.toBe(3);
   });
