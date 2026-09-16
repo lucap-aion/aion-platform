@@ -104,7 +104,8 @@ Deno.serve(async (req: Request) => {
     // result. See demoLogin.
     if (kind === "demo_login") return json(await demoLogin(admin, brand));
     if (kind === "upload_demo_video") return json(await uploadDemoVideo(admin, brand, body));
-    return json({ error: "kind must be list | data_request | read_data_request | business_case | operations | upload_template | demo_login | upload_demo_video" }, 400);
+    if (kind === "record_demo_video") return json(await recordDemoVideo(brand, body));
+    return json({ error: "kind must be list | data_request | read_data_request | business_case | operations | upload_template | demo_login | upload_demo_video | record_demo_video" }, 400);
   } catch (e) {
     console.error("[build-collateral]", e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
@@ -820,6 +821,83 @@ async function uploadDemoVideo(
       "travels without anybody present to correct it.",
     ],
   });
+}
+
+/**
+ * Start a recording, from the brand page.
+ *
+ * The film cannot be made here. It needs a browser and a video encoder, and an edge function
+ * has neither — so this presses the button on something that does: the repository's
+ * `demo-video` workflow, which runs on a GitHub runner, drives the portal, and posts the
+ * finished film back through `upload_demo_video`. It appears in this brand's artefact list a
+ * few minutes later, next to the decks.
+ *
+ * Dispatching returns nothing but 204, so the run's URL cannot be known exactly. The workflow
+ * page for the repo is returned instead, which is one click from the run that just started.
+ */
+const GITHUB_TOKEN = Deno.env.get("GITHUB_TOKEN") ?? "";
+// owner/repo, e.g. "lucap-aion/aion-platform".
+const GITHUB_REPO = Deno.env.get("GITHUB_REPO") ?? "";
+const GITHUB_REF = Deno.env.get("GITHUB_REF_NAME") ?? "dev";
+const WORKFLOW_FILE = "demo-video.yml";
+
+async function recordDemoVideo(brand: Record<string, unknown>, body: Record<string, unknown>) {
+  if (!GITHUB_TOKEN || !GITHUB_REPO) {
+    return {
+      ok: false,
+      reason: "recording is not wired up yet — set GITHUB_TOKEN (a fine-grained token with " +
+        "Actions: write on this repo) and GITHUB_REPO (owner/repo) as function secrets, and " +
+        "the four AION_* secrets on the repository itself. Until then, run it from a laptop: " +
+        "npm run demo:video -- --slug <slug> --brand-id <id> --upload",
+    };
+  }
+  if (!brand.slug) return { ok: false, reason: "this brand has no slug, so it has no portal to film" };
+
+  const res = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ref: GITHUB_REF,
+        inputs: {
+          slug: String(brand.slug),
+          brand_id: String(brand.id),
+          questions: String(body.questions ?? 3),
+          speed: String(body.speed ?? 1.5),
+          ask: String(body.ask ?? ""),
+          upload: true,
+        },
+      }),
+    },
+  );
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    return {
+      ok: false,
+      reason: `GitHub refused the run (${res.status}). ${detail.slice(0, 200)}`,
+    };
+  }
+
+  return {
+    ok: true,
+    kind: "record_demo_video",
+    brand: brand.name,
+    queued: true,
+    // 204 carries no body, so there is no run id to return — this is the list it is top of.
+    run_url: `https://github.com/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}`,
+    review: [
+      "The film takes a few minutes: it asks the assistant three questions and waits for each " +
+      "answer in full. It appears in this brand's files when it is done.",
+      "It records the live demo brand, so it shows whatever that brand's data says right now.",
+    ],
+  };
 }
 
 // ── PPTX rendering ──────────────────────────────────────────────────────────

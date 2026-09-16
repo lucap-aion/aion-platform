@@ -30,9 +30,9 @@
 
 import { chromium } from "playwright-core";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 // Playwright's own Chromium when it is installed (`npx playwright install chromium`), which
 // is what a CI runner has; a local Chrome otherwise, which is what a laptop has. Nothing here
@@ -227,6 +227,11 @@ if (!webm) { console.error("no video was recorded"); process.exit(1); }
 // Sped up, not trimmed. Cutting the waits out would be the same lie as rendering the thing:
 // what it takes to answer is part of what is being shown. The frame rate is raised to match
 // so the result does not stutter.
+// The recording is the expensive part — two minutes of driving a live assistant — and ffmpeg
+// will not create a missing directory, so a `--out` pointing somewhere that has since been
+// tidied away throws it all away at the last step. It happened.
+mkdirSync(dirname(out) || ".", { recursive: true });
+
 console.log("encoding…");
 execFileSync("ffmpeg", [
   "-y", "-i", webm,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { AlertCircle, Copy, Loader2, Trash2 } from "lucide-react";
+import { AlertCircle, Copy, ExternalLink, Loader2, Trash2, Video } from "lucide-react";
 import { untyped } from "@/integrations/supabase/untyped";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { StageState } from "@/lib/commercialCycle";
@@ -69,6 +69,35 @@ export default function DemoPanel({
         ? `${brandName}'s portal now shows the assistant and the knowledge base only.`
         : `${brandName}'s portal shows every screen again.`,
     });
+  };
+
+  // The demo film. It is recorded by a GitHub runner rather than here — it needs a browser
+  // and a video encoder — so this queues the run and the finished film turns up in the
+  // brand's files a few minutes later. See build-collateral's record_demo_video.
+  const [runUrl, setRunUrl] = useState<string | null>(null);
+
+  const recordFilm = async () => {
+    setBusy("film");
+    setRunUrl(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("build-collateral", {
+        body: { brand_id: brandId, kind: "record_demo_video" },
+      });
+      if (error) throw new Error(error.message);
+      const d = data as { ok?: boolean; reason?: string; run_url?: string };
+      if (d?.ok === false) throw new Error(d.reason ?? "unknown error");
+      setRunUrl(d?.run_url ?? null);
+      toast({
+        title: "Recording started",
+        description: `A film of ${brandName}'s assistant is being made. It takes a few minutes and lands in this brand's files.`,
+      });
+    } catch (e) {
+      toast({
+        title: "Could not start the recording",
+        description: e instanceof Error ? e.message : "unknown error",
+        variant: "destructive",
+      });
+    } finally { setBusy(null); }
   };
 
   const call = async (payload: Record<string, unknown>) => {
@@ -229,6 +258,34 @@ export default function DemoPanel({
               ? "Covers, claims, clients, boutiques and insights are hidden for every user of this brand — including the brand's own logins. Switch back before a programme goes live."
               : "The prospect sees the whole platform."}
         </p>
+      </div>
+
+      {/* A film of the assistant answering, for a prospect who is not in the room. */}
+      <div className="rounded-lg border border-border p-3">
+        <p className="text-sm font-medium">Demo film</p>
+        <p className="mb-2 text-xs text-muted-foreground">
+          Two minutes of this brand's own assistant answering three of its own opening
+          questions, recorded off the live portal. It is made by a runner rather than in the
+          browser, so it keeps going after you close this — look in the brand's files.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void recordFilm()}
+            disabled={busy !== null || !ready}
+            title={ready ? undefined : "The demo needs its book of business and its logins first"}
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50"
+          >
+            {busy === "film" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
+            Record a demo film
+          </button>
+          {runUrl && (
+            <a href={runUrl} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+              Watch it being made <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </div>
       </div>
 
       {accounts && (
