@@ -73,6 +73,16 @@ jobs:
       # Chromium only. The other two engines are a few hundred megabytes this never opens.
       - run: npx playwright install --with-deps chromium
 
+      # ffmpeg is NOT on ubuntu-latest — it was on the older images and is not on 24.04, so
+      # the first run drove the whole demo, asked all three questions, waited for every
+      # answer, and then died on `spawnSync ffmpeg ENOENT` at the encode. Two minutes of live
+      # assistant thrown away at the last step.
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffmpeg -version | head -1
+
       - name: Record
         env:
           AION_FUNCTIONS_BASE: ${{ secrets.AION_FUNCTIONS_BASE }}
