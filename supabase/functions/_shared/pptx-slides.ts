@@ -299,7 +299,11 @@ function table(
 
 function mark(relId: string | null): string {
   if (!relId) return "";
-  return `<p:pic><p:nvPicPr><p:cNvPr id="4" name="AION"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>` +
+  // 990, not 4. Shape ids have to be unique within a slide, and the section opener already
+  // uses 2, 3 and 4 — so on the cover, the one slide where both appear, the wordmark
+  // collided with the standfirst and PowerPoint offers to repair the file. The local proof
+  // renders without a wordmark, so this only shows up in the deck built into the teaser.
+  return `<p:pic><p:nvPicPr><p:cNvPr id="990" name="AION"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>` +
     `<p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>` +
     `<p:spPr><a:xfrm><a:off x="${MARK.x}" y="${MARK.y}"/><a:ext cx="${MARK.cx}" cy="${MARK.cy}"/></a:xfrm>` +
     `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
