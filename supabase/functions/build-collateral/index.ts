@@ -97,7 +97,10 @@ Deno.serve(async (req: Request) => {
     if (kind === "business_case") return json(await buildBusinessCase(admin, brand, body));
     if (kind === "operations") return json(await buildOperations(admin, brand));
     if (kind === "read_data_request") return json(await readDataRequest(admin, brand, body));
-    return json({ error: "kind must be list | data_request | read_data_request | business_case | operations" }, 400);
+    // The one kind that is not about this brand — a template is shared. brand_id is still
+    // required by the handler above, which is harmless and keeps one auth path.
+    if (kind === "upload_template") return json(await uploadTemplate(admin, body));
+    return json({ error: "kind must be list | data_request | read_data_request | business_case | operations | upload_template" }, 400);
   } catch (e) {
     console.error("[build-collateral]", e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
@@ -568,6 +571,183 @@ async function buildOperations(admin: ReturnType<typeof createClient>, brand: Re
         ? []
         : [`No legal entity on the record, so the trading name "${shortName}" is used where the booklet names the contracting party. Set it on the brand record if this deck is going to a legal or finance team.`]),
     ] });
+}
+
+// ── 4. A new deck template, uploaded ────────────────────────────────────────
+// The teaser gets revised, and until now revising it meant somebody with a service key
+// putting a binary into a private bucket by hand. That is not a footnote: the data-request
+// template spent months as a previous client's filled-in workbook precisely because
+// "re-upload the template" was a manual step nobody could see or check.
+//
+// So it is an operation, with the checks attached to it:
+//
+//   - it has to BE a .pptx, not a PDF of one (the generator opens the package)
+//   - it must not name another house — the same guard every generated artefact passes,
+//     applied here, where a leak would be baked into every deck built afterwards
+//   - the media map comes back with it, because a new deck renames every media part and the
+//     slot list has to be re-derived from what is actually in the file
+//
+// It does NOT touch `slots`. Guessing which picture is the boutique and which is the
+// ambassador is exactly the judgement this should not make silently; the inventory is
+// returned so a person can map them in one pass.
+const MAX_TEMPLATE_BYTES = 40 * 1024 * 1024;
+
+async function uploadTemplate(
+  admin: ReturnType<typeof createClient>, body: Record<string, unknown>,
+) {
+  const key = String(body.template_key ?? "intro_teaser");
+  const b64 = String(body.file_base64 ?? "").replace(/^data:[^;]*;base64,/, "");
+  if (!b64) return { ok: false, reason: "attach the .pptx" };
+
+  // A 13MB deck is a 17MB base64 string, and the worker has to hold the string, the decoded
+  // bytes and the parsed package at once. The first version of this ran out of memory before
+  // it reached the upload — it decoded with `Uint8Array.from(binary, …)`, which allocates an
+  // intermediate per element, and then parsed the archive TWICE, once here and once inside
+  // the name check. So: decode into a preallocated buffer, and parse once.
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(b64);
+    if (binary.length > MAX_TEMPLATE_BYTES) {
+      return { ok: false, reason: `that file is ${Math.round(binary.length / 1024 / 1024)}MB — the limit is 40MB` };
+    }
+    bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  } catch {
+    return { ok: false, reason: "could not decode the upload" };
+  }
+
+  const zip = await JSZip.loadAsync(bytes).catch(() => null);
+  if (!zip || !zip.file("ppt/presentation.xml")) {
+    return {
+      ok: false,
+      reason: "that is not a .pptx — a PDF export cannot be used, because the generator has " +
+        "to open the PowerPoint package to swap its pictures",
+    };
+  }
+
+  const { data: tpl } = await admin.from("deck_templates").select("*").eq("key", key).maybeSingle();
+  if (!tpl) return { ok: false, reason: `no deck template registered under "${key}"` };
+
+  // The same name check every artefact gets on the way out, applied on the way IN. A template
+  // naming a live client would put that name into every prospect's deck from here on.
+  const { data: houses } = await admin.from("brands").select("name, legal_name");
+  // The archive this already has, not a second copy of it.
+  const foreign = foreignNamesFound(
+    await readableText(bytes, () => Promise.resolve(zip) as never),
+    (houses ?? []) as { name: string | null; legal_name: string | null }[],
+  );
+
+  const inventory = await inspectDeck(zip);
+
+  const name = String(body.file_name ?? `${key}.pptx`).replace(/[^A-Za-z0-9._-]+/g, "_");
+  const path = `templates/${name.endsWith(".pptx") ? name : `${name}.pptx`}`;
+  const { error } = await admin.storage.from(BUCKET).upload(path, bytes, {
+    contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    upsert: true,
+  });
+  if (error) throw new Error(`upload failed: ${error.message}`);
+
+  const patch: Record<string, unknown> = { storage_path: path };
+  // The corner wordmark is what every generated deck's co-branding hangs off, and its media
+  // name changes with the file. Re-pointed here rather than left stale — a stale anchor is
+  // invisible: the deck still builds, it just quietly stops carrying the brand's logo.
+  if (inventory.corner_mark) patch.logo_anchor = `ppt/media/${inventory.corner_mark}`;
+  const { error: rowErr } = await admin.from("deck_templates").update(patch).eq("key", key);
+  if (rowErr) throw new Error(`template row not updated: ${rowErr.message}`);
+
+  return {
+    ok: true,
+    kind: "upload_template",
+    template_key: key,
+    storage_path: path,
+    previous_storage_path: tpl.storage_path,
+    logo_anchor: patch.logo_anchor ?? tpl.logo_anchor,
+    ...inventory,
+    leaks: foreign.map((n) => `it names ${n}`),
+    review: [
+      ...(foreign.length
+        ? [`DO NOT USE — this template names ${foreign.join(", ")}. Every deck built from it ` +
+           `would carry that name to a prospect.`]
+        : []),
+      inventory.corner_mark
+        ? `The AION wordmark in the corner is ${inventory.corner_mark}, on ${inventory.corner_mark_slides} slides — logo_anchor points at it.`
+        : "NO corner wordmark found, so the brand's logo has nothing to sit beside. Check logo_anchor by hand.",
+      `slots is UNCHANGED and now certainly wrong — a new deck renames every picture. Map it ` +
+      `from the ${inventory.pictures.length} pictures listed here before building anything.`,
+    ],
+  };
+}
+
+/**
+ * What is in this deck, in the terms the slot map is written in.
+ *
+ * Only pictures big enough to be imagery — an icon is not a slot, and a deck like this one
+ * carries forty of them. Positions as a percentage of the page, because that is what makes a
+ * list of media filenames readable as "the big one on the right of slide 4".
+ */
+async function inspectDeck(zip: JSZip) {
+  const pres = (await zip.file("ppt/presentation.xml")?.async("string")) ?? "";
+  const size = /<p:sldSz cx="(\d+)" cy="(\d+)"/.exec(pres);
+  const W = Number(size?.[1] ?? 12192000), H = Number(size?.[2] ?? 6858000);
+
+  const slideNumbers = Object.keys(zip.files)
+    .map((n) => /^ppt\/slides\/slide(\d+)\.xml$/.exec(n)?.[1])
+    .filter(Boolean).map(Number).sort((a, b) => a - b);
+
+  const pictures: {
+    slide: number; media: string; x: number; y: number; w: number; h: number; aspect: number;
+  }[] = [];
+  const cornerCount = new Map<string, number>();
+
+  for (const n of slideNumbers) {
+    const xml = (await zip.file(`ppt/slides/slide${n}.xml`)?.async("string")) ?? "";
+    const relsXml = (await zip.file(`ppt/slides/_rels/slide${n}.xml.rels`)?.async("string")) ?? "";
+    const targets = new Map<string, string>();
+    for (const m of relsXml.matchAll(/Id="([^"]+)"[^>]*Target="([^"]+)"/g)) {
+      targets.set(m[1], m[2].replace("../media/", ""));
+    }
+    for (const pic of xml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) ?? []) {
+      const emb = /r:embed="([^"]+)"/.exec(pic)?.[1] ?? "";
+      const media = targets.get(emb) ?? "";
+      const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(pic);
+      const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(pic);
+      if (!media || !off || !ext) continue;
+      const x = Number(off[1]), y = Number(off[2]), cx = Number(ext[1]), cy = Number(ext[2]);
+      if (!cx || !cy) continue;
+
+      if (looksLikeCornerMark(pic)) cornerCount.set(media, (cornerCount.get(media) ?? 0) + 1);
+      // A tenth of the page across: below that it is an icon, and the deck is full of them.
+      if (cx < W * 0.1 && cy < H * 0.1) continue;
+      pictures.push({
+        slide: n, media,
+        x: round1(100 * x / W), y: round1(100 * y / H),
+        w: round1(100 * cx / W), h: round1(100 * cy / H),
+        aspect: round1(cx / cy),
+      });
+    }
+  }
+
+  const [corner] = [...cornerCount.entries()].sort((a, b) => b[1] - a[1]);
+  return {
+    slides: slideNumbers.length,
+    media: Object.keys(zip.files).filter((n) => n.startsWith("ppt/media/")).length,
+    corner_mark: corner?.[0] ?? null,
+    corner_mark_slides: corner?.[1] ?? 0,
+    pictures,
+  };
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** Shared with brand-deck's co-branding: wide, short, in the bottom margin. */
+function looksLikeCornerMark(picXml: string): boolean {
+  const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(picXml);
+  const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(picXml);
+  if (!off || !ext) return false;
+  const y = Number(off[2]), cx = Number(ext[1]), cy = Number(ext[2]);
+  if (!cx || !cy) return false;
+  const aspect = cx / cy;
+  return aspect >= 2 && aspect <= 8 && cy <= 6858000 * 0.09 && cx <= 12192000 * 0.25 && y >= 6858000 * 0.82;
 }
 
 // ── PPTX rendering ──────────────────────────────────────────────────────────

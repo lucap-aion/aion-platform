@@ -146,8 +146,8 @@ Deno.serve(async (req: Request) => {
   const given = new Map<number, string>(
     (brief.images ?? []).filter((i) => i?.slide && i?.url).map((i) => [Number(i.slide), String(i.url)]));
 
-  const products = Array.isArray(body.image_urls) && body.image_urls.length
-    ? (body.image_urls as string[])
+  const products: Piece[] = Array.isArray(body.image_urls) && body.image_urls.length
+    ? (body.image_urls as string[]).map((image_url) => ({ image_url, name: null }))
     : await pickBrandImages(admin, brandId, slots.length, wanted);
   const campaign = campaignImages(brand);
 
@@ -156,23 +156,23 @@ Deno.serve(async (req: Request) => {
   const plan = slots.map((s) => {
     const role = (s.role ?? "product").toLowerCase();
     const explicit = given.get(s.slide);
-    if (explicit) return { ...s, image_url: explicit, from: "given" };
+    if (explicit) return { ...s, image_url: explicit, piece_name: null, from: "given" };
 
     if (role === "store") {
       unfilled.push(`slide ${s.slide}: a boutique photograph with the brand's sign legible — nothing derivable, supply one`);
-      return { ...s, image_url: null, from: "none" };
+      return { ...s, image_url: null, piece_name: null, from: "none" };
     }
     if (role === "ambassador" || role === "lifestyle") {
       // Round-robin over whatever campaign photography exists, so two ambassador slots do
       // not end up as the same picture twice when there are two to choose from.
       const url = campaign.length ? campaign[roleOrdinal(slots, s) % campaign.length] : null;
-      if (url) return { ...s, image_url: url, from: "campaign" };
+      if (url) return { ...s, image_url: url, piece_name: null, from: "campaign" };
       unfilled.push(`slide ${s.slide}: ${role === "ambassador" ? "a campaign portrait" : "people wearing the pieces"} — this house published no campaign photography we could mirror`);
-      return { ...s, image_url: null, from: "none" };
+      return { ...s, image_url: null, piece_name: null, from: "none" };
     }
-    const url = products.length ? products[nextProduct++ % products.length] : null;
-    if (!url) unfilled.push(`slide ${s.slide}: a piece from the catalogue — none read yet`);
-    return { ...s, image_url: url, from: url ? "catalogue" : "none" };
+    const piece = products.length ? products[nextProduct++ % products.length] : null;
+    if (!piece) unfilled.push(`slide ${s.slide}: a piece from the catalogue — none read yet`);
+    return { ...s, image_url: piece?.image_url ?? null, piece_name: piece?.name ?? null, from: piece ? "catalogue" : "none" };
   });
 
   if (plan.every((p) => !p.image_url)) {
@@ -250,8 +250,32 @@ Deno.serve(async (req: Request) => {
   // A run of text is often split across several <a:t> elements, so only edits
   // that actually match a single run are applied — a partial replacement would
   // corrupt the slide, and a silent no-op is the safer failure.
+  // Tokens the template can ask for, resolved from what actually went into the deck.
+  //
+  // The teaser's phone mockup names a product — it shipped saying "Bee Pink Gold", which is
+  // nobody's piece here — and nothing replaced it, so every prospect's deck showed their
+  // photograph beside somebody else's product name. The name now follows the piece that
+  // landed in the first product slot, so the screenshot is internally consistent.
+  const firstPiece = shortProductName(
+    plan.find((p) => p.from === "catalogue" && p.piece_name)?.piece_name ?? null);
+  const tokens: Record<string, string | null> = {
+    "{{PRODUCT_NAME}}": firstPiece,
+    "{{BRAND_NAME}}": String(brand.name ?? "") || null,
+  };
+
   const applied: string[] = [];
-  const requested = (body.text_edits ?? textSlots) as TextSlot[];
+  const unresolved: string[] = [];
+  const requested = ((body.text_edits ?? textSlots) as TextSlot[])
+    .map((e) => {
+      if (!e?.replace_with || !(e.replace_with in tokens)) return e;
+      const value = tokens[e.replace_with];
+      // A token with nothing behind it leaves the slide alone. Writing an empty string into
+      // a product name would be worse than leaving the placeholder: an empty label reads as
+      // a rendering fault, where a wrong one at least reads as a deck to finish.
+      if (!value) { unresolved.push(`${e.find} (no ${e.replace_with.replace(/[{}]/g, "").toLowerCase().replace(/_/g, " ")} to use)`); return null; }
+      return { ...e, replace_with: value };
+    })
+    .filter(Boolean) as TextSlot[];
   if (Array.isArray(requested) && requested.length) {
     for (let n = 1; n <= 60; n++) {
       const path = `ppt/slides/slide${n}.xml`;
@@ -302,6 +326,7 @@ Deno.serve(async (req: Request) => {
     logo_source: cobrand.source,
     anchor_found_by_shape: cobrand.foundByShape,
     text_edits: applied,
+    text_unresolved: unresolved,
     storage_path: outPath,
     file_name: fileName,
     download_url: signed?.signedUrl ?? null,
@@ -330,6 +355,9 @@ Deno.serve(async (req: Request) => {
         ? [`${unfilled.length} slot${unfilled.length === 1 ? " is" : "s are"} still the template's own photograph: ${unfilled.join("; ")}. Supply them with brief.images and rebuild.`]
         : []),
       `${filled.length} of ${slots.length} imagery slots filled. A deck branded by hand replaces around 37 images — the icons, diagrams and the pioneer logo wall are all still AION's originals and need doing by hand.`,
+      ...(unresolved.length
+        ? [`Text left as the template had it: ${unresolved.join("; ")}. The deck names a product on the app mockup, and that name is still the template's own.`]
+        : []),
       "Check every swapped image on the slide — crops and aspect ratios differ from the originals.",
       "Neither this deck nor the hand-branded reference names the brand in text anywhere; the identity is carried by imagery, so the imagery is what has to be right.",
     ],
@@ -416,13 +444,19 @@ async function coBrandSlides(
     // rather than of the file it happens to live in, so it survives the swap.
     if (!pic) { pic = pics.find(looksLikeCornerMark); if (pic) foundByShape++; }
 
+    // The title slide carries a different mark: AION large and centred, not small in the
+    // corner — a separate media part, so the anchor never matches there and neither does the
+    // corner test. Without this the one slide the brand's logo was explicitly asked for
+    // ("below AION, smaller than AION") is the one slide that never got it.
+    if (!pic && n === 1) { pic = pics.find(looksLikeTitleMark); if (pic) foundByShape++; }
+
     if (!pic) continue;
     const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(pic);
     const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(pic);
     if (!off || !ext) continue;
 
     const anchor = { x: Number(off[1]), y: Number(off[2]), cx: Number(ext[1]), cy: Number(ext[2]) };
-    const spot = n === 1 ? underTheMark(anchor, aspect) : besideTheMark(anchor, aspect);
+    const spot = n === 1 ? underTheMark(anchor, aspect, xml) : besideTheMark(anchor, aspect);
     if (!spot) {
       // Better a slide with only AION's mark than a logo half off the page or sitting on
       // top of the artwork. Named, so the review notes can say which slide to do by hand.
@@ -445,6 +479,29 @@ async function coBrandSlides(
     slides: placed, source, skipped, foundByShape,
     reason: placed ? "" : "no slide carries the AION wordmark to place it against",
   };
+}
+
+/**
+ * The big centred AION on a title slide.
+ *
+ * Same proportions as the corner mark — it is the same wordmark — but large and centred
+ * horizontally. Centred within a tenth of the page, because the test has to reject a
+ * photograph that merely happens to be wide, and the cover's other candidate is usually
+ * nothing at all.
+ */
+function looksLikeTitleMark(picXml: string): boolean {
+  const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(picXml);
+  const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(picXml);
+  if (!off || !ext) return false;
+  const x = Number(off[1]), cx = Number(ext[1]), cy = Number(ext[2]);
+  if (!cx || !cy) return false;
+  const aspect = cx / cy;
+  const centre = x + cx / 2;
+  return (
+    aspect >= 2 && aspect <= 8 &&
+    cx >= SLIDE_W * 0.25 &&                          // large
+    Math.abs(centre - SLIDE_W / 2) <= SLIDE_W * 0.1  // and on the page's centreline
+  );
 }
 
 /**
@@ -476,19 +533,52 @@ type Placement = Box & { cross?: Box };
 /**
  * Title slide: under AION's mark, centred on it, smaller than it.
  *
- * 55% of the height, which is small enough to read as "for" rather than as "with" and large
- * enough to be legible at the back of a room.
+ * "Under" means under the whole title block, not under the wordmark. The cover carries a
+ * tagline in a full-width box below the mark, and a logo placed a fixed gap under the mark
+ * itself lands on top of the words — which is what the first render did, PRADA straight
+ * through "Global coverage for luxury products".
+ *
+ * "Smaller" is capped on WIDTH as well as height. At 55% of AION's height a 6.4:1 wordmark is
+ * exactly as wide as AION, which does not read as smaller at all; the width cap is what makes
+ * the two legible as a house and the house it is for.
  */
-function underTheMark(anchor: Box, aspect: number): Placement | null {
-  const cy = Math.round(anchor.cy * 0.55);
+function underTheMark(anchor: Box, aspect: number, slideXml: string): Placement | null {
+  const cy = Math.min(
+    Math.round(anchor.cy * 0.55),
+    Math.round((anchor.cx * 0.6) / aspect),
+  );
   const cx = Math.round(cy * aspect);
-  const gap = Math.round(anchor.cy * 0.5);
-  const y = anchor.y + anchor.cy + gap;
+  if (cy < 40000) return null;   // too small to read; better none than a smudge
+
+  const gap = Math.round(anchor.cy * 0.35);
+  const y = lowestEdgeBelow(slideXml, anchor) + gap;
   if (y + cy > SLIDE_H - MARGIN) return null;
   // Centred on the mark's centre, not on the page: the mark is what it hangs from.
   const x = Math.round(anchor.x + (anchor.cx - cx) / 2);
   if (x < MARGIN || x + cx > SLIDE_W - MARGIN) return null;
   return { x, y, cx, cy };
+}
+
+/**
+ * The bottom of the lowest thing that belongs to the title block.
+ *
+ * Everything whose top edge sits at or below the mark's own top, which on a cover is the mark
+ * and the tagline under it and nothing else. Anything above the mark is a header and is not
+ * in the way.
+ */
+function lowestEdgeBelow(slideXml: string, anchor: Box): number {
+  let lowest = anchor.y + anchor.cy;
+  for (const shape of slideXml.match(/<p:(?:sp|pic|graphicFrame)>[\s\S]*?<\/p:(?:sp|pic|graphicFrame)>/g) ?? []) {
+    const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(shape);
+    const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(shape);
+    if (!off || !ext) continue;
+    const y = Number(off[2]), cy = Number(ext[2]);
+    // Ignore anything that starts above the mark, and anything running to the very bottom of
+    // the page — a full-bleed background would otherwise leave nowhere to put anything.
+    if (y < anchor.y || y > SLIDE_H * 0.9) continue;
+    lowest = Math.max(lowest, y + cy);
+  }
+  return lowest;
 }
 
 /**
@@ -516,11 +606,39 @@ function besideTheMark(anchor: Box, aspect: number): Placement | null {
   };
 }
 
+/**
+ * A product name that fits the label it is going into.
+ *
+ * The placeholder it replaces is three words on one line. These catalogues are scraped in the
+ * house's own market and describe rather than name — "Borsa Prada Buckle medium in pelle
+ * scamosciata con cintura" — which wrapped to five lines and overflowed the card in the app
+ * mockup. Whole words only, and no ellipsis: a product label ending in "…" reads as a
+ * rendering fault rather than as a name.
+ */
+function shortProductName(name: string | null): string | null {
+  const clean = (name ?? "").replace(/\s+/g, " ").trim();
+  if (!clean) return null;
+  if (clean.length <= 28) return clean;
+  const words = clean.split(" ");
+  let out = words[0];
+  for (const w of words.slice(1)) {
+    if ((out + " " + w).length > 28) break;
+    out += " " + w;
+  }
+  // A name cut after a preposition reads as a sentence someone abandoned — "Borsa Prada
+  // Buckle medium in". These catalogues describe the material after one ("in pelle", "en
+  // cuir"), so the cut lands on one often.
+  return out.replace(/\s+(?:in|di|da|con|per|a|e|ed|the|with|and|de|en|of|à|et|und|mit|y|con)$/i, "");
+}
+
 /** The × of "AION × Brand". A text box, so it takes the deck's own ink colour and font. */
 function crossXml(n: number, box: Box): string {
   // Sized off the box rather than fixed: the mark is a different height on a title slide
   // than on a content slide, and a 12pt × next to a large wordmark reads as a smudge.
-  const sz = Math.max(800, Math.min(2400, Math.round((box.cy / 12700) * 100 * 0.55)));
+  // Close to the wordmark's own cap height. At half of it the glyph reads as a full stop
+  // between two logos rather than as the × of a lockup — which is what the first proof
+  // render showed.
+  const sz = Math.max(900, Math.min(2400, Math.round((box.cy / 12700) * 100 * 0.95)));
   return `<p:sp><p:nvSpPr><p:cNvPr id="${940 + n}" name="Lockup x"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>` +
     `<p:spPr><a:xfrm><a:off x="${box.x}" y="${box.y}"/><a:ext cx="${box.cx}" cy="${box.cy}"/></a:xfrm>` +
     `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>` +
@@ -557,9 +675,11 @@ function roleOrdinal(slots: Slot[], slot: Slot): number {
 
 // Hero slots want a tall editorial shot; product slots want the pieces that
 // carry the house. Both come from the brand's own catalogue.
+type Piece = { image_url: string; name: string | null };
+
 async function pickBrandImages(
   admin: ReturnType<typeof createClient>, brandId: number, want: number, categories: string[] = [],
-): Promise<string[]> {
+): Promise<Piece[]> {
   // Read wider than the slots need, because the category filter below throws most of it
   // away: asking for 24 rows and then keeping only the bags leaves a deck with two pictures.
   const { data } = await admin.from("storefront_products")
@@ -593,11 +713,14 @@ async function pickBrandImages(
   const source = inScope.length >= Math.min(want, 3) ? inScope : rows;
 
   const seen = new Set<string>();
-  const out: string[] = [];
+  const out: Piece[] = [];
   for (const r of source) {
     if (seen.has(r.image_url)) continue;
     seen.add(r.image_url);
-    out.push(r.image_url);
+    // The NAME travels with the picture. The deck names a product on the app mockup, and a
+    // deck whose screenshot says one house's piece next to another house's photograph is
+    // worse than one that names nothing.
+    out.push({ image_url: r.image_url, name: r.name });
     if (out.length >= want) break;
   }
   return out;
