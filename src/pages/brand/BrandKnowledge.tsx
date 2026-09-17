@@ -466,8 +466,12 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
             </p>
           </div>
         </div>
+        {/* Wraps, because four buttons do not fit a phone. The shell clips rather than
+            scrolls (overflow-x-hidden on <main>), so a row that overflows here does not
+            become swipeable — it becomes invisible, and "Add document" was the one that
+            went. */}
         {canWrite && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setScrapeOpen(true)}
@@ -505,8 +509,10 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
         )}
       </div>
 
-      {/* Stats */}
-      <div className="flex gap-3">
+      {/* Stats. Wraps for the same reason as the buttons above: two counters, an
+          indexing pill and Refresh are wider than 390px, and the Refresh that ml-auto
+          pushes to the right edge is the first thing off the screen. */}
+      <div className="flex flex-wrap items-center gap-3">
         <Stat label={tt(locale, "Documents", "Documenti")} value={totalDocs} loading={loading} />
         <Stat label={tt(locale, "Knowledge chunks", "Sezioni indicizzate")} value={totalChunks} loading={loading || chunksArePartial} />
         {pending > 0 && (
@@ -843,15 +849,15 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
             </p>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full table-fixed sm:table-auto text-sm">
             <thead className="sticky top-0 bg-muted/60 backdrop-blur">
               <tr className="border-b border-border text-left text-xs font-semibold text-muted-foreground">
                 <th className="px-4 py-2.5">{tt(locale, "Title", "Titolo")}</th>
-                <th className="px-3 py-2.5">{tt(locale, "Category", "Categoria")}</th>
-                <th className="px-3 py-2.5">{tt(locale, "Source", "Origine")}</th>
-                <th className="px-3 py-2.5 text-right">{tt(locale, "Chunks", "Sezioni")}</th>
-                <th className="px-3 py-2.5">{tt(locale, "Status", "Stato")}</th>
-                {canWrite && <th className="px-3 py-2.5" />}
+                <th className="hidden sm:table-cell px-3 py-2.5">{tt(locale, "Category", "Categoria")}</th>
+                <th className="hidden sm:table-cell px-3 py-2.5">{tt(locale, "Source", "Origine")}</th>
+                <th className="hidden sm:table-cell px-3 py-2.5 text-right">{tt(locale, "Chunks", "Sezioni")}</th>
+                <th className="w-24 sm:w-auto px-3 py-2.5">{tt(locale, "Status", "Stato")}</th>
+                {canWrite && <th className="w-10 sm:w-auto px-3 py-2.5" />}
               </tr>
             </thead>
             <tbody>
@@ -868,15 +874,15 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
                       </a>
                     )}
                   </td>
-                  <td className="px-3 py-2.5">
+                  <td className="hidden sm:table-cell px-3 py-2.5">
                     <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
                       {tt(locale, CATEGORY_LABEL[d.category]?.en ?? d.category, CATEGORY_LABEL[d.category]?.it ?? d.category)}
                     </span>
                   </td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                  <td className="hidden sm:table-cell px-3 py-2.5 text-xs text-muted-foreground">
                     {d.source_type === "url" ? tt(locale, "Website", "Sito") : d.source_type === "upload" ? tt(locale, "Upload", "Caricato") : tt(locale, "Manual", "Manuale")}
                   </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-foreground">{d.chunk_count}</td>
+                  <td className="hidden sm:table-cell px-3 py-2.5 text-right tabular-nums text-foreground">{d.chunk_count}</td>
                   <td className="px-3 py-2.5"><StatusBadge status={d.status} error={d.error} locale={locale} /></td>
                   {canWrite && (
                     <td className="px-3 py-2.5">

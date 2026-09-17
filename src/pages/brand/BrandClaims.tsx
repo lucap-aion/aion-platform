@@ -382,9 +382,11 @@ const BrandClaims = () => {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
-  const SortableTh = ({ col, label }: { col: SortKey; label: string }) => (
+  // `hide` stands a column down on a phone. Seven columns need 720px; a phone has 390,
+  // and what a claim is actually about is who it belongs to and where it has got to.
+  const SortableTh = ({ col, label, hide, w }: { col: SortKey; label: string; hide?: boolean; w?: string }) => (
     <th
-      className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+      className={`${hide ? "hidden md:table-cell " : ""}${w ? w + " md:w-auto " : ""}px-4 md:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors`}
       onClick={() => handleSort(col)}
     >
       <div className="flex items-center gap-1">
@@ -405,7 +407,7 @@ const BrandClaims = () => {
         </div>
         <div className="glass-card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px]">
+            <table className="w-full table-fixed md:table-auto md:min-w-[720px]">
               <thead>
                 <tr className="border-b border-border">
                   {["ID", "Customer", "Product", "Type", "Date", "Status", "Actions"].map((h) => (
@@ -418,8 +420,8 @@ const BrandClaims = () => {
               <tbody className="divide-y divide-border">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i}>
-                    <td className="px-6 py-4"><div className="h-3.5 w-8 rounded bg-muted animate-pulse" /></td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 md:px-6 py-4"><div className="h-3.5 w-8 rounded bg-muted animate-pulse" /></td>
+                    <td className="px-4 md:px-6 py-4">
                       <div className="flex items-center gap-2.5">
                         <div className="h-9 w-9 rounded-full bg-muted animate-pulse shrink-0" />
                         <div className="space-y-1.5">
@@ -556,19 +558,19 @@ const BrandClaims = () => {
           />
         ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px]">
+          <table className="w-full table-fixed md:table-auto md:min-w-[720px]">
             <thead>
               <tr className="border-b border-border">
-                <SortableTh col="id" label="ID" />
+                <SortableTh col="id" label="ID" hide />
                 <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Customer
                 </th>
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <th className="hidden md:table-cell px-4 md:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Product
                 </th>
-                <SortableTh col="type" label="Type" />
-                <SortableTh col="created_at" label="Date" />
-                <SortableTh col="status" label="Status" />
+                <SortableTh col="type" label="Type" hide />
+                <SortableTh col="created_at" label="Date" hide />
+                <SortableTh col="status" label="Status" w="w-24" />
                 <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Actions
                 </th>
@@ -591,10 +593,10 @@ const BrandClaims = () => {
                       className="transition-colors hover:bg-muted cursor-pointer"
                       onClick={() => navigate(`${slugPrefix}/claims/${claim.id}`)}
                     >
-                      <td className="px-6 py-4 text-sm font-medium text-foreground">
+                      <td className="hidden md:table-cell px-4 md:px-6 py-4 text-sm font-medium text-foreground">
                         {claim.id}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 md:px-6 py-4">
                         {(() => {
                           const firstName = claim.policies?.profiles?.first_name || "";
                           const lastName = claim.policies?.profiles?.last_name || "";
@@ -615,7 +617,7 @@ const BrandClaims = () => {
                           );
                         })()}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="hidden md:table-cell px-4 md:px-6 py-4">
                         <div className="flex items-center gap-2.5">
                           {claim.policies?.catalogues?.picture
                             ? <img src={claim.policies.catalogues.picture} alt={claim.policies?.catalogues?.name || ""} className="h-9 w-9 rounded-lg object-contain bg-muted shrink-0" />
@@ -623,7 +625,7 @@ const BrandClaims = () => {
                           <span className="text-sm text-foreground whitespace-nowrap">{claim.policies?.catalogues?.name || "—"}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                      <td className="hidden md:table-cell px-4 md:px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-2">
                             <span>{toLabel(claim.type)}</span>
@@ -640,20 +642,20 @@ const BrandClaims = () => {
                           <FlagBadges flags={flagsByClaimId.get(claim.id) ?? []} />
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                      <td className="hidden md:table-cell px-4 md:px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
                         {claim.created_at ? format(new Date(claim.created_at), "MMM dd, yyyy") : "—"}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 md:px-6 py-4">
                         <span className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${state.color}`}>
                           {state.label}
                         </span>
                       </td>
-                      <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-4 md:px-6 py-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
                           {canWrite && (
                             <button
                               onClick={() => openEdit(claim)}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              className="tap-target rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                               title="Edit claim"
                             >
                               <Pencil className="h-4 w-4" />
@@ -662,7 +664,7 @@ const BrandClaims = () => {
                           {canWrite && key === "open" && (
                             <button
                               onClick={() => handleClose(claim.id)}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              className="tap-target rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                               title="Close claim"
                             >
                               <XCircle className="h-4 w-4" />
@@ -671,7 +673,7 @@ const BrandClaims = () => {
                           {canWrite && (
                             <button
                               onClick={() => setConfirmDeleteId(claim.id)}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                              className="tap-target rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                               title="Delete claim"
                             >
                               <Trash2 className="h-4 w-4" />

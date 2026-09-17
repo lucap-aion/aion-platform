@@ -101,4 +101,30 @@
   .glass-card {
     @apply bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl shadow-sm;
   }
+
+  /* A finger is not a mouse pointer.
+   *
+   * Icon buttons across the portals are drawn at 28-32px — p-1.5 or p-2 around a 16px
+   * lucide icon — which is fine for a cursor and too small for a thumb. Apple's HIG asks
+   * for 44x44, Material for 48x48; an audit at 390px found 124 targets under 44px on one
+   * admin screen alone, 106 of them under 32.
+   *
+   * This grows the HIT AREA without growing the drawn button: the padding stays where the
+   * designer put it, and the touch box is pushed out to 44px with a pseudo-element that
+   * cannot affect layout. Above `sm` the pointer is a mouse again and it costs nothing.
+   */
+  .tap-target {
+    @apply relative;
+  }
+  .tap-target::after {
+    content: "";
+    @apply absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2;
+    min-width: 44px;
+    min-height: 44px;
+    width: 100%;
+    height: 100%;
+  }
+  @media (min-width: 640px) {
+    .tap-target::after { content: none; }
+  }
 }

@@ -626,15 +626,19 @@ function AdminTable<T extends Record<string, unknown>>({
 
   // ────────────────────────────────────────────────────────────────────
   return (
-    <div className="h-full flex flex-col p-6 md:p-8 gap-6">
+    <div className="h-full flex flex-col p-4 sm:p-6 md:p-8 gap-4 sm:gap-6">
 
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between">
-        <div>
+      {/* ── Header ──
+          Wraps, and the title gets its own line on a phone. Held on one row, "Catalogues /
+          517 records" and the Export + New Item pair are wider than 390px, and because the
+          shell clips rather than scrolls the buttons do not go off the edge — they go
+          through the title. */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="font-serif text-2xl font-bold text-foreground">{title}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{total.toLocaleString()} records</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {action}
           {onExport && (
             <button
@@ -1037,16 +1041,18 @@ function AdminTable<T extends Record<string, unknown>>({
         </div>
 
         {/* ── Pagination ── */}
-        <div className="flex items-center justify-between border-t border-border px-4 py-3 bg-background shrink-0">
+        {/* Wraps: five controls plus the record count do not fit 390px, and on a phone the
+            "1 / 21" indicator was breaking across two lines inside its own row. */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 bg-background shrink-0">
           <p className="text-xs text-muted-foreground">
             {total === 0 ? "No records" : `${from}–${to} of ${total.toLocaleString()}`}
           </p>
           <div className="flex items-center gap-1">
-            <button onClick={() => onPageChange(0)} disabled={page === 0} className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">«</button>
-            <button onClick={() => onPageChange(page - 1)} disabled={page === 0} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Previous</button>
+            <button onClick={() => onPageChange(0)} disabled={page === 0} className="tap-target rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">«</button>
+            <button onClick={() => onPageChange(page - 1)} disabled={page === 0} className="tap-target rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Previous</button>
             <span className="px-3 py-1.5 text-xs text-muted-foreground">{page + 1} / {Math.max(1, pageCount)}</span>
-            <button onClick={() => onPageChange(page + 1)} disabled={page >= pageCount - 1} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next</button>
-            <button onClick={() => onPageChange(pageCount - 1)} disabled={page >= pageCount - 1} className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">»</button>
+            <button onClick={() => onPageChange(page + 1)} disabled={page >= pageCount - 1} className="tap-target rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next</button>
+            <button onClick={() => onPageChange(pageCount - 1)} disabled={page >= pageCount - 1} className="tap-target rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">»</button>
           </div>
         </div>
       </div>

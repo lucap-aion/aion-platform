@@ -394,11 +394,11 @@ const BrandCustomers = () => {
         </div>
         <div className="glass-card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px]">
+            <table className="w-full table-fixed sm:table-auto sm:min-w-[640px]">
               <thead>
                 <tr className="border-b border-border">
                   {["Customer", "Covers", "Claims", "Protected Value", "Joined"].map((h) => (
-                    <th key={h} className="px-6 py-4 text-left">
+                    <th key={h} className="px-4 sm:px-6 py-4 text-left">
                       <div className="h-3 w-20 rounded bg-muted animate-pulse" />
                     </th>
                   ))}
@@ -407,7 +407,7 @@ const BrandCustomers = () => {
               <tbody className="divide-y divide-border">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i}>
-                    <td className="px-6 py-4">
+                    <td className="px-4 sm:px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="h-9 w-9 rounded-full bg-muted animate-pulse shrink-0" />
                         <div className="space-y-1.5">
@@ -417,7 +417,7 @@ const BrandCustomers = () => {
                       </div>
                     </td>
                     {[1, 2, 3, 4].map((j) => (
-                      <td key={j} className="px-6 py-4">
+                      <td key={j} className="px-4 sm:px-6 py-4">
                         <div className="h-3.5 w-12 rounded bg-muted animate-pulse" />
                       </td>
                     ))}
@@ -510,28 +510,28 @@ const BrandCustomers = () => {
         className="glass-card overflow-hidden"
       >
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px]">
+          <table className="w-full table-fixed sm:table-auto sm:min-w-[640px]">
             <thead>
               <tr className="border-b border-border">
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <th className="px-4 sm:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Customer
                 </th>
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <th className="w-14 sm:w-auto px-4 sm:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Covers
                 </th>
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <th className="hidden sm:table-cell px-4 sm:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Claims
                 </th>
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <th className="hidden sm:table-cell px-4 sm:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   {t("brandCustomers.column.ltv")}
                 </th>
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <th className="hidden sm:table-cell px-4 sm:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   <div className="flex items-center gap-1">
                     Joined
                     <ArrowUpDown className="h-3 w-3 opacity-40" />
                   </div>
                 </th>
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <th className="w-20 sm:w-auto px-4 sm:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Actions
                 </th>
               </tr>
@@ -553,36 +553,39 @@ const BrandCustomers = () => {
                     className="transition-colors hover:bg-muted cursor-pointer"
                     onClick={() => navigate(`${slugPrefix}/customers/${c.id}`)}
                   >
-                    <td className="px-6 py-4">
+                    <td className="px-4 sm:px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0 overflow-hidden">
                           {c.avatar
                             ? <SignedImage bucket="profile_pictures" value={c.avatar} alt="" className="h-full w-full object-cover" />
                             : <>{c.first_name?.[0] || ""}{c.last_name?.[0] || ""}</>}
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <p className="text-sm font-medium text-foreground">
+                            <p className="truncate text-sm font-medium text-foreground">
                               {c.first_name} {c.last_name}
                             </p>
                             <SegmentBadges seg={c.segments} />
                           </div>
-                          <p className="text-xs text-muted-foreground">
+                          {/* min-w-0 + truncate: a flex child defaults to min-width:auto, so
+                              a 42-character demo address refuses to shrink and props the
+                              whole table open past the viewport. */}
+                          <p className="truncate text-xs text-muted-foreground">
                             {c.email}
                           </p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-foreground">
+                    <td className="px-4 sm:px-6 py-4 text-sm text-foreground">
                       {c.covers}
                     </td>
-                    <td className="px-6 py-4 text-sm text-foreground">
+                    <td className="hidden sm:table-cell px-4 sm:px-6 py-4 text-sm text-foreground">
                       {c.claims}
                     </td>
-                    <td className="px-6 py-4 text-sm font-medium text-foreground">
+                    <td className="hidden sm:table-cell px-4 sm:px-6 py-4 text-sm font-medium text-foreground">
                       €{c.ltv.toLocaleString()}
                     </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                    <td className="hidden sm:table-cell px-4 sm:px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
                       {c.created_at
                         ? new Date(c.created_at).toLocaleDateString("en-US", {
                             month: "short",
@@ -595,7 +598,7 @@ const BrandCustomers = () => {
                         {canWrite && (
                           <button
                             onClick={() => openEdit(c)}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            className="tap-target rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                             title="Edit"
                           >
                             <Pencil className="h-4 w-4" />
@@ -604,7 +607,7 @@ const BrandCustomers = () => {
                         {canWrite && (
                           <button
                             onClick={() => setConfirmDeleteId(c.id)}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                            className="tap-target rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                             title="Delete"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -629,7 +632,7 @@ const BrandCustomers = () => {
               <button
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="tap-target rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
@@ -639,7 +642,7 @@ const BrandCustomers = () => {
               <button
                 onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={page >= totalPages - 1}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="tap-target rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
