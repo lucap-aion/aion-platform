@@ -109,6 +109,27 @@ export function nameFromSlug(slug: string): string {
 }
 
 /**
+ * A slug that is an opaque identifier rather than a description of a piece.
+ *
+ * Prada's product sitemap names its pages by hash — `…/fd7cb0b14fc5127b6c069f99c42853e193a95feb1a7`
+ * — and a hash comes through nameFromSlug completely untouched: it has no separators to turn
+ * into spaces and no word-bounded run of five-to-ten digits to strip out. The length guard
+ * below it is looking for the opposite problem, a slug worn down to nothing, so it waved this
+ * through. One row went into the catalogue named
+ * "Fd7cb0b14fc5127b6c069f99c42853e193a95feb1a7", with no price and no photograph, ready to be
+ * drawn in the portal's product grid as a grey square in front of a prospect.
+ *
+ * A real product slug is a description, and descriptions have joints: white-gold-and-diamonds-
+ * necklace, sac-a-main-cuir. One unbroken token of this length is routing, not a name. Hex is
+ * called out separately because a shorter hash is still a hash, and no word of eight letters
+ * or more is spelled from a-f alone.
+ */
+export function isOpaqueSlug(name: string): boolean {
+  if (/\s/.test(name)) return false;
+  return name.length >= 16 || /^[0-9a-f]{8,}$/i.test(name);
+}
+
+/**
  * Build what catalogue we can out of a sitemap's own contents.
  *
  * Pages and images are joined on the item code both carry — Damiani's
@@ -165,6 +186,8 @@ export function productsFromSitemap(
     const name = nameFromSlug(slug);
     // A slug that is nothing but its code names nothing a person could read on a slide.
     if (name.length < 3) continue;
+    // Nor does a hash, and a hash is long rather than short — see isOpaqueSlug.
+    if (isOpaqueSlug(name)) continue;
     // Every picture any of this page's codes matched, in sitemap order, without repeats.
     const images: string[] = [];
     for (const code of codes) {
