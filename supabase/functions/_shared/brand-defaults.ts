@@ -414,6 +414,31 @@ const ROLE_PREFIXES = [
 ];
 
 /**
+ * A role address, possibly with the region bolted on the end.
+ *
+ * A house that runs one client-care desk per market says so in the mailbox:
+ * `client.service.eu@prada.com`, published in plain sight on its own Contact us page, beside
+ * the phone number and the opening hours. Matching ROLE_PREFIXES exactly threw it away —
+ * "client.service" was in the list and "client.service.eu" was not — and the brand record
+ * kept an empty email while two hundred and thirty-six indexed chunks held the address.
+ *
+ * Adding every region to the list is the wrong shape: it multiplies a sixty-entry list by
+ * every market a house might split by. Strip the region and ask the same question instead.
+ *
+ * Only ONE trailing region is stripped, and only when what remains is a role prefix in its
+ * own right — so `client.service.eu` resolves and `marco.rossi.it`, which is a person, does
+ * not, because "marco.rossi" is not a role.
+ */
+const REGION_SUFFIX = /^(?:eu|us|usa|uk|gb|it|fr|de|es|pt|nl|be|ch|at|se|dk|no|fi|pl|gr|tr|ru|jp|cn|hk|tw|kr|sg|au|nz|ca|mx|br|ae|sa|in|apac|emea|amer|latam|na|intl|international|global|world|ww|row|online)$/;
+
+export function isRolePrefix(prefix: string): boolean {
+  if (ROLE_PREFIXES.includes(prefix)) return true;
+  const cut = prefix.lastIndexOf(".") > prefix.lastIndexOf("-") ? prefix.lastIndexOf(".") : prefix.lastIndexOf("-");
+  if (cut <= 0) return false;
+  return REGION_SUFFIX.test(prefix.slice(cut + 1)) && ROLE_PREFIXES.includes(prefix.slice(0, cut));
+}
+
+/**
  * Addresses that are on the house's own domain and still wrong to publish to a client.
  *
  * A blocklist as well as the allowlist above, because the allowlist is edited by people and
@@ -502,7 +527,7 @@ export function customerServiceEmail(text: string, website: string): string | nu
     // lets it through and only this stops it.
     if (/(^|\.)pec\./i.test(host)) continue;
     if (NEVER_PUBLISHED.has(prefix)) continue;
-    if (!ROLE_PREFIXES.includes(prefix)) continue;
+    if (!isRolePrefix(prefix)) continue;
     found.add(address);
   }
   if (!found.size) return null;

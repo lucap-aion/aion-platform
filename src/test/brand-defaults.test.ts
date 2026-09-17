@@ -178,6 +178,23 @@ describe("finding a customer-service address", () => {
       .toBe("info@luisabeccaria.it");
   });
 
+  it("takes a role address with the region on the end", () => {
+    // Prada publishes client.service.eu@prada.com on its own Contact us page, beside the
+    // phone number. "client.service" was in the list, "client.service.eu" was not, and the
+    // brand record kept an empty email while the address sat in 236 indexed chunks.
+    expect(customerServiceEmail("by e-mail at client.service.eu@prada.com, or", "https://www.prada.com"))
+      .toBe("client.service.eu@prada.com");
+    expect(customerServiceEmail("customercare-us@ferragamo.com", "https://www.ferragamo.com"))
+      .toBe("customercare-us@ferragamo.com");
+  });
+
+  it("does not let the region rule turn a person into a mailbox", () => {
+    // "marco.rossi" is not a role prefix, so stripping ".it" must not rescue it.
+    expect(customerServiceEmail("marco.rossi.it@prada.com", "https://www.prada.com")).toBe(null);
+    // Only one region comes off: "info.eu.fr" is not a thing anyone publishes.
+    expect(customerServiceEmail("info.eu.fr@prada.com", "https://www.prada.com")).toBe(null);
+  });
+
   it("still refuses a boutique address, which is not where a claim should go", () => {
     expect(customerServiceEmail("boutique.milano@pasqualebruni.com", "https://www.pasqualebruni.com")).toBe(null);
   });
