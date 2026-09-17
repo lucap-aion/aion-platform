@@ -1057,6 +1057,18 @@ async function runStage(
     // Re-checked here, not only at the door: run_queued reaches this from the cron
     // tick with a stage row that was queued before anything was flagged.
     if (!demoAllowedForBrand(brand)) return { ok: true, skipped: true, reason: demoBlockedForBrandReason(brand) };
+
+    // Clear the previous book before building a new one. generate_brand_demo_data has no
+    // DELETE in it — it appends — and its client emails number from 1 on every run, so a
+    // second pass either doubles the book or dies on profiles_email_brand_unique. This
+    // stage is re-runnable by the sweeper and by "Re-run everything" on the brand page, so
+    // "it only ever runs on a freshly purged brand" has not been true for a while.
+    // The demo logins survive; see reset_brand_demo_book.
+    const { data: cleared, error: clearErr } = await admin.rpc("reset_brand_demo_book", {
+      p_brand_id: brandId,
+    });
+    if (clearErr) throw new Error(`reset demo book: ${clearErr.message}`);
+
     const { data, error } = await admin.rpc("generate_brand_demo_data", {
       p_brand_id: brandId,
       p_customers: options.customers ?? 40,
@@ -1102,6 +1114,7 @@ async function runStage(
       pictures_recovered: pictures,
       visits_seeded: (seeded as { visits?: number } | null)?.visits ?? 0,
       crm_depth: depth,
+      cleared_first: (cleared as { cleared?: Record<string, number> } | null)?.cleared ?? null,
     };
   }
 
