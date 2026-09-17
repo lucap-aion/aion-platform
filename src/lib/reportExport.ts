@@ -26,11 +26,16 @@ export const downloadBlob = (blob: Blob, filename: string) => {
 // Multi-sheet XLSX. Each sheet: humanized headers, sensible widths, numbers and
 // ISO dates coerced by ExcelJS.
 export const downloadXlsx = async (sheets: Sheet[], filename: string) => {
+  // Saving a workbook with no rows in it looks like a broken download, not an
+  // empty result — fail loudly (the caller shows a toast) instead of handing
+  // over a blank file the associate has to open to discover is blank.
+  const withRows = sheets.filter((s) => s.columns.length > 0 && s.rows.length > 0);
+  if (withRows.length === 0) throw new Error("no data to export");
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
   wb.creator = "AION Assistant";
   wb.created = new Date();
-  for (const sheet of sheets) {
+  for (const sheet of withRows) {
     const ws = wb.addWorksheet(sheet.name.slice(0, 31) || "Sheet");
     ws.columns = sheet.columns.map((c) => ({
       header: c.header,

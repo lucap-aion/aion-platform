@@ -2,7 +2,7 @@
 // a generic list of sections (KPIs, charts, tables, product cards, notes), so the
 // same renderer handles the client & performance presets AND any ad-hoc report.
 // Exports to PDF (the rendered layout) and Excel (a sheet per data section).
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Bar, BarChart, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
@@ -29,6 +29,18 @@ export type ReportPayload = {
   title: string; subtitle?: string | null; generated_at: string;
   brand: string | null; brand_logo?: string | null; sections: ReportSection[];
 };
+
+// A section with nothing in it is worse than no section at all: on screen it
+// draws a headerless table, in the PDF it divides by zero laying out 0 columns,
+// and in the Excel it becomes a sheet with no columns and no rows — which is
+// exactly the "it generates an empty file" the associate sees. One predicate,
+// applied once, so the screen, the PDF and the workbook agree on what exists.
+export const sectionHasData = (s: ReportSection) =>
+  s.type === "note" ? !!s.body?.trim()
+  : s.type === "kpis" ? !!s.items?.length
+  : s.type === "products" ? !!s.items?.length
+  : s.type === "table" ? !!s.rows?.length && !!s.columns?.length
+  : !!s.data?.length;
 
 const SectionTitle = ({ children }: { children: React.ReactNode }) =>
   children ? <h4 className="mb-2 mt-6 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary">{children}</h4> : null;
@@ -152,16 +164,19 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
   const printRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState<null | "pdf" | "xlsx">(null);
   const fileBase = (report.title || "report").replace(/\s+/g, "_");
+  const sections = useMemo(() => (report.sections ?? []).filter(sectionHasData), [report.sections]);
+  const shown = useMemo(() => ({ ...report, sections }), [report, sections]);
+  const sheets = useMemo(() => sectionsToSheets(shown, locale), [shown, locale]);
 
   const onPdf = async () => {
     setBusy("pdf");
-    try { await downloadReportPdf(report, fileBase); }
+    try { await downloadReportPdf(shown, fileBase); }
     catch (e) { console.error("[report pdf]", e); toast.error(`${tt(locale, "PDF export failed", "Export PDF non riuscito")}: ${e instanceof Error ? e.message : "error"}`); }
     finally { setBusy(null); }
   };
   const onXlsx = async () => {
     setBusy("xlsx");
-    try { await downloadXlsx(sectionsToSheets(report, locale), fileBase); }
+    try { await downloadXlsx(sheets, fileBase); }
     catch (e) { console.error("[report xlsx]", e); toast.error(`${tt(locale, "Excel export failed", "Export Excel non riuscito")}: ${e instanceof Error ? e.message : "error"}`); }
     finally { setBusy(null); }
   };
@@ -186,7 +201,13 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
           </div>
         </div>
 
-        {report.sections.map((s, i) => (
+        {sections.length === 0 && (
+          <p className="py-6 text-xs text-muted-foreground">
+            {tt(locale, "No data for this report.", "Nessun dato per questo report.")}
+          </p>
+        )}
+
+        {sections.map((s, i) => (
           <div key={i} data-block="" className="pt-1">
             <SectionTitle>{s.title}</SectionTitle>
             {s.type === "kpis" ? <Kpis s={s} />
@@ -206,7 +227,10 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
           className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50">
           {busy === "pdf" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />} PDF
         </button>
-        <button type="button" onClick={onXlsx} disabled={busy !== null}
+        <button type="button" onClick={onXlsx} disabled={busy !== null || sheets.length === 0}
+          title={sheets.length === 0
+            ? tt(locale, "Nothing to put in a spreadsheet — this report has no table data.", "Niente da mettere in un foglio — questo report non ha dati tabellari.")
+            : undefined}
           className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50">
           {busy === "xlsx" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />} Excel
         </button>
@@ -216,7 +240,7 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
 }
 
 // Each data section becomes a sheet; all KPI sections merge into one summary sheet.
-function sectionsToSheets(report: ReportPayload, locale: string): Sheet[] {
+export function sectionsToSheets(report: ReportPayload, locale: string): Sheet[] {
   const sheets: Sheet[] = [];
   const used = new Set<string>();
   const name = (base: string) => {
@@ -229,6 +253,7 @@ function sectionsToSheets(report: ReportPayload, locale: string): Sheet[] {
   };
   const kpiRows: Record<string, unknown>[] = [];
   for (const s of report.sections) {
+    if (!sectionHasData(s)) continue; // a blank sheet is the empty download
     if (s.type === "kpis") { kpiRows.push(...s.items.map((it) => ({ k: it.label, v: it.value }))); }
     else if (s.type === "bar" || s.type === "line" || s.type === "pie") {
       sheets.push({ name: name(s.title ?? "Chart"), columns: [{ key: "label", header: tt(locale, "Label", "Voce") }, { key: "value", header: tt(locale, "Value", "Valore") }], rows: s.data });
@@ -239,5 +264,7 @@ function sectionsToSheets(report: ReportPayload, locale: string): Sheet[] {
     }
   }
   if (kpiRows.length) sheets.unshift({ name: name(tt(locale, "Summary", "Riepilogo")), columns: [{ key: "k", header: tt(locale, "Metric", "Metrica") }, { key: "v", header: tt(locale, "Value", "Valore") }], rows: kpiRows });
-  return sheets.length ? sheets : [{ name: "Report", columns: [{ key: "k", header: "—" }], rows: [] }];
+  // No fallback sheet: an empty workbook is the bug, not a graceful degradation.
+  // With nothing to write, the Excel button is disabled instead.
+  return sheets;
 }

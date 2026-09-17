@@ -1587,11 +1587,15 @@ Deno.serve(async (req: Request) => {
                 if ((report as { error?: string }).error) {
                   toolResults.push({ type: "tool_result", tool_use_id: block.id, content: (report as { error: string }).error });
                 } else {
-                  emit("report", report);
+                  const { warnings, ...payload } = report as Record<string, unknown> & { warnings?: string };
+                  emit("report", payload);
                   toolResults.push({
                     type: "tool_result",
                     tool_use_id: block.id,
-                    content: "Report ready and shown to the user with PDF/Excel download buttons. Give ONE short sentence pointing to it; do NOT re-list the figures.",
+                    content: "Report ready and shown to the user with PDF/Excel download buttons. Give ONE short sentence pointing to it; do NOT re-list the figures."
+                      + (warnings
+                        ? ` INCOMPLETE — these were left out of the report and out of the Excel (${warnings}). Say so in your sentence, briefly, so the associate doesn't go looking for rows that aren't in the file.`
+                        : ""),
                   });
                 }
               } catch (e) {
@@ -2440,15 +2444,32 @@ async function buildCustomReport(
   if (specs.length === 0) return { error: "Provide at least one section (type + sql) for a custom report." };
 
   const sections: Section[] = [];
+  const empty: string[] = [];   // ran fine, returned nothing
+  const failed: string[] = [];  // the SQL errored
+  let asked = 0;                // data (non-note) sections requested
   for (const raw of specs) {
     const spec = raw as { type?: string; title?: string; sql?: string; unit?: string; body?: string };
     const type = spec.type ?? "table";
     if (type === "note") { sections.push({ type: "note", title: spec.title, body: String(spec.body ?? "") }); continue; }
     if (!spec.sql) continue;
+    asked++;
+    const label = (spec.title ?? "").trim() || type;
     let rows: Row[] = [];
     try { rows = await runReportSql(client, brandId, spec.sql); }
-    catch (e) { console.warn("[custom section]", e instanceof Error ? e.message : e); continue; }
+    catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("[custom section]", label, msg);
+      failed.push(`${label} (${msg})`);
+      continue;
+    }
     const cols = rows.length ? Object.keys(rows[0]).filter((c) => !/(^|_)id$/i.test(c)) : [];
+    // A section with no rows — or with nothing left after the id columns are
+    // dropped — used to be pushed anyway. On screen it drew a headerless table
+    // and in the workbook it became a sheet with no columns and no rows: the
+    // associate asked for a spreadsheet and downloaded an empty file, while the
+    // model, told only "report ready", promised data that was never there.
+    // Leave it out and name it below, so the answer says what's missing.
+    if (rows.length === 0 || (cols.length === 0 && type !== "products")) { empty.push(label); continue; }
     const unit = spec.unit === "eur" ? "eur" : (spec.unit === "num" ? "num" : undefined);
 
     if (type === "kpis") {
@@ -2463,8 +2484,21 @@ async function buildCustomReport(
       sections.push({ type: "table", title: spec.title, columns: cols.map((c) => ({ key: c, header: humanize(c) })), rows });
     }
   }
-  if (sections.length === 0) return { error: "None of the report sections returned data — check the queries." };
-  return { title, subtitle: input.subtitle ?? null, generated_at, brand: brandName, sections };
+  const why = [
+    failed.length ? `queries that errored: ${failed.join("; ")}` : "",
+    empty.length ? `sections that returned no rows: ${empty.join(", ")}` : "",
+  ].filter(Boolean).join("; ");
+  // Nothing to show at all (a note-only report is legitimate — e.g. a
+  // knowledge-card client's purchases written out — but only when notes were
+  // what was asked for, not when every query came back empty).
+  if (sections.length === 0 || (asked > 0 && !sections.some((x) => x.type !== "note"))) {
+    return { error:
+      `No section returned any data, so there is nothing to show or download (${why || "no sections"}). ` +
+      `Do NOT say a report is ready. Either the filters are too narrow or that data isn't in the system: ` +
+      `retry ONCE with simpler SQL, and if it's still empty tell the associate plainly what isn't there.` };
+  }
+  const report = { title, subtitle: input.subtitle ?? null, generated_at, brand: brandName, sections };
+  return why ? { ...report, warnings: why } : report;
 }
 
 // Map a result row to a product card (detect the usual columns).
