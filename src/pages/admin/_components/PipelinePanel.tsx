@@ -276,6 +276,19 @@ export default function PipelinePanel({
 function progressLine(stage: string, st: StageState | undefined): string | null {
   const d = (st?.detail ?? {}) as Record<string, unknown>;
   const n = (k: string) => (typeof d[k] === "number" ? (d[k] as number) : null);
+
+  // Neither of these is doing anything of its own: both are waiting for the crawl, which on
+  // a five-hundred-page site is the better part of an hour. Saying "Working" and nothing
+  // else for that long reads as a hang, and was reported as one — while the Knowledge page
+  // two clicks away was displaying the exact number of pages left. Both stages already
+  // carry it; nobody was reading it.
+  if (stage === "documents" || stage === "assistant") {
+    const left = n("waiting_for_crawl") ?? n("pages_still_crawling");
+    return left && left > 0
+      ? `indexing the site first — ${left.toLocaleString()} page${left === 1 ? "" : "s"} left`
+      : null;
+  }
+
   if (stage !== "storefront") return null;
 
   const total = n("pages_total") ?? 0;
