@@ -28,8 +28,8 @@ const BRANDS_SCHEMA: ExportColumn[] = [
 ];
 import AdminDrawer from "./_components/AdminDrawer";
 import { Link } from "react-router-dom";
-import { AlertCircle, ExternalLink } from "lucide-react";
-import { CYCLE_STEPS, stepStateLabel } from "@/lib/commercialCycle";
+import { AlertCircle, CheckCircle2, ExternalLink } from "lucide-react";
+import { CYCLE_STEPS, PIPELINE_STAGES, stepStateLabel } from "@/lib/commercialCycle";
 import { formatCountry, formatWebsiteLabel, websiteHref } from "@/lib/format";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import { FormField, Input, Select, TextArea, SaveBar } from "./_components/FormField";
@@ -57,6 +57,9 @@ type PipelineRow = {
   last_touch: string | null;
   blocking: string | null;
   artifacts: number;
+  /** How many onboarding stages this brand has rows for, and how many have come to rest. */
+  stages_total: number;
+  stages_settled: number;
 };
 
 // Roberto Coin has been live for a year and nobody ever recorded its cycle, so the RPC
@@ -264,6 +267,42 @@ const AdminBrands = () => {
                     {p.steps_done}/5 · {sinceLabel(p.last_touch)}
                   </p>
                 </div>
+              );
+            },
+          },
+          {
+            // "Setting Prada up" ran for ninety minutes and finished, and the list said
+            // nothing. Not `status`, which is account verification, and not the cycle
+            // column, whose "All five done" is about the five meetings — a house set up
+            // this morning is honestly still on step 1 of those.
+            //
+            // Ready means every stage has come to rest, against the real stage list rather
+            // than against itself: brands onboarded before this pipeline existed have a
+            // handful of rows — Roberto Coin has one, Luisa Beccaria three — and all of
+            // them are 'done', so "settled === total" alone calls them all ready. They are
+            // not set up, they are from before. PIPELINE_STAGES is the list the rest of the
+            // app already agrees on, so there is no second number to keep in step.
+            key: "setup", label: "Setup", sortable: false, width: 120,
+            render: (row) => {
+              const r = row as unknown as Brand;
+              if (!pipeline) return <span className="inline-block h-3.5 w-16 animate-pulse rounded bg-muted" />;
+              const p = pipeline[r.id];
+              const total = p?.stages_total ?? 0;
+              const settled = p?.stages_settled ?? 0;
+              if (!total) return <span className="text-muted-foreground" title="never run through onboarding">—</span>;
+              if (total < PIPELINE_STAGES.length) {
+                return (
+                  <span className="text-xs text-muted-foreground" title={`onboarded before the current pipeline — ${total} of ${PIPELINE_STAGES.length} stages exist`}>
+                    pre-pipeline
+                  </span>
+                );
+              }
+              return settled >= total ? (
+                <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> Ready
+                </span>
+              ) : (
+                <span className="text-muted-foreground">{settled}/{total}</span>
               );
             },
           },
