@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import { Link } from "react-router-dom";
 import {
   Search, Plus, Pencil, Trash2, Eye, EyeOff,
@@ -625,6 +625,15 @@ function AdminTable<T extends Record<string, unknown>>({
   });
 
   // ────────────────────────────────────────────────────────────────────
+  // One cell's content, shared by the table and the phone card list below it so the two can
+  // never drift into rendering the same column differently.
+  const cellContent = (col: Column<T>, row: T): React.ReactNode => {
+    if (col.render) return col.render(row);
+    const v = row[col.key];
+    if (isDateLikeValue(v, col.key)) return <span className="block truncate">{fmtDate(v as string)}</span>;
+    return <span className="block truncate">{v == null || v === "" ? "—" : String(v)}</span>;
+  };
+
   return (
     <div className="h-full flex flex-col p-4 sm:p-6 md:p-8 gap-4 sm:gap-6">
 
@@ -851,8 +860,87 @@ function AdminTable<T extends Record<string, unknown>>({
       {/* ── Table ── */}
       <div className="flex-1 flex flex-col rounded-xl border border-border overflow-hidden min-h-0">
         <div className="flex-1 overflow-auto">
+
+          {/* ── The same rows, as cards, on a phone ──
+              The grid cannot be made to fit: its columns are chosen by the user and there
+              can be thirty-four of them, so it is 1,418px wide on Brands against a 390px
+              screen. Forcing it to fit would truncate every column to nothing; leaving it
+              is a sideways swipe past columns you cannot see the headers of.
+
+              So below `sm` the row is turned on its side: the first column is the row's
+              identity and becomes the heading and the link, and the next three become
+              labelled values. The column picker still decides what those are, and pinning a
+              column to the left — which is how an admin says "this is the one that matters"
+              — moves it into the card for free.
+
+              Row actions are laid out plainly here rather than reusing the table's, because
+              the table's are opacity-0 until group-hover and a touch screen has no hover:
+              on a phone they were not dimmed, they were unreachable. */}
+          <div className="sm:hidden divide-y divide-border">
+            {!data.length ? (
+              <p className="px-4 py-12 text-center text-sm text-muted-foreground">No records found.</p>
+            ) : data.map((row, i) => {
+              const [lead, ...rest] = visibleColumns;
+              const href = lead && !lead.noRowLink ? rowHref?.(row) : null;
+              const heading = lead ? cellContent(lead, row) : null;
+              return (
+                <div key={i} className="px-4 py-3">
+                  <div className="font-medium text-foreground">
+                    {href ? (
+                      <Link to={href} className="block min-w-0 hover:underline">{heading}</Link>
+                    ) : onView ? (
+                      <button type="button" onClick={() => onView(row)} className="block w-full min-w-0 text-left hover:underline">
+                        {heading}
+                      </button>
+                    ) : heading}
+                  </div>
+                  <dl className="mt-1.5 grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1">
+                    {rest.slice(0, 3).map((col) => (
+                      <Fragment key={col.key}>
+                        <dt className="text-xs text-muted-foreground">{col.label}</dt>
+                        <dd className="min-w-0 text-xs text-foreground">{cellContent(col, row)}</dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                  {hasRowActions && (
+                    <div className="mt-2 flex items-center gap-1.5">
+                      {extraRowAction && extraRowAction(row)}
+                      {onView && (
+                        <button
+                          onClick={() => onView(row)}
+                          className="tap-target rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                          aria-label="View"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      )}
+                      {onEdit && (
+                        <button
+                          onClick={() => onEdit(row)}
+                          className="tap-target rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                          aria-label="Edit"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          onClick={() => onDelete(row)}
+                          className="tap-target rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                          aria-label="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
           <table
-            className="text-sm border-collapse"
+            className="hidden sm:table text-sm border-collapse"
             style={{ tableLayout: "fixed", width: "100%", minWidth: totalMinWidth }}
           >
             <colgroup>
