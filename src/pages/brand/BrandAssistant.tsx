@@ -1120,7 +1120,7 @@ export default function BrandAssistant() {
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                disabled={loading}
+                disabled={recording}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
                 aria-label={tt(locale, "Attach a photo", "Allega una foto")}
                 title={tt(locale, "Attach a photo of a piece", "Allega la foto di un pezzo")}
@@ -1137,7 +1137,7 @@ export default function BrandAssistant() {
               <button
                 type="button"
                 onClick={() => sheetRef.current?.click()}
-                disabled={loading}
+                disabled={recording}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
                 aria-label={tt(locale, "Attach an Excel or CSV", "Allega un Excel o CSV")}
                 title={tt(locale, "Attach a file to ask about — PDF, Word, PowerPoint, Excel or CSV. Used for this chat only, not added to the knowledge base.", "Allega un file su cui fare domande — PDF, Word, PowerPoint, Excel o CSV. Solo per questa chat, non aggiunto alla knowledge base.")}
@@ -1170,7 +1170,12 @@ export default function BrandAssistant() {
                 // said in full in the heading above it.
                 placeholder={tt(locale, "Ask, or record a note…", "Chiedi o registra…")}
                 rows={1}
-                disabled={loading || recording}
+                // Deliberately NOT disabled while the assistant is thinking: an
+                // answer takes long enough that the next question has already
+                // been formed, and a dead field loses it. send() ignores Enter
+                // while loading without clearing the draft, so what's typed
+                // waits in the box and the send button is the thing greyed out.
+                disabled={recording}
                 className="min-w-0 flex-1 resize-none rounded-3xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
                 style={{ maxHeight: 160 }}
               />
