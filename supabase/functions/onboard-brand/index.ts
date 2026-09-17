@@ -1065,12 +1065,44 @@ async function runStage(
     });
     if (error) throw new Error(error.message);
 
+    // The base generator stops at forty clients, sixty covers and a handful of
+    // claims: enough to make the screens look alive, which is a demo of the
+    // PRODUCT. A head of CRM opens a platform and tries to do their JOB in it —
+    // filter to the clients they can call, find who has not bought in a year,
+    // see who came to the last trunk show — and forty clients with no phone
+    // numbers, no events and no shop visits answers none of it.
+    //
+    // Both of these existed since 15 September and NOTHING called them. They
+    // were run by hand once, for Prada, and the knowledge that they had to be
+    // run at all lived in one person's head. Rebuilding that brand from scratch
+    // produced a demo with zero visits — the single feature the pitch was
+    // built on — and reported success while doing it.
+    //
+    // The order is not optional. generate_brand_crm_depth CLONES visits: it
+    // builds its pool from the visits that already exist and, given an empty
+    // table, skips its loop and returns visits: 0 without complaint. The
+    // templated seed has to land first or the depth pass silently does nothing.
+    const { data: seeded, error: seedErr } = await admin.rpc("generate_brand_demo_visits", {
+      p_brand_id: brandId,
+    });
+    if (seedErr) throw new Error(`visit seed: ${seedErr.message}`);
+
+    const { data: depth, error: depthErr } = await admin.rpc("generate_brand_crm_depth", {
+      p_brand_id: brandId,
+    });
+    if (depthErr) throw new Error(`crm depth: ${depthErr.message}`);
+
     // A demo catalogue built from indexed product PAGES has no images, and the
     // customer portal then shows a grid of empty grey squares — which reads as
     // broken, in the exact screen a prospect is shown during the demo. The
     // pages carry an og:image, so recover it.
     const pictures = await recoverCatalogueImages(admin, brandId);
-    return { ...(data as Record<string, unknown>), pictures_recovered: pictures };
+    return {
+      ...(data as Record<string, unknown>),
+      pictures_recovered: pictures,
+      visits_seeded: (seeded as { visits?: number } | null)?.visits ?? 0,
+      crm_depth: depth,
+    };
   }
 
   if (stage === "demo_users") {
