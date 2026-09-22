@@ -156,27 +156,59 @@ shopify-orders, sync-catalogue-prices, sync-storefront, update-knowledge`.
 (The whole dev set was redeployed on 2026-09-11 — that is the origin-allowlist
 change `54dd8cf` touching 18 functions, not 18 unrelated changes.)
 
+> **Version numbers are not a proxy for code (learned 2026-09-22).** Writing a
+> project secret re-versions *every* function in that project — all eight prod
+> functions bumped +1 the moment `ANTHROPIC_API_KEY` was set, with their
+> `updated_at` unchanged. So the prod column above reads low today: prod's
+> `auth-email-hook` is **v18** after the 2026-09-22 deploy, and the others sit
+> 1–2 above the table without a line of code having changed. To compare code,
+> diff the deployed bundle (`GET /v1/projects/<ref>/functions/<slug>/body`)
+> rather than trusting versions. That endpoint returns plain TypeScript for
+> older deploys and an **ESZIP2** archive for ones made by a recent CLI — `grep
+> -a` works on both. The useful side effect: a secret write takes effect
+> immediately, with no cold-start wait.
+
 ### 3.4 Secrets
 
-On DEV, missing on PROD: **`AUTH_HOOK_SECRET`**, `KNOWLEDGE_BATCH_SECRET`,
-`JINA_API_KEY`, `VOYAGE_API_KEY`.
+On DEV, missing on PROD: `KNOWLEDGE_BATCH_SECRET`, `JINA_API_KEY`,
+`VOYAGE_API_KEY`. (`AUTH_HOOK_SECRET` was on this list until 2026-09-22; it is
+now set on prod too, with its own value — see §4.1.)
 
 On PROD, missing on DEV: `ENV` (= `production`, verified by hash). That is
 correct and must stay: it is what suppresses the `[DEV]` subject prefix. Never
 set `ENV` on dev.
 
-`AUTH_HOOK_SECRET` is a production outage waiting to happen — see §4.1.
+`AUTH_HOOK_SECRET` is no longer a pending outage, but it became a **two-place
+secret** on 2026-09-22 — see §4.1.
 
 ---
 
 ## 4. The traps
 
-### 4.1 ☠️ Deploying `auth-email-hook` without setting `AUTH_HOOK_SECRET` kills all auth mail
+### 4.1 ✅ RESOLVED 2026-09-22 — signature verification is live on prod
 
-The fixed function verifies a Standard Webhooks HMAC and **fails closed**:
+**Done on 2026-09-22.** `AUTH_HOOK_SECRET` was set on prod from the dashboard
+value, then `auth-email-hook` was deployed (**v18**, `verify_jwt` false —
+preserved with `--no-verify-jwt`; without that flag the CLI sets it to `true`
+and Supabase's calls are rejected at the edge before the code runs).
+
+Verified live against prod, in this order — metadata first, so no probe could
+reach the old code and actually send mail:
+
+| probe | result |
+|---|---|
+| unsigned POST | `401 invalid signature` |
+| valid signature, 1h stale timestamp | `401` (300s replay window enforced) |
+| valid signature, fresh, unrecognised `email_action_type` | `200 {"ok":true}`, no mail sent |
+
+The third probe is the happy-path proof: an unknown action type returns before
+the Resend call, so a valid signature can be confirmed without emailing anyone.
+
+The mechanism it protects, for reference: the function verifies a Standard
+Webhooks HMAC over `id.timestamp.body` and **fails closed** —
 `verifyWebhookSignature` returns `false` when the secret is empty
 (`supabase/functions/_shared/auth-hook.ts`), and the handler answers
-`401 invalid signature`. Prod has no `AUTH_HOOK_SECRET`.
+`401 invalid signature`.
 
 Prod's Auth hook is live and pointed at that function
 (`hook_send_email_enabled = true`,
@@ -184,13 +216,22 @@ Prod's Auth hook is live and pointed at that function
 every transactional auth email: signup confirmation, password reset, magic
 link, invite. Silently. Nothing errors in the UI — the mail just never arrives.
 
-Correct order, no gap:
+**The standing rule this leaves behind.** Prod's hook secret now lives in two
+places that must change together: Auth → Hooks → Send Email, and the
+`AUTH_HOOK_SECRET` function secret. Change one without the other and every auth
+email dies silently. The same ordering applies to any future redeploy of this
+function on a project where the secret is not yet set: secret first, deploy
+second, never the reverse.
 
-1. Read prod's current hook secret from the dashboard (Auth → Hooks → Send Email).
-2. Set it as the `AUTH_HOOK_SECRET` **function secret** on prod, identical value.
-3. Verify both read the same string.
-4. *Then* deploy the function.
-5. Immediately trigger a real password reset on prod and confirm the mail lands.
+Note the management API returns function secrets as a plain SHA-256 of the
+value, so you can confirm a secret matches a candidate without ever printing it
+— but `config/auth` hashes `hook_send_email_secrets` by some other scheme, so
+that one cannot be compared the same way. Read it from the dashboard.
+
+The secret currently in use is a guessable placeholder — a short, obviously
+hand-typed phrase rather than a random value. Enforcement is only as strong as
+the secret, so rotating it is still worth doing. Read the current value from
+the dashboard; do not write it down here.
 
 Rotating the secret later is a separate, also-ordered operation: add the new
 secret to the hook config while the function still accepts the old one, deploy
@@ -302,11 +343,14 @@ anon key; the `transfer_request` policy takeover; unsigned auth webhooks; and
 
 ### Order
 
-**Step 0 — pre-flight.** Run §9. Confirm: prod still has no `AUTH_HOOK_SECRET`;
+**Step 0 — pre-flight.** Run §9. Confirm: prod's `AUTH_HOOK_SECRET` still
+matches the dashboard hook secret;
 prod's `brands` still has all 17 columns; `git cherry` is clean.
 
-**Step 1 — set `AUTH_HOOK_SECRET` on prod** to prod's existing hook secret
-(§4.1). Nothing is deployed yet, so this is inert and reversible.
+**Step 1 — ~~set `AUTH_HOOK_SECRET` on prod~~ — DONE 2026-09-22** (§4.1). Note
+the consequence for Step 2: prod already *runs* `8c6d7d3` as a deployed
+function, but `main` still does not contain that commit. Until it does, any
+function deploy made from `main` would silently regress the fix.
 
 **Step 2 — get the code onto `main`.** Cherry-pick the six commits rather than
 merging `dev`: a merge drags 154 commits of unreleased features into the branch
