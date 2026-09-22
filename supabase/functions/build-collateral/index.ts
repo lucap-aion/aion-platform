@@ -180,6 +180,23 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
     "{{BRAND_FOCUS}}": focus,
   };
 
+  // ── How many segments this house's pilot has ──────────────────────────────
+  // "Can we make the focus and the number of segments depend on the categories of the
+  // brand? If there is one category, one segment; two categories, two segments."
+  //
+  // It was always two, because the template has two side by side, and the two were called
+  // "Segment 1" and "Segment 2" with nothing to say which was which. The perimeter is
+  // already decided and already on the record: `product_focus` is one or two categories out
+  // of a fixed vocabulary, read off the catalogue or typed by an admin. So the form asks
+  // about exactly those, by name. An explicit `segment_blocks` still wins — a pilot can be
+  // scoped to something the record does not say yet.
+  const segmentLabels = focus.split(/[,;/]|\u2022/).map((c) => c.trim()).filter(Boolean);
+  const wantSegments = body.segment_blocks != null
+    ? Number(body.segment_blocks)
+    // No focus at all leaves the template's own two: better a spare block the client leaves
+    // empty than a form with one segment in it when the house has three.
+    : Math.max(1, Math.min(8, segmentLabels.length || 2));
+
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
 
   // ── The Data sheet, laid out down the page ─────────────────────────────────
@@ -198,10 +215,22 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
     const sheetXml = await zip.file(dataPath)?.async("string");
     if (sheetXml) {
       const shared = sharedStrings(ssXml);
-      const stacked = stackSegments(sheetXml, shared, Number(body.segment_blocks ?? 2));
+      const stacked = stackSegments(sheetXml, shared, wantSegments, segmentLabels);
       zip.file(dataPath, stacked.xml);
       ssXml = rewriteSharedStrings(ssXml, stacked.shared, stacked.shared.slice(shared.length));
       layoutNotes.push(...stacked.notes);
+      // The calculation chain names every formula cell in the workbook, in the order Excel
+      // last worked them out. Restacking moves those cells and makes new ones, so the chain
+      // in the file is now a list of cells that mostly have no formula in them — and Excel
+      // opening a workbook whose chain does not match its sheets offers to REPAIR the file,
+      // which is what a prospect sees as "this came from somewhere untrustworthy". The part
+      // is optional and Excel rebuilds it on the first calculation, so the safe move is to
+      // take it out with its relationship and its content type, not to try to patch it.
+      zip.remove("xl/calcChain.xml");
+      const types = await zip.file("[Content_Types].xml")?.async("string");
+      if (types) zip.file("[Content_Types].xml", types.replace(/<Override[^>]*calcChain\.xml[^>]*\/>/g, ""));
+      const wbRels = await zip.file("xl/_rels/workbook.xml.rels")?.async("string");
+      if (wbRels) zip.file("xl/_rels/workbook.xml.rels", wbRels.replace(/<Relationship[^>]*calcChain\.xml[^>]*\/>/g, ""));
     }
   } else {
     layoutNotes.push("no sheet called \"Data\" in the template, so the segment layout was left alone");

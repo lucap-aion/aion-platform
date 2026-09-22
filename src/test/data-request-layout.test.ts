@@ -10,13 +10,13 @@ import { sharedStrings, sheetGrid } from "../../supabase/functions/_shared/xlsx-
 // the transformation works on a sheet written to make it work.
 const BLANK = resolve(__dirname, "../../docs/templates/AION_Data_Request_Pilot_Blank.xlsx");
 
-async function dataSheet(segments: number) {
+async function dataSheet(segments: number, labels: string[] = []) {
   const zip = await JSZip.loadAsync(readFileSync(BLANK));
   const ssXml = await zip.file("xl/sharedStrings.xml")!.async("string");
   const shared = sharedStrings(ssXml);
   // sheet2 is "Data" in this workbook; the generator resolves it through the rels.
   const xml = await zip.file("xl/worksheets/sheet2.xml")!.async("string");
-  const out = stackSegments(xml, shared, segments);
+  const out = stackSegments(xml, shared, segments, labels);
   return { ...out, before: { xml, shared, ssXml } };
 }
 
@@ -104,6 +104,43 @@ describe("the data request's Data sheet, stacked", () => {
     // The declared count has to agree with what is in the file.
     const declared = /uniqueCount="(\d+)"/.exec(await reopened.file("xl/sharedStrings.xml")!.async("string"))?.[1];
     if (declared) expect(Number(declared)).toBe(reShared.length);
+  });
+
+  it("points each copied formula at its own block", async () => {
+    // The segment block carries three formulas — the average price and two column totals.
+    // Copied without moving their references, every segment's average price reads segment
+    // 1's revenue over segment 1's units, and the client is asked to check a number that
+    // was never theirs.
+    const { xml } = await dataSheet(3);
+    const formulas = [...xml.matchAll(/<c r="([A-Z]+\d+)"(?:(?!<\/c>)[\s\S])*?<f>([^<]*)<\/f>/g)]
+      .map((m) => [m[1], m[2]] as const);
+
+    expect(formulas.length).toBeGreaterThanOrEqual(9);   // three per block, three blocks
+    for (const [ref, f] of formulas) {
+      const row = Number(/\d+$/.exec(ref)![0]);
+      for (const cited of f.matchAll(/([A-Z]+)(\d+)/g)) {
+        // Every cell a formula names is within a dozen rows above it — which is to say,
+        // inside its own block rather than pointing back at the first one.
+        expect(Math.abs(row - Number(cited[2])), `${ref} = ${f}`).toBeLessThan(12);
+      }
+    }
+  });
+
+  it("names each segment after the category it covers", async () => {
+    const { xml, shared, notes } = await dataSheet(2, ["Bags and leather goods", "Accessories"]);
+    const rowsOf = labels(sheetGrid(xml, shared));
+    expect(rowsOf.some(([, v]) => /segment 1: bags and leather goods/i.test(v))).toBe(true);
+    expect(rowsOf.some(([, v]) => /segment 2: accessories/i.test(v))).toBe(true);
+    expect(notes.join(" ")).toMatch(/named after the category/i);
+  });
+
+  it("leaves the headings alone when nobody named the categories", async () => {
+    // A house with no product focus on its record still gets a usable form.
+    const { xml, shared } = await dataSheet(2);
+    const rowsOf = labels(sheetGrid(xml, shared));
+    // The template's own heading, word for word, with nothing appended to it.
+    expect(rowsOf.some(([, v]) => /^company information — segment 1$/i.test(v.trim()))).toBe(true);
+    expect(rowsOf.some(([, v]) => /^company information — segment 2$/i.test(v.trim()))).toBe(true);
   });
 
   it("refuses to touch a sheet it does not recognise", async () => {

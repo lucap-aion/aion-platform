@@ -37,7 +37,9 @@ const MAX_SEGMENTS = 8;
  * a revised template must not come out mangled, and the generator has a "the template was
  * revised since it was mapped" path already.
  */
-export function stackSegments(sheetXml: string, shared: string[], segments: number): StackResult {
+export function stackSegments(
+  sheetXml: string, shared: string[], segments: number, labels: string[] = [],
+): StackResult {
   const want = Math.max(1, Math.min(MAX_SEGMENTS, Math.round(segments || 2)));
   const rows = parseRows(sheetXml);
   if (!rows.length) return { xml: sheetXml, shared, notes: ["the Data sheet has no rows to lay out"] };
@@ -94,12 +96,20 @@ export function stackSegments(sheetXml: string, shared: string[], segments: numb
         ref: shiftRef(c.ref, shift),
         xml: shiftCell(c.xml, shift),
       }));
-      // Each block says which segment it is. Segment 1 keeps the template's own string; the
-      // rest get one appended to the table, which is how a shared string is added.
-      if (r.n === headRow.n && i > 0) {
+      // Each block says which segment it is, and — when the caller knows them — WHICH one:
+      // "Segment 1 — Bags and leather goods". A pilot's segments are its categories, and a
+      // form that asks the same six questions three times under three numbers leaves the
+      // client to guess which category each block is for. Segment 1 keeps the template's own
+      // string when there is nothing to add to it; anything else is appended to the table,
+      // which is how a shared string is made.
+      if (r.n === headRow.n && (i > 0 || labels[0])) {
         const head = cells[0];
         if (head) {
-          const label = inColumnA(headRow).replace(/segment\s*1\b/i, `segment ${i + 1}`);
+          const named = (labels[i] ?? "").trim();
+          const label = inColumnA(headRow).replace(/segment\s*1\b/i, `segment ${i + 1}`)
+            // A colon rather than a dash: the template's own heading is already
+            // "Company information — segment 1", and two dashes in one line read as a typo.
+            + (named ? `: ${named}` : "");
           shared2.push(label);
           head.xml = setSharedIndex(head.xml, shared2.length - 1);
         }
@@ -131,7 +141,10 @@ export function stackSegments(sheetXml: string, shared: string[], segments: numb
   return {
     xml, shared: shared2,
     notes: [
-      `Data sheet laid out for ${want} segment${want === 1 ? "" : "s"}, one under the other, with Product mix below them.`,
+      `Data sheet laid out for ${want} segment${want === 1 ? "" : "s"}, one under the other, with Product mix below them.`
+      + (labels.slice(0, want).some((l) => (l ?? "").trim())
+        ? ` Each one is named after the category it covers: ${labels.slice(0, want).filter(Boolean).join(", ")}.`
+        : ""),
     ],
   };
 }
@@ -172,7 +185,44 @@ function shiftRef(ref: string, by: number): string {
 }
 
 function shiftCell(cellXml: string, by: number): string {
-  return cellXml.replace(/\br="([A-Z]+\d+)"/i, (_, ref: string) => `r="${shiftRef(ref, by)}"`);
+  const moved = cellXml.replace(/\br="([A-Z]+\d+)"/i, (_, ref: string) => `r="${shiftRef(ref, by)}"`);
+  return by === 0 ? moved : shiftFormula(moved, by);
+}
+
+/**
+ * A copied formula, pointing at the copy's own rows.
+ *
+ * The segment block carries three: the average price (`B9/B10`) and the two column totals
+ * (`SUM(B20:B24)`). Copying the cell without copying the formula's REFERENCES is what a
+ * spreadsheet never does and this did: segment 2's average price read segment 1's revenue
+ * and segment 1's units, and every segment after it read them too. The client fills in
+ * three segments, sees the same number three times, and either tells us or does not.
+ *
+ * Only relative rows move, which is what `$` means; a reference into another sheet is left
+ * alone, since the block moving says nothing about where that sheet's rows are. Text inside
+ * a formula is skipped so a literal like "A1" in a label is not treated as a cell.
+ */
+function shiftFormula(cellXml: string, by: number): string {
+  return cellXml.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g, (_, attrs: string, body: string) =>
+    `<f${attrs}>${shiftRefsInFormula(body, by)}</f>`);
+}
+
+export function shiftRefsInFormula(formula: string, by: number): string {
+  // Split on quoted strings, shift only what is between them.
+  return formula
+    .split(/("(?:[^"]|"")*")/)
+    .map((part, i) => (i % 2 === 1 ? part : shiftBareRefs(part, by)))
+    .join("");
+}
+
+function shiftBareRefs(text: string, by: number): string {
+  return text.replace(
+    /(!?)(\$?)([A-Z]{1,3})(\$?)(\d{1,7})\b/g,
+    (whole, sheetMark: string, colAbs: string, col: string, rowAbs: string, row: string) => {
+      if (sheetMark) return whole;   // Sheet1!B9 — another sheet's rows did not move
+      if (rowAbs) return whole;      // B$9 — pinned on purpose
+      return `${colAbs}${col}${rowAbs}${Number(row) + by}`;
+    });
 }
 
 function shiftRowAttrs(attrs: string, by: number): string {
