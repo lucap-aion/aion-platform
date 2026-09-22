@@ -39,6 +39,7 @@ import JSZip from "npm:jszip@3.10.1";
 import { focusMatcher } from "../_shared/brand-defaults.ts";
 import { sniffFormat, imageSize, EMBEDDABLE, MEDIA_TYPES } from "../_shared/image-bytes.ts";
 import { findBrandPhotos, type FoundPhoto, type PhotoRole } from "../_shared/brand-photos.ts";
+import { fitPictureInSlide, PACKSHOT, PHOTOGRAPH } from "../_shared/picture-fit.ts";
 import { fetchSite } from "../_shared/fetch-site.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -270,8 +271,13 @@ Deno.serve(async (req: Request) => {
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const filled: {
     media: string; slide: number; role: string; from: string;
-    source_page: string | null; image_url: string; bytes: number;
+    source_page: string | null; image_url: string; bytes: number; fit: string;
   }[] = [];
+  // How each swapped picture had to be fitted, for the review notes: a centre-crop is worth
+  // a glance, a shrunk frame leaves a gap somebody has to look at.
+  const cropped: string[] = [];
+  const shrunk: string[] = [];
+  const unfitted: string[] = [];
 
   for (const [i, s] of plan.entries()) {
     if (!s.image_url) continue;   // a slot the brief could not fill — reported, not faked
@@ -290,6 +296,13 @@ Deno.serve(async (req: Request) => {
       const ext = img.ext;
       const oldName = s.media.replace("ppt/media/", "");
       const newName = `brand${brandId}_${i}.${ext}`;
+      const relPath = `ppt/slides/_rels/slide${s.slide}.xml.rels`;
+      const rels = await zip.file(relPath)?.async("string");
+      if (!rels) { unfilled.push(`slide ${s.slide}: the slide has no relationships file to read`); continue; }
+      // Which relationship the slide's picture embeds — read BEFORE any repointing, since
+      // that is what ties the media part to the shape whose frame has to be re-fitted.
+      const relId = new RegExp(`Id="([^"]+)"[^>]*Target="[^"]*${oldName.replace(".", "\\.")}"`).exec(rels)?.[1]
+        ?? new RegExp(`Target="[^"]*${oldName.replace(".", "\\.")}"[^>]*Id="([^"]+)"`).exec(rels)?.[1] ?? null;
 
       // Same extension → overwrite in place, no relationship surgery needed.
       if (oldName.split(".").pop()?.toLowerCase() === ext) {
@@ -299,17 +312,35 @@ Deno.serve(async (req: Request) => {
         // not just this picture — PowerPoint offers to repair it.
         await declareMedia(zip, ext);
         zip.file(`ppt/media/${newName}`, img.bytes);
-        const relPath = `ppt/slides/_rels/slide${s.slide}.xml.rels`;
-        const rels = await zip.file(relPath)?.async("string");
-        if (!rels) { unfilled.push(`slide ${s.slide}: the slide has no relationships file to repoint`); continue; }
         zip.file(relPath, rels.replaceAll(`../media/${oldName}`, `../media/${newName}`));
       }
+
+      // ── Fit it ─────────────────────────────────────────────────────────────
+      // The frame and the crop on that slide were measured against the photograph that was
+      // just replaced. Left alone they distort this one — see picture-fit.ts. This is the
+      // whole of Giulio's "le immagini vengono stretchate in modo strano".
+      let fitMode = "unfitted";
+      const slidePath = `ppt/slides/slide${s.slide}.xml`;
+      const slideXml = await zip.file(slidePath)?.async("string");
+      if (!relId || !slideXml) {
+        unfitted.push(`slide ${s.slide} (${!relId ? "its media part is in no relationship" : "the slide is unreadable"})`);
+      } else {
+        // A packshot and a campaign photograph want different crops — see picture-fit.ts.
+        const fitted = fitPictureInSlide(slideXml, relId, imageSize(img.bytes),
+          s.role === "ambassador" || s.role === "lifestyle" || s.role === "store" ? PHOTOGRAPH : PACKSHOT);
+        zip.file(slidePath, fitted.xml);
+        fitMode = fitted.fit?.mode ?? "unfitted";
+        if (fitted.fit?.mode === "crop") cropped.push(`slide ${s.slide} (${Math.round(fitted.fit.cropped * 100)}%)`);
+        else if (fitted.fit?.mode === "shrink") shrunk.push(`slide ${s.slide}`);
+        else if (!fitted.fit) unfitted.push(`slide ${s.slide} (${fitted.why ?? "unknown"})`);
+      }
+
       filled.push({
         media: s.media, slide: s.slide, role: s.role ?? "product", from: s.from,
         // Which page a photograph came off, so a choice nobody agrees with can be traced
         // and overridden rather than argued about.
         source_page: (s as { source_page?: string }).source_page ?? null,
-        image_url: s.image_url, bytes: img.bytes.byteLength,
+        image_url: s.image_url, bytes: img.bytes.byteLength, fit: fitMode,
       });
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
@@ -450,7 +481,13 @@ Deno.serve(async (req: Request) => {
       ...(unresolved.length
         ? [`Text left as the template had it: ${unresolved.join("; ")}. The deck names a product on the app mockup, and that name is still the template's own.`]
         : []),
-      "Check every swapped image on the slide — crops and aspect ratios differ from the originals.",
+      // What replaced the old blanket warning that crops "differ from the originals" — they
+      // no longer differ by accident, so the note says what was actually done to each one.
+      ...(cropped.length ? [`Centre-cropped to the frame: ${cropped.join(", ")} — the percentage is how much of the long edge went.`] : []),
+      ...(shrunk.length
+        ? [`Too far off the frame's shape to crop, so the frame was shrunk to the picture and centred on ${shrunk.join(", ")}. Nothing is distorted and nothing is cut, but there is slide background where the old picture reached — look at those slides.`]
+        : []),
+      ...(unfitted.length ? [`Not fitted, so still stretched to the template's frame: ${unfitted.join(", ")}.`] : []),
       "Neither this deck nor the hand-branded reference names the brand in text anywhere; the identity is carried by imagery, so the imagery is what has to be right.",
     ],
   });
