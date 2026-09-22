@@ -1652,17 +1652,22 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
           </button>
           {onEscalate && (
             escalated ? (
-              <span className="ml-1 flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-emerald-600">
+              <span className="ml-1 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-emerald-700">
                 <Check className="h-3.5 w-3.5" />
                 {tt(locale, "Sent to AION", "Inviato ad AION")}
               </span>
             ) : (
               // Deliberately labelled, not a bare icon: the whole point is that
               // an associate notices they can push the question further.
+              //
+              // "Hard to read" — and measurably so: 11px at 70% of the muted colour is
+              // about #9C9C9C on the card, 2.8:1, where small text needs 4.5:1. Full
+              // strength at 12px is 4.7:1 and passes. Copy untouched: whether it wants an
+              // (i) saying what it is for is a question for the round with Luna.
               <button
                 type="button"
                 onClick={onEscalate}
-                className="ml-1 flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+                className="ml-1 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 title={tt(locale, "Send this question to the AION team", "Invia la domanda al team AION")}
               >
                 <LifeBuoy className="h-3.5 w-3.5" />
