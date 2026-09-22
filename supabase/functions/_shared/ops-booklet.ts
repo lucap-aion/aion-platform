@@ -23,7 +23,20 @@
 export type Slide =
   | { kind: "section"; number: string; title: string; lead?: string }
   | { kind: "bullets"; title: string; lead?: string; bullets: string[] }
-  | { kind: "steps"; title: string; lead?: string; steps: string[] }
+  | {
+      kind: "steps"; title: string; lead?: string; steps: string[];
+      /**
+       * The number the first step on this slide carries.
+       *
+       * A flow of fourteen steps does not fit on one slide, so it is cut in two — and the
+       * second half was drawn starting at 1 again, which says there are two flows of eight
+       * and six rather than one of fourteen. "Slide 4 should be 2/2 and the numbers should
+       * start at 9."
+       */
+      start?: number;
+      /** "2 of 2", for a flow that runs over more than one slide. */
+      part?: { of: number; index: number };
+    }
   | { kind: "table"; title: string; lead?: string; head: string[]; rows: string[][] }
   | { kind: "callout"; title: string; label: string; body: string };
 
@@ -88,6 +101,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
     // ── 2 ────────────────────────────────────────────────────────────────────
     {
       kind: "steps", title: "2. Attivazione della polizza",
+      part: { index: 1, of: 2 },
       lead: "Il processo di registrazione del cliente e attivazione della copertura assicurativa è il punto di partenza del servizio.",
       steps: [
         "Chubb e AION concordano i campi obbligatori dei bordereaux vendite e sinistri",
@@ -101,7 +115,11 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       ],
     },
     {
-      kind: "steps", title: "Attivazione della polizza — dal nono passo",
+      // Same title as the slide before it, because it is the same flow: the badge and the
+      // ninth step say where the reader is, and "— dal nono passo" in a heading was the
+      // renderer's job being done in the copy.
+      kind: "steps", title: "2. Attivazione della polizza",
+      part: { index: 2, of: 2 }, start: 9,
       steps: [
         "AION invia una email di verifica dell'indirizzo email",
         "Il cliente apre la email e attiva il proprio account",
@@ -115,6 +133,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
     // ── 3 ────────────────────────────────────────────────────────────────────
     {
       kind: "steps", title: "3. Apertura e gestione dei sinistri",
+      part: { index: 1, of: 2 },
       lead:
         `Il cliente può aprire un sinistro per furto o danno accidentale di un prodotto assicurato. ` +
         `${B} gestisce la relazione con il cliente in modo diretto, supportato dalla piattaforma AION ` +
@@ -130,7 +149,8 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       ],
     },
     {
-      kind: "steps", title: "Gestione dei sinistri — dal settimo passo",
+      kind: "steps", title: "3. Apertura e gestione dei sinistri",
+      part: { index: 2, of: 2 }, start: 7,
       steps: [
         `${B} approva o rigetta il sinistro`,
         "Il cliente riceve una risposta sul sinistro via email entro 15 giorni lavorativi dall'apertura",

@@ -26,6 +26,10 @@ export const INK = "262626";
 export const GOLD = "CB9D4D";
 export const MUTED = "6B6257";
 export const RULE = "E3DACB";
+/** The gold at the weight a ground can carry — the number column's rail. */
+export const NUMBER_RAIL = "F7F1E6";
+/** Every other row of a table, a shade off the cream. */
+export const BAND = "F3EEE6";
 export const HEADING = "Georgia";
 export const BODY = "Montserrat";
 
@@ -102,19 +106,24 @@ function bulletsSlide(s: Extract<Slide, { kind: "bullets" }>): string {
  * this draws whatever it is given and shrinks the type rather than running off the page.
  */
 function stepsSlide(s: Extract<Slide, { kind: "steps" }>): string {
-  const top = header(s.title, s.lead);
+  const top = header(s.title, s.lead, s.part);
   const h = FLOOR - top.y;
   const n = Math.max(1, s.steps.length);
   const rowH = Math.floor(h / n);
   // Eight steps at 15pt is comfortable; twelve is not, so the type follows the count rather
   // than the last rows sliding under the wordmark.
   const size = n <= 6 ? 1500 : n <= 9 ? 1300 : 1150;
+  // Where this slide's numbering picks up. A flow cut across two slides is still one flow,
+  // and the second slide's first step is the ninth, not the first.
+  const from = Math.max(1, Math.round(s.start ?? 1));
 
   const rows = s.steps.map((text, i) => ({
     height: rowH,
     cells: [
-      // The number a size up from its step: it is the thing being pointed at in a meeting.
-    { paras: [para(String(i + 1), { face: HEADING, size: size + 200, color: GOLD, align: "ctr" })], fill: null, align: "ctr" as const },
+      // The number a size up from its step, on a pale gold ground that runs down the slide as
+      // one rail: it is the thing being pointed at in a meeting, and the rail is what makes a
+      // list of sentences read as a sequence.
+    { paras: [para(String(from + i), { face: HEADING, size: size + 200, color: GOLD, align: "ctr" })], fill: NUMBER_RAIL, align: "ctr" as const },
       { paras: [para(text, { face: BODY, size, color: INK })], fill: null, align: "ctr" as const },
     ],
   }));
@@ -147,7 +156,11 @@ function tableSlide(s: Extract<Slide, { kind: "table" }>): string {
         fill: INK, align: "ctr" as const,
       })),
     },
-    ...s.rows.map((r) => ({
+    // Alternate rows carry a ground barely off the cream. On a table of four actors with a
+    // paragraph each, the eye loses which responsibilities belong to which row halfway
+    // across the slide; two shades hold the line without drawing a grid. A two-panel slide
+    // keeps its plain ground — banding two panels reads as one of them being different.
+    ...s.rows.map((r, row) => ({
       height: rowH,
       cells: r.map((t, i) => ({
         paras: [para(t, {
@@ -156,7 +169,8 @@ function tableSlide(s: Extract<Slide, { kind: "table" }>): string {
           bold: !panels && i === 0 && cols > 1,
           lineSpacing: panels ? 140 : undefined,
         })],
-        fill: null, align: panels ? ("t" as const) : ("ctr" as const),
+        fill: !panels && row % 2 === 1 ? BAND : null,
+        align: panels ? ("t" as const) : ("ctr" as const),
       })),
     })),
   ];
@@ -183,11 +197,35 @@ function calloutSlide(s: Extract<Slide, { kind: "callout" }>): string {
 
 // ── Pieces ──────────────────────────────────────────────────────────────────────────────
 
-/** Title, optional standfirst, and where the content may start underneath them. */
-function header(title: string, lead?: string): { xml: string; y: number } {
-  let xml = textBox(10, M, TITLE_Y, CONTENT_W, TITLE_H, [
-    para(title, { face: HEADING, size: 2600, color: INK }),
+/**
+ * Title, optional standfirst, and where the content may start underneath them.
+ *
+ * `part` draws the "2 / 2" a flow carries when it runs over two slides — opposite the title,
+ * on the same baseline, in the gold. It replaces a heading that said "— dal nono passo": a
+ * reader who has to be told in prose which half of a flow they are looking at is a reader
+ * the deck is not helping.
+ */
+function header(
+  title: string, lead?: string, part?: { of: number; index: number },
+): { xml: string; y: number } {
+  const badge = part && part.of > 1 ? `${part.index} / ${part.of}` : null;
+  // The booklet numbers its sections in the heading itself — "2. Attivazione della polizza".
+  // Setting that number in the gold makes the six sections findable by eye at the back of a
+  // room, and costs nothing: it is the same string, in two runs.
+  const numbered = /^(\d+\.)\s+(\S[\s\S]*)$/.exec(title);
+  let xml = textBox(10, M, TITLE_Y, badge ? CONTENT_W - 900000 : CONTENT_W, TITLE_H, [
+    numbered
+      ? para(numbered[2], {
+          face: HEADING, size: 2600, color: INK,
+          accent: { text: `${numbered[1]} `, color: GOLD },
+        })
+      : para(title, { face: HEADING, size: 2600, color: INK }),
   ]);
+  if (badge) {
+    xml += textBox(13, M + CONTENT_W - 900000, TITLE_Y + 70000, 900000, 400000, [
+      para(badge, { face: BODY, size: 1400, color: GOLD, align: "r" }),
+    ]);
+  }
   xml += rect(11, M, TITLE_Y + TITLE_H - 40000, 520000, 19050, GOLD);
   let y = TITLE_Y + TITLE_H + 200000;
   if (lead) {
@@ -208,6 +246,8 @@ type ParaOpts = {
   /** Percent, e.g. 140 for 1.4 lines. */
   lineSpacing?: number;
   spaceBefore?: number;
+  /** A run set before the text, in another colour — the gold section number on a heading. */
+  accent?: { text: string; color: string };
 };
 
 function para(text: string, o: ParaOpts): string {
@@ -223,11 +263,14 @@ function para(text: string, o: ParaOpts): string {
   const bullet = o.bullet
     ? `<a:buFont typeface="Arial"/><a:buChar char="—"/>`
     : `<a:buNone/>`;
-  return `<a:p><a:pPr${props}>${spacing}${bullet}</a:pPr>` +
+  const run = (t: string, color: string) =>
     `<a:r><a:rPr lang="it-IT" sz="${o.size}"${o.bold ? ` b="1"` : ""} dirty="0">` +
-    `<a:solidFill><a:srgbClr val="${o.color}"/></a:solidFill>` +
+    `<a:solidFill><a:srgbClr val="${color}"/></a:solidFill>` +
     `<a:latin typeface="${o.face}"/><a:cs typeface="${o.face}"/></a:rPr>` +
-    `<a:t>${escapeXml(text)}</a:t></a:r></a:p>`;
+    `<a:t>${escapeXml(t)}</a:t></a:r>`;
+  return `<a:p><a:pPr${props}>${spacing}${bullet}</a:pPr>` +
+    (o.accent ? run(o.accent.text, o.accent.color) : "") +
+    run(text, o.color) + `</a:p>`;
 }
 
 function textBox(id: number, x: number, y: number, cx: number, cy: number, paras: string[]): string {

@@ -750,11 +750,17 @@ type Placement = Box & { cross?: Box };
  * "Smaller" is capped on WIDTH as well as height. At 55% of AION's height a 6.4:1 wordmark is
  * exactly as wide as AION, which does not read as smaller at all; the width cap is what makes
  * the two legible as a house and the house it is for.
+ *
+ * Both caps came down — 55/60 to 40/40 — because "smaller" was still the note on the second
+ * look. A wordmark is read at its WIDTH, and 60% of the width of a mark that fills a quarter
+ * of the cover is still a large logo: on Prada's cover the two marks read as a pair of
+ * sponsors rather than as a deck by one house for another. At 40% of both the brand's mark
+ * sits under AION's as an attribution, which is what the title slide is saying.
  */
 function underTheMark(anchor: Box, aspect: number, slideXml: string): Placement | null {
   const cy = Math.min(
-    Math.round(anchor.cy * 0.55),
-    Math.round((anchor.cx * 0.6) / aspect),
+    Math.round(anchor.cy * 0.4),
+    Math.round((anchor.cx * 0.4) / aspect),
   );
   const cx = Math.round(cy * aspect);
   if (cy < 40000) return null;   // too small to read; better none than a smudge
