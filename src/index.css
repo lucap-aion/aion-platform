@@ -128,3 +128,33 @@
     .tap-target::after { content: none; }
   }
 }
+
+@layer base {
+  /* Why the portal looks "slightly zoomed in" on a phone, and stays that way.
+   *
+   * Safari on iOS zooms the page in when a form field smaller than 16px takes focus, and
+   * it does not zoom back out when the keyboard goes away: the page is left at about 1.15x
+   * until the reader pinches out. Tap the assistant's message box once — text-sm, 14px —
+   * and every screen after it reads as a site that was never sized for a phone.
+   *
+   * shadcn's own Input already ships text-base with md:text-sm for exactly this reason.
+   * Nothing else did: the assistant composer, the escalation note, the search boxes and
+   * every hand-rolled field in the admin are 14px or 12px. Rather than chase them one at a
+   * time, a coarse pointer gets 16px on every field that holds text — the size at which
+   * iOS leaves the page alone, and the size a thumb-typed message should be anyway.
+   *
+   * Scoped to the ELEMENT, not to a class, so a field added tomorrow is covered too. A
+   * mouse is unaffected: `pointer: coarse` is a finger or a stylus.
+   *
+   * The `:not(...)` on each line is carrying weight, not filtering: a bare `textarea` is
+   * one element and loses to `.text-sm`, an attribute test makes it an element AND an
+   * attribute, which wins. Without it this rule is written, shipped, and silently does
+   * nothing on the one field — the assistant's composer — it was written for. */
+  @media (pointer: coarse) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    select:not([hidden]),
+    textarea:not([hidden]) {
+      font-size: 16px;
+    }
+  }
+}

@@ -16,11 +16,12 @@ import AssistantMarkdown from "@/components/assistant/AssistantMarkdown";
 import {
   ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
   Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown, LifeBuoy, Check,
-  Mic, Square, CalendarDays,
+  Mic, Square, CalendarDays, History,
 } from "lucide-react";
 import { startRecording, isRecordingSupported, extensionFor, type Recorder } from "@/lib/speech";
 import VisitCard, { type Visit } from "@/components/visits/VisitCard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { sendEmail } from "@/utils/sendEmail";
@@ -287,6 +288,8 @@ export default function BrandAssistant() {
 
   const [configOpen, setConfigOpen] = useState(false);
   const [chats, setChats] = useState<ChatSummary[]>([]);
+  // The conversation list is a drawer below `md`, where there is no room for a column.
+  const [chatsOpen, setChatsOpen] = useState(false);
   // Start null (not urlChatId) so the [urlChatId] effect actually fires loadChat
   // on a fresh page load — otherwise chatId already equals urlChatId and the
   // chat never loads (blank on reload).
@@ -930,50 +933,30 @@ export default function BrandAssistant() {
     <>
     <div className="flex h-full min-h-0 overflow-hidden">
       <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card/40 md:flex">
-        <div className="border-b border-border p-3">
-          <button
-            type="button"
-            onClick={startNewChat}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-          >
-            <MessageSquarePlus className="h-4 w-4" />
-            {tt(locale, "New chat", "Nuova chat")}
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          {chats.length === 0 ? (
-            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-              {tt(locale, "No conversations yet", "Nessuna conversazione")}
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-0.5">
-              {chats.map((c) => (
-                <li key={c.id}>
-                  <div
-                    onClick={() => selectChat(c.id)}
-                    className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
-                      c.id === chatId ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
-                    }`}
-                  >
-                    <div className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate text-sm font-medium">{c.title}</span>
-                      <span className="text-[11px] text-muted-foreground">{formatRelative(c.updated_at)}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); void deleteChat(c.id); }}
-                      className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                      aria-label={tt(locale, "Delete chat", "Elimina chat")}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <ChatList
+          locale={locale} chats={chats} chatId={chatId}
+          onNew={startNewChat} onSelect={selectChat} onDelete={deleteChat}
+        />
       </aside>
+
+      {/* The same list on a phone.
+        *
+        * It used to be the `hidden md:flex` above and nothing else, so on a phone — which is
+        * where a sales associate actually uses this — there was no way to reach a past
+        * conversation, or to see that they were kept at all. "Where do I see my conversations
+        * with the assistant? I don't see them." The drawer is the same component, not a
+        * second implementation of it, so a change to one is a change to both. */}
+      <Sheet open={chatsOpen} onOpenChange={setChatsOpen}>
+        <SheetContent side="left" className="w-[18rem] p-0 md:hidden">
+          <SheetTitle className="sr-only">{tt(locale, "Conversations", "Conversazioni")}</SheetTitle>
+          <ChatList
+            locale={locale} chats={chats} chatId={chatId}
+            onNew={() => { startNewChat(); setChatsOpen(false); }}
+            onSelect={(id) => { selectChat(id); setChatsOpen(false); }}
+            onDelete={deleteChat}
+          />
+        </SheetContent>
+      </Sheet>
 
       <div
         className="relative flex min-w-0 min-h-0 flex-1 flex-col"
@@ -990,9 +973,19 @@ export default function BrandAssistant() {
             </div>
           </div>
         )}
-        <div className="border-b border-border px-6 py-4">
+        <div className="border-b border-border px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+            {/* Below md the conversation column is a drawer, and this is its handle. */}
+            <button
+              type="button"
+              onClick={() => setChatsOpen(true)}
+              className="tap-target -ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+              aria-label={tt(locale, "Conversations", "Conversazioni")}
+              title={tt(locale, "Conversations", "Conversazioni")}
+            >
+              <History className="h-4 w-4" />
+            </button>
+            <div className="hidden h-9 w-9 items-center justify-center rounded-lg bg-primary/10 sm:flex">
               <Sparkles className="h-5 w-5 text-primary" />
             </div>
             <div>
@@ -2004,3 +1997,69 @@ const AssistantConfigDrawer = ({
     </div>
   );
 };
+
+/**
+ * The conversation list.
+ *
+ * One component, two frames: the fixed column on a desktop and the drawer on a phone. It
+ * was markup inside the column, which is why the phone had no list at all.
+ */
+function ChatList({
+  locale, chats, chatId, onNew, onSelect, onDelete,
+}: {
+  locale: string;
+  chats: ChatSummary[];
+  chatId: string | null;
+  onNew: () => void;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void | Promise<void>;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="border-b border-border p-3">
+        <button
+          type="button"
+          onClick={onNew}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          <MessageSquarePlus className="h-4 w-4" />
+          {tt(locale, "New chat", "Nuova chat")}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-2">
+        {chats.length === 0 ? (
+          <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+            {tt(locale, "No conversations yet", "Nessuna conversazione")}
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-0.5">
+            {chats.map((c) => (
+              <li key={c.id}>
+                <div
+                  onClick={() => onSelect(c.id)}
+                  className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
+                    c.id === chatId ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
+                  }`}
+                >
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium">{c.title}</span>
+                    <span className="text-[11px] text-muted-foreground">{formatRelative(c.updated_at)}</span>
+                  </div>
+                  {/* Always visible on a phone: `group-hover` is a thing a thumb never does. */}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); void onDelete(c.id); }}
+                    className="tap-target shrink-0 rounded p-1 text-muted-foreground opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive md:opacity-0 md:group-hover:opacity-100"
+                    aria-label={tt(locale, "Delete chat", "Elimina chat")}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
