@@ -38,8 +38,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import JSZip from "npm:jszip@3.10.1";
 import { focusMatcher } from "../_shared/brand-defaults.ts";
 import { sniffFormat, imageSize, EMBEDDABLE, MEDIA_TYPES } from "../_shared/image-bytes.ts";
-import { findBrandPhotos, type FoundPhoto, type PhotoRole } from "../_shared/brand-photos.ts";
-import { fitPictureInSlide, PACKSHOT, PHOTOGRAPH } from "../_shared/picture-fit.ts";
+import { findBrandPhotos, pickForFrame, type FoundPhoto, type PhotoRole } from "../_shared/brand-photos.ts";
+import { fitPictureInSlide, frameOf, PACKSHOT, PHOTOGRAPH } from "../_shared/picture-fit.ts";
 import { fetchSite } from "../_shared/fetch-site.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -112,6 +112,17 @@ Deno.serve(async (req: Request) => {
 
   const slots = (tpl.slots ?? []) as Slot[];
   const textSlots = (tpl.text_slots ?? []) as TextSlot[];
+
+  // ── The template, opened before anything is chosen ─────────────────────────
+  // The frames are in the file, and which photograph belongs in a slot depends on the shape
+  // of the frame it has to fill: a 3.3:1 site banner is the wrong picture for slide 10's
+  // near-square tile however good it is, because the best that can be done with it there is
+  // to shrink the frame around it and leave a gap. So the deck is opened first and the slots
+  // are measured, and the picker below is told what shape each one wants.
+  const { data: file, error: dlErr } = await admin.storage.from(BUCKET).download(tpl.storage_path);
+  if (dlErr || !file) return json({ error: `template not readable: ${dlErr?.message ?? "missing"}` }, 500);
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const frames = await slotFrames(zip, slots);
 
   // ── The imagery brief ──────────────────────────────────────────────────────
   //
@@ -215,18 +226,20 @@ Deno.serve(async (req: Request) => {
   // Each slot takes a different picture: the same portrait three times is worse than two
   // slots left as the template had them.
   const takenPhotos = new Set<string>();
-  const nextPhoto = (role: PhotoRole): FoundPhoto | null =>
-    found.find((p) => p.role === role && !takenPhotos.has(p.url)) ?? null;
+  // Not simply the best photograph left, but the best one for the shape of THIS slot's frame
+  // — see pickForFrame. A slot whose frame could not be measured falls back to the ranking.
+  const nextPhoto = (role: PhotoRole, frameAspect?: number): FoundPhoto | null =>
+    pickForFrame(found.filter((p) => p.role === role && !takenPhotos.has(p.url)), frameAspect);
 
   let nextProduct = 0;
   const unfilled: string[] = [];
-  const plan = slots.map((s) => {
+  const plan = slots.map((s, slotIndex) => {
     const role = (s.role ?? "product").toLowerCase();
     const explicit = given.get(s.slide);
     if (explicit) return { ...s, image_url: explicit, piece_name: null, from: "given" };
 
     if (role === "store" || role === "ambassador" || role === "lifestyle") {
-      const photo = nextPhoto(role);
+      const photo = nextPhoto(role, frames.get(slotIndex));
       if (photo) {
         takenPhotos.add(photo.url);
         return { ...s, image_url: photo.url, piece_name: null, from: "site", source_page: photo.page };
@@ -265,10 +278,6 @@ Deno.serve(async (req: Request) => {
   if (body.dry_run === true) return json({ ok: true, brand: brand.name, categories: wanted, plan, unfilled });
 
   // ── Rewrite the deck ───────────────────────────────────────────────────────
-  const { data: file, error: dlErr } = await admin.storage.from(BUCKET).download(tpl.storage_path);
-  if (dlErr || !file) return json({ error: `template not readable: ${dlErr?.message ?? "missing"}` }, 500);
-
-  const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const filled: {
     media: string; slide: number; role: string; from: string;
     source_page: string | null; image_url: string; bytes: number; fit: string;
@@ -442,6 +451,7 @@ Deno.serve(async (req: Request) => {
     slides_cobranded: cobrand.slides,
     logo_source: cobrand.source,
     anchor_found_by_shape: cobrand.foundByShape,
+    anchor_matched_slides: cobrand.byAnchor,
     text_edits: applied,
     text_unresolved: unresolved,
     storage_path: outPath,
@@ -460,9 +470,15 @@ Deno.serve(async (req: Request) => {
             ? " It used the small logo — usually the monogram rather than the wordmark, because the main logo is a vector. A wordmark reads better in a lockup: put a PNG or JPEG one on the brand record and rebuild."
             : " Check it reads well at that size.") +
           (cobrand.skipped.length ? ` Not placed on ${cobrand.skipped.join(", ")} — no room beside the mark there, so do those by hand.` : "") +
-          (cobrand.foundByShape
-            ? ` On ${cobrand.foundByShape} of them the AION mark was found by its shape rather than by the template's logo_anchor, which means the anchor is stale — check deck_templates.logo_anchor against the media in this template.`
-            : "")
+          // The old wording here read every shape match as evidence the anchor was stale, and
+          // said so on every build: the cover's mark is a different, larger part BY DESIGN and
+          // can never match the anchor, so the warning fired forever and meant nothing. Only
+          // an anchor that matches NO slide is actually stale.
+          (cobrand.byAnchor === 0
+            ? ` The template's logo_anchor (${tpl.logo_anchor ?? "unset"}) matched no slide — every mark was identified by its shape and proportions instead. That anchor is stale: check it against the media in this template.`
+            : cobrand.foundByShape
+              ? ` On ${cobrand.foundByShape} of them the mark was identified by its proportions rather than by logo_anchor, which is normal — a deck stores the same wordmark at more than one size and the anchor can only name one of them.`
+              : "")
         : `NO BRAND LOGO on any slide — ${cobrand.reason}. The deck carries only AION's mark, which is most of what makes it look generic. Put a PNG or JPEG logo on the brand record and rebuild.`,
       wanted.length
         ? `Product slots were filled from ${wanted.join(", ")}.` +
@@ -493,6 +509,30 @@ Deno.serve(async (req: Request) => {
   });
 });
 
+/**
+ * The shape of the frame each slot has to fill, by slot index.
+ *
+ * A slot names a media part; the media part is embedded by a picture; the picture has a
+ * frame. Slots whose frame cannot be read are simply absent — the picker then falls back to
+ * the ranking, which is what it did for every slot before.
+ */
+async function slotFrames(zip: JSZip, slots: Slot[]): Promise<Map<number, number>> {
+  const aspects = new Map<number, number>();
+  for (const [i, s] of slots.entries()) {
+    const name = s.media.replace("ppt/media/", "");
+    const rels = await zip.file(`ppt/slides/_rels/slide${s.slide}.xml.rels`)?.async("string");
+    const xml = await zip.file(`ppt/slides/slide${s.slide}.xml`)?.async("string");
+    if (!rels || !xml) continue;
+    const relId = new RegExp(`Id="([^"]+)"[^>]*Target="[^"]*${name.replace(".", "\\.")}"`).exec(rels)?.[1]
+      ?? new RegExp(`Target="[^"]*${name.replace(".", "\\.")}"[^>]*Id="([^"]+)"`).exec(rels)?.[1];
+    if (!relId) continue;
+    const pic = (xml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) ?? []).find((p) => p.includes(`r:embed="${relId}"`));
+    const frame = pic ? frameOf(pic) : null;
+    if (frame && frame.cy > 0) aspects.set(i, frame.cx / frame.cy);
+  }
+  return aspects;
+}
+
 // Put the brand's logo with the AION wordmark, as one lockup, on every slide that has one.
 //
 // Anchored off the AION mark itself: find the picture that embeds the anchor media on a
@@ -515,7 +555,10 @@ Deno.serve(async (req: Request) => {
 // logo at all.
 async function coBrandSlides(
   zip: JSZip, anchorMedia: string, brand: Record<string, unknown>, brandId: number,
-): Promise<{ slides: number; source: string; reason: string; skipped: string[]; foundByShape: number }> {
+): Promise<{
+  slides: number; source: string; reason: string; skipped: string[];
+  foundByShape: number; byAnchor: number;
+}> {
   const candidates: [string, unknown][] = [["logo_big", brand.logo_big], ["logo_small", brand.logo_small]];
   let logo: { bytes: Uint8Array; ext: string; w: number; h: number } | null = null;
   let source = "";
@@ -535,7 +578,7 @@ async function coBrandSlides(
     if (!size) { reason = `${field} is a ${got.image.ext.toUpperCase()} whose dimensions could not be read`; continue; }
     logo = { ...got.image, ...size }; source = field; break;
   }
-  if (!logo) return { slides: 0, source: "", reason, skipped: [], foundByShape: 0 };
+  if (!logo) return { slides: 0, source: "", reason, skipped: [], foundByShape: 0, byAnchor: 0 };
 
   const anchorName = anchorMedia.replace("ppt/media/", "");
   const logoName = `brand${brandId}_logo.${logo.ext}`;
@@ -543,7 +586,33 @@ async function coBrandSlides(
   zip.file(`ppt/media/${logoName}`, logo.bytes);
   const aspect = logo.w / logo.h;
 
+  // The mark's own proportions, read off the part `logo_anchor` names.
+  //
+  // One deck stores the SAME wordmark several times: this template has it at 1197×344 on the
+  // cover, 512×147 in the corner of ten slides and 66×19 on the eleventh — three parts,
+  // three names, one mark, all of them 3.48:1. `logo_anchor` can only name one of them, so
+  // the other two used to be matched on placement alone ("wide, short, bottom-left") and
+  // reported as evidence the anchor had gone stale, which it had not. Checking a
+  // shape-matched picture against the anchor's own aspect ratio corroborates it as the same
+  // wordmark rather than some other wide picture that happens to sit in the margin.
+  const anchorBytes = await zip.file(`ppt/media/${anchorName}`)?.async("uint8array");
+  const anchorAspect = anchorBytes ? (imageSize(anchorBytes) ?? null) : null;
+  const markAspect = anchorAspect ? anchorAspect.w / anchorAspect.h : null;
+  const mediaAspect = new Map<string, number | null>();
+  const isTheMark = async (target: string): Promise<boolean> => {
+    if (markAspect === null) return true;   // nothing to corroborate against; trust the shape
+    const name = target.replace(/^.*\//, "");
+    if (!mediaAspect.has(name)) {
+      const b = await zip.file(`ppt/media/${name}`)?.async("uint8array");
+      const size = b ? imageSize(b) : null;
+      mediaAspect.set(name, size ? size.w / size.h : null);
+    }
+    const a = mediaAspect.get(name);
+    return a !== null && a !== undefined && Math.abs(a / markAspect - 1) <= 0.03;
+  };
+
   let placed = 0;
+  let byAnchor = 0;
   let foundByShape = 0;
   const skipped: string[] = [];
   for (let n = 1; n <= 60; n++) {
@@ -559,8 +628,9 @@ async function coBrandSlides(
     const anchorRel = new RegExp(`Id="([^"]+)"[^>]*Target="[^"]*${anchorName.replace(".", "\\.")}"`).exec(rels)
       ?? new RegExp(`Target="[^"]*${anchorName.replace(".", "\\.")}"[^>]*Id="([^"]+)"`).exec(rels);
     let pic = anchorRel ? pics.find((p) => p.includes(`r:embed="${anchorRel[1]}"`)) : undefined;
+    if (pic) byAnchor++;
 
-    // Failing that, by its SHAPE.
+    // Failing that, by its SHAPE — corroborated by its proportions.
     //
     // `logo_anchor` names a media part — "ppt/media/image2.png" — and a media part's name is
     // an accident of whichever deck was uploaded. Swap the teaser for a new version and every
@@ -570,8 +640,18 @@ async function coBrandSlides(
     //
     // A wordmark in the corner of a slide is recognisable without knowing its name: it is
     // wide, it is short, and it sits in the bottom margin. That is a description of the thing
-    // rather than of the file it happens to live in, so it survives the swap.
-    if (!pic) { pic = pics.find(looksLikeCornerMark); if (pic) foundByShape++; }
+    // rather than of the file it happens to live in, so it survives the swap. What the
+    // placement alone cannot tell you is whether the wide short thing in the margin is the
+    // MARK, so the candidate's aspect ratio is checked against the anchor's before it is
+    // accepted: the same wordmark at another size still matches, a stray banner does not.
+    if (!pic) {
+      for (const p of pics.filter(looksLikeCornerMark)) {
+        const embed = /r:embed="([^"]+)"/.exec(p)?.[1];
+        const target = embed ? new RegExp(`Id="${embed}"[^>]*Target="([^"]+)"`).exec(rels)?.[1] : null;
+        if (target && !await isTheMark(target)) continue;
+        pic = p; foundByShape++; break;
+      }
+    }
 
     // The title slide carries a different mark: AION large and centred, not small in the
     // corner — a separate media part, so the anchor never matches there and neither does the
@@ -605,7 +685,7 @@ async function coBrandSlides(
     placed++;
   }
   return {
-    slides: placed, source, skipped, foundByShape,
+    slides: placed, source, skipped, foundByShape, byAnchor,
     reason: placed ? "" : "no slide carries the AION wordmark to place it against",
   };
 }

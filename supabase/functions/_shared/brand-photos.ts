@@ -289,6 +289,31 @@ export async function findBrandPhotos(opts: {
   return { photos, notes };
 }
 
+/**
+ * Which of the photographs still going spare belongs in a frame of this shape.
+ *
+ * `findBrandPhotos` ranks by megapixels, which is a good proxy for "the editorial shot rather
+ * than a thumbnail of it" and a bad one for "belongs in THIS frame". On Prada's deck a 3.3:1
+ * banner off the fashion-shows page outscored every portrait on the site for slide 10's
+ * 1.11:1 tile, and there is nothing good to do with it there: crop two thirds of its width
+ * away, or shrink the frame and leave a letterbox in a row of three full tiles.
+ *
+ * So the score is multiplied by how well the two shapes agree, squared — width a frame cannot
+ * use costs a picture more than its pixels win it. Squared rather than linear because a
+ * banner is otherwise still ahead: at 0.34 agreement a 2.7MP banner beats a 1.9MP portrait
+ * on the straight product and loses on this one.
+ */
+export function pickForFrame(free: FoundPhoto[], frameAspect?: number): FoundPhoto | null {
+  if (!free.length) return null;
+  if (!frameAspect || frameAspect <= 0) return free[0];   // already sorted, best first
+  const fitted = (p: FoundPhoto) => {
+    if (!(p.width > 0 && p.height > 0)) return 0;
+    const a = p.width / p.height;
+    return p.score * (Math.min(a, frameAspect) / Math.max(a, frameAspect)) ** 2;
+  };
+  return free.reduce((best, p) => (fitted(p) > fitted(best) ? p : best));
+}
+
 function describe(head: Uint8Array): { width: number; height: number; format: string } | null {
   const format = sniffFormat(head);
   if (!format) return null;

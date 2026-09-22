@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  rankPages, imageUrlsFrom, plausiblePhotoUrl, findBrandPhotos,
+  rankPages, imageUrlsFrom, plausiblePhotoUrl, findBrandPhotos, pickForFrame,
 } from "../../supabase/functions/_shared/brand-photos.ts";
 
 // The URLs are real ones out of a crawled site, because the whole module is a bet on how
@@ -170,5 +170,35 @@ describe("finding a house's own photographs", () => {
     });
     expect(photos).toHaveLength(0);
     expect(notes.join(" ")).toMatch(/no page on this site reads as store photography/);
+  });
+});
+
+describe("which photograph belongs in which frame", () => {
+  // The three that were actually on Prada's site when slide 10 came back letterboxed: the
+  // site banner won on pixels, and 1.11:1 is that slot's frame.
+  const BANNER = { url: "b", role: "lifestyle", page: "p", width: 2000, height: 600, format: "jpeg", score: 1.2 + 1 } as const;
+  const PORTRAIT = { url: "p1", role: "lifestyle", page: "p", width: 1200, height: 1500, format: "jpeg", score: 1.8 } as const;
+  const SQUARE = { url: "s", role: "lifestyle", page: "p", width: 900, height: 900, format: "jpeg", score: 0.81 } as const;
+
+  it("passes over the bigger banner for a picture the frame can hold", () => {
+    expect(pickForFrame([BANNER, PORTRAIT, SQUARE], 1.11)?.url).toBe("p1");
+  });
+
+  it("takes the banner when the frame is a banner", () => {
+    expect(pickForFrame([BANNER, PORTRAIT, SQUARE], 3.2)?.url).toBe("b");
+  });
+
+  it("falls back to the ranking when the frame could not be measured", () => {
+    expect(pickForFrame([BANNER, PORTRAIT], undefined)?.url).toBe("b");
+    expect(pickForFrame([BANNER, PORTRAIT], 0)?.url).toBe("b");
+  });
+
+  it("has nothing to give when nothing is left", () => {
+    expect(pickForFrame([], 1.11)).toBeNull();
+  });
+
+  it("ignores a candidate whose dimensions never got read", () => {
+    const unmeasured = { ...PORTRAIT, url: "x", width: 0, height: 0, score: 99 };
+    expect(pickForFrame([unmeasured, SQUARE], 1.11)?.url).toBe("s");
   });
 });
