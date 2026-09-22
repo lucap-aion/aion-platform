@@ -507,6 +507,7 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
                         counts={overview?.counts}
                         demoAllowed={demo?.allowed === true}
                         demoBlockedReason={demo?.reason}
+                        film={links.demo_video ?? null}
                         onChanged={() => void load()}
                       />
                       {/* Where the catalogue comes from — the input the pipeline depends on. */}

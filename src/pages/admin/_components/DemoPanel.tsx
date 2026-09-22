@@ -22,6 +22,9 @@ type PurgePreview = {
   will_keep: Record<string, number>;
 };
 
+/** The finished film, as the cycle's artefact list carries it. */
+type Film = { file_name: string; generated_at: string; download_url: string | null };
+
 type Props = {
   brandId: number;
   brandName: string;
@@ -30,11 +33,13 @@ type Props = {
   counts: Record<string, number> | undefined;
   demoAllowed: boolean;
   demoBlockedReason?: string | null;
+  /** The recorded film, once one exists. Null while there has never been one. */
+  film?: Film | null;
   onChanged: () => void;
 };
 
 export default function DemoPanel({
-  brandId, brandName, stages, counts, demoAllowed, demoBlockedReason, onChanged,
+  brandId, brandName, stages, counts, demoAllowed, demoBlockedReason, film, onChanged,
 }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [avgTicket, setAvgTicket] = useState("");
@@ -75,6 +80,28 @@ export default function DemoPanel({
   // and a video encoder — so this queues the run and the finished film turns up in the
   // brand's files a few minutes later. See build-collateral's record_demo_video.
   const [runUrl, setRunUrl] = useState<string | null>(null);
+  // When this session asked for one, so the panel can tell "a film exists" from "the film
+  // you just asked for has landed", and can stop waiting for it.
+  const [waitingSince, setWaitingSince] = useState<number | null>(null);
+
+  const filmedAt = film?.generated_at ? Date.parse(film.generated_at) : null;
+  const waiting = waitingSince !== null && !(filmedAt && filmedAt > waitingSince);
+
+  // The runner takes a few minutes and posts the film back through an edge function, so
+  // nothing in this tab knows it arrived. The parent polls the overview only while a stage
+  // is running, and recording is not a stage — without this the film is there and the
+  // screen still says it is being made until somebody reloads the page.
+  useEffect(() => {
+    if (!waiting) return;
+    const started = waitingSince!;
+    const t = setInterval(() => {
+      // Twelve minutes is well past a two-minute film on a cold runner; after that the run
+      // has failed and the link to the run is the thing to look at, not this timer.
+      if (Date.now() - started > 12 * 60_000) { setWaitingSince(null); return; }
+      onChanged();
+    }, 20_000);
+    return () => clearInterval(t);
+  }, [waiting, waitingSince, onChanged]);
 
   const recordFilm = async () => {
     setBusy("film");
@@ -87,6 +114,7 @@ export default function DemoPanel({
       const d = data as { ok?: boolean; reason?: string; run_url?: string };
       if (d?.ok === false) throw new Error(d.reason ?? "unknown error");
       setRunUrl(d?.run_url ?? null);
+      setWaitingSince(Date.now());
       toast({
         title: "Recording started",
         description: `A film of ${brandName}'s assistant is being made. It takes a few minutes and lands in this brand's files.`,
@@ -285,7 +313,38 @@ export default function DemoPanel({
               Watch it being made <ExternalLink className="h-3 w-3" />
             </a>
           )}
+          {waiting && (
+            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" /> Recording — the film appears here when it lands.
+            </span>
+          )}
         </div>
+
+        {/* The film itself.
+          *
+          * "I can see the video being built — how do I get to it and play it?" It was posted
+          * back into the brand's artefact list and nothing on this panel said so, and the
+          * artefact list only offers a download: an mp4 saved to Downloads is not a demo you
+          * can put in front of somebody in the next thirty seconds. It plays here. */}
+        {film?.download_url && (
+          <div className="mt-3 space-y-2">
+            <video
+              src={film.download_url}
+              controls
+              playsInline
+              preload="metadata"
+              className="w-full rounded-lg border border-border bg-black"
+            />
+            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <span>Recorded {new Date(film.generated_at).toLocaleString()}</span>
+              <a href={film.download_url} download={film.file_name}
+                className="inline-flex items-center gap-1 text-primary hover:underline">
+                Download the mp4
+              </a>
+              <span>Re-recording replaces this one.</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {accounts && (
