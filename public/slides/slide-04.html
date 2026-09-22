@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AION — Solution</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet" />
+<style>
+
+  /* ── Design Tokens (mirrors index.css) ─────────────────────────── */
+  :root {
+    --bg:           hsl(40, 33%, 96%);
+    --card:         hsl(40, 33%, 99%);
+    --fg:           hsl(30, 10%, 15%);
+    --fg-muted:     hsl(30, 8%,  50%);
+    --gold:         hsl(38, 55%, 55%);
+    --gold-dark:    hsl(38, 60%, 40%);
+    --gold-light:   hsl(38, 45%, 75%);
+    --border:       hsl(38, 25%, 88%);
+    --muted:        hsl(40, 15%, 94%);
+    --radius:       0.75rem;
+    --font-serif:   'Playfair Display', Georgia, serif;
+    --font-sans:    'DM Sans', system-ui, sans-serif;
+    --shadow-sm:    0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.06);
+    --shadow-md:    0 1px 3px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.08), 0 20px 60px rgba(0,0,0,.06);
+    --gold-grad:    linear-gradient(135deg, hsl(38,60%,40%), hsl(38,55%,55%), hsl(38,45%,75%));
+    --bg-grad:      linear-gradient(160deg, hsl(40,33%,98%) 0%, hsl(38,30%,94%) 100%);
+  }
+
+  /* ── Reset ──────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 16px; }
+  body { font-family: var(--font-sans); background: #1a1612; color: var(--fg); }
+  h1,h2,h3,h4,h5,h6 { font-family: var(--font-serif); }
+
+  /* ── Slide Container ─────────────────────────────────────────────── */
+  .deck { position: relative; }
+  .slide { display: flex; width: 100vw; height: 100vh; background: var(--bg-grad); position: relative; overflow: hidden; align-items: center; justify-content: center; }
+  .slide.active { display: flex; }
+
+  /* ── Noise texture overlay ──────────────────────────────────────── */
+  .slide::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 0;
+  }
+
+  /* ── Decorative gold corner accent ──────────────────────────────── */
+  .slide::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 6px; height: 100%;
+    background: var(--gold-grad);
+    z-index: 1;
+  }
+
+  /* ── Slide inner wrapper ─────────────────────────────────────────── */
+  .slide-inner {
+    position: relative; z-index: 2;
+    width: 100%; max-width: 1100px;
+    padding: 60px 80px;
+    display: flex; flex-direction: column; gap: 36px;
+  }
+
+  /* ── Slide header ───────────────────────────────────────────────── */
+  .slide-label {
+    font-family: var(--font-sans);
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--gold-dark);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .slide-label::before {
+    content: '';
+    display: inline-block;
+    width: 24px; height: 1.5px;
+    background: var(--gold-grad);
+  }
+
+  .slide-title {
+    font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+    font-weight: 600;
+    color: var(--fg);
+    line-height: 1.15;
+    max-width: 820px;
+  }
+  .slide-title em { font-style: normal; color: var(--gold-dark); }
+
+  .slide-body { font-size: 1rem; color: var(--fg-muted); line-height: 1.7; max-width: 700px; }
+
+  /* ── Card ────────────────────────────────────────────────────────── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    padding: 28px 32px;
+  }
+  .card-grid { display: grid; gap: 20px; }
+  .card-grid.cols-3 { grid-template-columns: repeat(3,1fr); }
+  .card-grid.cols-2 { grid-template-columns: repeat(2,1fr); }
+
+  .card-icon {
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, hsl(38,45%,94%), hsl(38,35%,88%));
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 14px;
+    font-size: 1.3rem;
+  }
+  .card h4 {
+    font-family: var(--font-serif);
+    font-size: 1.05rem; font-weight: 600;
+    color: var(--fg);
+    margin-bottom: 8px;
+  }
+  .card p { font-size: 0.875rem; color: var(--fg-muted); line-height: 1.6; }
+
+  /* ── Big stat ────────────────────────────────────────────────────── */
+  .big-stat {
+    font-family: var(--font-serif);
+    font-size: clamp(3.5rem, 8vw, 6rem);
+    font-weight: 700;
+    background: var(--gold-grad);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1;
+  }
+  .big-stat-label { font-size: 1rem; color: var(--fg-muted); margin-top: 8px; line-height: 1.5; max-width: 320px; }
+
+  /* ── Two-col layout ──────────────────────────────────────────────── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+  .two-col.narrow-left { grid-template-columns: 2fr 3fr; }
+  .two-col.narrow-right { grid-template-columns: 3fr 2fr; }
+
+  /* ── Gold pill badge ─────────────────────────────────────────────── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: linear-gradient(135deg, hsl(38,45%,94%), hsl(38,35%,90%));
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 14px;
+    font-size: 0.72rem; font-weight: 600;
+    color: var(--gold-dark);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* ── Numbered list ───────────────────────────────────────────────── */
+  .num-list { display: flex; flex-direction: column; gap: 16px; }
+  .num-item { display: flex; gap: 16px; align-items: flex-start; }
+  .num-bubble {
+    flex-shrink: 0;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--gold-grad);
+    color: white;
+    font-family: var(--font-serif);
+    font-size: 0.85rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .num-item-body h4 {
+    font-family: var(--font-serif);
+    font-size: 0.95rem; font-weight: 600; color: var(--fg);
+    margin-bottom: 2px;
+  }
+  .num-item-body p { font-size: 0.82rem; color: var(--fg-muted); line-height: 1.55; }
+
+  /* ── Logo word mark ──────────────────────────────────────────────── */
+  .aion-wordmark {
+    font-family: var(--font-serif);
+    font-size: clamp(5rem, 14vw, 10rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    color: var(--fg);
+  }
+
+  /* ── Cover layout ────────────────────────────────────────────────── */
+  .cover-inner {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    gap: 24px;
+    height: 100%;
+  }
+  .cover-tagline {
+    font-size: 1.1rem; color: var(--fg-muted);
+    letter-spacing: 0.05em;
+  }
+
+  /* ── Divider ─────────────────────────────────────────────────────── */
+  .gold-rule {
+    width: 48px; height: 2px;
+    background: var(--gold-grad);
+    border-radius: 2px;
+  }
+
+  /* ── Flow steps ──────────────────────────────────────────────────── */
+  .flow { display: flex; gap: 0; align-items: stretch; }
+  .flow-step {
+    flex: 1;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 20px;
+    position: relative;
+  }
+  .flow-step + .flow-step { margin-left: -1px; border-radius: 0; }
+  .flow-step:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+  .flow-step:last-child  { border-radius: 0 var(--radius) var(--radius) 0; }
+  .flow-num {
+    font-family: var(--font-serif);
+    font-size: 0.7rem; font-weight: 700;
+    color: var(--gold-dark);
+    background: linear-gradient(135deg,hsl(38,45%,94%),hsl(38,35%,90%));
+    border-radius: 50%;
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 10px;
+  }
+  .flow-step h4 { font-family: var(--font-serif); font-size: 0.88rem; font-weight: 600; margin-bottom: 4px; }
+  .flow-step p  { font-size: 0.78rem; color: var(--fg-muted); line-height: 1.5; }
+
+  /* ── Revenue row ─────────────────────────────────────────────────── */
+  .rev-row {
+    display: grid; grid-template-columns: 160px 1fr 100px;
+    gap: 20px; align-items: center;
+    padding: 18px 24px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+  }
+  .rev-row + .rev-row { margin-top: 12px; }
+  .rev-pill {
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-family: var(--font-sans);
+    font-size: 0.82rem; font-weight: 600;
+    text-align: center;
+  }
+  .rev-pill.dark { background: hsl(30,10%,22%); color: hsl(40,20%,90%); }
+  .rev-pill.light { background: var(--muted); color: var(--fg); border: 1px solid var(--border); }
+  .rev-desc { font-size: 0.83rem; color: var(--fg-muted); line-height: 1.55; }
+  .rev-pct { font-family: var(--font-serif); font-size: 1rem; font-weight: 700; color: var(--gold-dark); text-align: right; }
+
+  /* ── Waterfall bar chart ─────────────────────────────────────────── */
+  .waterfall { display: flex; gap: 16px; align-items: flex-end; height: 200px; }
+  .wf-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .wf-bar {
+    width: 100%; border-radius: 6px 6px 0 0;
+    position: relative;
+  }
+  .wf-bar.pos { background: hsl(30,10%,22%); }
+  .wf-bar.neg { background: repeating-linear-gradient(45deg,hsl(0,65%,72%),hsl(0,65%,72%) 4px,hsl(0,50%,86%) 4px,hsl(0,50%,86%) 8px); border-radius: 0; }
+  .wf-bar.result { background: var(--gold-grad); }
+  .wf-val { font-size: 0.72rem; font-weight: 600; color: var(--fg); }
+  .wf-label { font-size: 0.65rem; color: var(--fg-muted); text-align: center; line-height: 1.3; }
+
+  /* ── TAM circles ─────────────────────────────────────────────────── */
+  .tam-wrap { position: relative; width: 260px; height: 260px; margin: 0 auto; }
+  .tam-circle {
+    position: absolute; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex-direction: column;
+  }
+  .tam-circle.outer { width:260px;height:260px;top:0;left:0; border:2px solid var(--border); background: hsl(38,35%,90%,0.4); }
+  .tam-circle.mid   { width:180px;height:180px;top:40px;left:40px; background: hsl(38,40%,80%,0.6); border:1px solid var(--border); }
+  .tam-circle.inner { width:110px;height:110px;top:75px;left:75px; background: var(--fg); }
+  .tam-txt { font-family: var(--font-serif); font-size:0.78rem;font-weight:700; color:var(--fg); }
+  .tam-txt.light { color:white; }
+  .tam-sub { font-size:0.65rem; color:var(--fg-muted); }
+  .tam-sub.light { color:hsl(40,20%,80%); }
+
+  /* ── Brand logos grid ────────────────────────────────────────────── */
+  .brand-grid {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  }
+  .brand-tag {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-family: var(--font-serif);
+    font-size: 0.82rem; font-weight: 600;
+    color: var(--fg);
+    letter-spacing: 0.06em;
+    box-shadow: var(--shadow-sm);
+  }
+  .brand-tag.launched {
+    border-color: var(--gold);
+    background: linear-gradient(135deg,hsl(38,45%,96%),hsl(38,35%,93%));
+    color: var(--gold-dark);
+  }
+
+  /* ── Roadmap ─────────────────────────────────────────────────────── */
+  .roadmap-timeline {
+    position: relative;
+    padding-top: 24px;
+  }
+  .timeline-line {
+    position: absolute;
+    top: 36px; left: 0; right: 0;
+    height: 2px;
+    background: var(--border);
+  }
+  .timeline-phases { display: flex; gap: 0; }
+  .timeline-phase { flex: 1; position: relative; }
+  .timeline-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--gold-grad);
+    position: absolute; top: -5px; left: 0;
+    transform: translateX(-50%);
+    box-shadow: 0 0 0 3px var(--bg);
+  }
+  .timeline-phase-label {
+    font-size: 0.65rem; font-weight: 600; color: var(--gold-dark);
+    text-transform: uppercase; letter-spacing: 0.12em;
+    margin-bottom: 4px;
+  }
+  .timeline-arr {
+    font-family: var(--font-serif);
+    font-size: 1.1rem; font-weight: 700; color: var(--fg);
+    margin-top: 20px;
+  }
+  .timeline-arr span { font-size: 0.72rem; color: var(--fg-muted); font-family: var(--font-sans); font-weight: 400; display: block; }
+  .timeline-features { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+  .timeline-feature {
+    font-size: 0.72rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: var(--fg);
+  }
+  .timeline-feature.highlight {
+    background: hsl(30,10%,22%);
+    color: hsl(40,20%,90%);
+    border-color: transparent;
+  }
+
+  /* ── Team card ───────────────────────────────────────────────────── */
+  .team-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+  .team-card { text-align: center; }
+  .team-avatar {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    background: var(--gold-grad);
+    margin: 0 auto 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-serif);
+    font-size: 1.5rem; font-weight: 700; color: white;
+  }
+  .team-role { font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gold-dark); margin-bottom: 2px; }
+  .team-name { font-family: var(--font-serif); font-size: 1rem; font-weight: 600; color: var(--fg); margin-bottom: 2px; }
+  .team-exp  { font-size: 0.78rem; color: var(--fg-muted); }
+  .team-logos { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 8px; }
+  .team-logo-tag {
+    font-size: 0.65rem; background: var(--muted); border: 1px solid var(--border);
+    border-radius: 4px; padding: 2px 7px; color: var(--fg-muted);
+  }
+
+  /* ── Thank you ───────────────────────────────────────────────────── */
+  .thankyou {
+    background: hsl(30,15%,10%) !important;
+  }
+  .thankyou::after { display: none; }
+  .thankyou .aion-wordmark { color: hsl(40,20%,88%); }
+  .thankyou .cover-tagline { color: hsl(40,10%,60%); }
+  .thankyou .gold-rule { margin: 0 auto; }
+
+  /* ── Source footnote ─────────────────────────────────────────────── */
+  .footnote {
+    position: absolute; bottom: 24px; left: 86px;
+    font-size: 0.6rem; color: var(--fg-muted);
+  }
+
+  /* ── Slide number ────────────────────────────────────────────────── */
+  .slide-num {
+    position: absolute; bottom: 24px; right: 40px;
+    font-size: 0.65rem; color: var(--fg-muted);
+    font-family: var(--font-sans);
+  }
+
+  /* ── AION watermark footer ───────────────────────────────────────── */
+  .aion-footer {
+    position: absolute; bottom: 20px; left: 86px;
+    font-family: var(--font-serif);
+    font-size: 0.85rem; font-weight: 700;
+    color: var(--fg); letter-spacing: 0.06em;
+  }
+
+  /* ── Navigation ──────────────────────────────────────────────────── */
+  .nav {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    display: flex; justify-content: center; align-items: center; gap: 12px;
+    padding: 12px 20px;
+    background: rgba(26,22,18,0.92);
+    backdrop-filter: blur(8px);
+    z-index: 100;
+  }
+  .nav button {
+    background: none; border: 1px solid hsl(38,25%,35%);
+    color: hsl(40,20%,80%); border-radius: 8px;
+    padding: 6px 16px; cursor: pointer;
+    font-family: var(--font-sans); font-size: 0.78rem;
+    transition: all 0.15s;
+  }
+  .nav button:hover { background: hsl(38,55%,55%,0.2); border-color: var(--gold); color: white; }
+  .nav-count { font-size: 0.72rem; color: hsl(40,15%,55%); min-width: 60px; text-align: center; }
+  .progress {
+    position: fixed; top: 0; left: 0; height: 2px;
+    background: var(--gold-grad); z-index: 101;
+    transition: width 0.3s ease;
+  }
+
+  /* ── Print / fullscreen ──────────────────────────────────────────── */
+  
+
+  /* ── Highlight box ───────────────────────────────────────────────── */
+  .highlight-box {
+    border-left: 3px solid var(--gold);
+    background: linear-gradient(135deg, hsl(38,45%,96%), hsl(38,35%,93%));
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 18px 20px;
+  }
+  .highlight-box p { font-size: 0.88rem; color: var(--fg); font-style: italic; line-height: 1.6; }
+  .highlight-box cite { font-size: 0.72rem; color: var(--gold-dark); font-style: normal; display: block; margin-top: 6px; }
+
+  /* ── Coverage grid ───────────────────────────────────────────────── */
+  .coverage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .coverage-item { display: flex; gap: 14px; align-items: flex-start; }
+  .cov-icon { font-size: 1.4rem; flex-shrink: 0; margin-top: 2px; }
+  .cov-title { font-family: var(--font-serif); font-size: 0.9rem; font-weight: 600; color: var(--fg); }
+  .cov-val   { font-size: 0.82rem; color: var(--fg-muted); }
+
+  /* ── Bullet list ─────────────────────────────────────────────────── */
+  .bullet-list { display: flex; flex-direction: column; gap: 12px; }
+  .bullet-item { display: flex; gap: 12px; align-items: flex-start; font-size: 0.88rem; color: var(--fg); line-height: 1.55; }
+  .bullet-item::before {
+    content: '';
+    flex-shrink: 0;
+    margin-top: 8px;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--gold-grad);
+  }
+
+  /* ── Print ── */
+  @media print { .nav, .progress { display:none!important; } @page { size:1280px 720px; margin:0; } }
+  /* ── Nav ── */
+  .nav { position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:12px;padding:12px 20px;background:rgba(26,22,18,.92);backdrop-filter:blur(8px);z-index:100; }
+  .nav-btn { background:none;border:1px solid hsl(38,25%,35%);color:hsl(40,20%,80%);border-radius:8px;padding:6px 16px;cursor:pointer;font-family:var(--font-sans);font-size:.78rem;text-decoration:none;display:inline-block;transition:all .15s; }
+  .nav-btn:hover { background:hsl(38,55%,55%,.2);border-color:var(--gold);color:#fff; }
+  .nav-btn.disabled { opacity:.3;pointer-events:none; }
+  .nav-count { font-size:.72rem;color:hsl(40,15%,55%);min-width:60px;text-align:center; }
+</style>
+</head>
+<body>
+<section class="slide" id="s4">
+    <div class="slide-inner">
+      <div class="slide-label">The solution</div>
+      <h2 class="slide-title">AION is the solution: <em>embedded insurance</em> for luxury products</h2>
+      <div class="two-col">
+        <div class="num-list">
+          <div class="num-item">
+            <div class="num-bubble">B</div>
+            <div class="num-item-body">
+              <h4>Brands build loyalty and collect data</h4>
+              <p>A seamless touchpoint post-purchase that keeps brands relevant and gathers first-party customer data.</p>
+            </div>
+          </div>
+          <div class="num-item">
+            <div class="num-bubble">C</div>
+            <div class="num-item-body">
+              <h4>Customers wear with peace of mind</h4>
+              <p>Global coverage against theft and accidental damage, included in the retail price at checkout.</p>
+            </div>
+          </div>
+          <div class="num-item">
+            <div class="num-bubble">✓</div>
+            <div class="num-item-body">
+              <h4>A true win-win</h4>
+              <p>Brands grow loyalty and revenue. Customers gain protection. Insurers gain distribution.</p>
+            </div>
+          </div>
+        </div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:32px;box-shadow:var(--shadow-md);display:flex;flex-direction:column;gap:16px;">
+          <div style="font-size:0.65rem;font-weight:600;text-transform:uppercase;letter-spacing:0.12em;color:var(--gold-dark);">Items covered by AION Cover</div>
+          <div style="background:var(--muted);border-radius:10px;padding:14px 16px;display:flex;align-items:center;gap:14px;">
+            <div style="width:36px;height:36px;border-radius:50%;background:var(--gold-grad);"></div>
+            <div>
+              <div style="font-family:var(--font-serif);font-size:0.88rem;font-weight:600;">Leather Bag — Bee Pink Gold</div>
+              <div style="font-size:0.72rem;color:var(--fg-muted);">Policy active · Global coverage</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <div style="flex:1;background:hsl(30,10%,22%);color:white;border-radius:8px;padding:10px;text-align:center;font-size:0.75rem;font-weight:600;">Theft claim</div>
+            <div style="flex:1;background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center;font-size:0.75rem;font-weight:600;">Damage claim</div>
+          </div>
+          <div style="font-size:0.65rem;color:var(--fg-muted);text-align:center;">aioncover.com/yourbrand</div>
+        </div>
+      </div>
+    </div>
+    <div class="aion-footer">AION</div>
+    <div class="slide-num">4</div>
+  </section>
+<nav class="nav">
+  <a href="slide-03.html" class="nav-btn">← Prev</a>
+  <span class="nav-count">5 / 18</span>
+  <a href="slide-05.html" class="nav-btn">Next →</a>
+</nav>
+<script>
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); location.href="slide-05.html" }
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')  { e.preventDefault(); location.href="slide-03.html" }
+});
+let tx=0;
+document.addEventListener('touchstart',e=>{tx=e.touches[0].clientX;});
+document.addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-tx;if(Math.abs(dx)>40){if(dx<0)location.href="slide-05.html";if(dx>0)location.href="slide-03.html";}});
+</script>
+</body>
+</html>
