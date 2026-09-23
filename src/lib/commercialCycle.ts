@@ -376,3 +376,30 @@ export function nextAction(facts: CycleFacts): NextAction {
     detail: "Go-live is the next tab.",
   };
 }
+
+// ── The pilot's categories ───────────────────────────────────────────────────
+// `brands.product_focus` is a list of categories, and the data-request workbook carries one
+// segment per category in it, named after it. That was invisible on every screen that could
+// change it: the field was labelled "Product focus" with a placeholder mixing a category and
+// a geography, and the only other place on the record that says "category" is the per-category
+// rate table — so the honest reading of the UI was that the rate table decides the segments.
+// It does not. It prices them.
+//
+// The split MUST match build-collateral's, which is asserted in the tests against a literal
+// copy of the function's line: two files, one rule, and a test that fails when they part.
+const SEGMENT_SPLIT = /[,;/]|•/;
+
+/** The categories in a product focus, in order, as the workbook will name its segments. */
+export function focusCategories(focus: string | null | undefined): string[] {
+  return (focus ?? "").split(SEGMENT_SPLIT).map((c) => c.trim()).filter(Boolean);
+}
+
+/**
+ * How many segments the workbook will have.
+ *
+ * Two when the focus is empty, because a form with one segment on it is a worse starting
+ * point than one with a spare; eight at most, which is where the template's layout stops.
+ */
+export function segmentCount(focus: string | null | undefined): number {
+  return Math.max(1, Math.min(8, focusCategories(focus).length || 2));
+}

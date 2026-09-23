@@ -18,7 +18,8 @@ import BusinessCasePanel, { type StoredBusinessCase } from "./BusinessCasePanel"
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   CYCLE_STEPS, STEP_STATES, PIPELINE_STAGES, stepIsBuilding, nextAction,
-  summarisePipeline, type StageState, type StepNumber, type NextAction,
+  summarisePipeline, focusCategories, segmentCount,
+  type StageState, type StepNumber, type NextAction,
 } from "@/lib/commercialCycle";
 
 // The commercial cycle for one brand.
@@ -470,13 +471,18 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
                           hint={overview?.brand?.address_is_override ? undefined : "from the brand record"}
                         />
                         <PersistedField
-                          label="Product focus" value={focus} onChange={setFocus}
+                          label="Product focus — the pilot's categories" value={focus} onChange={setFocus}
                           onCommit={(v) => void saveBrandField("product_focus", v)}
                           saving={savingField === "product_focus"}
-                          placeholder="High jewellery, EU boutiques"
+                          // Two categories, because that is what this field is: a list of
+                          // them, comma separated. The old placeholder was "High jewellery,
+                          // EU boutiques" — half a category and half a geography — which
+                          // invited a second segment headed "EU boutiques".
+                          placeholder="Bags and leather goods, Accessories"
                         />
                       </div>
                       <p className="text-[11px] text-muted-foreground">Saved to the brand record as you leave each field.</p>
+                      <SegmentPreview focus={focus} />
                       <StepAction
                         produces={step.produces}
                         busy={busy === "step2"}
@@ -639,6 +645,55 @@ function PersistedField({ label, value, onChange, onCommit, saving, placeholder,
       />
       {hint && <span className="normal-case tracking-normal text-[10px]">{hint}</span>}
     </label>
+  );
+}
+
+/**
+ * What the workbook is about to ask for, on the screen that builds it.
+ *
+ * "It's not clear where this pulls the data from. The brand should say 'we are interested in
+ * these categories' … my understanding is that this comes from Record → Per category rates.
+ * But I think I am wrong."
+ *
+ * He had the model exactly right and the field wrong, which is a UI problem and not a
+ * misunderstanding: the segments ARE one per category, the categories ARE typed in by hand —
+ * into the field directly above this, whose label said "Product focus" and whose example
+ * offered a geography as one of them. Nothing on the screen connected the two, and the one
+ * other place on the record that says "category" prices them.
+ *
+ * So the form says what it will produce, by name, before it is built — and says which
+ * neighbour does not decide it.
+ */
+function SegmentPreview({ focus }: { focus: string }) {
+  const categories = focusCategories(focus);
+  const n = segmentCount(focus);
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-3">
+      <p className="text-xs font-medium text-foreground">
+        The data request will carry {n} {n === 1 ? "segment" : "segments"} — one per category above.
+      </p>
+      {categories.length > 0 ? (
+        <ol className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
+          {categories.slice(0, 8).map((c, i) => (
+            <li key={`${c}-${i}`}>Company information — segment {i + 1}: {c}</li>
+          ))}
+        </ol>
+      ) : (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          Product focus is empty, so the workbook goes out with two unnamed segments. Type the
+          categories the pilot covers above, separated by commas.
+        </p>
+      )}
+      {categories.length > 8 && (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          Only the first eight fit the template; the rest are left off.
+        </p>
+      )}
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        Per-category rates on the brand record price each category — they do not decide the
+        segments. Editing the focus here changes the brand record, and with it the intro deck.
+      </p>
+    </div>
   );
 }
 

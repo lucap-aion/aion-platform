@@ -331,13 +331,17 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
               <FormField label="Legal entity" hint="The entity the programme is contracted with, if not the trading name">
                 <Input disabled={ro} value={editing.legal_name ?? ""} onChange={(e) => set("legal_name", e.target.value)} placeholder="Brand Name S.p.A." />
               </FormField>
+              {/* The categories the pilot covers, and the field the data request's segments
+                  come from — one segment per category, named after it. Said here because it
+                  was said nowhere: the label alone reads as positioning, and the only other
+                  place on this record that says "category" is the rate table below. */}
               <FormField
-                label="Product focus"
+                label="Product focus — the pilot's categories"
                 hint={editing.product_focus_manual
-                  ? "Set by hand — onboarding will not overwrite it"
-                  : "Read from the catalogue on every onboarding run; type over it to own it"}
+                  ? "One segment per category on the data request. Set by hand — onboarding will not overwrite it"
+                  : "One segment per category on the data request. Read from the catalogue on every onboarding run; type over it to own it"}
               >
-                <Input disabled={ro} value={editing.product_focus ?? ""} onChange={(e) => set("product_focus", e.target.value)} placeholder="High jewellery, EU boutiques" />
+                <Input disabled={ro} value={editing.product_focus ?? ""} onChange={(e) => set("product_focus", e.target.value)} placeholder="Bags and leather goods, Accessories" />
               </FormField>
             </div>
             {/* The workings, because this line goes out on a data request telling a client

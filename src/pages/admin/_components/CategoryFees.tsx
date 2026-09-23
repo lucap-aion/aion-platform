@@ -148,6 +148,13 @@ export default function CategoryFees({ brandId, readOnly, brandRates }: {
         A category here overrides the house-wide rates above. Leave a cell empty and that
         category keeps the house-wide value — shown greyed as the placeholder.
       </p>
+      {/* Read as the place the pilot's categories are declared, because it is the only table
+          on the record with the word "category" at the top of it. It prices categories; it
+          does not choose them. The data request's segments come from Product focus. */}
+      <p className="text-xs text-muted-foreground">
+        These are prices, not the pilot's perimeter. The categories the data request asks
+        about — one segment each — come from <span className="font-medium text-foreground">Product focus</span> above.
+      </p>
 
       {rows.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">

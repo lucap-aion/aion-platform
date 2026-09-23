@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import {
   CYCLE_STEPS, PIPELINE_STAGES, pipelineStageKeys, DEMO_STAGE_KEYS,
   stageDisplayState, stepIsBuilding, summarisePipeline, stagesForStep, stepStateLabel, isStalled,
-  nextAction, stageByKey,
+  nextAction, stageByKey, focusCategories, segmentCount,
   type StageState, type CycleFacts, type PipelineSummary,
 } from "@/lib/commercialCycle";
 
@@ -357,5 +357,39 @@ describe("what to do next", () => {
     }));
     expect(n.kind).toBe("done");
     expect(n.step).toBeNull();
+  });
+});
+
+describe("the data request's segments", () => {
+  // The admin screen tells somebody, before they press Build, how many segments the workbook
+  // will have and what each one will be called. If it splits the focus differently from the
+  // function that writes the file, it is a confident lie — which is worse than the silence it
+  // replaced, because the silence is what was complained about.
+  it("splits a focus the way build-collateral splits it", () => {
+    const src = readFileSync(resolve(__dirname, "../../supabase/functions/build-collateral/index.ts"), "utf8");
+    // The split is a regex literal with a "/" inside its own character class, so it is
+    // matched up to the ".map" that follows it rather than by looking for a closing slash.
+    const line = /const segmentLabels = focus\.split\((.+?)\)\.map/.exec(src);
+    expect(line, "build-collateral no longer splits the focus where this expects").toBeTruthy();
+
+    const theirs = (focus: string) =>
+      focus.split(new RegExp(line![1].slice(1, -1))).map((c) => c.trim()).filter(Boolean);
+    for (const focus of [
+      "Bags and leather goods, Accessories",
+      "Watches; Jewellery / High jewellery",
+      "  Ready-to-wear ,, Silver and tableware ",
+      "Accessories",
+      "",
+    ]) {
+      expect(focusCategories(focus)).toEqual(theirs(focus));
+    }
+  });
+
+  it("counts them the way the workbook does — two when nothing is set, eight at most", () => {
+    expect(segmentCount(null)).toBe(2);
+    expect(segmentCount("   ")).toBe(2);
+    expect(segmentCount("Accessories")).toBe(1);
+    expect(segmentCount("a, b, c")).toBe(3);
+    expect(segmentCount(Array.from({ length: 12 }, (_, i) => `c${i}`).join(", "))).toBe(8);
   });
 });
