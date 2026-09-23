@@ -45,6 +45,9 @@ const LOCAL_CHROME = [
 ];
 const SIZE = { width: 1440, height: 900 };
 
+/** The composer, which carries the assistant's state on itself. */
+const COMPOSER = "textarea[data-assistant-state]";
+
 /**
  * What the film asks.
  *
@@ -169,10 +172,10 @@ try {
   ]);
 
   // ── The assistant ────────────────────────────────────────────────────────
-  await gotoAndSettle(`${base}/${slug}/assistant`, "textarea");
+  await gotoAndSettle(`${base}/${slug}/assistant`, COMPOSER);
   await page.waitForTimeout(1500);
 
-  const composer = page.locator("textarea").first();
+  const composer = page.locator(COMPOSER).first();
 
   // The brand's own opening prompts, before anything is typed — they disappear with the first
   // answer. Anything long enough to be a question; the screen also carries short UI labels.
@@ -190,16 +193,30 @@ try {
   const questions = asked.length ? pool.slice(0, count) : spread(pool, count);
   console.log(`asking ${questions.length}: ${questions.map((q) => q.slice(0, 48) + "…").join(" / ")}`);
 
-  for (const question of questions) {
-    // The composer is disabled while an answer is generating, so waiting for it to come back
-    // IS waiting for the assistant to finish. Before typing as well as after, because the
-    // first question can arrive while the page is still settling.
+  for (const [i, question] of questions.entries()) {
+    // Never type over an answer that is still arriving. Before typing as well as after,
+    // because the first question can arrive while the page is still settling.
     await waitComposerReady(page);
     await composer.click();
+    // Anything left in the box from a refused send would be prefixed to this question, and
+    // two questions run together is not a question. Nothing normally is; this is the belt.
+    await composer.fill("");
     // Typed, not pasted. The film is about a person using this.
     await composer.type(question, { delay: 18 });
     await page.waitForTimeout(400);
     await composer.press("Enter");
+
+    // Enter is not a send. `send()` returns without doing anything while an answer is still
+    // generating, and it does NOT clear the draft — so an empty composer is the product's own
+    // confirmation that the question was accepted, and a composer that still holds the
+    // question is a question that was thrown away. This is the exact failure that shipped a
+    // three-question film with one answer in it, so it is checked rather than assumed.
+    if (!(await sent(page))) {
+      throw new Error(
+        `question ${i + 1} of ${questions.length} was typed but not accepted — the assistant ` +
+        `was still answering the one before it. The film would have shown one answer.`,
+      );
+    }
 
     // Wait for the answer to finish rather than for a fixed time: these vary from eight
     // seconds to the better part of a minute, and a fixed wait either cuts an answer in half
@@ -208,6 +225,7 @@ try {
     await page.waitForTimeout(1200);
   }
 
+  // The last answer, on screen and readable, before the recording stops.
   await page.waitForTimeout(1500);
 } catch (e) {
   console.error("recording failed:", e instanceof Error ? e.message : e);
@@ -268,35 +286,49 @@ if (process.argv.includes("--upload")) {
 /**
  * Wait until the assistant has finished answering.
  *
- * By asking the product, not by guessing. The composer carries `disabled={loading || …}`, so
- * it is disabled for exactly as long as an answer is being generated and enabled again the
- * moment it is not. That is the authoritative signal and it costs nothing to read.
+ * By asking the product, not by guessing — but by asking it something it has SAID it will
+ * answer. This used to read `textarea.disabled`, on the reasoning that the composer is dead
+ * while an answer generates. That was true when it was written and stopped being true the
+ * day the composer was deliberately left alive so a user could write the next question while
+ * the assistant thinks. Nothing failed: the wait returned instantly, every question after the
+ * first was typed over a streaming answer, `send()` refused it, and the film went out with
+ * one answer in it. So the page now states `data-assistant-state` outright, and this reads
+ * that. A signal that exists for this is a signal that gets changed WITH this.
  *
- * Two earlier versions of this were wrong in opposite directions. Watching the page for a
- * fixed quiet period returned BEFORE the answer began — nine seconds of login, question and
- * the word "Thinking…". Watching for the transcript to stop growing returned in the middle of
- * one, because an answer that stops to query the CRM is quiet for several seconds and then
- * carries on; the next question then hit a disabled composer and the run died with a click
- * timeout after filming two thirds of a film.
+ * Two earlier versions were wrong in opposite directions. Watching the page for a fixed quiet
+ * period returned BEFORE the answer began — nine seconds of login, question and the word
+ * "Thinking…". Watching for the transcript to stop growing returned in the middle of one,
+ * because an answer that stops to query the CRM is quiet for several seconds and then carries
+ * on.
  */
 async function waitComposerReady(page, timeoutMs = 180_000) {
   // The `null` is not decoration. waitForFunction's signature is (fn, arg, options), so
   // passing the options object second makes it the function's ARGUMENT and leaves the
   // timeout at Playwright's 30-second default. That is how a 180-second cap silently became
   // 30, and two of three answers were reported as "did not finish inside the cap".
-  await page.waitForFunction(() => {
-    const t = document.querySelector("textarea");
-    return Boolean(t) && !t.disabled && !t.readOnly;
-  }, null, { timeout: timeoutMs });
+  await page.waitForFunction((sel) => {
+    const t = document.querySelector(sel);
+    // An older build with no state attribute would never match the selector, so this waits
+    // and then times out loudly, rather than racing ahead and filming one answer.
+    return Boolean(t) && t.dataset.assistantState === "idle" && !t.disabled && !t.readOnly;
+  }, COMPOSER, { timeout: timeoutMs });
+}
+
+/** Did the product take the question? An accepted question leaves the box empty. */
+async function sent(page, timeoutMs = 8000) {
+  return await page.waitForFunction((sel) => {
+    const t = document.querySelector(sel);
+    return Boolean(t) && t.value.trim() === "";
+  }, COMPOSER, { timeout: timeoutMs }).then(() => true).catch(() => false);
 }
 
 async function settled(page, { capMs = 180_000, settleMs = 900 } = {}) {
-  // It can take a moment for `loading` to go true after Enter; if it never does, the enabled
-  // wait below returns immediately and the pause covers a short answer.
-  await page.waitForFunction(() => {
-    const t = document.querySelector("textarea");
-    return Boolean(t) && t.disabled;
-  }, null, { timeout: 15_000 }).catch(() => {});
+  // It can take a moment for the state to go to "thinking" after Enter; if it never does, the
+  // idle wait below returns immediately and the pause covers a short answer.
+  await page.waitForFunction((sel) => {
+    const t = document.querySelector(sel);
+    return Boolean(t) && t.dataset.assistantState === "thinking";
+  }, COMPOSER, { timeout: 15_000 }).catch(() => {});
 
   try {
     await waitComposerReady(page, capMs);

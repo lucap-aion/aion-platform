@@ -1169,6 +1169,14 @@ export default function BrandAssistant() {
                 // while loading without clearing the draft, so what's typed
                 // waits in the box and the send button is the thing greyed out.
                 disabled={recording}
+                // Says out loud what `disabled` used to say by accident. The demo
+                // recorder drove this page by waiting for the field to be
+                // re-enabled between questions; the day the field stopped being
+                // disabled, every question after the first was typed over a
+                // still-streaming answer, refused by send(), and left sitting in
+                // the box — a film with one answer in it and nobody the wiser.
+                // A state nobody has to infer cannot rot that way.
+                data-assistant-state={loading ? "thinking" : "idle"}
                 className="min-w-0 flex-1 resize-none rounded-3xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
                 style={{ maxHeight: 160 }}
               />
