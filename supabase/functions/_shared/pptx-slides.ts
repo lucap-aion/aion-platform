@@ -46,8 +46,8 @@ const FLOOR = MARK.y - 120000;
 const TITLE_Y = 620000;
 const TITLE_H = 760000;
 
-/** Where a slide sits in the deck, and whose deck it is — the footer's two facts. */
-export type Page = { index: number; of: number; brand: string };
+/** Whose deck this is, for the footer lockup. */
+export type Page = { brand: string };
 
 /**
  * One slide's XML.
@@ -55,9 +55,8 @@ export type Page = { index: number; of: number; brand: string };
  * `markRelId` is the relationship id of the AION wordmark in this slide's rels, or null when
  * the package has no wordmark to place.
  *
- * `page` draws the footer: the AION × house lockup on the left and the page number on the
- * right. Omitting it leaves the slide exactly as it was drawn before — the business case deck
- * passes nothing.
+ * `page` draws the footer lockup — AION × house. Omitting it leaves the slide exactly as it
+ * was drawn before; the business case deck passes nothing.
  */
 export function slideXml(slide: Slide, markRelId: string | null, page?: Page): string {
   const body = (() => {
@@ -438,17 +437,19 @@ function table(
 }
 
 /**
- * The footer: whose deck this is, and where you are in it.
+ * The footer: whose deck this is.
  *
- * Two things the generated decks did not have and every deck sent to a client does. The
- * lockup is AION's wordmark with "× HOUSE" set beside it — the same lockup the intro deck
- * carries on its cover, repeated small — and it is what stops fourteen slides of cream from
- * reading as an internal handout. The page number is what lets somebody in the meeting say
- * "go back to 9"; without one, the answer to "which slide?" is a description of the slide.
+ * AION's wordmark with "× HOUSE" beside it — the same lockup the intro deck carries on its
+ * cover, repeated small. It is what stops fifteen slides of cream from reading as an internal
+ * handout, and it is the one piece of furniture the generated decks did not have.
  *
- * Not on the cover: the cover already sets the lockup at full size in the middle of the page,
- * and covers are not numbered. That also means the number printed on a slide is its position
- * in the file, so "slide 9" means the ninth slide, with no cover to argue about.
+ * It does NOT draw a page number, though it did for an afternoon. The deck is generated into
+ * the teaser package and inherits its layout, and that layout already carries a slide-number
+ * field — which the local proof render cannot show, because it builds its own blank layout.
+ * So the first real build came back with "2 2" in the corner of every slide. The numbers were
+ * there all along; what was missing was the lockup.
+ *
+ * Not on the cover, which sets the lockup at full size in the middle of the page already.
  */
 function footer(page: Page, slide: Slide, hasMark: boolean): string {
   const isCover = slide.kind === "section" && Boolean(slide.sub);
@@ -464,10 +465,7 @@ function footer(page: Page, slide: Slide, hasMark: boolean): string {
     : textBox(991, MARK.x, y, 5000000, 320000, [
         para(`AION × ${page.brand}`, { face: HEADING, size: 1050, color: INK, spacing: 150 }),
       ]);
-  const number = textBox(992, SLIDE_W - M - 800000, y, 800000, 320000, [
-    para(String(page.index), { face: BODY, size: 1000, color: MUTED, align: "r" }),
-  ]);
-  return lockup + number;
+  return lockup;
 }
 
 function mark(relId: string | null): string {

@@ -12,9 +12,14 @@
  *
  * The real `renderDeck` reaches for the teaser only to INHERIT its theme and masters; the
  * slides themselves are drawn entirely by `slideXml`. So a minimal package built around the
- * same call — one master, one blank layout, one theme — shows exactly what the slides look
- * like, with no storage and no Supabase. What it cannot show is anything inherited from the
- * teaser, which is the wordmark picture and nothing else.
+ * same call — one master, one blank layout, one theme — shows what the slides themselves
+ * draw, with no storage and no Supabase.
+ *
+ * WHAT IT CANNOT SHOW is everything that comes off the teaser's own master and layout: the
+ * AION wordmark picture, and — the one that cost an afternoon — the layout's SLIDE-NUMBER
+ * field. The blank layout here has neither, so a footer that drew its own number looked
+ * correct in this proof and came back from the real build reading "2 2". Check anything that
+ * lives near the foot of the slide against a real generated deck before believing it.
  *
  * Requires LibreOffice (`soffice`) and poppler (`pdftoppm`), both already used elsewhere here.
  */
@@ -93,7 +98,7 @@ zip.file("ppt/slideLayouts/slideLayout1.xml",
 
 chosen.forEach((s, i) => {
   const n = i + 1;
-  zip.file(`ppt/slides/slide${n}.xml`, slideXml(s, null, { index: only || n, of: slides.length, brand: "EXAMPLE" }));
+  zip.file(`ppt/slides/slide${n}.xml`, slideXml(s, null, { brand: "EXAMPLE" }));
   zip.file(`ppt/slides/_rels/slide${n}.xml.rels`, rels(
     `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`));
 });

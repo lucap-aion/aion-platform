@@ -43,7 +43,7 @@ describe("the operations booklet's numbered flows", () => {
 });
 
 describe("the deck's furniture", () => {
-  const page = { index: 4, of: booklet.length, brand: "EXAMPLE" };
+  const page = { brand: "EXAMPLE" };
 
   it("puts the section a slide belongs to above its title", () => {
     // "SLA — tempi di risposta della compagnia assicurativa" is a claims slide and said so
@@ -53,18 +53,21 @@ describe("the deck's furniture", () => {
     expect(slideXml(sla, null)).toContain("<a:t>3. Apertura e gestione dei sinistri</a:t>");
   });
 
-  it("names the house and the page at the foot of every slide but the cover", () => {
+  it("names the house at the foot of every slide but the cover", () => {
     const cover = booklet[0] as Extract<Slide, { kind: "section" }>;
     expect(cover.sub).toBe("Example Maison S.p.A.");
     // The cover sets the lockup full size in the middle of the page; it is not repeated
-    // small underneath it, and covers are not numbered.
-    const coverXml = slideXml(cover, null, { ...page, index: 1 });
-    expect(coverXml).not.toContain("AION × EXAMPLE");
-    expect(coverXml).not.toContain(`<a:t>1</a:t>`);
+    // small underneath it.
+    expect(slideXml(cover, null, page)).not.toContain("AION × EXAMPLE");
+    expect(slideXml(booklet[3], null, page)).toContain("<a:t>AION × EXAMPLE</a:t>");
+  });
 
+  it("leaves the page number to the template that already draws one", () => {
+    // The deck is generated into the teaser package and inherits its layout, which carries a
+    // slide-number field. Drawing our own put "2 2" in the corner of every slide — and the
+    // local proof render could not show it, because it builds its own blank layout.
     const xml = slideXml(booklet[3], null, page);
-    expect(xml).toContain("<a:t>AION × EXAMPLE</a:t>");
-    expect(xml).toContain("<a:t>4</a:t>");
+    expect(xml).not.toMatch(/<a:t>4<\/a:t>/);
   });
 
   it("draws the contents as the same six sections the deck is made of", () => {

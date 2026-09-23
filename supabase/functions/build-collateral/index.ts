@@ -964,8 +964,7 @@ async function renderDeck(
 
   slides.forEach((s, i) => {
     const n = i + 1;
-    zip.file(`ppt/slides/slide${n}.xml`, slideXml(s, hasMark ? "rId2" : null,
-      footer ? { index: n, of: slides.length, brand: footer.brand } : undefined));
+    zip.file(`ppt/slides/slide${n}.xml`, slideXml(s, hasMark ? "rId2" : null, footer));
     zip.file(`ppt/slides/_rels/slide${n}.xml.rels`,
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
