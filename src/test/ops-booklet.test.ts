@@ -41,3 +41,40 @@ describe("the operations booklet's numbered flows", () => {
     expect(xml).toContain("<a:t>Attivazione della polizza</a:t>");
   });
 });
+
+describe("the deck's furniture", () => {
+  const page = { index: 4, of: booklet.length, brand: "EXAMPLE" };
+
+  it("puts the section a slide belongs to above its title", () => {
+    // "SLA — tempi di risposta della compagnia assicurativa" is a claims slide and said so
+    // nowhere. Every slide that is not the one opening its section now carries the section.
+    const sla = booklet.find((s) => s.title?.startsWith("SLA"))!;
+    expect(sla.eyebrow).toBe("3. Apertura e gestione dei sinistri");
+    expect(slideXml(sla, null)).toContain("<a:t>3. Apertura e gestione dei sinistri</a:t>");
+  });
+
+  it("names the house and the page at the foot of every slide but the cover", () => {
+    const cover = booklet[0] as Extract<Slide, { kind: "section" }>;
+    expect(cover.sub).toBe("Example Maison S.p.A.");
+    // The cover sets the lockup full size in the middle of the page; it is not repeated
+    // small underneath it, and covers are not numbered.
+    const coverXml = slideXml(cover, null, { ...page, index: 1 });
+    expect(coverXml).not.toContain("AION × EXAMPLE");
+    expect(coverXml).not.toContain(`<a:t>1</a:t>`);
+
+    const xml = slideXml(booklet[3], null, page);
+    expect(xml).toContain("<a:t>AION × EXAMPLE</a:t>");
+    expect(xml).toContain("<a:t>4</a:t>");
+  });
+
+  it("draws the contents as the same six sections the deck is made of", () => {
+    const flow = booklet.find((s): s is Extract<Slide, { kind: "flow" }> => s.kind === "flow")!;
+    // Every chevron is a section that follows it, in order — a contents page that cannot
+    // disagree with its own deck.
+    const openers = booklet
+      .filter((s) => /^\d+\.\s/.test(s.title ?? ""))
+      .map((s) => s.title!.replace(/^\d+\.\s+/, ""));
+    expect([...new Set(openers)]).toEqual(flow.items);
+    expect(slideXml(flow, null)).toContain(`prst="chevron"`);
+  });
+});

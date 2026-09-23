@@ -19,12 +19,26 @@
 // them is in Italian; an English translation of an approved Italian text is a different
 // document with different words in it, and nobody has approved that one.
 
-/** A slide, in the shapes the renderer knows how to draw. */
+/**
+ * A slide, in the shapes the renderer knows how to draw.
+ *
+ * `eyebrow` is the section a slide belongs to, set on every slide that is NOT the one opening
+ * its section. Those slides — the four actors, the SLA table, the voucher flow — carried no
+ * section context at all, so a reader landing on one had no way of knowing whether they were
+ * in claims or in invoicing. It is the device the reference ops deck uses on every page, and
+ * it costs a line of small type at the top of the slide.
+ */
 export type Slide =
-  | { kind: "section"; number: string; title: string; lead?: string }
-  | { kind: "bullets"; title: string; lead?: string; bullets: string[] }
+  | { kind: "section"; number: string; title: string; lead?: string; eyebrow?: string;
+      /** The house, set under the title on the cover — the "× Brand" half of the lockup. */
+      sub?: string }
+  | { kind: "bullets"; title: string; lead?: string; eyebrow?: string; bullets: string[] }
   | {
-      kind: "steps"; title: string; lead?: string; steps: string[];
+      /** The whole programme as one row of chevrons: the deck's contents, drawn. */
+      kind: "flow"; title: string; lead?: string; eyebrow?: string; items: string[];
+    }
+  | {
+      kind: "steps"; title: string; lead?: string; eyebrow?: string; steps: string[];
       /**
        * The number the first step on this slide carries.
        *
@@ -37,8 +51,8 @@ export type Slide =
       /** "2 of 2", for a flow that runs over more than one slide. */
       part?: { of: number; index: number };
     }
-  | { kind: "table"; title: string; lead?: string; head: string[]; rows: string[][] }
-  | { kind: "callout"; title: string; label: string; body: string };
+  | { kind: "table"; title: string; lead?: string; eyebrow?: string; head: string[]; rows: string[][] }
+  | { kind: "callout"; title: string; label: string; body: string; eyebrow?: string };
 
 export type BookletParams = {
   /** The entity the programme is contracted with — "Salvatore Ferragamo SpA". */
@@ -46,6 +60,25 @@ export type BookletParams = {
   /** What its own people call it, as it appears in a process line — "FERRAGAMO". */
   shortName: string;
 };
+
+/**
+ * The booklet's six sections, in order, named once.
+ *
+ * The section headings used to be typed into each slide's title, which is how the deck ended
+ * up with slides that belong to a section and never say so. Now the list is the source: a
+ * heading is `section(n)`, a continuation slide's eyebrow is `section(n)`, and the contents
+ * slide is the same six strings drawn as a row. Renumbering a section cannot leave one of
+ * the three behind.
+ */
+const SECTIONS = [
+  "Panoramica del servizio",
+  "Attivazione della polizza",
+  "Apertura e gestione dei sinistri",
+  "Sostituzione del prodotto — voucher",
+  "Comunicazioni con il cliente",
+  "Ciclo attivo / passivo",
+];
+const section = (n: number) => `${n}. ${SECTIONS[n - 1]}`;
 
 /**
  * The booklet for one house.
@@ -61,15 +94,32 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
 
   return [
     {
-      kind: "section", number: "", title: `AION Cover × ${L}`,
+      // Stacked, not run together on one line. "AION Cover × Salvatore Ferragamo SpA" set as
+      // a single heading is a 46-character line that has to be shrunk to fit, and the house
+      // ends up the same size and weight as our own name. The reference deck sets the mark,
+      // then what the document is, then the house in caps underneath — which is the order a
+      // cover is read in, and it lets the house's name be as long as it is.
+      kind: "section", number: "", title: "AION Cover", sub: L,
       lead: "Servizio di copertura assicurativa — presentazione del programma operativo. " +
         "Un servizio esclusivo che protegge i prodotti dei vostri clienti attraverso una " +
         "soluzione assicurativa completa, gestita interamente sulla piattaforma AION.",
     },
 
+    // The whole programme on one page, before any of it is explained. Fourteen slides of
+    // flows, tables and SLAs with no contents page in front of them is a document you can
+    // only read in order, and an operations meeting never runs in order — somebody asks
+    // about invoicing on slide two. The six chevrons are the six sections, so this cannot
+    // drift away from what follows it.
+    {
+      kind: "flow", title: "Il programma operativo in sei sezioni",
+      lead: `Dalla panoramica del servizio al ciclo attivo e passivo: come funziona il programma ` +
+        `di copertura tra ${L}, AION e la compagnia assicurativa.`,
+      items: SECTIONS,
+    },
+
     // ── 1 ────────────────────────────────────────────────────────────────────
     {
-      kind: "bullets", title: "1. Panoramica del servizio",
+      kind: "bullets", title: section(1),
       lead:
         `AION Cover offre un servizio di copertura assicurativa integrato che protegge i prodotti ` +
         `acquistati dai clienti finali di ${L} (e delle sue controllate) contro furto e danni ` +
@@ -84,7 +134,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       ],
     },
     {
-      kind: "table", title: "I quattro attori del sistema",
+      kind: "table", title: "I quattro attori del sistema", eyebrow: section(1),
       head: ["Attore", "Responsabilità principali"],
       rows: [
         ["Compagnia assicurativa (Chubb)",
@@ -100,7 +150,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
 
     // ── 2 ────────────────────────────────────────────────────────────────────
     {
-      kind: "steps", title: "2. Attivazione della polizza",
+      kind: "steps", title: section(2),
       part: { index: 1, of: 2 },
       lead: "Il processo di registrazione del cliente e attivazione della copertura assicurativa è il punto di partenza del servizio.",
       steps: [
@@ -118,7 +168,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       // Same title as the slide before it, because it is the same flow: the badge and the
       // ninth step say where the reader is, and "— dal nono passo" in a heading was the
       // renderer's job being done in the copy.
-      kind: "steps", title: "2. Attivazione della polizza",
+      kind: "steps", title: section(2),
       part: { index: 2, of: 2 }, start: 9,
       steps: [
         "AION invia una email di verifica dell'indirizzo email",
@@ -132,7 +182,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
 
     // ── 3 ────────────────────────────────────────────────────────────────────
     {
-      kind: "steps", title: "3. Apertura e gestione dei sinistri",
+      kind: "steps", title: section(3),
       part: { index: 1, of: 2 },
       lead:
         `Il cliente può aprire un sinistro per furto o danno accidentale di un prodotto assicurato. ` +
@@ -149,7 +199,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       ],
     },
     {
-      kind: "steps", title: "3. Apertura e gestione dei sinistri",
+      kind: "steps", title: section(3),
       part: { index: 2, of: 2 }, start: 7,
       steps: [
         `${B} approva o rigetta il sinistro`,
@@ -161,7 +211,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       ],
     },
     {
-      kind: "table", title: "SLA — tempi di risposta della compagnia assicurativa",
+      kind: "table", title: "SLA — tempi di risposta della compagnia assicurativa", eyebrow: section(3),
       head: ["Metrica", "SLA"],
       rows: [
         ["Presa in carico (acknowledgement)", "100% entro 5 giorni lavorativi"],
@@ -170,7 +220,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       ],
     },
     {
-      kind: "callout", title: "Recupero del prodotto danneggiato",
+      kind: "callout", title: "Recupero del prodotto danneggiato", eyebrow: section(3),
       label: "Attenzione — obbligo di recupero",
       body:
         `Il recupero del prodotto danneggiato è obbligatorio per ${B} al fine di ottenere il pagamento ` +
@@ -179,7 +229,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
 
     // ── 4 ────────────────────────────────────────────────────────────────────
     {
-      kind: "bullets", title: "4. Sostituzione del prodotto — voucher",
+      kind: "bullets", title: section(4),
       lead:
         "In caso di sinistro approvato, la sostituzione del prodotto avviene tramite l'emissione di un " +
         "voucher. Soluzione suggerita per aumentare il traffico in negozio e sostituire prodotti fuori " +
@@ -192,7 +242,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       ],
     },
     {
-      kind: "steps", title: "Flusso operativo — emissione voucher",
+      kind: "steps", title: "Flusso operativo — emissione voucher", eyebrow: section(4),
       steps: [
         "La compagnia assicurativa (Chubb) approva il sinistro",
         `AION comunica l'approvazione a ${L}`,
@@ -202,7 +252,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       ],
     },
     {
-      kind: "callout", title: "Valore del voucher",
+      kind: "callout", title: "Valore del voucher", eyebrow: section(4),
       label: "Valore voucher = prezzo retail del prodotto",
       body:
         `Il valore del voucher corrisponde al prezzo retail del prodotto acquistato originariamente. Il ` +
@@ -213,7 +263,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
 
     // ── 5 ────────────────────────────────────────────────────────────────────
     {
-      kind: "table", title: "5. Comunicazioni con il cliente",
+      kind: "table", title: section(5),
       lead:
         `Tutte le comunicazioni con il cliente sono gestite dal team di ${L}, che mantiene il contatto ` +
         `diretto lungo tutto il ciclo di vita del servizio. AION invia esclusivamente l'invito alla ` +
@@ -231,7 +281,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
 
     // ── 6 ────────────────────────────────────────────────────────────────────
     {
-      kind: "table", title: "6. Ciclo attivo / passivo",
+      kind: "table", title: section(6),
       lead: "Dettaglio finanziario del programma.",
       head: ["Premi assicurativi", "Rimborso sinistri"],
       rows: [[

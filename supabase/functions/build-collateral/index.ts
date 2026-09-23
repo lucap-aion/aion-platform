@@ -592,7 +592,9 @@ async function buildOperations(admin: ReturnType<typeof createClient>, brand: Re
   const shortName = String(brand.name ?? "").trim() || legalName;
   const slides = opsBooklet({ legalName, shortName });
 
-  const out = await renderDeck(admin, slides);
+  // The footer's "× HOUSE" is the short name, in caps — the lockup, not the contracting
+  // party. The legal entity signs the cover; it does not belong at the bottom of every page.
+  const out = await renderDeck(admin, slides, { brand: shortName.toUpperCase() });
   return await store(admin, brand, "operations", "pptx", out,
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     { slides: slides.length, review: [
@@ -933,7 +935,12 @@ async function recordDemoVideo(brand: Record<string, unknown>, body: Record<stri
 // Slides are generated INTO the teaser package: theme, masters and layouts stay,
 // only the slide list is replaced. That is what makes these decks look like the
 // intro deck instead of like default PowerPoint.
-async function renderDeck(admin: ReturnType<typeof createClient>, slides: Slide[]): Promise<Uint8Array> {
+async function renderDeck(
+  admin: ReturnType<typeof createClient>, slides: Slide[],
+  // Given by the operations deck, which carries a footer; omitted by the business case deck,
+  // which is drawn exactly as it was before.
+  footer?: { brand: string },
+): Promise<Uint8Array> {
   const { data: file, error } = await admin.storage.from(BUCKET).download(STYLE_TEMPLATE);
   if (error || !file) {
     throw new Error(
@@ -957,7 +964,8 @@ async function renderDeck(admin: ReturnType<typeof createClient>, slides: Slide[
 
   slides.forEach((s, i) => {
     const n = i + 1;
-    zip.file(`ppt/slides/slide${n}.xml`, slideXml(s, hasMark ? "rId2" : null));
+    zip.file(`ppt/slides/slide${n}.xml`, slideXml(s, hasMark ? "rId2" : null,
+      footer ? { index: n, of: slides.length, brand: footer.brand } : undefined));
     zip.file(`ppt/slides/_rels/slide${n}.xml.rels`,
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +

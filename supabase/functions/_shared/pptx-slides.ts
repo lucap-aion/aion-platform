@@ -46,17 +46,25 @@ const FLOOR = MARK.y - 120000;
 const TITLE_Y = 620000;
 const TITLE_H = 760000;
 
+/** Where a slide sits in the deck, and whose deck it is — the footer's two facts. */
+export type Page = { index: number; of: number; brand: string };
+
 /**
  * One slide's XML.
  *
  * `markRelId` is the relationship id of the AION wordmark in this slide's rels, or null when
  * the package has no wordmark to place.
+ *
+ * `page` draws the footer: the AION × house lockup on the left and the page number on the
+ * right. Omitting it leaves the slide exactly as it was drawn before — the business case deck
+ * passes nothing.
  */
-export function slideXml(slide: Slide, markRelId: string | null): string {
+export function slideXml(slide: Slide, markRelId: string | null, page?: Page): string {
   const body = (() => {
     switch (slide.kind) {
       case "section": return sectionSlide(slide);
       case "bullets": return bulletsSlide(slide);
+      case "flow": return flowSlide(slide);
       case "steps": return stepsSlide(slide);
       case "table": return tableSlide(slide);
       case "callout": return calloutSlide(slide);
@@ -71,31 +79,102 @@ export function slideXml(slide: Slide, markRelId: string | null): string {
     `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>` +
     `<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>` +
     `<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>` +
-    body + mark(markRelId) +
+    body + mark(markRelId) + (page ? footer(page, slide, markRelId !== null) : "") +
     `</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
 }
 
 // ── The five shapes ─────────────────────────────────────────────────────────────────────
 
-/** A cover or a divider: the title large and centred, over a gold rule. */
+/**
+ * A cover or a divider: the title large and centred, over a gold rule.
+ *
+ * With `sub` — which only the cover carries — the house goes UNDER the rule in letterspaced
+ * caps rather than into the title beside our own name. Set as one line, a long legal entity
+ * shrinks the whole lockup to fit the slide, and the house ends up in the same face and
+ * weight as AION; stacked, its name can be as long as it is and still be the second thing
+ * read.
+ */
 function sectionSlide(s: Extract<Slide, { kind: "section" }>): string {
-  const y = 2100000;
+  const y = s.sub ? 2000000 : 2100000;
+  const ruleY = y + (s.sub ? 1080000 : 1500000);
   return textBox(2, M, y, CONTENT_W, 1400000, [
     para(s.title, { face: HEADING, size: 4000, align: "ctr", color: INK }),
   ]) +
-    rect(3, Math.round(SLIDE_W / 2 - 400000), y + 1500000, 800000, 22000, GOLD) +
+    rect(3, Math.round(SLIDE_W / 2 - 400000), ruleY, 800000, 22000, GOLD) +
+    (s.sub
+      ? textBox(5, M, ruleY + 300000, CONTENT_W, 600000, [
+          // Letterspaced, because caps set solid read as a word rather than as a name, and
+          // this is the one place in the deck where the house signs the document.
+          para(s.sub.toUpperCase(), { face: HEADING, size: 1800, align: "ctr", color: INK, spacing: 300 }),
+        ])
+      : "") +
     (s.lead
-      ? textBox(4, M + 900000, y + 1750000, CONTENT_W - 1800000, 1200000, [
+      ? textBox(4, M + 900000, ruleY + (s.sub ? 1150000 : 250000), CONTENT_W - 1800000, 1200000, [
           para(s.lead, { face: BODY, size: 1400, align: "ctr", color: MUTED, lineSpacing: 150 }),
         ])
       : "");
 }
 
+/**
+ * The programme as a row of chevrons — the deck's own contents, drawn.
+ *
+ * A number in a chevron and the section under it, which is the shape every operations deck
+ * uses for a chain of steps and the one thing this generator could not draw. The sections are
+ * passed in, so this is a picture of the deck that follows rather than a second copy of it
+ * that can go stale.
+ */
+function flowSlide(s: Extract<Slide, { kind: "flow" }>): string {
+  const top = header(s.title, s.lead, undefined, s.eyebrow);
+  const n = Math.max(1, s.items.length);
+  const gap = 96000;
+  const colW = Math.floor((CONTENT_W - gap * (n - 1)) / n);
+  const chevH = 520000;
+  const cardY = top.y + chevH + 170000;
+  const size = n >= 6 ? 1050 : n >= 4 ? 1150 : 1300;
+  // Measured off the longest label rather than stretched to the floor: six cards an inch
+  // taller than their contents read as six empty boxes with a word in the corner. ~1.9
+  // characters per point of width is the usual measure for this face at this size.
+  const perLine = Math.max(8, Math.floor((colW - 240000) / 12700 / (size / 100) * 1.9));
+  const lines = Math.max(1, ...s.items.map((t) => Math.ceil(t.length / perLine)));
+  const lineH = Math.round((size / 100) * 1.3 * 12700);
+  const cardH = Math.max(1400000, Math.min(FLOOR - cardY, lines * lineH + 420000));
+  // The whole assembly centred in the room under the standfirst. Pinned to the top it sits in
+  // the upper third with two inches of cream under it, which is the same emptiness the bullet
+  // slides had.
+  const drop = Math.max(0, Math.round((FLOOR - top.y - (chevH + 170000 + cardH)) / 2));
+  let id = 40;
+  let xml = "";
+  s.items.forEach((item, i) => {
+    const x = M + i * (colW + gap);
+    xml +=
+      rect(id++, x, top.y + drop, colW, chevH, NUMBER_RAIL, { lineColor: GOLD, lineWidth: 9525, prst: "chevron" }) +
+      // The number over the chevron rather than inside it: text in a chevron is centred on
+      // the shape's box, and the box includes the arrow head, so it sits visibly off to the
+      // right of the body it is meant to be centred in.
+      textBox(id++, x, top.y + drop + 120000, colW - 80000, chevH, [
+        para(String(i + 1), { face: HEADING, size: 1800, color: GOLD, align: "ctr" }),
+      ]) +
+      rect(id++, x, cardY + drop, colW, cardH, "FFFFFF", { lineColor: RULE, lineWidth: 9525 }) +
+      textBox(id++, x + 120000, cardY + drop + 170000, colW - 240000, cardH - 340000, [
+        para(item, { face: BODY, size, color: INK, lineSpacing: 130 }),
+      ], "ctr");
+  });
+  return top.xml + xml;
+}
+
 function bulletsSlide(s: Extract<Slide, { kind: "bullets" }>): string {
-  const top = header(s.title, s.lead);
-  return top.xml + textBox(20, M, top.y, CONTENT_W, FLOOR - top.y,
-    s.bullets.filter(Boolean).map((b) =>
-      para(b, { face: BODY, size: 1500, color: INK, bullet: true, lineSpacing: 130, spaceBefore: 600 })));
+  const top = header(s.title, s.lead, undefined, s.eyebrow);
+  const bullets = s.bullets.filter(Boolean);
+  const h = FLOOR - top.y;
+  // Open the list out into the room it has instead of stacking it at the top. Four bullets
+  // in the top third of a slide is what made these pages look half-finished next to the
+  // tables and the numbered flows, which fill the page by construction.
+  const slotPt = h / 12700 / Math.max(1, bullets.length);
+  const gap = Math.round(Math.max(600, Math.min(2600, (slotPt - 19.5) * 100)));
+  return top.xml + textBox(20, M, top.y, CONTENT_W, h,
+    bullets.map((b) =>
+      para(b, { face: BODY, size: 1500, color: INK, bullet: true, lineSpacing: 130, spaceBefore: gap })),
+    "ctr");
 }
 
 /**
@@ -106,7 +185,7 @@ function bulletsSlide(s: Extract<Slide, { kind: "bullets" }>): string {
  * this draws whatever it is given and shrinks the type rather than running off the page.
  */
 function stepsSlide(s: Extract<Slide, { kind: "steps" }>): string {
-  const top = header(s.title, s.lead, s.part);
+  const top = header(s.title, s.lead, s.part, s.eyebrow);
   const h = FLOOR - top.y;
   const n = Math.max(1, s.steps.length);
   const rowH = Math.floor(h / n);
@@ -131,7 +210,7 @@ function stepsSlide(s: Extract<Slide, { kind: "steps" }>): string {
 }
 
 function tableSlide(s: Extract<Slide, { kind: "table" }>): string {
-  const top = header(s.title, s.lead);
+  const top = header(s.title, s.lead, undefined, s.eyebrow);
   const h = FLOOR - top.y;
   const cols = Math.max(1, s.head.length);
   const size = s.rows.length <= 4 ? 1300 : 1150;
@@ -179,7 +258,7 @@ function tableSlide(s: Extract<Slide, { kind: "table" }>): string {
 
 /** One thing nobody may skim past: a gold-edged panel with the point in it. */
 function calloutSlide(s: Extract<Slide, { kind: "callout" }>): string {
-  const top = header(s.title);
+  const top = header(s.title, undefined, undefined, s.eyebrow);
   const h = 1900000;
   // Centred in what is left of the slide rather than pinned under the title: a panel with
   // four inches of cream under it reads as a slide that did not finish loading.
@@ -206,14 +285,22 @@ function calloutSlide(s: Extract<Slide, { kind: "callout" }>): string {
  * the deck is not helping.
  */
 function header(
-  title: string, lead?: string, part?: { of: number; index: number },
+  title: string, lead?: string, part?: { of: number; index: number }, eyebrow?: string,
 ): { xml: string; y: number } {
   const badge = part && part.of > 1 ? `${part.index} / ${part.of}` : null;
+  // The section this slide belongs to, above the title and out of its way. A slide headed
+  // "SLA — tempi di risposta della compagnia assicurativa" is about claims, and there was
+  // nothing on it that said so.
+  const brow = eyebrow
+    ? textBox(14, M, 300000, CONTENT_W, 300000, [
+        para(eyebrow, { face: BODY, size: 1050, color: MUTED, italic: true }),
+      ])
+    : "";
   // The booklet numbers its sections in the heading itself — "2. Attivazione della polizza".
   // Setting that number in the gold makes the six sections findable by eye at the back of a
   // room, and costs nothing: it is the same string, in two runs.
   const numbered = /^(\d+\.)\s+(\S[\s\S]*)$/.exec(title);
-  let xml = textBox(10, M, TITLE_Y, badge ? CONTENT_W - 900000 : CONTENT_W, TITLE_H, [
+  let xml = brow + textBox(10, M, TITLE_Y, badge ? CONTENT_W - 900000 : CONTENT_W, TITLE_H, [
     numbered
       ? para(numbered[2], {
           face: HEADING, size: 2600, color: INK,
@@ -242,7 +329,9 @@ function header(
 
 type ParaOpts = {
   face: string; size: number; color: string;
-  bold?: boolean; align?: "l" | "ctr" | "r"; bullet?: boolean;
+  bold?: boolean; italic?: boolean; align?: "l" | "ctr" | "r"; bullet?: boolean;
+  /** Letterspacing in hundredths of a point — caps set solid are a word, not a name. */
+  spacing?: number;
   /** Percent, e.g. 140 for 1.4 lines. */
   lineSpacing?: number;
   spaceBefore?: number;
@@ -264,7 +353,8 @@ function para(text: string, o: ParaOpts): string {
     ? `<a:buFont typeface="Arial"/><a:buChar char="—"/>`
     : `<a:buNone/>`;
   const run = (t: string, color: string) =>
-    `<a:r><a:rPr lang="it-IT" sz="${o.size}"${o.bold ? ` b="1"` : ""} dirty="0">` +
+    `<a:r><a:rPr lang="it-IT" sz="${o.size}"${o.bold ? ` b="1"` : ""}${o.italic ? ` i="1"` : ""}` +
+    `${o.spacing ? ` spc="${o.spacing}"` : ""} dirty="0">` +
     `<a:solidFill><a:srgbClr val="${color}"/></a:solidFill>` +
     `<a:latin typeface="${o.face}"/><a:cs typeface="${o.face}"/></a:rPr>` +
     `<a:t>${escapeXml(t)}</a:t></a:r>`;
@@ -273,24 +363,31 @@ function para(text: string, o: ParaOpts): string {
     run(text, o.color) + `</a:p>`;
 }
 
-function textBox(id: number, x: number, y: number, cx: number, cy: number, paras: string[]): string {
+function textBox(
+  id: number, x: number, y: number, cx: number, cy: number, paras: string[],
+  // Where the text sits in a box taller than it needs. A short list pinned to the top of the
+  // space left under a standfirst leaves a third of the slide empty and reads as a slide that
+  // lost its last point; centred in the same space it reads as the slide it is.
+  anchor?: "t" | "ctr" | "b",
+): string {
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Text ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>` +
     `<p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
     `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>` +
-    `<p:txBody><a:bodyPr wrap="square" lIns="0" rIns="0" tIns="0" bIns="0"><a:normAutofit/></a:bodyPr>` +
+    `<p:txBody><a:bodyPr wrap="square" lIns="0" rIns="0" tIns="0" bIns="0"` +
+    `${anchor && anchor !== "t" ? ` anchor="${anchor}"` : ""}><a:normAutofit/></a:bodyPr>` +
     `<a:lstStyle/>${paras.join("") || `<a:p/>`}</p:txBody></p:sp>`;
 }
 
 function rect(
   id: number, x: number, y: number, cx: number, cy: number, fill: string,
-  o: { lineColor?: string; lineWidth?: number } = {},
+  o: { lineColor?: string; lineWidth?: number; prst?: string } = {},
 ): string {
   const line = o.lineColor
     ? `<a:ln w="${o.lineWidth ?? 12700}"><a:solidFill><a:srgbClr val="${o.lineColor}"/></a:solidFill></a:ln>`
     : `<a:ln><a:noFill/></a:ln>`;
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Rect ${id}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>` +
     `<p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
-    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>` +
+    `<a:prstGeom prst="${o.prst ?? "rect"}"><a:avLst/></a:prstGeom>` +
     `<a:solidFill><a:srgbClr val="${fill}"/></a:solidFill>${line}</p:spPr>` +
     `<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>`;
 }
@@ -338,6 +435,39 @@ function table(
     `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">` +
     `<a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${grid}</a:tblGrid>${trs}</a:tbl>` +
     `</a:graphicData></a:graphic></p:graphicFrame>`;
+}
+
+/**
+ * The footer: whose deck this is, and where you are in it.
+ *
+ * Two things the generated decks did not have and every deck sent to a client does. The
+ * lockup is AION's wordmark with "× HOUSE" set beside it — the same lockup the intro deck
+ * carries on its cover, repeated small — and it is what stops fourteen slides of cream from
+ * reading as an internal handout. The page number is what lets somebody in the meeting say
+ * "go back to 9"; without one, the answer to "which slide?" is a description of the slide.
+ *
+ * Not on the cover: the cover already sets the lockup at full size in the middle of the page,
+ * and covers are not numbered. That also means the number printed on a slide is its position
+ * in the file, so "slide 9" means the ninth slide, with no cover to argue about.
+ */
+function footer(page: Page, slide: Slide, hasMark: boolean): string {
+  const isCover = slide.kind === "section" && Boolean(slide.sub);
+  if (isCover) return "";
+  const y = MARK.y - 52000;
+  // Beside the wordmark picture when there is one, and the whole lockup in type when there is
+  // not — the local proof render has no picture, and a footer that silently disappears in the
+  // one place the deck is checked is a footer nobody checks.
+  const lockup = hasMark
+    ? textBox(991, MARK.x + MARK.cx + 92000, y, 5000000, 320000, [
+        para(`× ${page.brand}`, { face: HEADING, size: 1050, color: INK, spacing: 150 }),
+      ])
+    : textBox(991, MARK.x, y, 5000000, 320000, [
+        para(`AION × ${page.brand}`, { face: HEADING, size: 1050, color: INK, spacing: 150 }),
+      ]);
+  const number = textBox(992, SLIDE_W - M - 800000, y, 800000, 320000, [
+    para(String(page.index), { face: BODY, size: 1000, color: MUTED, align: "r" }),
+  ]);
+  return lockup + number;
 }
 
 function mark(relId: string | null): string {
