@@ -182,6 +182,30 @@ const monthWindowUtc = (year: number, month: number) => {
   return { start: start.toISOString(), end: end.toISOString() };
 };
 
+// Chubb closes a month by issuing its appendix on the 10th of the following
+// month, between 06:00 and 07:00 Italian time: until then the month is still
+// open and any cover pertaining to it is booked there. Mirrors
+// internal_reports.APPENDIX_* in aion_services — keep the two in step.
+const APPENDIX_DAY = 10;
+const APPENDIX_HOUR_ROME = 6;
+
+// Europe/Rome is UTC+2 between the last Sunday of March and the last Sunday of
+// October, UTC+1 otherwise. The cut-off always falls on the 10th, so the DST
+// switch never lands on it and this month-level test is exact.
+const romeOffsetHours = (year: number, month: number): number =>
+  month > 3 && month < 11 ? 2 : 1;
+
+/** UTC instant at which the appendix for (year, month) is issued. */
+const appendixCutoffUtc = (year: number, month: number): string => {
+  const y = month === 12 ? year + 1 : year;
+  const m = month === 12 ? 1 : month + 1;
+  const hourUtc = APPENDIX_HOUR_ROME - romeOffsetHours(y, m);
+  return new Date(Date.UTC(y, m - 1, APPENDIX_DAY, hourUtc, 0, 0)).toISOString();
+};
+
+const prevYm = (year: number, month: number) =>
+  month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+
 const previousMonth = (): { year: number; month: number } => {
   const now = new Date();
   let y = now.getUTCFullYear();
@@ -293,6 +317,9 @@ Deno.serve(async (req: Request) => {
     const tplBuf = await tplBlob.arrayBuffer();
 
     const { start, end } = monthWindowUtc(year, month);
+    const cutoff = appendixCutoffUtc(year, month);
+    const prevMonth = prevYm(year, month);
+    const prevCutoff = appendixCutoffUtc(prevMonth.year, prevMonth.month);
     const reports: Array<{
       brand_id: number;
       brand_name: string;
@@ -309,20 +336,41 @@ Deno.serve(async (req: Request) => {
       const { data: categories } = await admin.from("manufacturing_costs")
         .select("category, chubb_category").eq("brand_id", brand.id);
 
-      // policies created in [start, end), status = 'live'
+      // The month's coverages on Chubb's own booking rule: everything that
+      // pertains to the month (start_date) and was registered before the
+      // month's appendix was issued, plus anything from an earlier month that
+      // missed its own appendix and landed while this month was still open.
+      // Booking month = the later of the pertinence month and the month whose
+      // appendix is open at registration time.
       const foreign =
         "brand_id: brands(*), shop_id: shops(*), profile_id: profiles(*), item_id: catalogues(*)";
-      const { data: policies, error: pErr } = await admin.from("policies")
-        .select(`*, ${foreign}`)
-        .eq("brand_id", brand.id)
-        .gte("created_at", start)
-        .lt("created_at", end)
-        .eq("status", "live");
-      if (pErr) {
+      const policyQuery = () =>
+        admin.from("policies")
+          .select(`*, ${foreign}`)
+          .eq("brand_id", brand.id)
+          .eq("status", "live");
+
+      const [{ data: inMonth, error: pErr }, { data: late, error: lErr }] =
+        await Promise.all([
+          policyQuery()
+            .gte("start_date", start)
+            .lt("start_date", end)
+            .lt("created_at", cutoff),
+          policyQuery()
+            .lt("start_date", start)
+            .gte("created_at", prevCutoff)
+            .lt("created_at", cutoff),
+        ]);
+      if (pErr || lErr) {
         throw new Error(
-          `Failed to fetch policies for ${brand.name}: ${pErr.message}`,
+          `Failed to fetch policies for ${brand.name}: ${
+            (pErr ?? lErr)!.message
+          }`,
         );
       }
+      const byId = new Map<number, any>();
+      for (const p of [...(inMonth ?? []), ...(late ?? [])]) byId.set(p.id, p);
+      const policies = [...byId.values()].sort((a, b) => a.id - b.id);
 
       const rows = (policies ?? [])
         .map((p) => policyToInternalRow(p, brand, categories ?? []));
