@@ -493,26 +493,52 @@ function useInsightsData(policies: ProcessedPolicy[], profiles: ProfileRow[], fe
       return bands.map((name, i) => ({ name, pct: tot[i] > 0 ? Math.round(reg[i] / tot[i] * 100) : 0, reg: reg[i], tot: tot[i] }));
     }
 
-    // Registration time — uses earliest policy date per customer vs their registration date
+    // Registration time — days from the purchase that led to the registration: the customer's
+    // LAST policy on or before their registration date. Counting from the first one made a
+    // returning customer (bought in April, came back in September, registered the next day)
+    // read as five months late.
     function regTimeData() {
-      // Use custMap which already has fd (first date) and reg per customer
+      const datesByCust: Record<string, string[]> = {};
+      policies.forEach(p => { (datesByCust[p.customerId] ||= []).push(p.date); });
       const uq: { cid: string; days: number; actDate: string }[] = [];
       Object.entries(custMap).forEach(([cid, c]) => {
         if (!c.reg) return;
-        const d1 = new Date(c.fd).getTime(), d2 = new Date(c.reg).getTime();
-        const days = Math.round((d2 - d1) / 86400000);
-        uq.push({ cid, days: Math.max(0, days), actDate: c.fd });
+        const regT = new Date(c.reg).getTime();
+        // No policy before registration (registered on a since-cancelled one) → first live policy, 0 days.
+        const before = datesByCust[cid].filter(d => new Date(d).getTime() <= regT).sort();
+        const anchor = before.length ? before[before.length - 1] : c.fd;
+        const days = Math.round((regT - new Date(anchor).getTime()) / 86400000);
+        uq.push({ cid, days: Math.max(0, days), actDate: anchor });
       });
       if (!uq.length) return { avgDays: 0, medDays: 0, min: 0, max: 0, byMonthData: [], byWeekData: [], distData: [] };
+      const median = (xs: number[]) => {
+        const s = [...xs].sort((a, b) => a - b), h = Math.floor(s.length / 2);
+        return s.length % 2 ? s[h] : Math.round((s[h - 1] + s[h]) / 2);
+      };
       const ds = uq.map(p => p.days).sort((a, b) => a - b);
       const avgDays = Math.round(ds.reduce((a, b) => a + b, 0) / ds.length);
-      const medDays = ds[Math.floor(ds.length / 2)];
-      const byM: Record<string, number[]> = {};
-      uq.forEach(p => { const m = getMonth(p.actDate); if (!byM[m]) byM[m] = []; byM[m].push(p.days); });
-      const byMonthData = Object.keys(byM).sort().map(m => ({ key: m, avg: Math.round(byM[m].reduce((a, b) => a + b, 0) / byM[m].length) }));
-      const byW: Record<string, number[]> = {};
-      uq.forEach(p => { const w = getWeek(p.actDate); if (!byW[w]) byW[w] = []; byW[w].push(p.days); });
-      const byWeekData = Object.keys(byW).sort().map(w => ({ key: w, avg: Math.round(byW[w].reduce((a, b) => a + b, 0) / byW[w].length) }));
+      const medDays = median(ds);
+      // A handful of registrations per period: the average alone is one late customer, so every
+      // bucket carries the median and its size. Periods with none stay on the axis, empty.
+      const byPeriod = (keyOf: (d: string) => string) => {
+        const buckets: Record<string, number[]> = {};
+        uq.forEach(p => { (buckets[keyOf(p.actDate)] ||= []).push(p.days); });
+        const keys: string[] = [];
+        const start = new Date(policies.reduce((m, p) => p.date < m ? p.date : m, policies[0].date));
+        const end = new Date(policies.reduce((m, p) => p.date > m ? p.date : m, policies[0].date));
+        for (const dt = start; dt <= end; dt.setUTCDate(dt.getUTCDate() + 1)) {
+          const k = keyOf(dt.toISOString().slice(0, 10));
+          if (keys[keys.length - 1] !== k) keys.push(k);
+        }
+        return keys.map(k => {
+          const xs = buckets[k] ?? [];
+          return xs.length
+            ? { key: k, avg: Math.round(xs.reduce((a, b) => a + b, 0) / xs.length), med: median(xs), n: xs.length }
+            : { key: k, avg: null, med: null, n: 0 };
+        });
+      };
+      const byMonthData = byPeriod(getMonth);
+      const byWeekData = byPeriod(getWeek);
       const buckets = ["0", "1", "2", "3", "4-7", "8-14", "15-30", "30+"];
       function bkt(d: number) { if (d <= 3) return d; if (d <= 7) return 4; if (d <= 14) return 5; if (d <= 30) return 6; return 7; }
       const dist = Array(8).fill(0);
@@ -1661,6 +1687,49 @@ function TicketBandChart({ title, data, t }: { title: string; data: { name: stri
 }
 
 // ─── Registration Time ───────────────────────────────────────────────────────
+type RegTimePoint = { key: string; avg: number | null; med: number | null; n: number };
+
+// Average as bars, median as a line: with a few registrations per period one late customer
+// sets the average, so the two are read together. Empty periods keep their slot on the axis.
+function RegTimeChart({ data, color, t, height, weekly }: { data: RegTimePoint[]; color: string; t: T; height: number; weekly?: boolean }) {
+  const tip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    const p: RegTimePoint = payload[0].payload;
+    return (
+      <div className="rounded-lg border border-border/50 bg-background px-3 py-2.5 text-xs shadow-lg backdrop-blur-sm">
+        <p className="font-semibold text-foreground mb-1.5">{fmtPeriodLabel(label)}</p>
+        {p.n === 0 ? (
+          <p className="text-muted-foreground">{t("insights.label.noRegistrations")}</p>
+        ) : (
+          <>
+            <p className="text-muted-foreground">{t("insights.kpi.avgDays")}: <strong className="text-foreground">{p.avg}</strong></p>
+            <p className="text-muted-foreground">{t("insights.kpi.medianDays")}: <strong className="text-foreground">{p.med}</strong></p>
+            <p className="text-muted-foreground">{t("insights.label.clients")}: <strong className="text-foreground">{p.n}</strong></p>
+          </>
+        )}
+      </div>
+    );
+  };
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data}>
+        <XAxis dataKey="key" tick={{ fontSize: weekly ? 10 : 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel}
+          {...(weekly ? { angle: -45, textAnchor: "end", height: 60 } : {})} />
+        <YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} />
+        <Tooltip content={tip} />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Bar dataKey="avg" fill={color} radius={[6, 6, 0, 0]} name={t("insights.kpi.avgDays")}>
+          <LabelList dataKey="avg" content={({ x, y, width, height, value }: any) => {
+            if (value == null) return null; const inside = height > 20;
+            return <text x={x + width / 2} y={inside ? y + height / 2 : y - 6} textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"} fill={inside ? "#fff" : "#555"} fontSize={weekly ? 10 : 11} fontWeight={600}>{value}g</text>;
+          }} />
+        </Bar>
+        <Line dataKey="med" type="monotone" stroke={GR} strokeWidth={2} dot={{ r: 3, fill: GR }} connectNulls name={t("insights.kpi.medianDays")} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
 function RegTimeTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData>>; t: T }) {
   const rt = d.regTime;
   if (!rt.byMonthData.length && !rt.byWeekData.length) {
@@ -1676,31 +1745,11 @@ function RegTimeTab({ d, t }: { d: NonNullable<ReturnType<typeof useInsightsData
       </div>
 
       <ChartCard title={t("insights.chart.avgDaysByMonth")}>
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={rt.byMonthData}>
-            <XAxis dataKey="key" tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} tickFormatter={fmtPeriodLabel} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
-            <Bar dataKey="avg" fill={PU} radius={[6, 6, 0, 0]} name={t("insights.label.days")}>
-              <LabelList dataKey="avg" content={({ x, y, width, height, value }: any) => {
-                if (!value) return null; const inside = height > 20;
-                return <text x={x + width / 2} y={inside ? y + height / 2 : y - 6} textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"} fill={inside ? "#fff" : "#555"} fontSize={11} fontWeight={600}>{value}g</text>;
-              }} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        <RegTimeChart data={rt.byMonthData} color={PU} t={t} height={260} />
       </ChartCard>
 
       <ChartCard title={t("insights.chart.avgDaysByWeek")}>
-        <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={rt.byWeekData}>
-            <XAxis dataKey="key" tick={{ fontSize: 10, fill: "hsl(0 0% 45%)" }} angle={-45} textAnchor="end" height={60} tickFormatter={fmtPeriodLabel} /><YAxis tick={{ fontSize: 11, fill: "hsl(0 0% 45%)" }} /><Tooltip content={<CTooltip />} />
-            <Bar dataKey="avg" fill={BL} radius={[6, 6, 0, 0]} name={t("insights.label.days")}>
-              <LabelList dataKey="avg" content={({ x, y, width, height, value }: any) => {
-                if (!value) return null; const inside = height > 20;
-                return <text x={x + width / 2} y={inside ? y + height / 2 : y - 6} textAnchor="middle" dominantBaseline={inside ? "middle" : "auto"} fill={inside ? "#fff" : "#555"} fontSize={11} fontWeight={600}>{value}g</text>;
-              }} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        <RegTimeChart data={rt.byWeekData} color={BL} t={t} height={280} weekly />
       </ChartCard>
 
       <ChartCard title={t("insights.chart.regDaysDist")}>
