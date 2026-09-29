@@ -4,15 +4,15 @@ import { supabase } from "@/integrations/supabase/client";
 // The standalone `toast`, not `useToast().toast` — the hook returns a fresh object every
 // render, so a fetcher that depends on it never stops re-running.
 import { toast } from "@/hooks/use-toast";
-import { Check, Loader2, MessageSquare, X, Sparkles, BadgeCheck } from "lucide-react";
+import { Check, Loader2, MessageSquare, X, Sparkles, BadgeCheck, Wrench } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  checklistProgress, isItemDone, itemBlockedBecause, filterChecklist, blockingItems,
-  CHECKLIST_FILTERS,
-  type ChecklistState, type ChecklistSignals, type ChecklistFilter,
+  checklistProgress, isItemDone, itemBlockedBecause, filterChecklist, blockingItems, countShown,
+  CHECKLIST_FILTERS, TECH_FILTERS, TECH_LOADS, ALL_ITEMS,
+  type ChecklistState, type ChecklistSignals, type ChecklistFilter, type TechFilter,
 } from "@/lib/goLiveChecklist";
 
 // What has to be true before a brand can issue a real cover — shared across AION admins.
@@ -25,7 +25,7 @@ import {
 // The item list itself is in code (src/lib/goLiveChecklist.ts) so brands pick up new items
 // automatically; only what has been DONE is stored. An item with no row is untouched.
 //
-// Eighteen of the items no longer need a tick at all. "Set the insurance premium" is a number
+// A third of the items no longer need a tick at all. "Set the insurance premium" is a number
 // on the brand record, "Write and load the FAQ" is two jsonb columns, "Assign the policy
 // number prefix" is a five-character string — brand_golive_signals() reads all of them and
 // this screen shows them as done, with the evidence, the moment they are true. Asking a
@@ -59,6 +59,9 @@ export default function GoLiveChecklist(
   // Lands on what is LEFT. Thirty-three rows of mostly-ticked boxes is not an answer to
   // "what is stopping us", which is the only question anyone opens this tab with.
   const [filter, setFilter] = useState<ChecklistFilter>("todo");
+  // Who can close it, independently of the view above: a developer planning the week wants
+  // "what is left that needs me", and the commercial team wants the rest without the noise.
+  const [tech, setTech] = useState<TechFilter>("any");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -176,9 +179,9 @@ export default function GoLiveChecklist(
   const { done, total, blockingLeft, detected } = checklistProgress(state, signals);
   const pct = total ? Math.round((done / total) * 100) : 0;
   const blocking = blockingItems(state, signals);
-  const groups = filterChecklist(filter, state, signals);
+  const groups = filterChecklist(filter, state, signals, tech);
   const left = total - done;
-  const counts: Record<ChecklistFilter, number> = { todo: left, blocking: blockingLeft, all: total };
+  const heavyLeft = ALL_ITEMS.filter((i) => i.tech === "heavy" && !isItemDone(i.key, state, signals)).length;
   const nothingToShow = groups.every((g) => g.items.length === 0);
 
   return (
@@ -207,6 +210,12 @@ export default function GoLiveChecklist(
           </div>
           <div className="shrink-0 text-right">
             <p className="font-serif text-2xl tabular-nums text-foreground">{done}<span className="text-base text-muted-foreground">/{total}</span></p>
+            {heavyLeft > 0 && (
+              <button type="button" onClick={() => { setTech("heavy"); setFilter("todo"); }}
+                className="block w-full text-right text-[11px] text-muted-foreground hover:text-foreground">
+                {heavyLeft} tech heavy left
+              </button>
+            )}
             {detected > 0 && (
               <p className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                 <Sparkles className="h-2.5 w-2.5 text-primary" /> {detected} detected
@@ -234,27 +243,50 @@ export default function GoLiveChecklist(
         )}
       </div>
 
-      {/* WHAT TO SHOW. Lands on what is left, not on everything. */}
-      <div className="flex flex-wrap items-center gap-1">
-        {CHECKLIST_FILTERS.map((f) => (
-          <button key={f.value} type="button" onClick={() => setFilter(f.value)}
-            aria-pressed={filter === f.value}
-            className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-              filter === f.value
-                ? "border-foreground bg-foreground text-background"
-                : "border-border text-muted-foreground hover:text-foreground"}`}>
-            {f.label} <span className="tabular-nums opacity-70">{counts[f.value]}</span>
-          </button>
-        ))}
+      {/* WHAT TO SHOW. Lands on what is left, not on everything — and, separately, on
+          whose work it is. The counts on each row follow the choice on the other. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-1">
+          {CHECKLIST_FILTERS.map((f) => (
+            <button key={f.value} type="button" onClick={() => setFilter(f.value)}
+              aria-pressed={filter === f.value}
+              className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                filter === f.value
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border text-muted-foreground hover:text-foreground"}`}>
+              {f.label} <span className="tabular-nums opacity-70">{countShown(f.value, tech, state, signals)}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Filter by tech load">
+          {TECH_FILTERS.map((t) => (
+            <button key={t.value} type="button" onClick={() => setTech(t.value)}
+              aria-pressed={tech === t.value}
+              className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs transition-colors ${
+                tech === t.value
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground"}`}>
+              {t.value === "heavy" && <Wrench className="h-3 w-3" />}
+              {t.label} <span className="tabular-nums opacity-70">{countShown(filter, t.value, state, signals)}</span>
+            </button>
+          ))}
+        </div>
       </div>
+      {tech !== "any" && (
+        <p className="-mt-2 text-[11px] text-muted-foreground">
+          {tech === "heavy" ? TECH_LOADS.heavy.hint : "Configuration, commercial, legal and operations work"} — group counts cover only these items.
+        </p>
+      )}
 
       {nothingToShow && (
         <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-6 text-center">
           <Check className="mx-auto h-6 w-6 text-emerald-600" />
           <p className="mt-2 text-sm font-medium text-foreground">
-            {filter === "blocking" ? "Nothing is blocking this brand." : "Nothing left to do."}
+            {tech === "heavy" ? (filter === "blocking" ? "No tech-heavy item is blocking this brand." : "No tech-heavy work left.")
+              : tech === "light" ? (filter === "blocking" ? "Only tech-heavy items are blocking this brand." : "Only tech-heavy work is left.")
+              : filter === "blocking" ? "Nothing is blocking this brand." : "Nothing left to do."}
           </p>
-          <button type="button" onClick={() => setFilter("all")}
+          <button type="button" onClick={() => { setFilter("all"); setTech("any"); }}
             className="mt-2 text-xs text-muted-foreground underline hover:text-foreground">
             Show the whole list
           </button>
@@ -264,6 +296,9 @@ export default function GoLiveChecklist(
       {groups.map(({ group, items, done: gDone, total: gTotal, settled }) => {
         // A group with nothing to show under this filter collapses to its own one line.
         // Six of those is a summary of the house; six expanded lists is a wall.
+        // A tech filter can leave a group with nothing of that kind at all; it is not
+        // "settled", it simply is not that kind of work.
+        if (!gTotal) return null;
         if (!items.length) {
           if (nothingToShow) return null;
           return (
@@ -318,6 +353,15 @@ export default function GoLiveChecklist(
                           </p>
                           {item.blocking && !isDone && (
                             <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">blocking</span>
+                          )}
+                          {/* Neutral on purpose: tech heavy is a kind of work, not a problem. */}
+                          {item.tech !== "none" && !isDone && (
+                            <span title={TECH_LOADS[item.tech].hint}
+                              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+                                item.tech === "heavy" ? "bg-foreground/10 text-foreground" : "text-muted-foreground"}`}>
+                              {item.tech === "heavy" && <Wrench className="h-2.5 w-2.5" />}
+                              {TECH_LOADS[item.tech].label}
+                            </span>
                           )}
                           {auto && (
                             <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400">

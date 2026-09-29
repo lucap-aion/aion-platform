@@ -6,6 +6,9 @@ import {
   isItemDone,
   filterChecklist,
   blockingItems,
+  countShown,
+  matchesTech,
+  TECH_LOADS,
   type ChecklistState,
 } from "@/lib/goLiveChecklist";
 
@@ -41,6 +44,22 @@ describe("go-live checklist", () => {
     // that had already ticked it.
     const p = checklistProgress(stateOf(["an_item_that_was_deleted"]));
     expect(p.done).toBe(0);
+  });
+
+  it("keeps every key a brand may already have ticked", () => {
+    // The key is the primary key of the stored state. Renaming one silently drops every tick
+    // and note recorded against it, on every brand.
+    const keys = new Set(ALL_ITEMS.map((i) => i.key));
+    for (const k of [
+      "slug", "brand_record", "brand_verified", "assets_collected", "assets_uploaded", "theme", "faq",
+      "premium", "fees", "ceiling", "floor",
+      "category_list", "costs_loaded", "category_ownership", "cost_reconciliation",
+      "spec_shared", "test_credential", "field_allowlist", "no_email_policy", "shops", "test_set", "prod_credential",
+      "quotation", "policy_prefix", "product_codes", "sftp", "reporting_on", "first_file_validated",
+      "brand_users", "client_documents", "training", "claims_runbook", "first_sale",
+    ]) {
+      expect(keys.has(k), k).toBe(true);
+    }
   });
 
   it("names no client — the list ships to brands that are not yet customers", () => {
@@ -86,7 +105,8 @@ describe("what the checklist can see for itself", () => {
     for (const item of ALL_ITEMS.filter((i) => i.evidence)) {
       expect(item.evidence!.length).toBeGreaterThan(10);
     }
-    expect(ALL_ITEMS.filter((i) => i.evidence)).toHaveLength(19);
+    // 19 read off the record and the tables, plus onboarding and the five cycle steps.
+    expect(ALL_ITEMS.filter((i) => i.evidence)).toHaveLength(25);
   });
 
   it("keeps the status out of the record item, because it is not a field", () => {
@@ -165,5 +185,58 @@ describe("the blocking items named in the header", () => {
   it("drops an item once it is ticked", () => {
     const one = ALL_ITEMS.find((i) => i.blocking)!;
     expect(blockingItems(stateOf([one.key])).some((b) => b.item.key === one.key)).toBe(false);
+  });
+});
+
+// ── Who can close it ─────────────────────────────────────────────────────────────────────
+describe("the tech-load filter", () => {
+  it("gives every item a known tech load", () => {
+    for (const item of ALL_ITEMS) expect(Object.keys(TECH_LOADS)).toContain(item.tech);
+  });
+
+  it("files the development and production work as tech heavy", () => {
+    const load = (k: string) => ALL_ITEMS.find((i) => i.key === k)!.tech;
+    for (const k of ["prod_brand", "field_allowlist", "test_set", "brand_it_integration", "product_key", "invite_email"]) {
+      expect(load(k), k).toBe("heavy");
+    }
+    // Configuration is technical but not heavy; a meeting or a contract is not technical.
+    expect(load("reporting_on")).toBe("config");
+    expect(load("insurance_contract")).toBe("none");
+    expect(load("training")).toBe("none");
+  });
+
+  it("splits the list in two with nothing lost or counted twice", () => {
+    const heavy = countShown("all", "heavy", {});
+    const light = countShown("all", "light", {});
+    expect(heavy).toBeGreaterThan(0);
+    expect(light).toBeGreaterThan(0);
+    expect(heavy + light).toBe(ALL_ITEMS.length);
+    expect(countShown("all", "any", {})).toBe(ALL_ITEMS.length);
+  });
+
+  it("puts configuration under 'not tech heavy'", () => {
+    const config = ALL_ITEMS.find((i) => i.tech === "config")!;
+    expect(matchesTech(config, "light")).toBe(true);
+    expect(matchesTech(config, "heavy")).toBe(false);
+  });
+
+  it("combines with the view: blocking and tech heavy", () => {
+    const shown = filterChecklist("blocking", {}, {}, "heavy").flatMap((g) => g.items);
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.every((i) => i.blocking && i.tech === "heavy")).toBe(true);
+  });
+
+  it("counts a group over the filtered items only, and zero when none are that kind", () => {
+    const groups = filterChecklist("all", {}, {}, "heavy");
+    for (const g of groups) {
+      expect(g.total).toBe(g.group.items.filter((i) => i.tech === "heavy").length);
+    }
+    // Finance is two conversations — nothing in it is tech heavy, and the screen hides it.
+    expect(groups.find((g) => g.group.key === "finance")!.total).toBe(0);
+  });
+
+  it("drops a tech-heavy item from 'to do' once it is ticked", () => {
+    const before = countShown("todo", "heavy", {});
+    expect(countShown("todo", "heavy", stateOf(["prod_brand"]))).toBe(before - 1);
   });
 });
