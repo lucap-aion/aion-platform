@@ -1,0 +1,59 @@
+# Every public hostname still has a certificate with three weeks left on it.
+#
+# Vercel renews the aioncover.com certificates by itself, about thirty days before they lapse.
+# It stopped doing that for www.app.aioncover.com in May 2026 without saying anything, and the
+# certificate expired on 25 June; nobody noticed until a browser refused the page in October.
+# The renewer lives in a Vercel account this repo cannot see, so the check is from the outside:
+# connect to each hostname the way a browser does and read the date off what comes back.
+#
+# A renewal that happens on time leaves ~30 days, so MIN_DAYS at 21 only fires once Vercel has
+# missed its window by a week — and still leaves three weeks to issue one by hand:
+#   vercel certs issue <hostname>      (from the lucap-projects team, which holds the domain)
+#
+# A failed scheduled run emails whoever last edited the cron line below.
+
+name: Certificate expiry
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read each hostname's certificate
+        env:
+          MIN_DAYS: "21"
+          HOSTS: >-
+            aioncover.com
+            www.aioncover.com
+            app.aioncover.com
+            www.app.aioncover.com
+            rc.app.aioncover.com
+            dev.app.aioncover.com
+            www.dev.app.aioncover.com
+            api.aioncover.com
+        run: |
+          fail=0
+          for h in $HOSTS; do
+            # curl verifies the chain and the name as well as the date; a 404 still counts as served.
+            if ! err=$(curl -sS --max-time 20 -o /dev/null "https://$h" 2>&1); then
+              echo "::error title=$h::$(echo "$err" | head -1)"; fail=1; continue
+            fi
+            end=$(echo | openssl s_client -servername "$h" -connect "$h:443" 2>/dev/null \
+                  | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2) || true
+            expires=$(date -d "$end" +%s 2>/dev/null) || expires=""
+            if [ -z "$end" ] || [ -z "$expires" ]; then
+              echo "::error title=$h::could not read the certificate's expiry"; fail=1; continue
+            fi
+            days=$(( (expires - $(date +%s)) / 86400 ))
+            if [ "$days" -lt "$MIN_DAYS" ]; then
+              echo "::error title=$h::certificate expires in $days days ($end)"; fail=1
+            else
+              printf '%-28s %3d days  (%s)\n' "$h" "$days" "$end"
+            fi
+          done
+          exit $fail
