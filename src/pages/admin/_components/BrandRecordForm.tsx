@@ -331,15 +331,15 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
               <FormField label="Legal entity" hint="The entity the programme is contracted with, if not the trading name">
                 <Input disabled={ro} value={editing.legal_name ?? ""} onChange={(e) => set("legal_name", e.target.value)} placeholder="Brand Name S.p.A." />
               </FormField>
-              {/* The categories the pilot covers, and the field the data request's segments
-                  come from — one segment per category, named after it. Said here because it
-                  was said nowhere: the label alone reads as positioning, and the only other
-                  place on this record that says "category" is the rate table below. */}
+              {/* What the house sells, as the catalogue reads it. It picks the intro deck's pieces
+                  and is OFFERED as the pilot's categories — the list itself, one data-request
+                  segment per row, is the Categories table under Fee Rates. This field used to be
+                  that list, and one comma-separated box is not a list anybody can see as one. */}
               <FormField
-                label="Product focus — the pilot's categories"
+                label="Product focus"
                 hint={editing.product_focus_manual
-                  ? "One segment per category on the data request. Set by hand — onboarding will not overwrite it"
-                  : "One segment per category on the data request. Read from the catalogue on every onboarding run; type over it to own it"}
+                  ? "What the house sells. Picks the intro deck's pieces. Set by hand — onboarding will not overwrite it"
+                  : "What the house sells, read from the catalogue on every onboarding run. Picks the intro deck's pieces; type over it to own it"}
               >
                 <Input disabled={ro} value={editing.product_focus ?? ""} onChange={(e) => set("product_focus", e.target.value)} placeholder="Bags and leather goods, Accessories" />
               </FormField>
@@ -382,13 +382,14 @@ export default function BrandRecordForm({ brandId, initialMode = "edit", onClose
                 the record that difference lived in somebody's head. Saved as you leave each
                 cell — this is its own table, not part of the form's payload. */}
             {brandId ? (
-              <div className="mt-5">
+              <div className="mt-5 scroll-mt-24" id="pilot-categories">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Per-category rates
+                  Categories — the pilot's perimeter and rates
                 </p>
                 <CategoryFees
                   brandId={brandId}
                   readOnly={ro}
+                  focus={editing.product_focus ?? null}
                   brandRates={{
                     insurance_premium: editing.insurance_premium ?? null,
                     activation_fee: editing.activation_fee ?? null,

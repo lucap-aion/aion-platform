@@ -18,7 +18,7 @@ import BusinessCasePanel, { type StoredBusinessCase } from "./BusinessCasePanel"
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   CYCLE_STEPS, STEP_STATES, PIPELINE_STAGES, stepIsBuilding, nextAction,
-  summarisePipeline, focusCategories, segmentCount,
+  summarisePipeline, segmentCount, pilotCategories, type CategoryRow,
   type StageState, type StepNumber, type NextAction,
 } from "@/lib/commercialCycle";
 
@@ -78,17 +78,42 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
   const [address, setAddress] = useState("");
   const [focus, setFocus] = useState("");
   const [savingField, setSavingField] = useState<string | null>(null);
+  // The record's category table — the data request's segments, one per row.
+  const [categoryRows, setCategoryRows] = useState<CategoryRow[]>([]);
 
   const load = useCallback(async () => {
     if (!brandId) return;
-    const { data, error } = await untyped.rpc("commercial_cycle_overview", { p_brand_id: brandId });
+    const [{ data, error }, cats] = await Promise.all([
+      untyped.rpc("commercial_cycle_overview", { p_brand_id: brandId }),
+      untyped.from("brand_category_fees").select("category, label").eq("brand_id", brandId).order("id"),
+    ]);
     if (error) {
       toast({ title: "Could not load the cycle", description: error.message, variant: "destructive" });
     } else {
       setOverview(data as unknown as Overview);
     }
+    if (!cats.error) setCategoryRows((cats.data ?? []) as CategoryRow[]);
     setLoadingBrand(false);
   }, [brandId]);
+
+  // The categories are edited on the record, in one place; this screen shows them and links
+  // there. Switching tab is a URL change (the page owns ?tab), and the record form loads
+  // asynchronously, so the scroll waits for the table to exist.
+  const editCategories = useCallback(() => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("tab"); next.delete("step");
+      return next;
+    });
+    let tries = 0;
+    const t = setInterval(() => {
+      const el = document.getElementById("pilot-categories");
+      if (el || ++tries > 30) {
+        clearInterval(t);
+        el?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
+  }, [setParams]);
 
   useEffect(() => { setLoadingBrand(true); void load(); }, [load]);
 
@@ -456,7 +481,7 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
 
                   {step.n === 2 && (loadingBrand ? <StepSkeleton /> :
                     <div className="space-y-3">
-                      <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="grid gap-3 sm:grid-cols-2">
                         <PersistedField
                           label="Legal entity" value={legalName} onChange={setLegalName}
                           onCommit={(v) => void saveBrandField("legal_name", v)}
@@ -470,19 +495,9 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
                           placeholder="from the brand record"
                           hint={overview?.brand?.address_is_override ? undefined : "from the brand record"}
                         />
-                        <PersistedField
-                          label="Product focus — the pilot's categories" value={focus} onChange={setFocus}
-                          onCommit={(v) => void saveBrandField("product_focus", v)}
-                          saving={savingField === "product_focus"}
-                          // Two categories, because that is what this field is: a list of
-                          // them, comma separated. The old placeholder was "High jewellery,
-                          // EU boutiques" — half a category and half a geography — which
-                          // invited a second segment headed "EU boutiques".
-                          placeholder="Bags and leather goods, Accessories"
-                        />
                       </div>
                       <p className="text-[11px] text-muted-foreground">Saved to the brand record as you leave each field.</p>
-                      <SegmentPreview focus={focus} />
+                      <SegmentPreview rows={categoryRows} focus={focus} onEdit={editCategories} />
                       <StepAction
                         produces={step.produces}
                         busy={busy === "step2"}
@@ -651,48 +666,53 @@ function PersistedField({ label, value, onChange, onCommit, saving, placeholder,
 /**
  * What the workbook is about to ask for, on the screen that builds it.
  *
- * "It's not clear where this pulls the data from. The brand should say 'we are interested in
- * these categories' … my understanding is that this comes from Record → Per category rates.
- * But I think I am wrong."
+ * "The brand should say 'we are interested in these categories' that we fill in somewhere,
+ * and for each category we do a data request. My understanding is that this comes from
+ * Record → Per category rates → Category 1, 2, 3, n."
  *
- * He had the model exactly right and the field wrong, which is a UI problem and not a
- * misunderstanding: the segments ARE one per category, the categories ARE typed in by hand —
- * into the field directly above this, whose label said "Product focus" and whose example
- * offered a geography as one of them. Nothing on the screen connected the two, and the one
- * other place on the record that says "category" prices them.
- *
- * So the form says what it will produce, by name, before it is built — and says which
- * neighbour does not decide it.
+ * It does now: the segments are the rows of the record's category table, in order, named as
+ * written there. This used to be a comma-separated "Product focus" box on this screen, which
+ * is one field and cannot be seen as a list. The categories are edited on the record only —
+ * one place — and shown here by name before Build is pressed.
  */
-function SegmentPreview({ focus }: { focus: string }) {
-  const categories = focusCategories(focus);
-  const n = segmentCount(focus);
+function SegmentPreview({ rows, focus, onEdit }: { rows: CategoryRow[]; focus: string; onEdit: () => void }) {
+  const { names, source } = pilotCategories(rows, focus);
+  const n = segmentCount(names);
   return (
     <div className="rounded-lg border border-border bg-muted/30 p-3">
-      <p className="text-xs font-medium text-foreground">
-        The data request will carry {n} {n === 1 ? "segment" : "segments"} — one per category above.
-      </p>
-      {categories.length > 0 ? (
-        <ol className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
-          {categories.slice(0, 8).map((c, i) => (
-            <li key={`${c}-${i}`}>Company information — segment {i + 1}: {c}</li>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-xs font-medium text-foreground">
+          The pilot's categories — the data request will carry {n} {n === 1 ? "segment" : "segments"}, one each
+        </p>
+        <button type="button" onClick={onEdit} className="text-xs underline underline-offset-2 text-muted-foreground hover:text-foreground">
+          {source === "record" ? "Edit on the record" : "Add them on the record"}
+        </button>
+      </div>
+      {names.length > 0 ? (
+        <ol className="mt-2 flex flex-wrap gap-1.5">
+          {names.slice(0, 8).map((c, i) => (
+            <li key={`${c}-${i}`} className="rounded-full border border-border bg-background px-2.5 py-0.5 text-xs text-foreground">
+              <span className="mr-1 tabular-nums text-muted-foreground">{i + 1}</span>{c}
+            </li>
           ))}
         </ol>
       ) : (
         <p className="mt-1.5 text-xs text-muted-foreground">
-          Product focus is empty, so the workbook goes out with two unnamed segments. Type the
-          categories the pilot covers above, separated by commas.
+          No categories on the record and no product focus, so the workbook goes out with two
+          unnamed segments.
         </p>
       )}
-      {categories.length > 8 && (
+      {source === "focus" && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          The record lists no categories yet, so these are the catalogue's product focus. Add
+          the pilot's categories on the record to set them.
+        </p>
+      )}
+      {names.length > 8 && (
         <p className="mt-1.5 text-xs text-muted-foreground">
           Only the first eight fit the template; the rest are left off.
         </p>
       )}
-      <p className="mt-2 text-[11px] text-muted-foreground">
-        Per-category rates on the brand record price each category — they do not decide the
-        segments. Editing the focus here changes the brand record, and with it the intro deck.
-      </p>
     </div>
   );
 }

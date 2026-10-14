@@ -5,6 +5,7 @@ import {
   CYCLE_STEPS, PIPELINE_STAGES, pipelineStageKeys, DEMO_STAGE_KEYS,
   stageDisplayState, stepIsBuilding, summarisePipeline, stagesForStep, stepStateLabel, isStalled,
   nextAction, stageByKey, focusCategories, segmentCount,
+  pilotCategories, categoryName, pricingClassFor, FOCUS_VOCABULARY,
   type StageState, type CycleFacts, type PipelineSummary,
 } from "@/lib/commercialCycle";
 
@@ -369,7 +370,7 @@ describe("the data request's segments", () => {
     const src = readFileSync(resolve(__dirname, "../../supabase/functions/build-collateral/index.ts"), "utf8");
     // The split is a regex literal with a "/" inside its own character class, so it is
     // matched up to the ".map" that follows it rather than by looking for a closing slash.
-    const line = /const segmentLabels = focus\.split\((.+?)\)\.map/.exec(src);
+    const line = /: focus\.split\((.+?)\)\.map/.exec(src);
     expect(line, "build-collateral no longer splits the focus where this expects").toBeTruthy();
 
     const theirs = (focus: string) =>
@@ -385,7 +386,36 @@ describe("the data request's segments", () => {
     }
   });
 
+  it("reads the record's categories before the focus, as build-collateral does", () => {
+    const rows = [{ category: "bags", label: "Bags and leather goods" }, { category: "watches", label: null }];
+    expect(pilotCategories(rows, "Accessories")).toEqual({ names: ["Bags and leather goods", "Watches"], source: "record" });
+    expect(pilotCategories([], "Accessories, Eyewear")).toEqual({ names: ["Accessories", "Eyewear"], source: "focus" });
+    expect(pilotCategories(null, null)).toEqual({ names: [], source: "none" });
+    // A row typed with a slash is one category, never two segments.
+    expect(pilotCategories([{ category: "other", label: "Silver / tableware" }], null).names).toEqual(["Silver / tableware"]);
+
+    // And the function names a row the way the screen does.
+    const src = readFileSync(resolve(__dirname, "../../supabase/functions/build-collateral/index.ts"), "utf8");
+    expect(src).toContain('.from("brand_category_fees")');
+    expect(src).toContain("r.label?.trim() || r.category.charAt(0).toUpperCase() + r.category.slice(1)");
+    expect(categoryName({ category: "bags", label: "  " })).toBe("Bags");
+  });
+
+  it("prices every catalogue category the way the seeding migration did", () => {
+    const sql = readFileSync(resolve(__dirname, "../../supabase/migrations/20261014000001_pilot_categories.sql"), "utf8");
+    const seeded = new Map([...sql.matchAll(/when '([^']+)'\s+then '([a-z]+)'/g)].map((m) => [m[1], m[2]]));
+    // The client copy of the vocabulary is the server's.
+    const ai = readFileSync(resolve(__dirname, "../../supabase/functions/_shared/focus-ai.ts"), "utf8");
+    const block = /export const FOCUS_VOCABULARY = \[([\s\S]*?)\] as const;/.exec(ai);
+    expect([...block![1].matchAll(/"([^"]+)"/g)].map((m) => m[1])).toEqual([...FOCUS_VOCABULARY]);
+    for (const label of FOCUS_VOCABULARY) {
+      expect(pricingClassFor(label), label).toBe(seeded.get(label.toLowerCase()) ?? "other");
+    }
+  });
+
   it("counts them the way the workbook does — two when nothing is set, eight at most", () => {
+    expect(segmentCount(["a"])).toBe(1);
+    expect(segmentCount([])).toBe(2);
     expect(segmentCount(null)).toBe(2);
     expect(segmentCount("   ")).toBe(2);
     expect(segmentCount("Accessories")).toBe(1);

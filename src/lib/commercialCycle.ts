@@ -378,16 +378,63 @@ export function nextAction(facts: CycleFacts): NextAction {
 }
 
 // ── The pilot's categories ───────────────────────────────────────────────────
-// `brands.product_focus` is a list of categories, and the data-request workbook carries one
-// segment per category in it, named after it. That was invisible on every screen that could
-// change it: the field was labelled "Product focus" with a placeholder mixing a category and
-// a geography, and the only other place on the record that says "category" is the per-category
-// rate table — so the honest reading of the UI was that the rate table decides the segments.
-// It does not. It prices them.
+// The data-request workbook carries one segment per category, named after it. The categories
+// are the rows of the record's category table (`brand_category_fees`) — the place Giulio
+// looked for them, and the only place on the record that was ever a LIST of them. Each row
+// may also override the house-wide rates; a row with no rates is a category priced at the
+// house's rates.
+//
+// `brands.product_focus` — the catalogue's reading — is the fallback for a house whose table
+// is still empty, and the suggestion the table offers to fill itself from.
 //
 // The split MUST match build-collateral's, which is asserted in the tests against a literal
 // copy of the function's line: two files, one rule, and a test that fails when they part.
 const SEGMENT_SPLIT = /[,;/]|•/;
+
+/** The answers the catalogue reader may give (focus-ai.ts FOCUS_VOCABULARY — pinned by a test). */
+export const FOCUS_VOCABULARY = [
+  "High jewellery", "Watches", "Bags and leather goods", "Ready-to-wear", "Shoes",
+  "Eyewear", "Silver and tableware", "Accessories", "Fragrance and beauty",
+  "Writing instruments",
+] as const;
+
+/**
+ * The pricing class a category is quoted as. The same mapping the 20261014000001 migration
+ * used to seed every prospect's table, so a category added by hand lands where a seeded one
+ * would have. Anything unrecognised is 'other', and the admin can change it on the row.
+ */
+export function pricingClassFor(label: string): string {
+  const l = label.trim().toLowerCase();
+  if (/jewel/.test(l)) return "jewellery";
+  if (/watch/.test(l)) return "watches";
+  if (/\bbags?\b/.test(l)) return "bags";
+  if (/ready-to-wear|apparel|clothing/.test(l)) return "apparel";
+  if (/shoe|leather/.test(l)) return "leather";
+  return "other";
+}
+
+export type CategoryRow = { category: string; label: string | null };
+
+/** The name a client reads for a category row — its label, or its class capitalised. */
+export function categoryName(row: CategoryRow): string {
+  const label = row.label?.trim();
+  if (label) return label;
+  return row.category.charAt(0).toUpperCase() + row.category.slice(1);
+}
+
+/**
+ * The categories the data request will ask about, and where they came from — the same
+ * choice build-collateral makes: the record's rows when there are any, else the focus.
+ */
+export function pilotCategories(
+  rows: CategoryRow[] | null | undefined,
+  focus: string | null | undefined,
+): { names: string[]; source: "record" | "focus" | "none" } {
+  const fromRecord = (rows ?? []).map(categoryName).filter(Boolean);
+  if (fromRecord.length) return { names: fromRecord, source: "record" };
+  const fromFocus = focusCategories(focus);
+  return { names: fromFocus, source: fromFocus.length ? "focus" : "none" };
+}
 
 /** The categories in a product focus, in order, as the workbook will name its segments. */
 export function focusCategories(focus: string | null | undefined): string[] {
@@ -400,6 +447,7 @@ export function focusCategories(focus: string | null | undefined): string[] {
  * Two when the focus is empty, because a form with one segment on it is a worse starting
  * point than one with a spare; eight at most, which is where the template's layout stops.
  */
-export function segmentCount(focus: string | null | undefined): number {
-  return Math.max(1, Math.min(8, focusCategories(focus).length || 2));
+export function segmentCount(focus: string | string[] | null | undefined): number {
+  const n = Array.isArray(focus) ? focus.length : focusCategories(focus).length;
+  return Math.max(1, Math.min(8, n || 2));
 }

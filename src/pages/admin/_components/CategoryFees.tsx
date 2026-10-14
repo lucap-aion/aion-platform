@@ -4,8 +4,15 @@ import { toast } from "@/hooks/use-toast";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { CATEGORIES } from "./pricing-model";
 import { Skeleton } from "@/components/ui/skeleton";
+import { FOCUS_VOCABULARY, categoryName, focusCategories, pricingClassFor } from "@/lib/commercialCycle";
 
-// Fee rates, per category.
+// The pilot's categories, and their fee rates.
+//
+// "The brand should say 'we are interested in these categories' that we fill in somewhere,
+// and for each category we do a data request. My understanding is that this comes from
+// Record → Per category rates → Category 1, 2, 3, n." Since 2026-10-14 it does: a row here is
+// a category the pilot covers and one segment of the data request, named by its label. Its
+// rate cells stay optional overrides — a row with none is a category at the house's rates.
 //
 // "Fee rates are per category — in Ferragamo there is Bags and Watches, two different
 // categories with different fee rates." The record had one set of rates for a whole house, so
@@ -22,6 +29,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 type Row = {
   id: number;
   category: string;
+  label: string | null;
   insurance_premium: number | null;
   activation_fee: number | null;
   aion_premium_fee: number | null;
@@ -57,11 +65,13 @@ const toTyped = (unit: "pct" | "eur", stored: number | null): string => {
   return unit === "pct" ? String(Number((stored * 100).toFixed(6))) : String(stored);
 };
 
-export default function CategoryFees({ brandId, readOnly, brandRates }: {
+export default function CategoryFees({ brandId, readOnly, brandRates, focus }: {
   brandId: number;
   readOnly?: boolean;
   /** The house-wide rates, shown as the placeholder in every blank cell. */
   brandRates: Partial<Record<FieldKey, number | null>>;
+  /** brands.product_focus — offered as the starting list while the table is empty. */
+  focus?: string | null;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,9 +82,10 @@ export default function CategoryFees({ brandId, readOnly, brandRates }: {
     setLoading(true);
     const { data, error } = await untyped
       .from("brand_category_fees")
-      .select("id, category, insurance_premium, activation_fee, aion_premium_fee, min_covered_value, max_covered_value, note")
+      .select("id, category, label, insurance_premium, activation_fee, aion_premium_fee, min_covered_value, max_covered_value, note")
       .eq("brand_id", brandId)
-      .order("category");
+      // Insertion order is the house's order — the data request numbers its segments by it.
+      .order("id");
     if (error) toast({ title: "Could not read the category rates", description: error.message, variant: "destructive" });
     setRows((data ?? []) as Row[]);
     setLoading(false);
@@ -82,24 +93,54 @@ export default function CategoryFees({ brandId, readOnly, brandRates }: {
 
   useEffect(() => { void load(); }, [load]);
 
-  const addCategory = async () => {
-    if (!adding) return;
+  // Added by the name the client will read; the pricing class is derived and can be changed
+  // on the row. Several at once when they come from the catalogue's reading.
+  const addCategories = async (labels: string[]) => {
+    const clean = labels.map((l) => l.trim()).filter(Boolean);
+    if (!clean.length) return;
     setBusy("new");
     const { error } = await untyped.from("brand_category_fees")
-      .insert({ brand_id: brandId, category: adding });
+      .insert(clean.map((label) => ({ brand_id: brandId, category: pricingClassFor(label), label })));
     setBusy(null);
     if (error) {
       toast({
         title: "Could not add that category",
-        // The unique constraint is the one an admin will actually hit.
+        // The unique index is the one an admin will actually hit.
         description: /duplicate|unique/i.test(error.message)
-          ? `${adding} already has a row.` : error.message,
+          ? `${clean.join(", ")} is already on the list.` : error.message,
         variant: "destructive",
       });
       return;
     }
     setAdding("");
     await load();
+  };
+
+  const saveLabel = async (row: Row, typed: string) => {
+    const label = typed.trim() || null;
+    if (label === row.label) return;
+    setBusy(row.id);
+    const { error } = await untyped.from("brand_category_fees").update({ label }).eq("id", row.id);
+    setBusy(null);
+    if (error) {
+      toast({
+        title: "Not saved",
+        description: /duplicate|unique/i.test(error.message) ? `${label} is already on the list.` : error.message,
+        variant: "destructive",
+      });
+      await load();
+      return;
+    }
+    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, label } : r)));
+  };
+
+  const saveClass = async (row: Row, category: string) => {
+    if (category === row.category) return;
+    setBusy(row.id);
+    const { error } = await untyped.from("brand_category_fees").update({ category }).eq("id", row.id);
+    setBusy(null);
+    if (error) { toast({ title: "Not saved", description: error.message, variant: "destructive" }); await load(); return; }
+    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, category } : r)));
   };
 
   // Written on blur, not on every keystroke: a rate typed digit by digit would otherwise
@@ -138,34 +179,44 @@ export default function CategoryFees({ brandId, readOnly, brandRates }: {
     setRows((prev) => prev.filter((r) => r.id !== row.id));
   };
 
-  const unused = CATEGORIES.filter((c) => !rows.some((r) => r.category === c));
+  const taken = new Set(rows.map((r) => categoryName(r).toLowerCase()));
+  const suggestions = FOCUS_VOCABULARY.filter((c) => !taken.has(c.toLowerCase()));
+  const fromCatalogue = focusCategories(focus).filter((c) => !taken.has(c.toLowerCase()));
 
   if (loading) return <Skeleton className="h-24 w-full rounded-lg" />;
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        A category here overrides the house-wide rates above. Leave a cell empty and that
-        category keeps the house-wide value — shown greyed as the placeholder.
-      </p>
-      {/* Read as the place the pilot's categories are declared, because it is the only table
-          on the record with the word "category" at the top of it. It prices categories; it
-          does not choose them. The data request's segments come from Product focus. */}
-      <p className="text-xs text-muted-foreground">
-        These are prices, not the pilot's perimeter. The categories the data request asks
-        about — one segment each — come from <span className="font-medium text-foreground">Product focus</span> above.
+        The categories the pilot covers. Each one is a segment of the data request, named as
+        written here, in this order. Rates are optional: leave a cell empty and that category
+        keeps the house-wide value above — shown greyed as the placeholder.
       </p>
 
       {rows.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-          No per-category rates. Every category is priced at the house-wide rates above.
-        </p>
+        <div className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+          <p>No categories yet — the data request falls back to the catalogue's product focus{fromCatalogue.length ? ` (${fromCatalogue.join(", ")})` : ", which is empty too"}.</p>
+          {!readOnly && fromCatalogue.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void addCategories(fromCatalogue.slice(0, 8))}
+              disabled={busy === "new"}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground disabled:opacity-50"
+            >
+              {busy === "new" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Use {fromCatalogue.length === 1 ? "it" : "these"} as the pilot's categories
+            </button>
+          )}
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="py-2 pr-3 font-medium">Category</th>
+                <th className="py-2 pr-3 font-medium">
+                  Category
+                  <span className="block font-normal normal-case tracking-normal text-[11px] text-muted-foreground/70">as the client reads it · priced as</span>
+                </th>
                 {FIELDS.map((f) => (
                   <th key={f.key} className="py-2 pr-3 font-medium">
                     {f.label}
@@ -177,9 +228,34 @@ export default function CategoryFees({ brandId, readOnly, brandRates }: {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.id} className="border-b border-border/60">
-                  <td className="py-2 pr-3 capitalize">{row.category}</td>
+              {rows.map((row, i) => (
+                <tr key={row.id} className="border-b border-border/60 align-top">
+                  <td className="py-2 pr-3">
+                    <div className="flex items-start gap-2">
+                      <span className="mt-1.5 w-4 text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
+                      <div className="space-y-1">
+                        <input
+                          type="text"
+                          disabled={readOnly || busy === row.id}
+                          defaultValue={categoryName(row)}
+                          onBlur={(e) => void saveLabel(row, e.target.value)}
+                          className="w-48 rounded-md border border-border bg-background px-2 py-1 text-sm disabled:opacity-60"
+                          aria-label={`Category ${i + 1} name`}
+                        />
+                        {/* The pricing class decides which insurer quote prices it; the client
+                            never sees it. */}
+                        <select
+                          value={row.category}
+                          disabled={readOnly || busy === row.id}
+                          onChange={(e) => void saveClass(row, e.target.value)}
+                          className="block w-48 rounded-md border border-border bg-background px-1.5 py-0.5 text-[11px] capitalize text-muted-foreground disabled:opacity-60"
+                          aria-label={`${categoryName(row)} priced as`}
+                        >
+                          {CATEGORIES.map((c) => <option key={c} value={c}>priced as {c}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </td>
                   {FIELDS.map((f) => (
                     <td key={f.key} className="py-2 pr-3">
                       <input
@@ -212,7 +288,7 @@ export default function CategoryFees({ brandId, readOnly, brandRates }: {
                         onClick={() => void remove(row)}
                         disabled={busy === row.id}
                         className="rounded border border-border p-1 text-destructive disabled:opacity-50"
-                        aria-label={`Remove the ${row.category} rates`}
+                        aria-label={`Remove ${categoryName(row)} from the pilot`}
                       >
                         {busy === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                       </button>
@@ -225,26 +301,36 @@ export default function CategoryFees({ brandId, readOnly, brandRates }: {
         </div>
       )}
 
-      {!readOnly && unused.length > 0 && (
-        <div className="flex items-center gap-2">
-          <select
+      {!readOnly && rows.length < 8 && (
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(e) => { e.preventDefault(); void addCategories([adding]); }}
+        >
+          {/* Free text, with the catalogue reader's vocabulary offered: a pilot can be scoped
+              to "Small leather goods" even though the reader would never say it. */}
+          <input
+            type="text"
+            list={`category-suggestions-${brandId}`}
             value={adding}
             onChange={(e) => setAdding(e.target.value)}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm capitalize"
+            placeholder="Add a category…"
+            className="w-56 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
             aria-label="Category to add"
-          >
-            <option value="">Add a category…</option>
-            {unused.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          />
+          <datalist id={`category-suggestions-${brandId}`}>
+            {suggestions.map((c) => <option key={c} value={c} />)}
+          </datalist>
           <button
-            type="button"
-            onClick={() => void addCategory()}
-            disabled={!adding || busy === "new"}
+            type="submit"
+            disabled={!adding.trim() || busy === "new"}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm disabled:opacity-50"
           >
             {busy === "new" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Add
           </button>
-        </div>
+        </form>
+      )}
+      {!readOnly && rows.length >= 8 && (
+        <p className="text-xs text-muted-foreground">Eight categories is as many segments as the data request holds.</p>
       )}
     </div>
   );

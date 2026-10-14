@@ -173,7 +173,22 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
     String(fromBody ?? fromRecord ?? "").trim();
   const legalName = pick(body.legal_name, brand.legal_name);
   const brandAddress = pick(body.address, brand.registered_address) || composed;
-  const focus = pick(body.focus, brand.product_focus);
+  // ── Which categories the pilot covers ─────────────────────────────────────
+  // "Categories should flow into NDA & Data Request (instead of product focus, which is one
+  // field and cannot split into multiple categories)." The record's category table is the
+  // list — one row per category, named as the client reads it. The catalogue's product focus
+  // is the fallback for a house whose table is still empty. Same choice as pilotCategories()
+  // in src/lib/commercialCycle.ts, which is what the cycle screen previews.
+  const { data: categoryRows, error: categoryErr } = await admin.from("brand_category_fees")
+    .select("category, label").eq("brand_id", brand.id).order("id");
+  if (categoryErr) throw new Error(`could not read the record's categories: ${categoryErr.message}`);
+  const recordCategories = ((categoryRows ?? []) as { category: string; label: string | null }[])
+    .map((r) => r.label?.trim() || r.category.charAt(0).toUpperCase() + r.category.slice(1))
+    .filter(Boolean);
+  const focusSource = body.focus != null ? "request" : recordCategories.length ? "record" : "focus";
+  const focus = focusSource === "record"
+    ? recordCategories.join(", ")
+    : pick(body.focus, brand.product_focus);
   const values: Record<string, string> = {
     "{{BRAND_LEGAL_NAME}}": legalName,
     "{{BRAND_ADDRESS}}": brandAddress,
@@ -186,11 +201,14 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
   //
   // It was always two, because the template has two side by side, and the two were called
   // "Segment 1" and "Segment 2" with nothing to say which was which. The perimeter is
-  // already decided and already on the record: `product_focus` is one or two categories out
-  // of a fixed vocabulary, read off the catalogue or typed by an admin. So the form asks
-  // about exactly those, by name. An explicit `segment_blocks` still wins — a pilot can be
-  // scoped to something the record does not say yet.
-  const segmentLabels = focus.split(/[,;/]|\u2022/).map((c) => c.trim()).filter(Boolean);
+  // already decided and already on the record: the category table, or failing that the
+  // product focus read off the catalogue. So the form asks about exactly those, by name. An
+  // explicit `segment_blocks` still wins — a pilot can be scoped to something the record does
+  // not say yet. The record's rows are taken whole, never re-split: "Silver / tableware" is
+  // one category somebody typed, not two.
+  const segmentLabels = focusSource === "record"
+    ? recordCategories
+    : focus.split(/[,;/]|\u2022/).map((c) => c.trim()).filter(Boolean);
   const wantSegments = body.segment_blocks != null
     ? Number(body.segment_blocks)
     // No focus at all leaves the template's own two: better a spare block the client leaves
@@ -293,9 +311,11 @@ async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: R
           : []),
         legalName ? `Confirm "${legalName}" is the entity the pilot is contracted with.` : "No legal entity set — the workbook went out blank there.",
         brandAddress ? "Check the registered address against the client's own records." : "No registered address set — fill it on the brand record or in the field above.",
-        focus
-          ? `Product focus: ${focus}. It is the brand record's, so check it is the perimeter you mean — the record's is read off the catalogue unless somebody has typed it.`
-          : "No product focus set — the client will not know which categories the pilot covers.",
+        focusSource === "record"
+          ? `Categories: ${focus} — from the brand record's category table, one segment each.`
+          : focus
+          ? `Categories: ${focus}. The record's category table is empty, so these are the catalogue's product focus — add the pilot's categories on the record to own them.`
+          : "No categories on the record and no product focus — the client will not know which categories the pilot covers.",
         ...layoutNotes,
         ...(missed.length ? [`${missed.length} template slot${missed.length === 1 ? "" : "s"} did not match the workbook — it has been revised since the template was mapped, so check those cells by hand.`] : []),
       ],
