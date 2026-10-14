@@ -32,10 +32,14 @@ export type Slide =
   | { kind: "section"; number: string; title: string; lead?: string; eyebrow?: string;
       /** The house, set under the title on the cover — the "× Brand" half of the lockup. */
       sub?: string }
-  | { kind: "bullets"; title: string; lead?: string; eyebrow?: string; bullets: string[] }
+  | { kind: "bullets"; title: string; lead?: string; eyebrow?: string; bullets: string[];
+      /** Drawn at the head of the standfirst panel — the section's own pictogram. */
+      icon?: IconName }
   | {
       /** The whole programme as one row of chevrons: the deck's contents, drawn. */
       kind: "flow"; title: string; lead?: string; eyebrow?: string; items: string[];
+      /** One pictogram per item, under its chevron. */
+      icons?: IconName[];
     }
   | {
       kind: "steps"; title: string; lead?: string; eyebrow?: string; steps: string[];
@@ -51,8 +55,29 @@ export type Slide =
       /** "2 of 2", for a flow that runs over more than one slide. */
       part?: { of: number; index: number };
     }
-  | { kind: "table"; title: string; lead?: string; eyebrow?: string; head: string[]; rows: string[][] }
-  | { kind: "callout"; title: string; label: string; body: string; eyebrow?: string };
+  | {
+      kind: "table"; title: string; lead?: string; eyebrow?: string; head: string[]; rows: string[][];
+      /**
+       * How the rows are drawn. A table is the default; the same rows can be a row of cards
+       * (one per actor, its " · "-separated duties as a list), a row of key-figure tiles
+       * (the working days of an SLA set large), or side-by-side panels (one paragraph each).
+       * The text is the same in every form — only the drawing changes.
+       */
+      display?: "table" | "cards" | "figures" | "panels";
+      /** One pictogram per row (cards) or per column (panels). */
+      icons?: IconName[];
+    }
+  | { kind: "callout"; title: string; label: string; body: string; eyebrow?: string;
+      /** "warning" draws the hazard sign; a label of the form "A = B" is drawn as an equation. */
+      icon?: IconName };
+
+/**
+ * The pictograms the renderer can draw — each one a handful of DrawingML preset shapes, so
+ * they recolour with the deck and need no picture parts in the package.
+ */
+export type IconName =
+  | "overview" | "policy" | "claim" | "voucher" | "mail" | "cycle"
+  | "insurer" | "brand" | "platform" | "client" | "warning" | "coins";
 
 export type BookletParams = {
   /** The entity the programme is contracted with — "Salvatore Ferragamo SpA". */
@@ -115,11 +140,12 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       lead: `Dalla panoramica del servizio al ciclo attivo e passivo: come funziona il programma ` +
         `di copertura tra ${L}, AION e la compagnia assicurativa.`,
       items: SECTIONS,
+      icons: ["overview", "policy", "claim", "voucher", "mail", "cycle"],
     },
 
     // ── 1 ────────────────────────────────────────────────────────────────────
     {
-      kind: "bullets", title: section(1),
+      kind: "bullets", title: section(1), icon: "overview",
       lead:
         `AION Cover offre un servizio di copertura assicurativa integrato che protegge i prodotti ` +
         `acquistati dai clienti finali di ${L} (e delle sue controllate) contro furto e danni ` +
@@ -135,6 +161,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
     },
     {
       kind: "table", title: "I quattro attori del sistema", eyebrow: section(1),
+      display: "cards", icons: ["insurer", "brand", "platform", "client"],
       head: ["Attore", "Responsabilità principali"],
       rows: [
         ["Compagnia assicurativa (Chubb)",
@@ -212,6 +239,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
     },
     {
       kind: "table", title: "SLA — tempi di risposta della compagnia assicurativa", eyebrow: section(3),
+      display: "figures",
       head: ["Metrica", "SLA"],
       rows: [
         ["Presa in carico (acknowledgement)", "100% entro 5 giorni lavorativi"],
@@ -220,7 +248,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
       ],
     },
     {
-      kind: "callout", title: "Recupero del prodotto danneggiato", eyebrow: section(3),
+      kind: "callout", title: "Recupero del prodotto danneggiato", eyebrow: section(3), icon: "warning",
       label: "Attenzione — obbligo di recupero",
       body:
         `Il recupero del prodotto danneggiato è obbligatorio per ${B} al fine di ottenere il pagamento ` +
@@ -229,7 +257,7 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
 
     // ── 4 ────────────────────────────────────────────────────────────────────
     {
-      kind: "bullets", title: section(4),
+      kind: "bullets", title: section(4), icon: "voucher",
       lead:
         "In caso di sinistro approvato, la sostituzione del prodotto avviene tramite l'emissione di un " +
         "voucher. Soluzione suggerita per aumentare il traffico in negozio e sostituire prodotti fuori " +
@@ -283,12 +311,14 @@ export function opsBooklet({ legalName, shortName }: BookletParams): Slide[] {
     {
       kind: "table", title: section(6),
       lead: "Dettaglio finanziario del programma.",
+      display: "panels", icons: ["policy", "coins"],
       head: ["Premi assicurativi", "Rimborso sinistri"],
       rows: [[
         `Entro il 15 del mese successivo, Chubb emette estratto conto per tutti i prodotti registrati nel ` +
         `mese precedente, condivisi tramite tracciato da AION Insurance. Il Brand paga entro fine mese ad ` +
         `AION Insurance Srls, che trattiene la quota broker e trasferisce la differenza a Chubb.`,
-        `In caso di accettazione, in 5 giorni la compagnia emette un rimborso a ${L}.`,
+        // A legal name ends in its own full stop often enough ("S.p.A.") that the sentence must not add one.
+        `In caso di accettazione, in 5 giorni la compagnia emette un rimborso a ${L}${L.endsWith(".") ? "" : "."}`,
       ]],
     },
   ];

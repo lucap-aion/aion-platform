@@ -2,7 +2,7 @@
 /**
  * The operations booklet, rendered to PNGs on this machine.
  *
- *   npx tsx scripts/proof-deck.mts [--out dir] [--slide 5]
+ *   npx tsx scripts/proof-deck.mts [--out dir] [--slide 5] [--strict]
  *
  * WHY THIS EXISTS. The deck is generated inside an edge function, into a template that lives
  * in a private bucket, and the only way to look at the result was to press Build on a brand
@@ -38,6 +38,16 @@ const arg = (name: string, fallback = "") => {
 
 const outDir = arg("out", "/tmp/aion-deck-proof");
 const only = Number(arg("slide", "0"));
+// --strict: render the way the client's PowerPoint will, not the way LibreOffice wants to.
+// LibreOffice honours `normAutofit` at once and quietly shrinks a box that overflows, which
+// PowerPoint does not do until somebody edits the text — so a proof with autofit on hides
+// exactly the overflow it exists to catch. And Montserrat is not installed on most machines
+// this runs on; LibreOffice falls back to a narrower face and every line looks shorter than
+// it is. Verdana is at least as wide, so a slide that fits in strict mode fits for real.
+const strict = process.argv.includes("--strict");
+const proofXml = (xml: string) => strict
+  ? xml.replaceAll("<a:normAutofit/>", "").replaceAll(`typeface="Montserrat"`, `typeface="Verdana"`)
+  : xml;
 
 const slides = opsBooklet({ legalName: "Example Maison S.p.A.", shortName: "Example" });
 const chosen = only ? [slides[only - 1]] : slides;
@@ -98,7 +108,7 @@ zip.file("ppt/slideLayouts/slideLayout1.xml",
 
 chosen.forEach((s, i) => {
   const n = i + 1;
-  zip.file(`ppt/slides/slide${n}.xml`, slideXml(s, null, { brand: "EXAMPLE" }));
+  zip.file(`ppt/slides/slide${n}.xml`, proofXml(slideXml(s, null, { brand: "EXAMPLE" })));
   zip.file(`ppt/slides/_rels/slide${n}.xml.rels`, rels(
     `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`));
 });
