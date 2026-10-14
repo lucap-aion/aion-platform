@@ -47,6 +47,10 @@ const SIZE = { width: 1440, height: 900 };
 
 /** The composer, which carries the assistant's state on itself. */
 const COMPOSER = "textarea[data-assistant-state]";
+/** The conversation's own scroller, and the turns inside it. */
+const SCROLLER = "[data-assistant-scroll]";
+const QUESTION = '[data-chat-turn="user"]';
+const ANSWER = '[data-chat-turn="assistant"]';
 
 /**
  * What the film asks.
@@ -83,8 +87,9 @@ let email = arg("email");
 let password = arg("password");
 const base = arg("base", "https://dev.app.aioncover.com");
 const out = arg("out", `AION-${slug}-assistant.mp4`);
-// Three answers is a shade over ninety seconds at this speed. Four ran to two minutes, which
-// is longer than a demo video earns.
+// Three answers was a shade over ninety seconds at this speed; reading each one through at
+// a person's pace (presentAnswer) adds ten seconds or so apiece, which puts three at about
+// two minutes. Four would be longer than a demo video earns.
 const count = Number(arg("questions", 3));
 const asked = (arg("ask", "") || "").split("|").map((q) => q.trim()).filter(Boolean);
 // 1.5×, not 2×. Fast enough not to be a wait, slow enough to read an answer as it arrives —
@@ -140,14 +145,31 @@ const browser = await chromium.launch(chromePath ? { executablePath: chromePath,
     );
     process.exit(2);
   });
+// THE PHOTOS. A headless Chrome says so in its user agent — "HeadlessChrome/155" — and
+// Prada's CDN (Akamai) does not refuse that request, it never answers it: the connection
+// hangs, the <img> eventually errors, the card hides it, and the film showed a grid of
+// empty grey squares under every product answer. Reproduced: the same two Prada photos
+// load at 2400px with the user agent below and at 0px with the headless one; Ferragamo's
+// and Roberto Coin's CDNs serve both. The Sec-CH-UA client hints already name plain
+// "Google Chrome", so the user agent string is the only tell to take away. It is the
+// browser's own, with one word removed — not a disguise as some other browser.
+const userAgent = await (async () => {
+  const probe = await browser.newPage();
+  const ua = await probe.evaluate(() => navigator.userAgent);
+  await probe.close();
+  return ua.replace(/HeadlessChrome/g, "Chrome");
+})();
 const context = await browser.newContext({
   viewport: SIZE,
+  userAgent,
   // Playwright writes one webm per page, closed when the context closes.
   recordVideo: { dir: work, size: SIZE },
   deviceScaleFactor: 2,
   locale: "it-IT",
 });
 const page = await context.newPage();
+/** Per answer: how many product photos it had and how many actually drew. */
+const photos = [];
 
 /** The SPA mounts after domcontentloaded, so every wait is for a thing, never for a timeout. */
 const gotoAndSettle = async (url, selector) => {
@@ -222,11 +244,9 @@ try {
     // seconds to the better part of a minute, and a fixed wait either cuts an answer in half
     // or films a still frame.
     await settled(page);
-    await page.waitForTimeout(1200);
+    // Then read it, which is what a person does with an answer and what the film is for.
+    photos.push(await presentAnswer(page, i));
   }
-
-  // The last answer, on screen and readable, before the recording stops.
-  await page.waitForTimeout(1500);
 } catch (e) {
   console.error("recording failed:", e instanceof Error ? e.message : e);
   await context.close().catch(() => {});
@@ -261,6 +281,17 @@ execFileSync("ffmpeg", [
 ], { stdio: ["ignore", "ignore", "inherit"] });
 
 rmSync(work, { recursive: true, force: true });
+
+// Said at the end as well as as it happened, because the end is the part of a CI log that
+// gets read. A film whose photos did not draw is the film Giulio sent back.
+const missing = photos.filter((p) => p.total > p.loaded);
+if (missing.length) {
+  console.warn(
+    `WARNING: product photos missing from the film — ${missing
+      .map((p) => `answer ${p.answer}: ${p.loaded}/${p.total} (${p.hosts.join(", ") || "?"})`)
+      .join("; ")}. Watch it before sending it.`,
+  );
+}
 
 const seconds = Number(execFileSync("ffprobe", [
   "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", out,
@@ -337,6 +368,138 @@ async function settled(page, { capMs = 180_000, settleMs = 900 } = {}) {
   }
   // Let the last of the answer paint before the next question starts typing over it.
   await page.waitForTimeout(settleMs);
+}
+
+/**
+ * Show the finished answer the way a person reads one: from its question, down, at a pace.
+ *
+ * WHY THE RECORDER SCROLLS AND NOT THE PAGE. While an answer streams the page follows it
+ * down until the question reaches the top, then lets the rest arrive below the fold — the
+ * right thing for a person, who scrolls on when they are ready. The film has no hand on the
+ * wheel, so without this it showed the top of every answer and never its photos, or (before
+ * the page stopped doing it) a lurch to the bottom as the product grid mounted, which 1.5×
+ * made worse. So once the product says the answer is done, the recorder takes the scroll:
+ * back to the question if the view has left it, a beat to read the opening, a steady eased
+ * pan down through the rest, and a hold on the end.
+ *
+ * WHY THE PHOTOS ARE WAITED FOR FIRST. They are hotlinked from the house's CDN, a few
+ * hundred kilobytes each (Prada's are 2400px), and lazy: an image below the fold of a
+ * scrolling div is not even requested until it is scrolled to. Panning straight away filmed
+ * cards filling in one by one as they went past, or not at all. So they are switched to
+ * eager, given up to twenty seconds, and counted — a photo that never drew is reported, not
+ * filmed quietly as a grey square.
+ *
+ * WHY THE PACE IS SET HERE AND NOT IN FFMPEG. "Show the answer more slowly" could mean
+ * cutting the film into pieces and playing these at 1× and the rest at 1.5×. It need not:
+ * during the pan nothing on the page moves but the scroll, so a pan recorded 1.5× slower
+ * and played at 1.5× is the same frames as a pan played at 1×. Every duration below is the
+ * one the VIEWER sees, multiplied by `speed` for the recording, so the reading pace holds
+ * whatever --speed the film is cut at — and the waiting for an answer is still the only
+ * thing compressed. Splicing by timestamp would instead depend on lining up the page's clock
+ * with the recording's, which Playwright does not promise.
+ */
+async function presentAnswer(page, index) {
+  const film = (ms) => ms * speed; // on-film milliseconds → real ones
+
+  // ── The photos ─────────────────────────────────────────────────────────────
+  const total = await page.evaluate((sel) => {
+    const answers = document.querySelectorAll(sel);
+    const answer = answers[answers.length - 1];
+    if (!answer) return 0;
+    const imgs = [...answer.querySelectorAll("img")];
+    for (const img of imgs) img.loading = "eager";
+    return imgs.length;
+  }, ANSWER);
+  if (total > 0) {
+    await page.waitForFunction((sel) => {
+      const answers = document.querySelectorAll(sel);
+      const answer = answers[answers.length - 1];
+      return !answer || [...answer.querySelectorAll("img")].every((i) => i.complete);
+    }, ANSWER, { timeout: 20_000 }).catch(() => {});
+  }
+  const health = await page.evaluate((sel) => {
+    const answers = document.querySelectorAll(sel);
+    const imgs = [...(answers[answers.length - 1]?.querySelectorAll("img") ?? [])];
+    const bad = imgs.filter((i) => !(i.complete && i.naturalWidth > 0));
+    return {
+      loaded: imgs.length - bad.length,
+      hosts: [...new Set(bad.map((i) => { try { return new URL(i.src).host; } catch { return "?"; } }))],
+    };
+  }, ANSWER);
+  const report = { answer: index + 1, total, ...health };
+  if (total) {
+    console.log(`  answer ${index + 1}: ${health.loaded}/${total} photos drew`);
+    if (health.loaded < total) {
+      console.warn(`  (photos that did not draw came from ${health.hosts.join(", ")})`);
+    }
+  }
+  // One frame for the decoded photos to paint before the camera moves.
+  await page.waitForTimeout(film(250));
+
+  // ── The pan ────────────────────────────────────────────────────────────────
+  await page.evaluate(async ({ scroller, question, timing }) => {
+    const el = document.querySelector(scroller);
+    if (!el) return;
+    // Two shapes of movement. Finding the question is a quick ease in and out. Reading is
+    // not: an ease-in-out over a nine-second pan peaks at three times its average speed,
+    // which is the middle of the answer going past too fast to read. So the pan speeds up
+    // over its first seventh, holds one steady speed, and settles over its last — barely
+    // faster than average anywhere.
+    const find = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+    const read = (t) => {
+      const a = 0.15, v = 1 / (1 - a);
+      if (t < a) return (v * t * t) / (2 * a);
+      if (t > 1 - a) return 1 - (v * (1 - t) * (1 - t)) / (2 * a);
+      return v * (t - a / 2);
+    };
+    const glide = (to, ms, ease) => new Promise((resolve) => {
+      const from = el.scrollTop;
+      if (Math.abs(to - from) < 2 || ms <= 0) { el.scrollTop = to; resolve(); return; }
+      const t0 = performance.now();
+      const step = (now) => {
+        const t = Math.min(1, (now - t0) / ms);
+        el.scrollTop = from + (to - from) * ease(t);
+        if (t < 1) requestAnimationFrame(step); else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+    const hold = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    const qs = el.querySelectorAll(question);
+    const q = qs[qs.length - 1];
+    const bottom = Math.max(0, el.scrollHeight - el.clientHeight);
+    const start = q
+      ? Math.min(bottom, Math.max(0, el.scrollTop + q.getBoundingClientRect().top - el.getBoundingClientRect().top - 16))
+      : el.scrollTop;
+
+    // Back to the question if the page has left it, quickly — this is the camera finding
+    // its place, not part of the reading.
+    if (Math.abs(el.scrollTop - start) > 2) {
+      await glide(start, Math.min(timing.findMax, Math.abs(el.scrollTop - start) * timing.findPerPx), find);
+    }
+    await hold(timing.openingHold);
+    const run = bottom - start;
+    if (run > 2) {
+      // A reading pace, not a fixed time: a three-line answer should not crawl and a
+      // product grid should not fly. Bounded both ways so one long answer does not eat the
+      // film and a short scroll is still a movement rather than a twitch.
+      const ms = Math.max(timing.panMin, Math.min(timing.panMax, run * timing.panPerPx));
+      await glide(bottom, ms, read);
+    }
+    await hold(timing.endHold);
+  }, {
+    scroller: SCROLLER,
+    question: QUESTION,
+    // All as the viewer sees them; `film()` stretches each for the recording.
+    timing: {
+      findPerPx: film(0.6), findMax: film(700),
+      openingHold: film(1200),
+      // ~110px a second on film: the speed you scroll a page you are reading.
+      panPerPx: film(9), panMin: film(1500), panMax: film(8000),
+      endHold: film(2200),
+    },
+  });
+  return report;
 }
 
 /** `count` items spread evenly across a list, in order, without repeats. */

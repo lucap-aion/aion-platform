@@ -227,7 +227,7 @@ const ImageCell = ({ url }: { url: unknown }) => {
   if (!looksLikeImageUrl(url)) return <div className="h-11 w-11 rounded-md bg-muted/50" />;
   return (
     <a href={url} target="_blank" rel="noreferrer" className="block h-11 w-11 overflow-hidden rounded-md border border-border bg-muted/40 hover:opacity-80" onClick={(e) => e.stopPropagation()}>
-      <img src={url} alt="" loading="lazy" className="h-full w-full object-cover"
+      <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover"
         onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
     </a>
   );
@@ -492,6 +492,7 @@ export default function BrandAssistant() {
     }
     const row = data as unknown as { id: string; messages: unknown };
     setChatId(row.id);
+    followRef.current = true;
     const raw = (row.messages as Message[]) ?? [];
     // Coerce each field on older/malformed saved turns (a null array would crash
     // rendering) rather than a blanket spread that lets null override defaults.
@@ -527,9 +528,54 @@ export default function BrandAssistant() {
     }
   }, [urlChatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Following the answer down ─────────────────────────────────────────────
+  // This used to be one line: on every change to `messages`, smooth-scroll to the
+  // very bottom. Every change is every streamed word, so it restarted a smooth
+  // scroll thirty times a second, and the moment the answer finished the photo
+  // grid / table / report — which only mounts once streaming stops — arrived all
+  // at once, several hundred pixels of it, and the view flew to the bottom of it.
+  // The answer the associate had been reading went out of the top in one glide,
+  // and anyone who had scrolled up to re-read something was dragged back down.
+  // Giulio saw it first in the demo film, where 1.5× playback made the glide a
+  // lurch, but it is the same lurch on a shop floor.
+  //
+  // So two rules, the ones every chat that streams long answers has settled on:
+  //   1. Follow only while the reader is following. A wheel or touch on the
+  //      conversation lets go; coming back to the bottom takes it up again; asking
+  //      a question always takes it up (you want to see the answer to it).
+  //   2. Never follow further than the question at the top of the view. The answer
+  //      flows in beneath its question; once the question reaches the top, the rest
+  //      arrives below the fold and the reader scrolls on when they are ready. So
+  //      the photos landing at the end extend the page instead of moving it.
+  // Small steps (a line of text) are instant — a smooth scroll per word is what
+  // made it judder — and only a jump worth seeing is animated.
+  const followRef = useRef(true);
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    const el = scrollRef.current;
+    if (!el || !followRef.current) return;
+    const bottom = el.scrollHeight - el.clientHeight;
+    const questions = el.querySelectorAll<HTMLElement>('[data-chat-turn="user"]');
+    const question = questions[questions.length - 1];
+    const cap = question
+      ? el.scrollTop + question.getBoundingClientRect().top - el.getBoundingClientRect().top - 16
+      : bottom;
+    // Already past the cap means the reader went there themselves (rule 2 only
+    // ever stops short of it), so they get the bottom they asked for.
+    const target = Math.max(0, el.scrollTop > cap + 4 ? bottom : Math.min(bottom, cap));
+    const distance = target - el.scrollTop;
+    if (distance <= 1) return; // never scroll anybody UP on their behalf
+    el.scrollTo({
+      top: target,
+      // Opening an old chat can be thousands of pixels; a smooth glide over that
+      // is a blur, so it lands. A line of streamed text lands too.
+      behavior: distance < 120 || distance > el.clientHeight * 2 ? "auto" : "smooth",
+    });
   }, [messages, loading]);
+  const letGo = () => { followRef.current = false; };
+  const onConversationScroll = () => {
+    const el = scrollRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 48) followRef.current = true;
+  };
 
   // ── Persistence ────────────────────────────────────────────────────────────
   const persistChat = useCallback(
@@ -727,6 +773,8 @@ export default function BrandAssistant() {
     setInput("");
     setImage(null);
     setSheet(null);
+    // Asking is always a wish to see the answer, wherever the reader had scrolled.
+    followRef.current = true;
 
     const priorHistory = messages.map((m) =>
       m.role === "user"
@@ -1023,7 +1071,18 @@ export default function BrandAssistant() {
           />
         )}
 
-        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-6">
+        <div
+          ref={scrollRef}
+          // The demo recorder pans this element itself once an answer is complete.
+          data-assistant-scroll
+          onScroll={onConversationScroll}
+          // A person's hand on the conversation, as opposed to our own scrollTo.
+          // pointerdown only counts on the element itself: that is the scrollbar.
+          onWheel={letGo}
+          onTouchMove={letGo}
+          onPointerDown={(e) => { if (e.target === e.currentTarget) letGo(); }}
+          className="flex-1 min-h-0 overflow-y-auto px-6 py-6"
+        >
           {chatLoading ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1511,7 +1570,9 @@ const UserBubble = ({ text, image, file, voice, locale }: {
   text: string; image?: string; file?: string;
   voice?: { url: string; seconds: number }; locale: string;
 }) => (
-  <div className="flex flex-col items-end gap-1.5">
+  // data-chat-turn: the latest question is where auto-follow stops, and where the
+  // demo recorder starts its pan through the answer.
+  <div data-chat-turn="user" className="flex flex-col items-end gap-1.5">
     {voice && <VoiceBubble url={voice.url} seconds={voice.seconds} locale={locale} />}
     {image && (
       <img src={image} alt="" className="max-h-56 max-w-[80%] rounded-2xl rounded-tr-md border border-border object-cover" />
@@ -1572,7 +1633,7 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
 
   if (!hasAnything && streaming) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div data-chat-turn="assistant" className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
         <span>{activity ?? tt(locale, "Thinking…", "Sto pensando…")}</span>
       </div>
@@ -1580,7 +1641,7 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div data-chat-turn="assistant" className="flex flex-col gap-4">
       {(summary.trim() || streaming) && (
         <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-a:text-primary prose-code:text-foreground prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-table:text-xs prose-th:bg-muted/40">
           <AssistantMarkdown>{summary}</AssistantMarkdown>
@@ -1733,7 +1794,12 @@ const ProductCard = ({ row, cols, locale }: {
     <>
       <div className="aspect-square w-full overflow-hidden bg-muted/30">
         {looksLikeImageUrl(img) ? (
-          <img src={img} alt={title} loading="lazy"
+          // no-referrer: these are the house's own CDN photos, hotlinked. A CDN
+          // with hotlink protection refuses a foreign Referer but serves an empty
+          // one (that is a typed-in URL), so sending none is the version that loads
+          // everywhere — and the house's CDN has no business seeing our portal's
+          // address in its logs anyway.
+          <img src={img} alt={title} loading="lazy" referrerPolicy="no-referrer"
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
             onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
         ) : <div className="h-full w-full" />}

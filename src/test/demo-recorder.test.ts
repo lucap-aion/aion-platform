@@ -47,3 +47,51 @@ describe("the demo recorder and the assistant it films", () => {
     expect(recorder).toMatch(/if \(!\(await sent\(page\)\)\) \{/);
   });
 });
+
+// The second film went back with two notes: it scrolled unnaturally — worst when a product
+// grid or a table arrived — and the product photos were not there. Both were real, and
+// neither was the recorder's fault alone, so both ends are held here as well.
+describe("how the film reads an answer", () => {
+  it("finds the conversation and its turns by attributes the page states", () => {
+    // The recorder pans the conversation itself and starts each pan from the question.
+    // If these move, it pans nothing and nobody is told — the same silent rot as above.
+    expect(recorder).toContain(`const SCROLLER = "[data-assistant-scroll]";`);
+    expect(recorder).toContain(`const QUESTION = '[data-chat-turn="user"]';`);
+    expect(recorder).toContain(`const ANSWER = '[data-chat-turn="assistant"]';`);
+    expect(composer).toContain("data-assistant-scroll");
+    expect(composer).toContain(`data-chat-turn="user"`);
+    expect(composer).toContain(`data-chat-turn="assistant"`);
+  });
+
+  it("reads every answer through after it finishes, not just waits on it", () => {
+    expect(recorder).toContain("async function presentAnswer(page, index)");
+    expect(recorder).toMatch(/await settled\(page\);\s*\n(\s*\/\/.*\n)*\s*photos\.push\(await presentAnswer\(page, i\)\);/);
+  });
+
+  it("paces the reading on film, so --speed compresses the waiting and not the reading", () => {
+    expect(recorder).toContain("const film = (ms) => ms * speed;");
+  });
+
+  it("waits for the photos to draw before panning, and says when they did not", () => {
+    expect(recorder).toContain(`img.loading = "eager"`);
+    expect(recorder).toContain("i.naturalWidth > 0");
+    expect(recorder).toContain("WARNING: product photos missing from the film");
+  });
+
+  it("does not announce itself as headless to the house's CDN", () => {
+    // Prada's Akamai never answers an image request from "HeadlessChrome": the grid filmed
+    // as grey squares. Reproduced, and fixed by the one word.
+    expect(recorder).toMatch(/replace\(\/HeadlessChrome\/g, "Chrome"\)/);
+    expect(recorder).toMatch(/newContext\(\{[\s\S]*?userAgent,[\s\S]*?recordVideo/);
+  });
+
+  it("the page no longer chases the bottom on every streamed word", () => {
+    // The old one-liner: a smooth scroll to the very bottom on every change, which flew
+    // past the answer the moment the photo grid mounted, and dragged a reader who had
+    // scrolled up back down.
+    expect(composer).not.toContain(`scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })`);
+    expect(composer).toContain("if (!el || !followRef.current) return;");
+    expect(composer).toContain("if (distance <= 1) return;");
+    expect(composer).toContain("onWheel={letGo}");
+  });
+});

@@ -29,6 +29,8 @@ export default function AssistantMarkdown({ children }: { children: string }) {
                 src={src}
                 alt={alt ?? ""}
                 loading="lazy"
+                // Hotlinked from the house's CDN: see ProductCard in BrandAssistant.
+                referrerPolicy="no-referrer"
                 className="h-full w-full object-cover"
                 onError={(e) => { e.currentTarget.style.display = "none"; }}
               />
