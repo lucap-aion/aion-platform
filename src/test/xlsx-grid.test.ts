@@ -257,3 +257,41 @@ describe("figures left in an outgoing form", () => {
     expect(filledNumericCells(xml)).toEqual(["B25"]);
   });
 });
+
+describe("AION's own data request, one block per category", () => {
+  // The layout build-collateral writes since 2026-10-14, cell for cell (column A labels).
+  const blocks = (fill: Record<number, string[]>): Sheet => {
+    const rows: string[][] = Array.from({ length: 50 }, () => [""]);
+    const put = (r: number, ...cells: string[]) => { rows[r - 1] = cells; };
+    put(1, "These data refers to the company sales");
+    put(3, "Focus", "Bags and leather goods, Shoes");
+    put(8, "Company information — segment 1: Bags and leather goods");
+    put(9, "Revenues - €"); put(10, "Total units sold - n."); put(11, "Average price");
+    put(13, "Distribution channels"); put(14, "Retail in store - % of Revenues");
+    put(18, "Volumes by price range"); put(19, "Price range - €", "Volumes", "Revenues"); put(20, "<1000€", "", "999999");
+    put(28, "Company information — segment 2: Shoes");
+    put(29, "Revenues - €"); put(30, "Total units sold - n."); put(31, "Average price");
+    put(47, "Product mix");
+    put(48, "Sub-Category", "Min price - €", "Max price - €", "Average retail price - €", "COGS - % of retail price", "Units sold per year - n.", "Revenues -€");
+    put(49, "Totes", "900", "4000", "2100", "28%", "500", "1050000");
+    for (const [r, cells] of Object.entries(fill)) rows[Number(r) - 1] = [rows[Number(r) - 1][0], ...cells];
+    return { name: "Data", grid: rows };
+  };
+
+  it("reads each block as its own segment, named after its category", () => {
+    const out = extractPerimeter([blocks({ 9: ["4.200.000"], 10: ["1750"], 11: ["2400"], 29: ["1100000"], 30: ["1222"] })]);
+    expect(out.segments.map((s) => [s.name, s.category, s.revenues, s.avg_price])).toEqual([
+      // The reader's own guess; the pricing panel re-files a segment named after a record
+      // category under that category's class.
+      ["Bags and leather goods", "leather", 4200000, 2400],
+      // No cached average price (the template's formula): revenues / units.
+      ["Shoes", "other", 1100000, 900],
+    ]);
+  });
+
+  it("leaves an unanswered block out and says so", () => {
+    const out = extractPerimeter([blocks({ 9: ["4200000"], 10: ["1750"] })]);
+    expect(out.segments.map((s) => s.name)).toEqual(["Bags and leather goods"]);
+    expect(out.notes.join(" ")).toContain("Left empty by the client, so not priced: Shoes");
+  });
+});

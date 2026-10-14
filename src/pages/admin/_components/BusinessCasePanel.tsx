@@ -8,7 +8,11 @@ import { untyped } from "@/integrations/supabase/untyped";
 import { toast } from "@/hooks/use-toast";
 import { Loader2, Plus, Trash2, Download, AlertTriangle, Calculator, ChevronDown, ChevronRight, Upload, FileSpreadsheet, Check } from "lucide-react";
 import InsurerQuotes from "./InsurerQuotes";
-import { CATEGORIES, COVERAGES, DAMAGE_SCOPES, type BusinessCase, type Quote, type RateUsed } from "./pricing-model";
+import {
+  CATEGORIES, COVERAGES, DAMAGE_SCOPES, RATE_SOURCE_LABEL, resolveRates,
+  type BusinessCase, type Quote, type RateUsed, type RecordCategory, type RecordRates,
+} from "./pricing-model";
+import { categoryName } from "@/lib/commercialCycle";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // Step 4 of the commercial cycle: the pricing conversation.
@@ -98,6 +102,14 @@ const fromStored = (r: StoredSegment): Segment => ({
   start_month: String(r.start_month ?? 1),
 });
 
+/**
+ * The perimeter the brand record implies: one segment per category on the record, named as
+ * the data request names it, priced as its class. Revenue is the one thing the record does
+ * not know, so it is left for somebody to type — or for the returned workbook to fill.
+ */
+const fromRecord = (rows: RecordCategory[]): Segment[] =>
+  rows.map((r) => ({ ...emptySegment(), name: categoryName(r), category: r.category }));
+
 /** A wholly untouched row is not worth a database round trip. */
 const isEmptySegment = (s: Segment) =>
   !s.name.trim() && !s.revenues.trim() && !s.avg_price.trim();
@@ -172,6 +184,13 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
   // table all live in one row of aion_pricing_terms, and nothing showed you
   // which row was being applied or what was in it.
   const [terms, setTerms] = useState<Terms | null>(null);
+  // The brand record's rates — per category and house-wide. compute_business_case prices
+  // from them (20261014000002); the panel reads them too, to seed the perimeter and to show
+  // what a piece costs before anybody has a revenue figure.
+  const [recordRows, setRecordRows] = useState<RecordCategory[] | null>(null);
+  const [recordRates, setRecordRates] = useState<RecordRates | null>(null);
+  // Set when a workbook has just been read, so the figures follow without another click.
+  const calcAfterImport = useRef(false);
 
   // Which categories can actually be priced, so the answer arrives before the
   // Calculate button rather than as a failure out of it.
@@ -182,6 +201,24 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
     setQuotes((data ?? []) as unknown as Quote[]);
   }, []);
   useEffect(() => { void loadQuotes(); }, [loadQuotes]);
+
+  useEffect(() => {
+    if (brandId == null) return;
+    let live = true;
+    void (async () => {
+      const [cats, rates] = await Promise.all([
+        untyped.from("brand_category_fees")
+          .select("category, label, insurance_premium, activation_fee, aion_premium_fee")
+          .eq("brand_id", brandId).order("id"),
+        supabase.from("brands").select("insurance_premium, activation_fee, aion_premium_fee")
+          .eq("id", brandId).maybeSingle(),
+      ]);
+      if (!live) return;
+      setRecordRows((cats.data ?? []) as RecordCategory[]);
+      setRecordRates((rates.data ?? null) as RecordRates | null);
+    })();
+    return () => { live = false; };
+  }, [brandId]);
 
   useEffect(() => {
     void (async () => {
@@ -216,6 +253,26 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
       segments: rows.filter((r) => !isEmptySegment(r)).map(toStored),
     }));
   }, [brandId, stored]);
+
+  // "If the data request is not available, compute the numbers based on the Record tab."
+  // A brand nobody has priced starts from its record's categories rather than from one blank
+  // row — once, when the record arrives, and only while the perimeter is still untouched.
+  const recordSeededFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (brandId == null || !recordRows?.length || recordSeededFor.current === brandId) return;
+    if (seededFor.current !== brandId) return;
+    recordSeededFor.current = brandId;
+    if ((stored?.segments ?? []).length) return;
+    setSegments((prev) => (prev.every(isEmptySegment) ? fromRecord(recordRows) : prev));
+  }, [brandId, recordRows, stored]);
+
+  const startFromRecord = () => {
+    if (!recordRows?.length) return;
+    const touched = segments.some((s) => !isEmptySegment(s));
+    if (touched && !window.confirm("Replace the perimeter with the brand record's categories? Revenues typed here are cleared.")) return;
+    setSegments(fromRecord(recordRows));
+    setImportedFrom(null); setImportedAt(null);
+  };
 
   const perimeterSig = useMemo(() => JSON.stringify({
     months: Number(months),
@@ -277,7 +334,13 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
         toast({ title: "Could not read that workbook", description: d.reason, variant: "destructive" });
         return;
       }
-      const rows = (d.segments ?? []).map(fromExtracted);
+      // A block named after one of the record's categories is that category: its pricing
+      // class is the record's, not the reader's guess from the words ("Bags and leather
+      // goods" reads as leather, and would miss the bags quote).
+      const byName = new Map((recordRows ?? []).map((r) => [categoryName(r).toLowerCase(), r.category]));
+      const rows = (d.segments ?? []).map((seg) => fromExtracted({
+        ...seg, category: byName.get(seg.name.trim().toLowerCase()) ?? seg.category,
+      }));
       setImportNotes(d.notes ?? []);
       if (rows.length) {
         // REPLACES the perimeter rather than appending to it: importing twice should not
@@ -285,9 +348,12 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
         setSegments(rows);
         setImportedFrom(d.received_as ?? file.name);
         setImportedAt(new Date().toISOString());
+        // "Upload the Data Request sheet and compute the numbers based on it." The figures
+        // follow the read; the deck still waits for a person to press Build.
+        calcAfterImport.current = true;
         toast({
           title: `${rows.length} segment${rows.length === 1 ? "" : "s"} read from the workbook`,
-          description: "Nothing has been priced. Check every figure against what they meant, then calculate.",
+          description: "Priced from what they declared. Check every figure against what they meant before building the deck.",
         });
       } else {
         toast({
@@ -346,10 +412,27 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
   [segments]);
 
   // Preflight, per segment: is there a rate that could price this at all?
+  // A segment is priceable when the record or a quote gives it a rate — the record's
+  // house-wide rate catches most, so this now fires only for a house with none on its record.
   const uncovered = useMemo(() =>
-    loadingRefs ? [] : payloadSegments.filter((s) =>
-      !quotes.some((q) => q.category === s.category && q.coverage === s.coverage)),
-  [payloadSegments, quotes, loadingRefs]);
+    loadingRefs || recordRows === null ? [] : payloadSegments.filter((s) =>
+      resolveRates(s, recordRows, recordRates, quotes, brandId).source === null),
+  [payloadSegments, quotes, loadingRefs, recordRows, recordRates, brandId]);
+
+  // What one piece costs the brand, per segment, before any revenue is known: the insurer's
+  // rate applies to cost of goods, the activation fee to the price. Service and setup are
+  // fixed sums and need a volume to become per-piece figures, so they are left to Calculate.
+  const perPiece = useMemo(() => segments
+    .filter((s) => s.name.trim())
+    .map((s) => {
+      const r = resolveRates(s, recordRows ?? [], recordRates, quotes, brandId, terms?.aion_premium_share ?? null);
+      const cogs = Number(s.cogs_ratio) || 0.3;
+      const insurerPct = r.rate != null ? r.rate * cogs : null;
+      const total = insurerPct != null ? insurerPct + (r.activation ?? 0) : null;
+      const price = Number(s.avg_price) || null;
+      return { name: s.name.trim(), source: r.source, rate: r.rate, insurerPct, activation: r.activation, total, price };
+    }),
+  [segments, recordRows, recordRates, quotes, brandId, terms]);
 
   const call = async (extra: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke("build-collateral", {
@@ -387,6 +470,14 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
       toast({ title: "Calculation failed", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
     } finally { setBusy(null); }
   };
+
+  useEffect(() => {
+    if (!calcAfterImport.current || busy !== null) return;
+    calcAfterImport.current = false;
+    if (payloadSegments.length) void calculate();
+    // calculate is recreated every render; the trigger is the imported perimeter landing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payloadSegments]);
 
   const buildDeck = async () => {
     setBusy("deck");
@@ -452,6 +543,12 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
                 </span>
               )}
             </h3>
+            {!importedFrom && (
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Rates and fees come from the brand record. Import the returned data request to fill
+                the revenues, or type them.
+              </p>
+            )}
             {importedFrom && (
               <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <FileSpreadsheet className="h-3 w-3" />
@@ -474,6 +571,13 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) void onWorkbook(f); }}
               />
             </label>
+            {recordRows && recordRows.length > 0 && (
+              <button onClick={startFromRecord}
+                title="One segment per category on the brand record"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs hover:bg-muted">
+                Start from the record
+              </button>
+            )}
             <button onClick={() => setSegments((p) => [...p, emptySegment()])}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs">
               <Plus className="h-3.5 w-3.5" /> Add segment
@@ -559,14 +663,47 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
           </div>
         ))}
 
+        {perPiece.some((p) => p.total != null) && (
+          <div className="rounded-lg border border-border bg-background p-3">
+            <p className="text-xs font-medium text-foreground">What a piece costs the brand, at these rates</p>
+            <p className="text-[11px] text-muted-foreground">Before service and setup, which are fixed sums and need the revenues to spread.</p>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[520px] text-xs">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="py-1 pr-3 font-medium">Segment</th>
+                    <th className="py-1 pr-3 font-medium">Insurer</th>
+                    <th className="py-1 pr-3 font-medium">Activation</th>
+                    <th className="py-1 pr-3 font-medium">Total, % of price</th>
+                    <th className="py-1 pr-3 font-medium">Per piece</th>
+                    <th className="py-1 font-medium">Rate from</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perPiece.map((p, i) => (
+                    <tr key={`${p.name}-${i}`} className="border-t border-border/60">
+                      <td className="py-1 pr-3 text-foreground">{p.name}</td>
+                      <td className="py-1 pr-3">{p.insurerPct != null ? pct(p.insurerPct) : "—"}{p.rate != null && <span className="text-muted-foreground"> ({pct(p.rate)} of COGS)</span>}</td>
+                      <td className="py-1 pr-3">{p.activation != null ? pct(p.activation) : "tier"}</td>
+                      <td className="py-1 pr-3 font-medium text-foreground">{p.total != null ? pct(p.total) : "—"}</td>
+                      <td className="py-1 pr-3">{p.total != null && p.price ? eur2(p.total * p.price) : "—"}</td>
+                      <td className="py-1 text-muted-foreground">{p.source ? RATE_SOURCE_LABEL[p.source] : "no rate"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {uncovered.length > 0 && (
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
             <span>
-              No rate on file for{" "}
-              {uncovered.map((s) => `${s.category} (${s.coverage === "theft" ? "theft only" : "theft + damage"})`).join(", ")}.
-              {" "}<button onClick={() => jumpToQuotes(uncovered[0])} className="font-medium underline">Add the quote</button>
-              {" "}or this will not price.
+              No rate for{" "}
+              {uncovered.map((s) => `${s.name} (${s.coverage === "theft" ? "theft only" : "theft + damage"})`).join(", ")}
+              {" "}— the brand record has no insurance premium and there is no quote.
+              {" "}Set one on the record, or <button onClick={() => jumpToQuotes(uncovered[0])} className="font-medium underline">add the quote</button>.
             </span>
           </div>
         )}
@@ -607,8 +744,9 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
             <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
               <span>
-                <strong>Indicative pricing.</strong> At least one rate below was quoted for a different house.
-                Showing it is a commercial decision — the slide carries the same warning.
+                <strong>Indicative pricing.</strong> At least one rate below is a quote for a different house
+                or the brand record's house-wide default. Showing it is a commercial decision — the slide
+                carries the same warning.
               </span>
             </div>
           )}
@@ -666,15 +804,20 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
           <div className="rounded-xl border border-border p-4">
             <h3 className="mb-2 text-sm font-semibold text-foreground">Where these rates come from</h3>
             <ul className="space-y-1 text-xs text-muted-foreground">
-              {(result.rates_used ?? []).map((r: RateUsed, i: number) => (
-                <li key={i}>
-                  <span className="text-foreground">{r.category}</span>
-                  {" · "}{r.coverage === "theft" ? "theft only" : `theft + damage${r.damage_scope ? ` (${r.damage_scope})` : ""}`}
-                  {" — "}{pct(r.rate_of_cogs)} of COGS · {r.insurer}
-                  {r.quoted_for ? `, quoted for ${r.quoted_for}` : ""}{r.quoted_at ? ` (${r.quoted_at})` : ""}
-                  {r.own_quote ? "" : <span className="ml-1 font-medium text-amber-600">— indicative</span>}
-                </li>
-              ))}
+              {(result.rates_used ?? []).map((r: RateUsed, i: number) => {
+                const fromRecord = r.rate_source === "record_category" || r.rate_source === "record_brand";
+                const indicative = r.rate_source ? r.rate_source === "borrowed_quote" || r.rate_source === "record_brand" : !r.own_quote;
+                return (
+                  <li key={i}>
+                    <span className="text-foreground">{r.segment || r.category}</span>
+                    {" · "}{r.coverage === "theft" ? "theft only" : `theft + damage${r.damage_scope ? ` (${r.damage_scope})` : ""}`}
+                    {" — "}{pct(r.rate_of_cogs)} of COGS · {fromRecord
+                      ? `${RATE_SOURCE_LABEL[r.rate_source!]}${r.source ? ` (${r.source})` : ""}`
+                      : <>{r.insurer}{r.quoted_for ? `, quoted for ${r.quoted_for}` : ""}{r.quoted_at ? ` (${r.quoted_at})` : ""}</>}
+                    {indicative && <span className="ml-1 font-medium text-amber-600">— indicative</span>}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </div>
@@ -695,7 +838,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
             <span>Setup <span className="text-foreground">{eur(terms.setup_fee)}</span>, discounted {pct(terms.setup_discount, 0)}</span>
             <span>GVT fee <span className="text-foreground">{pct(terms.gvt_fee)}</span> between gross and net premium</span>
             <span>API fee <span className="text-foreground">{eur(terms.api_fee)}</span> when included</span>
-            <span>AION takes <span className="text-foreground">{pct(terms.aion_premium_share, 0)}</span> of the net premium</span>
+            <span>AION takes <span className="text-foreground">{pct(terms.aion_premium_share, 0)}</span> of the net premium, unless the brand record says otherwise</span>
             <span>Service discounted {pct(terms.service_discount, 0)} for the first {terms.service_discount_months} months</span>
             <span>VAT <span className="text-foreground">{pct(terms.vat, 0)}</span></span>
           </div>
@@ -709,6 +852,10 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
             ))}
           </div>
           {terms.note && <p className="mt-2 text-[11px] text-muted-foreground">{terms.note}</p>}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            The brand record's insurance premium, activation fee and AION premium fee — per category,
+            then house-wide — take precedence over these terms and over borrowed quotes.
+          </p>
         </div>
       )}
 

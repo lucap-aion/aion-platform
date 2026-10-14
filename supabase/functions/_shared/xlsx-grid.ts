@@ -348,6 +348,81 @@ function fromForm(sheet: Sheet, notes: string[]): ExtractedSegment[] {
 }
 
 /**
+ * Layout 3: AION's own data request, segment blocks stacked down the Data sheet.
+ *
+ * Since 2026-10-14 the workbook carries one block per category on the brand record —
+ * "Company information — segment 1: Bags and leather goods", then Revenues, Total units sold
+ * and Average price under it — and the next block below. Read as a form, the whole sheet
+ * yielded ONE segment (the first block's revenue, labelled "Declared perimeter"), so the
+ * per-category split the workbook exists to collect was lost on the way back in. Each block
+ * is its own segment here, named by its heading — which is the record's category name, so the
+ * business case finds that category's rates on the record by name.
+ *
+ * Only column A is read for labels: further right, "Revenues" heads the price-range table's
+ * third column and "% of Revenues" the channel split, and neither is the segment's revenue.
+ */
+const SEGMENT_HEADING = /\bsegment\s*(\d+)\s*(?:[:\-\u2013\u2014]\s*(.+))?$/i;
+
+function fromSegmentBlocks(sheet: Sheet, notes: string[]): ExtractedSegment[] {
+  const { name: sheetName, grid } = sheet;
+  const starts: { row: number; n: number; label: string }[] = [];
+  grid.forEach((row, r) => {
+    const m = SEGMENT_HEADING.exec((row[0] ?? "").trim());
+    if (m) starts.push({ row: r, n: Number(m[1]), label: (m[2] ?? "").trim() });
+  });
+  if (!starts.length) return [];
+
+  const segments: ExtractedSegment[] = [];
+  const empty: string[] = [];
+  starts.forEach((start, i) => {
+    const end = i + 1 < starts.length ? starts[i + 1].row : grid.length;
+    const found = new Map<PerimeterField, { value: string; at: string }>();
+    for (let r = start.row + 1; r < end; r++) {
+      const label = (grid[r]?.[0] ?? "").trim();
+      // The product mix closes the last block; it is a table of its own.
+      if (/^product\s*mix|^mix\s*prodott/i.test(label)) break;
+      const field = fieldFor(label);
+      if (!field || found.has(field)) continue;
+      const row = grid[r] ?? [];
+      for (let k = 1; k < row.length; k++) {
+        const v = (row[k] ?? "").trim();
+        if (v) { found.set(field, { value: v, at: `${sheetName}!row ${r + 1}` }); break; }
+      }
+    }
+
+    const name = start.label || `Segment ${start.n}`;
+    const revenues = parseNumber(found.get("revenues")?.value ?? "");
+    const units = parseNumber(found.get("units")?.value ?? "");
+    let avgPrice = parseNumber(found.get("avg_price")?.value ?? "");
+    // Average price is a formula in the template (revenues / units); a workbook saved by a
+    // tool that does not calculate carries no cached value for it.
+    if ((avgPrice == null || avgPrice <= 0) && revenues != null && units != null && units > 0) avgPrice = revenues / units;
+    const value = revenues ?? (units != null && avgPrice != null ? units * avgPrice : null);
+    if (value == null || value <= 0) { empty.push(name); return; }
+    if (revenues == null) notes.push(`${name}: no revenue declared, so it was taken as units x average price (${units} x ${Math.round(avgPrice ?? 0)}).`);
+
+    const mapped = mapCategory(start.label);
+    segments.push({
+      name,
+      category: mapped.category,
+      coverage: "theft_and_damage",
+      damage_scope: "",
+      revenues: Math.round(value),
+      cogs_ratio: normaliseCogs(parseNumber(found.get("cogs")?.value ?? "")),
+      avg_price: avgPrice != null && avgPrice > 0 ? Math.round(avgPrice) : null,
+      start_month: 1,
+      source: found.get("revenues")?.at ?? `${sheetName}!row ${start.row + 1}`,
+    });
+  });
+
+  if (segments.length) {
+    notes.push(`Read ${segments.length} segment${segments.length === 1 ? "" : "s"} from the data request's own blocks on "${sheetName}", each named after its category.`);
+    if (empty.length) notes.push(`Left empty by the client, so not priced: ${empty.join(", ")}.`);
+  }
+  return segments;
+}
+
+/**
  * The client's returned workbook -> a perimeter to check.
  *
  * Tables are preferred over forms because they carry more: a table that yields three
@@ -361,9 +436,17 @@ export function extractPerimeter(sheets: Sheet[]): Extraction {
   const scanned = sheets.map((s) => s.name);
 
   let segments: ExtractedSegment[] = [];
+  // AION's own blocks first: the Data sheet also holds a product-mix TABLE, and read as the
+  // perimeter it would price sub-categories nobody asked to price.
   for (const sheet of sheets) {
-    segments = fromTable(sheet, notes);
+    segments = fromSegmentBlocks(sheet, notes);
     if (segments.length) break;
+  }
+  if (!segments.length) {
+    for (const sheet of sheets) {
+      segments = fromTable(sheet, notes);
+      if (segments.length) break;
+    }
   }
   if (!segments.length) {
     for (const sheet of sheets) {
