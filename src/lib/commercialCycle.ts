@@ -51,8 +51,8 @@ export const CYCLE_STEPS: readonly CycleStep[] = [
     n: 3,
     title: "Platform demo",
     blurb:
-      "The platform on their own catalogue, brand side and client side, with a book of business that looks real.",
-    produces: "A demo-ready account and logins for both portals.",
+      "The whole platform on their own catalogue — clients, covers, claims, boutiques and insights, brand side and client side — with a book of business that looks real.",
+    produces: "A demo-ready account, logins for both portals, and a film of the tour.",
     action: "Set the demo up",
     artifact: null,
   },

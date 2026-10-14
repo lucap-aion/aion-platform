@@ -117,7 +117,7 @@ export default function DemoPanel({
       setWaitingSince(Date.now());
       toast({
         title: "Recording started",
-        description: `A film of ${brandName}'s assistant is being made. It takes a few minutes and lands in this brand's files.`,
+        description: `A film of ${assistantOnly ? `${brandName}'s assistant` : `the ${brandName} platform`} is being made. It takes a few minutes and lands in this brand's files.`,
       });
     } catch (e) {
       toast({
@@ -254,12 +254,17 @@ export default function DemoPanel({
           "If we give them the AI assistant to test, I'd make sure only the relevant content
           is there — I'd take out the Cover, Claim etc." Those screens are the insurance
           programme, and in a meeting about the assistant they are four entries of a product
-          that is not being discussed, seeded with claims for a programme nobody has bought. */}
+          that is not being discussed, seeded with claims for a programme nobody has bought.
+
+          And the other way round: "Platform Demo — Full Portal shall focus on the whole
+          platform (AI assistant is not core at all)." Full portal is the default and the
+          demo being sold — the programme, brand side and client side. The assistant is one
+          screen in it, listed last here so the hint does not read as if it were the point. */}
       <div className="rounded-lg border border-border p-3">
         <p className="text-sm font-medium">What the demo shows</p>
         <div className="mt-2 flex flex-wrap gap-2">
           {([
-            { value: false, label: "Full portal", hint: "Every screen — covers, claims, clients, boutiques, insights, assistant" },
+            { value: false, label: "Full portal", hint: "The whole platform, brand side and client side — clients, covers, claims, boutiques, insights; the assistant is one screen among them" },
             { value: true, label: "Assistant + knowledge only", hint: "The assistant and the knowledge base. Nothing else is reachable, typed URLs included" },
           ] as const).map((opt) => {
             const on = assistantOnly === opt.value;
@@ -284,17 +289,26 @@ export default function DemoPanel({
             ? "Reading the current setting…"
             : assistantOnly
               ? "Covers, claims, clients, boutiques and insights are hidden for every user of this brand — including the brand's own logins. Switch back before a programme goes live."
-              : "The prospect sees the whole platform."}
+              : "The prospect sees the whole platform: the brand's clients, covers, claims, boutiques and insights, and the client portal where a client sees their covers and opens a claim. The assistant is there, but it is not the demo."}
         </p>
       </div>
 
-      {/* A film of the assistant answering, for a prospect who is not in the room. */}
+      {/* A film of the demo, for a prospect who is not in the room.
+          It films whichever demo the toggle above sets up, because a film of the assistant
+          sent to a brand being shown the whole programme demonstrates the one part that is
+          not being sold — which is exactly what the first one did. The recorder reads the
+          mode off the portal itself (scripts/demo-video.mjs), so this copy and the film
+          cannot disagree. Until the mode is read, nothing is promised. */}
       <div className="rounded-lg border border-border p-3">
         <p className="text-sm font-medium">Demo film</p>
         <p className="mb-2 text-xs text-muted-foreground">
-          Two minutes of this brand's own assistant answering three of its own opening
-          questions, recorded off the live portal. It is made by a runner rather than in the
-          browser, so it keeps going after you close this — look in the brand's files.
+          {assistantOnly === null
+            ? "Recorded off the live portal."
+            : assistantOnly
+              ? "Two minutes of this brand's own assistant answering three of its own opening questions, recorded off the live portal."
+              : "A two-minute tour of the platform on this brand's demo, recorded off the live portal: home, clients, covers, claims, boutiques and insights on the brand side, then the client portal — the client's own covers and the claim form they would open."}{" "}
+          It is made by a runner rather than in the browser, so it keeps going after you close
+          this — look in the brand's files.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <button

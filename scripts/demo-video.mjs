@@ -1,8 +1,31 @@
 #!/usr/bin/env node
 /**
- * A one-to-two minute film of the assistant answering, recorded off the real product.
+ * A two-minute film of the demo, recorded off the real product.
  *
- *   node scripts/demo-video.mjs --slug prada --email … --password … [--out film.mp4]
+ *   node scripts/demo-video.mjs --slug prada --email … --password … [--mode portal|assistant] [--out film.mp4]
+ *
+ * TWO FILMS, BECAUSE THERE ARE TWO DEMOS. Step 3 of the commercial cycle shows a prospect
+ * either the whole platform or, for a meeting that is only about the assistant, the
+ * assistant and its knowledge base alone (`brands.demo_assistant_only`). The film follows:
+ *
+ *  - portal (the default, "Full portal"): a tour of the platform. The brand side — home,
+ *    clients and one client, covers and one cover, claims and one claim, boutiques,
+ *    insights — and then the client side with the demo client's own login: their home,
+ *    their covers, one cover, and the claim form they would open from it. "Platform Demo —
+ *    Full Portal shall focus on the whole platform (AI assistant is not core at all)." The
+ *    first film was two minutes of the assistant even for a brand being shown the
+ *    insurance programme, which demonstrated the one part that was not being sold. The
+ *    assistant appears here only if asked for (`--cameo`), as one question at the end of
+ *    the brand side.
+ *  - assistant ("Assistant + knowledge only"): the assistant answering three of the
+ *    brand's own opening questions. In that mode the other screens are not reachable, so a
+ *    tour of them would film redirects.
+ *
+ * The mode is decided, in order, by `--mode` / AION_DEMO_MODE, by build-collateral's
+ * demo_login if it says, and otherwise by the portal itself: after logging in, the sidebar
+ * either has Covers in it or it does not. That last one is the product's own answer to
+ * "which demo is this", so a film cannot be recorded in the wrong mode by a caller who did
+ * not pass one.
  *
  * WHY A RECORDING AND NOT A RENDER.
  *
@@ -52,6 +75,73 @@ const SCROLLER = "[data-assistant-scroll]";
 const QUESTION = '[data-chat-turn="user"]';
 const ANSWER = '[data-chat-turn="assistant"]';
 
+// ── The platform tour ────────────────────────────────────────────────────────
+//
+// WHAT IT SHOWS, AND IN WHAT ORDER. The order a brand's day goes in, not the sidebar's:
+// home, where it starts; the clients, and one of them in full, because the book of business
+// is the thing the platform is built around; the covers that book holds, and one cover; the
+// claims, and one claim, which is the moment the programme earns its keep; the boutiques
+// that registered them; and insights last, as the summary of everything just shown. Then
+// the other side of the same programme: the demo client logs in and sees their own covers,
+// opens one, and opens the claim form from it — the form, not a claim, and the film ends
+// there. Submitting one would write a row into a demo the prospect is about to be handed,
+// and the form is the point.
+//
+// HOW IT IS PACED. The way the assistant answers are: a beat on arrival, a steady pan at
+// reading speed through anything longer than the screen, a hold at the end. Lists are panned
+// a screen or so, not to the bottom — five hundred covers is a fact the count states, and
+// the film is two minutes. Every duration is on-film (see `film`), so --speed compresses the
+// loading and not the looking.
+//
+// NOTHING IS FILMED HALF-LOADED. Each screen is waited on until its skeletons and spinners
+// are gone, its content has stopped changing, and its photos have drawn — the covers carry
+// the house's own product photos, hotlinked like the assistant's, and a cover list of grey
+// squares is the film Giulio sent back the first time.
+//
+// Moves happen through the product: the sidebar is hovered and clicked, a row is hovered
+// and clicked. Headless video has no cursor, so the hover is what tells the viewer where the
+// next screen came from — the row lights up before it opens.
+
+/** Brand portal. `open` is the one record of the list the film goes into. */
+const BRAND_TOUR = [
+  { path: "/dashboard", label: "home", hold: 1800, run: 900 },
+  {
+    path: "/customers", label: "clients", hold: 1400, run: 700,
+    open: { rows: "main tr.cursor-pointer", url: /\/customers\/[^/]+$/, label: "a client", hold: 1600, run: 1400 },
+  },
+  {
+    path: "/covers", label: "covers", hold: 1400, run: 800,
+    open: { rows: "main .glass-card.cursor-pointer", url: /\/covers\/[^/]+$/, label: "a cover", hold: 1600, run: 1100 },
+  },
+  {
+    path: "/claims", label: "claims", hold: 1400, run: 700,
+    open: { rows: "main tr.cursor-pointer", url: /\/claims\/[^/]+$/, label: "a claim", hold: 1600, run: 1100 },
+  },
+  { path: "/shops", label: "boutiques", hold: 1600, run: 700 },
+  { path: "/insights", label: "insights", hold: 1800, run: 1400 },
+];
+
+/** Client portal, on the demo client's own login. */
+const CLIENT_TOUR = [
+  { path: "/home", label: "client home", hold: 1600, run: 700 },
+  {
+    path: "/covers", label: "client covers", hold: 1400, run: 500,
+    open: { rows: "main .glass-card.cursor-pointer", url: /\/covers\/[^/]+\/view$/, label: "their cover", hold: 1600, run: 900 },
+  },
+  // Back to the list, and into the claim form from the cover's own button — the path a
+  // client actually takes. A cover that already has a claim offers "Manage Claim" instead,
+  // which is the other half of the same story, so that is filmed if it is what is there.
+  {
+    path: "/covers", label: "client covers", hold: 600, run: 0,
+    open: { rows: 'main a[href*="/claims/new"], main a[href*="/claims?edit="]', url: /\/claims(\/new|\?edit=|$)/, label: "the claim form", hold: 2000, run: 900 },
+  },
+  // It ends on the form. A demo client's claims list is empty by design — the claim is the
+  // one they are about to open — and "No claims yet" is a flat last frame for a film.
+];
+
+/** A link in the portal's sidebar, not one of the same href on the page. */
+const SIDEBAR_LINK = (path) => `[data-sidebar="sidebar"] a[href="/${slug}${path}"]`;
+
 /**
  * What the film asks.
  *
@@ -85,8 +175,20 @@ const batchSecret = arg("batch-secret", process.env.AION_BATCH_SECRET ?? "");
 const anonKey = arg("anon-key", process.env.AION_ANON_KEY ?? "");
 let email = arg("email");
 let password = arg("password");
+// The client side of the tour needs the demo client's own login. Onboarding makes one with
+// the other two (it owns the generated client with the fullest book); demo_login hands it
+// back as `client` once build-collateral passes it, and these flags cover the meantime.
+let clientEmail = arg("client-email", process.env.AION_DEMO_CLIENT_EMAIL ?? "");
+let clientPassword = arg("client-password", process.env.AION_DEMO_CLIENT_PASSWORD ?? "");
 const base = arg("base", "https://dev.app.aioncover.com");
-const out = arg("out", `AION-${slug}-assistant.mp4`);
+// portal | assistant. Empty means "find out" — see the header.
+let mode = normaliseMode(arg("mode", process.env.AION_DEMO_MODE ?? ""));
+// One assistant question at the end of the brand side of the tour. Off unless asked: in a
+// full-portal demo the assistant is not the point, and a minute of answer is a minute of
+// the film spent on it.
+const cameo = process.argv.includes("--cameo");
+// Named after what it is a film of, which is only known once the mode is.
+const outArg = arg("out", "");
 // Three answers was a shade over ninety seconds at this speed; reading each one through at
 // a person's pace (presentAnswer) adds ten seconds or so apiece, which puts three at about
 // two minutes. Four would be longer than a demo video earns.
@@ -95,6 +197,15 @@ const asked = (arg("ask", "") || "").split("|").map((q) => q.trim()).filter(Bool
 // 1.5×, not 2×. Fast enough not to be a wait, slow enough to read an answer as it arrives —
 // at 2× the streaming text was a blur, which defeats the point of filming it.
 const speed = Number(arg("speed", 1.5));
+/** On-film milliseconds → real ones. Every hold and pan below is written as the viewer sees it. */
+const film = (ms) => ms * speed;
+
+function normaliseMode(v) {
+  const m = String(v ?? "").trim().toLowerCase();
+  if (m === "portal" || m === "full" || m === "full_portal") return "portal";
+  if (m === "assistant" || m === "assistant_only") return "assistant";
+  return "";
+}
 
 /** build-collateral, as a batch caller. */
 async function callCollateral(payload) {
@@ -120,6 +231,13 @@ if ((!email || !password) && canCallBack) {
   const login = await callCollateral({ brand_id: Number(brandId), kind: "demo_login" });
   email = login.email;
   password = login.password;
+  // Both optional: an older build-collateral returns neither, and the recorder then reads
+  // the mode off the portal and films the brand side alone.
+  if (!clientEmail && login.client?.email) {
+    clientEmail = login.client.email;
+    clientPassword = login.client.password;
+  }
+  if (!mode && typeof login.assistant_only === "boolean") mode = login.assistant_only ? "assistant" : "portal";
   console.log(`using the demo login for ${login.brand}`);
 }
 
@@ -127,6 +245,7 @@ if (!slug || !email || !password) {
   console.error(
     "usage: demo-video.mjs --slug <brand> (--email … --password … | --brand-id N with\n" +
     "       --functions-base/--batch-secret, or AION_FUNCTIONS_BASE/AION_BATCH_SECRET)\n" +
+    "       [--mode portal|assistant] [--client-email … --client-password …] [--cameo]\n" +
     "       [--base url] [--ask \"q1|q2\"] [--questions 3] [--speed 1.5] [--out file.mp4] [--upload]",
   );
   process.exit(2);
@@ -134,7 +253,7 @@ if (!slug || !email || !password) {
 const chromePath = LOCAL_CHROME.find((p) => existsSync(p));
 
 const work = mkdtempSync(join(tmpdir(), "aion-demo-"));
-console.log(`recording ${slug} → ${out}`);
+console.log(`recording ${slug}${mode ? ` (${mode})` : ""}`);
 
 // No executablePath means Playwright's own download, which is the CI case.
 const browser = await chromium.launch(chromePath ? { executablePath: chromePath, headless: true } : { headless: true })
@@ -168,7 +287,7 @@ const context = await browser.newContext({
   locale: "it-IT",
 });
 const page = await context.newPage();
-/** Per answer: how many product photos it had and how many actually drew. */
+/** Per answer, or per screen of the tour: how many photos it had and how many actually drew. */
 const photos = [];
 
 /** The SPA mounts after domcontentloaded, so every wait is for a thing, never for a timeout. */
@@ -178,23 +297,130 @@ const gotoAndSettle = async (url, selector) => {
 };
 
 try {
-  // ── Log in as the prospect would ─────────────────────────────────────────
+  await logIn(page, email, password);
+
+  // ── Which film ───────────────────────────────────────────────────────────
+  if (!mode) mode = await modeFromPortal(page);
+  console.log(`mode: ${mode}${mode === "portal" ? (clientEmail ? " (brand side + client side)" : " (brand side only — no client login given)") : ""}`);
+
+  if (mode === "assistant") {
+    await filmAssistant(page, { count });
+  } else {
+    await tourPortal(page);
+  }
+} catch (e) {
+  console.error("recording failed:", e instanceof Error ? e.message : e);
+  await context.close().catch(() => {});
+  await browser.close().catch(() => {});
+  process.exit(1);
+}
+
+// The video is only written out when the context closes.
+await context.close();
+await browser.close();
+
+const webm = readdirSync(work).filter((f) => f.endsWith(".webm")).map((f) => join(work, f))[0];
+if (!webm) { console.error("no video was recorded"); process.exit(1); }
+
+// ── Cut ────────────────────────────────────────────────────────────────────
+// Sped up, not trimmed. Cutting the waits out would be the same lie as rendering the thing:
+// what it takes to answer is part of what is being shown. The frame rate is raised to match
+// so the result does not stutter.
+// The recording is the expensive part — two minutes of driving a live assistant — and ffmpeg
+// will not create a missing directory, so a `--out` pointing somewhere that has since been
+// tidied away throws it all away at the last step. It happened.
+const out = outArg || `AION-${slug}-${mode === "assistant" ? "assistant" : "platform"}.mp4`;
+mkdirSync(dirname(out) || ".", { recursive: true });
+
+console.log("encoding…");
+execFileSync("ffmpeg", [
+  "-y", "-hide_banner", "-loglevel", "error", "-i", webm,
+  "-filter:v", `setpts=${(1 / speed).toFixed(4)}*PTS,fps=30,scale=1440:-2:flags=lanczos`,
+  "-an",
+  "-c:v", "libx264", "-preset", "slow", "-crf", "22", "-pix_fmt", "yuv420p",
+  "-movflags", "+faststart",
+  out,
+], { stdio: ["ignore", "ignore", "inherit"] });
+
+rmSync(work, { recursive: true, force: true });
+
+// Said at the end as well as as it happened, because the end is the part of a CI log that
+// gets read. A film whose photos did not draw is the film Giulio sent back.
+const missing = photos.filter((p) => p.total > p.loaded);
+if (missing.length) {
+  console.warn(
+    `WARNING: product photos missing from the film — ${missing
+      .map((p) => `${p.label ?? `answer ${p.answer}`}: ${p.loaded}/${p.total} (${p.hosts.join(", ") || "?"})`)
+      .join("; ")}. Watch it before sending it.`,
+  );
+}
+
+const seconds = Number(execFileSync("ffprobe", [
+  "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", out,
+]).toString().trim());
+console.log(`${out} — ${Math.round(seconds)}s`);
+
+// Put it where the rest of the commercial pack lives, so it appears in the cycle's artefact
+// list with a working link rather than on whichever machine happened to make it.
+if (process.argv.includes("--upload")) {
+  if (!canCallBack) {
+    console.error("--upload needs --brand-id and the functions base + batch secret");
+    process.exit(2);
+  }
+  const stored = await callCollateral({
+    brand_id: Number(brandId),
+    kind: "upload_demo_video",
+    seconds: Math.round(seconds),
+    file_base64: readFileSync(out).toString("base64"),
+  });
+  console.log(`uploaded → ${stored.storage_path}`);
+}
+
+/** Log in as the prospect would — or as their client would; it is the same page. */
+async function logIn(page, who, secret) {
   await gotoAndSettle(`${base}/${slug}/login`, 'input[type="email"]');
-  await page.fill('input[type="email"]', email);
-  await page.fill('input[type="password"]', password);
+  await page.fill('input[type="email"]', who);
+  await page.fill('input[type="password"]', secret);
   // BY ITS NAME, not by button[type="submit"]. The login page has three submit buttons and
   // the first of them is invisible, so a type selector clicks something that can never be
   // clicked and Playwright retries until it times out. Both languages, because the portal's
   // toggle is independent of the browser locale.
-  const logIn = page.getByRole("button", { name: /log\s?in|accedi/i }).first();
-  await logIn.waitFor({ state: "visible", timeout: 30_000 });
+  const button = page.getByRole("button", { name: /log\s?in|accedi/i }).first();
+  await button.waitFor({ state: "visible", timeout: 30_000 });
+  await curtainDown(page);
   await Promise.all([
     page.waitForURL((u) => !u.toString().includes("/login"), { timeout: 60_000 }),
-    logIn.click(),
+    button.click(),
   ]);
+  await screenReady(page, "landing");
+  await curtainUp(page);
+}
 
-  // ── The assistant ────────────────────────────────────────────────────────
-  await gotoAndSettle(`${base}/${slug}/assistant`, COMPOSER);
+/**
+ * Which demo this brand is set up for, read off the portal rather than assumed.
+ *
+ * In an assistant-only demo the sidebar keeps Assistant and Knowledge and drops everything
+ * else (AppSidebar's assistantOnlyPaths), so a brand sidebar with no Covers link is an
+ * assistant demo. Waited on the Assistant link first, which both modes have: the sidebar
+ * mounts after the redirect, and reading it a frame early would see no Covers in a full
+ * portal too.
+ */
+async function modeFromPortal(page) {
+  const sidebar = SIDEBAR_LINK("/assistant");
+  await page.waitForSelector(sidebar, { timeout: 30_000 }).catch(() => {});
+  const covers = await page.locator(SIDEBAR_LINK("/covers")).count();
+  return covers > 0 ? "portal" : "assistant";
+}
+
+/** The assistant film: the brand's own opening questions, each answered and read through. */
+async function filmAssistant(page, { count, arrive = "url" }) {
+  // Into the assistant the way a person gets there: from the sidebar mid-tour, by URL when
+  // it is the whole film (where the login has landed on a page the film is not about).
+  if (arrive === "sidebar" && await viaSidebar(page, "/assistant", "assistant")) {
+    await page.waitForSelector(COMPOSER, { timeout: 45_000 });
+  } else {
+    await gotoAndSettle(`${base}/${slug}/assistant`, COMPOSER);
+  }
   await page.waitForTimeout(1500);
 
   const composer = page.locator(COMPOSER).first();
@@ -247,71 +473,273 @@ try {
     // Then read it, which is what a person does with an answer and what the film is for.
     photos.push(await presentAnswer(page, i));
   }
-} catch (e) {
-  console.error("recording failed:", e instanceof Error ? e.message : e);
-  await context.close().catch(() => {});
-  await browser.close().catch(() => {});
-  process.exit(1);
 }
 
-// The video is only written out when the context closes.
-await context.close();
-await browser.close();
+async function tourPortal(page) {
+  for (const scene of BRAND_TOUR) await playScene(page, scene);
 
-const webm = readdirSync(work).filter((f) => f.endsWith(".webm")).map((f) => join(work, f))[0];
-if (!webm) { console.error("no video was recorded"); process.exit(1); }
-
-// ── Cut ────────────────────────────────────────────────────────────────────
-// Sped up, not trimmed. Cutting the waits out would be the same lie as rendering the thing:
-// what it takes to answer is part of what is being shown. The frame rate is raised to match
-// so the result does not stutter.
-// The recording is the expensive part — two minutes of driving a live assistant — and ffmpeg
-// will not create a missing directory, so a `--out` pointing somewhere that has since been
-// tidied away throws it all away at the last step. It happened.
-mkdirSync(dirname(out) || ".", { recursive: true });
-
-console.log("encoding…");
-execFileSync("ffmpeg", [
-  "-y", "-i", webm,
-  "-filter:v", `setpts=${(1 / speed).toFixed(4)}*PTS,fps=30,scale=1440:-2:flags=lanczos`,
-  "-an",
-  "-c:v", "libx264", "-preset", "slow", "-crf", "22", "-pix_fmt", "yuv420p",
-  "-movflags", "+faststart",
-  out,
-], { stdio: ["ignore", "ignore", "inherit"] });
-
-rmSync(work, { recursive: true, force: true });
-
-// Said at the end as well as as it happened, because the end is the part of a CI log that
-// gets read. A film whose photos did not draw is the film Giulio sent back.
-const missing = photos.filter((p) => p.total > p.loaded);
-if (missing.length) {
-  console.warn(
-    `WARNING: product photos missing from the film — ${missing
-      .map((p) => `answer ${p.answer}: ${p.loaded}/${p.total} (${p.hosts.join(", ") || "?"})`)
-      .join("; ")}. Watch it before sending it.`,
-  );
-}
-
-const seconds = Number(execFileSync("ffprobe", [
-  "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", out,
-]).toString().trim());
-console.log(`${out} — ${Math.round(seconds)}s`);
-
-// Put it where the rest of the commercial pack lives, so it appears in the cycle's artefact
-// list with a working link rather than on whichever machine happened to make it.
-if (process.argv.includes("--upload")) {
-  if (!canCallBack) {
-    console.error("--upload needs --brand-id and the functions base + batch secret");
-    process.exit(2);
+  if (cameo) {
+    // One question, from the brand's own opening prompts, read through like the assistant
+    // film's. At the end of the brand side because that is where it is least in the way.
+    await filmAssistant(page, { count: 1, arrive: "sidebar" });
   }
-  const stored = await callCollateral({
-    brand_id: Number(brandId),
-    kind: "upload_demo_video",
-    seconds: Math.round(seconds),
-    file_base64: readFileSync(out).toString("base64"),
+
+  if (!clientEmail || !clientPassword) {
+    console.warn("  (no client login — the film shows the brand side only. Pass --client-email/--client-password.)");
+    return;
+  }
+
+  // Signed out by forgetting the session, not through the profile menu: the menu is a
+  // sheet with a confirmation in it, and filming somebody hunting for "Sign out" says
+  // nothing about the product. The reload lands on the brand's own login, which is where a
+  // client starts.
+  await page.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ } });
+  await logIn(page, clientEmail, clientPassword);
+  for (const scene of CLIENT_TOUR) await playScene(page, scene);
+}
+
+/** One screen: arrive, wait for it, look at it — and, if it has one, open a record and look at that. */
+async function playScene(page, scene) {
+  const here = new URL(page.url()).pathname;
+  // A screen that is going to have a row opened is not ready until that row is there. A
+  // list can draw its empty state before its query has even started — BrandCovers shows
+  // "No covers found." while the profile loads — and stay quiet long enough to pass for
+  // finished; the first recording skipped the cover detail on exactly that.
+  const expect = scene.open?.rows;
+  if (here !== `/${slug}${scene.path}`) {
+    if (!(await viaSidebar(page, scene.path, scene.label, expect))) return;
+  } else {
+    await screenReady(page, scene.label, expect);
+  }
+  console.log(`  ${scene.label}`);
+  await look(page, scene);
+
+  if (scene.open && (await openOne(page, scene.open))) {
+    console.log(`  ${scene.open.label}`);
+    await look(page, scene.open);
+  }
+}
+
+/** Through the sidebar, with the hover that shows where the click came from. */
+async function viaSidebar(page, path, label, expect) {
+  const link = page.locator(SIDEBAR_LINK(path)).first();
+  if (!(await link.count())) {
+    console.warn(`  (no ${label} in the sidebar — skipped)`);
+    return false;
+  }
+  await link.hover();
+  await page.waitForTimeout(film(450));
+  await curtainDown(page);
+  await Promise.all([
+    page.waitForURL((u) => new URL(u).pathname === `/${slug}${path}`, { timeout: 30_000 }),
+    link.click(),
+  ]);
+  await screenReady(page, label, expect);
+  await curtainUp(page);
+  return true;
+}
+
+/**
+ * Open one record off the list — one that is on screen, so the click is not preceded by a
+ * jump. Playwright scrolls a target into view before clicking it, instantly; after a pan
+ * that would be a lurch, and the film has spent the whole of the assistant's rework getting
+ * rid of those.
+ *
+ * Clicked near its left edge. A cover row carries the client's name as its own link, which
+ * goes to the client — clicked in the middle, the film would open the wrong thing.
+ */
+async function openOne(page, { rows, url, label }) {
+  const picked = await page.evaluate((sel) => {
+    const main = document.querySelector("main");
+    const box = (main ?? document.body).getBoundingClientRect();
+    const all = [...document.querySelectorAll(sel)].filter((el) => el.getClientRects().length > 0);
+    const inView = all.find((el) => {
+      const r = el.getBoundingClientRect();
+      return r.top >= box.top + 8 && r.bottom <= box.bottom - 8;
+    }) ?? all[0];
+    document.querySelectorAll("[data-demo-pick]").forEach((e) => e.removeAttribute("data-demo-pick"));
+    if (!inView) return null;
+    inView.setAttribute("data-demo-pick", "");
+    const r = inView.getBoundingClientRect();
+    return { w: r.width, h: r.height, link: inView.tagName === "A" };
+  }, rows);
+  if (!picked) {
+    console.warn(`  (nothing to open for ${label} — skipped)`);
+    return false;
+  }
+  const row = page.locator("[data-demo-pick]").first();
+  // A link is clicked where it is; a row at its left edge, clear of the links inside it.
+  const position = picked.link ? undefined : { x: Math.min(28, picked.w / 2), y: Math.min(24, picked.h / 2) };
+  await row.hover({ position });
+  await page.waitForTimeout(film(600));
+  await curtainDown(page);
+  try {
+    await Promise.all([
+      page.waitForURL((u) => url.test(new URL(u).pathname + new URL(u).search), { timeout: 20_000 }),
+      row.click({ position }),
+    ]);
+  } catch {
+    await curtainUp(page);
+    console.warn(`  (opening ${label} did not navigate — skipped)`);
+    return false;
+  }
+  await screenReady(page, label);
+  await curtainUp(page);
+  return true;
+}
+
+/**
+ * THE CURTAIN. Between a click and the next screen being ready the portal shows what any
+ * SPA shows — skeleton bars, a spinner, a list arriving row by row — and filmed, at 1.5×,
+ * that is a flicker of grey on every move. Waiting for the screen to be ready (screenReady)
+ * decides when the camera looks; it cannot stop the recording seeing the wait.
+ *
+ * So the moment before a move is photographed and laid over the page — a still of exactly
+ * what was on screen, the hovered row still lit — while the app navigates and loads
+ * underneath it, and is faded off once the new screen is finished. The viewer sees the
+ * click land, a held frame, and a short dissolve into a complete screen. The wait is still
+ * in the film, held rather than cut, like the assistant's answers; only the half-drawn
+ * frames are not.
+ *
+ * It lives on <body>, outside React's root, so a route change does not take it away, and
+ * it lets the pointer through, so the click it covers still reaches the row beneath it. A
+ * full page load (the sign-in) replaces the document, and the curtain with it — which is
+ * why the client's half starts on its own login page, as a client's would.
+ */
+async function curtainDown(page) {
+  const shot = await page.screenshot({ type: "jpeg", quality: 85 }).catch(() => null);
+  if (!shot) return;
+  await page.evaluate((src) => {
+    document.getElementById("demo-curtain")?.remove();
+    const c = document.createElement("div");
+    c.id = "demo-curtain";
+    c.style.cssText =
+      "position:fixed;inset:0;z-index:2147483647;pointer-events:none;opacity:1;" +
+      `background:#fff url(${src}) 0 0/100% 100% no-repeat`;
+    document.body.appendChild(c);
+  }, `data:image/jpeg;base64,${shot.toString("base64")}`);
+}
+
+async function curtainUp(page) {
+  await page.evaluate(async (ms) => {
+    // Every screen starts at its top. The portal scrolls one <main> for every route, so
+    // without this a screen opens wherever the last one's pan left off — the first cut
+    // arrived on the covers list halfway down it.
+    const main = document.querySelector("main");
+    if (main) main.scrollTop = 0;
+    const c = document.getElementById("demo-curtain");
+    if (!c) return;
+    c.style.transition = `opacity ${ms}ms ease`;
+    requestAnimationFrame(() => { c.style.opacity = "0"; });
+    await new Promise((r) => setTimeout(r, ms + 60));
+    c.remove();
+  }, film(380)).catch(() => {});
+}
+
+/**
+ * Wait for a screen to be finished: no skeleton or spinner showing, content no longer
+ * changing, every photo drawn. Bounded throughout — a screen that never settles is filmed as
+ * it is and said so, rather than holding the run until the job times out.
+ */
+async function screenReady(page, label, expect) {
+  const t0 = Date.now();
+  const took = {};
+  if (expect) {
+    await page.waitForSelector(expect, { state: "visible", timeout: 20_000 })
+      .catch(() => console.warn(`  (${label}: nothing matching ${expect} after 20s)`));
+  }
+  // Skeletons are `animate-pulse` and spinners `animate-spin`, here and in every page of the
+  // portal; visible ones only, since a hidden button's spinner is not a loading screen.
+  await page.waitForFunction(() => {
+    const shown = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+    return ![...document.querySelectorAll(".animate-pulse, .animate-spin")].some(shown);
+  }, null, { timeout: 30_000 }).catch(() => console.warn(`  (${label}: still loading after 30s — filmed what there was)`));
+  took.loaders = Date.now() - t0;
+
+  // A page can be spinner-free and still be filling in — a second query, a list whose rows
+  // stagger in. Quiet for 700ms is "done".
+  await page.evaluate(async () => {
+    const root = document.querySelector("main") ?? document.body;
+    const sig = () => `${root.innerText.length}:${root.querySelectorAll("*").length}`;
+    const t0 = performance.now();
+    let last = sig(), since = performance.now();
+    while (performance.now() - t0 < 10_000) {
+      await new Promise((r) => setTimeout(r, 150));
+      const now = sig();
+      if (now !== last) { last = now; since = performance.now(); }
+      else if (performance.now() - since >= 700) return;
+    }
   });
-  console.log(`uploaded → ${stored.storage_path}`);
+  took.content = Date.now() - t0 - took.loaders;
+
+  // The photos, as for an answer: eager, waited for, counted.
+  const total = await page.evaluate(() => {
+    const imgs = [...document.querySelectorAll("img")];
+    for (const img of imgs) img.loading = "eager";
+    return imgs.length;
+  });
+  if (total > 0) {
+    await page.waitForFunction(
+      () => [...document.querySelectorAll("img")].every((i) => i.complete),
+      null, { timeout: 20_000 },
+    ).catch(() => {});
+  }
+  const health = await page.evaluate(() => {
+    const imgs = [...document.querySelectorAll("img")];
+    const bad = imgs.filter((i) => !(i.complete && i.naturalWidth > 0));
+    return {
+      total: imgs.length,
+      loaded: imgs.length - bad.length,
+      hosts: [...new Set(bad.map((i) => { try { return new URL(i.src).host; } catch { return "?"; } }))],
+    };
+  });
+  took.photos = Date.now() - t0 - took.loaders - took.content;
+  if (health.total > health.loaded) console.warn(`  (${label}: ${health.loaded}/${health.total} photos drew — ${health.hosts.join(", ")})`);
+  photos.push({ label, ...health });
+  // Every wait here is held on film under the curtain, so a slow screen is a long still.
+  // Said, so the log explains a film that drags.
+  const all = Date.now() - t0;
+  if (all > 4000) {
+    console.log(`  (${label}: ready in ${(all / 1000).toFixed(1)}s — loaders ${(took.loaders / 1000).toFixed(1)}s, ` +
+      `content ${(took.content / 1000).toFixed(1)}s, photos ${(took.photos / 1000).toFixed(1)}s)`);
+  }
+  // One frame for the decoded photos to paint before the camera moves.
+  await page.waitForTimeout(film(250));
+}
+
+/**
+ * Look at a screen: a beat, a steady pan down through up to `run` pixels of it, a hold.
+ * The same reading curve as an answer's pan (presentAnswer) — level speed, eased only at
+ * the ends — and the same ~110px a second on film.
+ */
+async function look(page, { hold = 1500, run = 0 }) {
+  await page.waitForTimeout(film(hold));
+  if (run > 0) {
+    await page.evaluate(async ({ max, perPx, minMs, maxMs }) => {
+      const el = document.querySelector("main");
+      if (!el) return;
+      const read = (t) => {
+        const a = 0.15, v = 1 / (1 - a);
+        if (t < a) return (v * t * t) / (2 * a);
+        if (t > 1 - a) return 1 - (v * (1 - t) * (1 - t)) / (2 * a);
+        return v * (t - a / 2);
+      };
+      const from = el.scrollTop;
+      const to = Math.min(from + max, Math.max(0, el.scrollHeight - el.clientHeight));
+      if (to - from < 24) return; // a page that fits is looked at, not twitched
+      const ms = Math.max(minMs, Math.min(maxMs, (to - from) * perPx));
+      await new Promise((resolve) => {
+        const t0 = performance.now();
+        const step = (now) => {
+          const t = Math.min(1, (now - t0) / ms);
+          el.scrollTop = from + (to - from) * read(t);
+          if (t < 1) requestAnimationFrame(step); else resolve();
+        };
+        requestAnimationFrame(step);
+      });
+    }, { max: run, perPx: film(9), minMs: film(1500), maxMs: film(8000) });
+    await page.waitForTimeout(film(1200));
+  }
 }
 
 /**
@@ -399,7 +827,6 @@ async function settled(page, { capMs = 180_000, settleMs = 900 } = {}) {
  * with the recording's, which Playwright does not promise.
  */
 async function presentAnswer(page, index) {
-  const film = (ms) => ms * speed; // on-film milliseconds → real ones
 
   // ── The photos ─────────────────────────────────────────────────────────────
   const total = await page.evaluate((sel) => {
