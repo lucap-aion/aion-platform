@@ -1,8 +1,13 @@
 #!/usr/bin/env -S npx tsx
 /**
- * The operations booklet, rendered to PNGs on this machine.
+ * The operations booklet — or the business case — rendered to PNGs on this machine.
  *
- *   npx tsx scripts/proof-deck.mts [--out dir] [--slide 5] [--strict]
+ *   npx tsx scripts/proof-deck.mts [--deck ops|business-case] [--out dir] [--slide 5] [--strict]
+ *
+ * `--deck business-case` builds the pricing deck from a fixture case (two segments, one rate
+ * from the brand record and one borrowed quote, so indicative, with a volume-band note) —
+ * the same `businessCaseSlides` the edge function calls on the real `compute_business_case`.
+ * Add `--stress` for the six-segment case, which exercises the compact and list layouts.
  *
  * WHY THIS EXISTS. The deck is generated inside an edge function, into a template that lives
  * in a private bucket, and the only way to look at the result was to press Build on a brand
@@ -29,7 +34,9 @@ import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import JSZip from "jszip";
 import { opsBooklet } from "../supabase/functions/_shared/ops-booklet.ts";
-import { slideXml, SLIDE_W, SLIDE_H } from "../supabase/functions/_shared/pptx-slides.ts";
+import { slideXml, SLIDE_W, SLIDE_H, type DeckSlide } from "../supabase/functions/_shared/pptx-slides.ts";
+import { businessCaseSlides } from "../supabase/functions/_shared/business-case-deck.ts";
+import { FIXTURE_CASE, SIX_SEGMENT_CASE } from "../src/test/fixtures/business-case.ts";
 
 const arg = (name: string, fallback = "") => {
   const i = process.argv.indexOf(`--${name}`);
@@ -49,7 +56,10 @@ const proofXml = (xml: string) => strict
   ? xml.replaceAll("<a:normAutofit/>", "").replaceAll(`typeface="Montserrat"`, `typeface="Verdana"`)
   : xml;
 
-const slides = opsBooklet({ legalName: "Example Maison S.p.A.", shortName: "Example" });
+const deck = arg("deck", "ops");
+const slides: DeckSlide[] = deck === "business-case"
+  ? businessCaseSlides("Example Maison", process.argv.includes("--stress") ? SIX_SEGMENT_CASE : FIXTURE_CASE)
+  : opsBooklet({ legalName: "Example Maison S.p.A.", shortName: "Example" });
 const chosen = only ? [slides[only - 1]] : slides;
 
 const rels = (body: string) =>

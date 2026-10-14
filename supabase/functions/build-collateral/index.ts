@@ -29,8 +29,11 @@ import {
 // AION's own advisor is called Riccardo Ferragamo — to live where it can be unit tested.
 import { foreignNamesFound, readableText } from "../_shared/foreign-names.ts";
 import { stackSegments, rewriteSharedStrings } from "../_shared/data-request-layout.ts";
-import { opsBooklet, type Slide } from "../_shared/ops-booklet.ts";
-import { slideXml } from "../_shared/pptx-slides.ts";
+import { opsBooklet } from "../_shared/ops-booklet.ts";
+import { slideXml, type DeckSlide } from "../_shared/pptx-slides.ts";
+import {
+  businessCaseSlides, borrowedForReview, isFromRecord, type BusinessCase,
+} from "../_shared/business-case-deck.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -44,12 +47,6 @@ const CORS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-batch-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-
-/** The business case's own shape: a title and a column of bullets. */
-type SlideSpec = { title: string; bullets: string[] };
-/** …rendered through the same renderer as the booklet, as its simplest slide kind. */
-const asSlides = (specs: SlideSpec[]): Slide[] =>
-  specs.map((s) => ({ kind: "bullets", title: s.title, bullets: s.bullets.filter(Boolean) }));
 
 Deno.serve(async (req: Request) => {
   // Refuse a browser origin that isn't ours before doing anything else.
@@ -82,7 +79,7 @@ Deno.serve(async (req: Request) => {
   // A read that failed is not a brand that does not exist — see the same fix in
   // onboard-brand. 503 says "try again", which is what the tick does.
   const { data: brand, error: brandErr } = await admin.from("brands")
-    .select("id, name, slug, hq_address, hq_city, hq_country, hq_postcode, legal_name, registered_address, product_focus")
+    .select("id, name, slug, hq_address, hq_city, hq_country, hq_postcode, legal_name, registered_address, product_focus, demo_assistant_only")
     .eq("id", brandId).maybeSingle();
   if (brandErr) return json({ error: `could not read brand ${brandId}: ${brandErr.message}` }, 503);
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
@@ -494,80 +491,13 @@ async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: 
   // each tweak is slow and litters storage.
   if (body.preview === true) return { ok: true, preview: true, business_case: c };
 
-  const eur = (n: number) => `€${Math.round(n).toLocaleString("en-US")}`;
-  const pct = (n: number) => `${(n * 100).toFixed(2)}%`;
-  const fees = c.aion_fees ?? {};
-  const pp = c.per_product ?? {};
+  // The slides are built by a pure function so the proof script and the tests read exactly
+  // what this sends — see _shared/business-case-deck.ts for what each slide shows and why.
+  const slides = businessCaseSlides(String(brand.name ?? ""), c as BusinessCase);
 
-  const slides: SlideSpec[] = [
-    { title: `${brand.name} — programme business case`, bullets: [
-      `Perimeter modelled over ${c.months} months`,
-      ...c.segments.map((s: any) => `${s.segment}: ${eur(s.revenues_covered)} covered, ${s.units ?? "—"} pieces`),
-      `Total covered revenues ${eur(c.revenues_covered)}${c.products_covered ? ` across ${c.products_covered.toLocaleString("en-US")} pieces` : ""}`,
-      c.average_price ? `Average price per piece ${eur(c.average_price)}` : "",
-    ].filter(Boolean) },
-
-    { title: "Insurance cost", bullets: [
-      ...c.segments.map((s: any) => `${s.segment}: ${pct(s.rate_of_cogs)} of COGS → ${eur(s.gross_premium)} gross premium`),
-      `Gross premium ${eur(c.gross_premium)}`,
-      `Net premium after GVT fee ${eur(c.net_premium)}`,
-      c.indicative
-        ? "Rates are INDICATIVE — quoted for another house, pending formal quotation"
-        : "Rates as quoted for this house",
-    ] },
-
-    { title: "AION fees", bullets: [
-      `Tier ${fees.tier} on covered GMV`,
-      `Setup ${eur(fees.setup)} — one-off`,
-      fees.service_fee_month
-        ? `Service ${eur(fees.service_fee_month)}/month → ${eur(fees.service)} over the period (${fees.service_months_discounted ?? 0} months discounted, ${fees.service_months_full ?? 0} at full rate)`
-        : `Service fee: ${fees.service_note ?? "on quotation"}`,
-      `Activation ${eur(fees.activation)}`,
-      `Total AION fees ${eur(fees.total)}`,
-    ] },
-
-    // Per piece is the RECURRING cost. Setup is one-off and is shown on its own
-    // line, so this slide reconciles with "total cost to the brand" when someone
-    // multiplies it out in the meeting.
-    { title: "Cost per piece", bullets: pp.total ? [
-      `Insurer ${eur(pp.insurer_fee)} per piece`,
-      `AION ${eur(pp.aion_fee)} per piece`,
-      `Recurring total ${eur(pp.total)} per piece`,
-      `${pct(pp.total_pct_of_price)} of the retail price, ${pct(pp.total_pct_of_price_incl_vat)} of the price including VAT`,
-      `Setup spread over the perimeter adds ${eur(pp.setup)} per piece → ${eur(pp.total_with_setup)} all-in`,
-    ] : ["Average price not supplied — add an average price per segment for per-piece figures"] },
-
-    { title: "Summary", bullets: [
-      `Total cost to ${brand.name}: ${eur(c.total_cost_to_brand)}`,
-      `of which insurance ${eur(c.gross_premium)} and AION ${eur(fees.total)}`,
-      `AION revenue over the period ${eur(c.aion_total_revenue)}`,
-      ...(c.volume_band_mismatch ? ["Rates were quoted at a different volume than this perimeter declares"] : []),
-      "Figures are a model, not an offer — the formal insurer quotation governs",
-    ] },
-
-    // Provenance is the slide that keeps this honest: what the rate covers, how
-    // current it is, and at what volume.
-    //
-    // What it must NOT do is name the house the rate was quoted for. This deck goes to a
-    // prospect, and "quoted for Roberto Coin (2026-07-30): 6.00% of COGS" hands them a
-    // live client's name and that client's insurance rate in one line. The admin needs to
-    // know whose rate it is — that is in the panel, and in the review notes below — but a
-    // prospect does not, and the honesty the slide owes them is "this is not yours yet",
-    // which "INDICATIVE" says without naming anybody.
-    { title: "Where these rates come from", bullets: (c.rates_used ?? []).map((r: any) => {
-      const cover = r.coverage === "theft" ? "theft only"
-        : `theft + accidental damage${r.damage_scope ? ` (${r.damage_scope})` : ""}`;
-      const band = r.gmv_from != null
-        ? `, quoted at ${eur(r.gmv_from)}–${r.gmv_to != null ? eur(r.gmv_to) : "no cap"} volume` : "";
-      const who = r.own_quote
-        ? `quoted for ${brand.name}`
-        : "quoted for a comparable house in the same category";
-      return `${r.category} — ${cover}: ${pct(r.rate_of_cogs)} of COGS. ${r.insurer}, ${who}` +
-        `${r.quoted_at ? ` (${r.quoted_at})` : ""}${band}${r.own_quote ? "" : " — INDICATIVE"}`;
-    }) },
-  ];
-
-  const out = await renderDeck(admin, asSlides(slides));
+  // The footer lockup the ops deck carries — AION × HOUSE — now that this deck is drawn in
+  // the same language. The house's own name, in caps; never anybody else's.
+  const out = await renderDeck(admin, slides, { brand: String(brand.name ?? "").trim().toUpperCase() });
   return await store(admin, brand, "business_case", "pptx", out,
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     {
@@ -576,12 +506,17 @@ async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: 
       review: [
         // The slide says "a comparable house"; this says which, because the person sending
         // it has to know whose rate they are about to quote.
+        // Record-sourced rates are this house's own agreed rates, not borrowed ones, though
+        // they carry no quote — `isBorrowed` knows the difference, `!own_quote` did not.
         c.indicative
-          ? "Borrowed rates, named on screen but NOT on the slide: " +
-            (c.rates_used ?? []).filter((r: any) => !r.own_quote)
-              .map((r: any) => `${r.category} ${pct(r.rate_of_cogs)} from ${r.quoted_for ?? "an unnamed quote"}`)
-              .join("; ") +
-            ". Decide deliberately whether to show them, and keep the 'indicative' wording."
+          ? (borrowedForReview(c as BusinessCase)
+              ? "Borrowed rates, named on screen but NOT on the slide: " + borrowedForReview(c as BusinessCase) +
+                ". Decide deliberately whether to show them, and keep the 'indicative' wording."
+              : (c.rates_used ?? []).some((r: any) => r.rate_source === "record_brand")
+              ? "Indicative because a segment uses the record's house-wide rate, not a category rate. Set the category's rate on the brand record, or keep the 'indicative' wording."
+              : "The case is marked indicative. Keep the 'indicative' wording until the formal quotation is in.")
+          : (c.rates_used ?? []).some((r: any) => isFromRecord(r))
+          ? "Rates are this brand's own: agreed on its record, or quoted for it."
           : "Rates are this brand's own quote.",
         ...((c.notes ?? []) as string[]),
         "Check the perimeter against what the client actually declared in the data request.",
@@ -828,6 +763,11 @@ async function demoLogin(admin: ReturnType<typeof createClient>, brand: Record<s
   return {
     ok: true, kind: "demo_login", brand: brand.name, slug: brand.slug,
     email: brandAdmin.email, password: brandAdmin.password, portal: brandAdmin.portal,
+    // "Full portal shall focus on the whole platform." The film tours the client side too,
+    // so it needs the demo client's login; and it films the assistant only when that is all
+    // the prospect will see.
+    client: accounts?.customer?.email ? { email: accounts.customer.email, password: accounts.customer.password } : null,
+    assistant_only: brand.demo_assistant_only === true,
   };
 }
 
@@ -944,8 +884,11 @@ async function recordDemoVideo(brand: Record<string, unknown>, body: Record<stri
     // 204 carries no body, so there is no run id to return — this is the list it is top of.
     run_url: `https://github.com/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}`,
     review: [
-      "The film takes a few minutes: it asks the assistant three questions and waits for each " +
-      "answer in full. It appears in this brand's files when it is done.",
+      brand.demo_assistant_only === true
+        ? "The film takes a few minutes: it asks the assistant three questions and waits for each " +
+          "answer in full. It appears in this brand's files when it is done."
+        : "The film takes a few minutes: a tour of the whole platform, brand side then client side — " +
+          "clients, covers, claims, boutiques, insights. It appears in this brand's files when it is done.",
       "It records the live demo brand, so it shows whatever that brand's data says right now.",
     ],
   };
@@ -956,9 +899,8 @@ async function recordDemoVideo(brand: Record<string, unknown>, body: Record<stri
 // only the slide list is replaced. That is what makes these decks look like the
 // intro deck instead of like default PowerPoint.
 async function renderDeck(
-  admin: ReturnType<typeof createClient>, slides: Slide[],
-  // Given by the operations deck, which carries a footer; omitted by the business case deck,
-  // which is drawn exactly as it was before.
+  admin: ReturnType<typeof createClient>, slides: DeckSlide[],
+  // The footer lockup, AION × HOUSE. Both decks pass it.
   footer?: { brand: string },
 ): Promise<Uint8Array> {
   const { data: file, error } = await admin.storage.from(BUCKET).download(STYLE_TEMPLATE);

@@ -26,6 +26,66 @@
 
 import type { IconName, Slide } from "./ops-booklet.ts";
 
+// ── The figure slides ───────────────────────────────────────────────────────────────────
+//
+// The business case is a pricing deck, and a pricing deck is figures: what is covered, what
+// the premium is, what AION charges, what one piece costs. Set as bullets — "Gross premium
+// €331,800" in the middle of a sentence — it read as an internal note, which is what "the
+// deck UI is too poor" was about. These four kinds draw the same figures the way the ops
+// deck draws its flows: key numbers on tiles, a table that can be read across the room, bars
+// whose length is the money, and one card per rate saying where it came from.
+
+/** A key figure: the number set large, what it is under it, and a qualifier under that. */
+export type Tile = { value: string; label: string; note?: string; strong?: boolean };
+
+/** What every figure slide's header takes. `key` is the phrase set in bold; `badge` the pill. */
+type FigureHead = { title: string; key?: string; badge?: string; lead?: string; eyebrow?: string };
+
+export type FigureSlide =
+  | (FigureHead & {
+      /** A row of key-figure tiles, then a table or a row of explanatory cards under it. */
+      kind: "metrics"; tiles: Tile[];
+      table?: {
+        head: string[]; rows: string[][];
+        /** A closing row set in bold on the gold rail — the perimeter's total. */
+        total?: string[];
+        /** Right-aligned columns: figures line up on their units. */
+        numeric?: boolean[];
+        /** Column widths as shares of the table. */
+        shares?: number[];
+      };
+      cards?: { title: string; body: string }[];
+    })
+  | (FigureHead & {
+      /** One row per item with a horizontal bar as long as its value, then an equation strip. */
+      kind: "bars";
+      captions?: [string, string, string];
+      rows: {
+        label: string; sub?: string;
+        /** The middle column's figure — a rate — and what qualifies it. */
+        figure: string; figureSub?: string; tag?: string;
+        value: number; valueText: string;
+      }[];
+      equation?: { terms: { label: string; value: string; strong?: boolean }[]; ops: ("minus" | "plus" | "equal")[] };
+    })
+  | (FigureHead & {
+      /** Stacked horizontal bars on one scale — a cost split into who it goes to. */
+      kind: "stack";
+      bars: { label: string; sub?: string; total: string; parts: { label: string; value: number; text: string }[] }[];
+      tiles?: Tile[];
+      notes?: string[];
+    })
+  | (FigureHead & {
+      /** One card per source, under a warning that cannot be skimmed past when there is one. */
+      kind: "sources";
+      warning?: { label: string; body: string };
+      cards: { title: string; sub?: string; figure: string; unit?: string; lines: string[]; tag?: string }[];
+      notes?: string[];
+    });
+
+/** Every slide the renderer draws: the booklet's shapes and the figure slides. */
+export type DeckSlide = Slide | FigureSlide;
+
 // ── The look, which is the teaser's own ─────────────────────────────────────────────────
 export const BG = "FAF7F2";
 export const INK = "262626";
@@ -89,7 +149,7 @@ const nid = () => nextId++;
  * it was drawn before: the business case deck passes nothing, and its plain title-and-bullets
  * slide is not part of the ops deck's graphic pass.
  */
-export function slideXml(slide: Slide, markRelId: string | null, page?: Page): string {
+export function slideXml(slide: DeckSlide, markRelId: string | null, page?: Page): string {
   nextId = 100;
   const body = (() => {
     switch (slide.kind) {
@@ -99,6 +159,10 @@ export function slideXml(slide: Slide, markRelId: string | null, page?: Page): s
       case "steps": return stepsSlide(slide);
       case "table": return tableSlide(slide);
       case "callout": return calloutSlide(slide);
+      case "metrics": return metricsSlide(slide);
+      case "bars": return barsSlide(slide);
+      case "stack": return stackSlide(slide);
+      case "sources": return sourcesSlide(slide);
     }
   })();
 
@@ -708,6 +772,674 @@ function equationCallout(
     ], "ctr");
 }
 
+// ── Figure slides ───────────────────────────────────────────────────────────────────────
+
+const figureHeader = (s: FigureHead) =>
+  opsHeader(s.title, s.lead, undefined, s.eyebrow, { key: s.key, badge: s.badge });
+
+/** A muted, letterspaced column caption — "SEGMENT", "RATE". */
+const caption = (t: string, align?: "l" | "ctr" | "r") =>
+  para(t.toUpperCase(), { face: BODY, size: 950, color: MUTED, bold: true, spacing: 120, align });
+
+/** On an ink ground, the muted colour that still reads. */
+const MUTED_ON_INK = "C9BFAE";
+/** The gold, lightened twice — for the smaller shares of a stacked bar. */
+const GOLD_2 = "DDBE85";
+const GOLD_3 = "EEDCB8";
+/** The ink, lightened — the second insurance-side share. */
+const INK_2 = "5A534B";
+
+// Tiles ────────────────────────────────────────────────────────────────────
+
+const TILE_GAP = 180000;
+const TILE_PAD = 200000;
+const TILE_TOP = 40000;
+
+/** How a row of tiles lays out in a width: one figure size for the row, so they line up. */
+/**
+ * How a row of tiles lays out in a width: one figure size for the row, so they line up.
+ * `compact` takes air out of the tile and a step off the figure, for a slide that has a bar
+ * chart above its tiles.
+ */
+function tileLayout(tiles: Tile[], w: number, compact = false) {
+  const n = Math.max(1, tiles.length);
+  const tileW = Math.floor((w - TILE_GAP * (n - 1)) / n);
+  const textW = tileW - 2 * TILE_PAD;
+  const padY = compact ? 110000 : 170000;
+  // A figure never wraps: "€4,200," over "000" is not a number anybody can read.
+  const vSize = pickSize((compact ? [2800, 2600] : [3400, 3000, 2800, 2600]).concat([2400, 2200, 2000, 1800]), (z) =>
+    tiles.every((t) => textWidth(t.value, z, HEADING) <= 0.92 * textW));
+  const valueH = Math.round(vSize / 100 * 1.25 * EMU_PT);
+  const labelH = Math.max(...tiles.map((t) => boldH(t.label, textW, 1400, HEADING, 105)));
+  const noteH = Math.max(0, ...tiles.map((t) => (t.note ? textH(t.note, textW, 1100, BODY, 120) : 0)));
+  const h = TILE_TOP + padY + valueH + 90000 + 19050 + 110000 + labelH + (noteH ? 50000 + noteH : 0) + padY;
+  return { tileW, textW, vSize, valueH, labelH, noteH, h, padY };
+}
+
+function tilesXml(tiles: Tile[], x: number, y: number, w: number, compact = false): string {
+  const L = tileLayout(tiles, w, compact);
+  let xml = "";
+  tiles.forEach((t, i) => {
+    const tx = x + i * (L.tileW + TILE_GAP);
+    const ix = tx + TILE_PAD;
+    let cy = y + TILE_TOP + L.padY;
+    xml +=
+      shape(tx, y, L.tileW, L.h, { prst: "rect", fill: t.strong ? INK : WHITE, line: t.strong ? undefined : RULE, lineW: 9525 }) +
+      rect(nid(), tx, y, L.tileW, TILE_TOP, GOLD) +
+      textBox(nid(), ix, cy, L.textW, L.valueH, [
+        para(t.value, { face: HEADING, size: L.vSize, color: GOLD, bold: true }),
+      ], "b");
+    cy += L.valueH + 90000;
+    xml += rect(nid(), ix, cy, 360000, 19050, GOLD);
+    cy += 19050 + 110000;
+    xml += textBox(nid(), ix, cy, L.textW, L.labelH + 30000, [
+      para(t.label, { face: HEADING, size: 1400, color: t.strong ? BG : INK, bold: true, lineSpacing: 105 }),
+    ]);
+    cy += L.labelH + 50000;
+    if (t.note) {
+      xml += textBox(nid(), ix, cy, L.textW, L.noteH + 30000, [
+        para(t.note, { face: BODY, size: 1100, color: t.strong ? MUTED_ON_INK : MUTED, lineSpacing: 120 }),
+      ]);
+    }
+  });
+  return xml;
+}
+
+// A data table ─────────────────────────────────────────────────────────────
+
+type DataTable = NonNullable<Extract<FigureSlide, { kind: "metrics" }>["table"]>;
+
+/** The table's layout in a width and a height: the largest text and the most air that fit. */
+function dataTableLayout(t: DataTable, w: number, avail: number) {
+  const cols = Math.max(1, t.head.length);
+  const shares = t.shares && t.shares.length === cols ? t.shares : Array(cols).fill(1 / cols);
+  const sum = shares.reduce((a, b) => a + b, 0);
+  const widths = shares.map((f) => Math.round(w * f / sum));
+  widths[cols - 1] = w - widths.slice(0, -1).reduce((a, b) => a + b, 0);
+  const pad = 2 * 91440;
+  const headH = 400000;
+  const rows = [...t.rows, ...(t.total ? [t.total] : [])];
+  const rowH = (r: string[], z: number, air: number) =>
+    Math.max(...r.map((c, i) => textH(c, widths[i] - pad, i === 0 ? z + 100 : z, i === 0 ? HEADING : BODY, 100)))
+      + 2 * 45720 + air;
+  for (const air of [150000, 100000, 50000, 10000]) {
+    for (const z of [1300, 1200, 1100, 1000]) {
+      const heights = rows.map((r) => rowH(r, z, air));
+      const h = headH + heights.reduce((a, b) => a + b, 0);
+      if (h <= avail) return { widths, headH, size: z, heights, h, fits: true };
+    }
+  }
+  const heights = rows.map((r) => rowH(r, 1000, 10000));
+  const h = headH + heights.reduce((a, b) => a + b, 0);
+  return { widths, headH, size: 1000, heights, h, fits: h <= avail };
+}
+
+function dataTableXml(t: DataTable, x: number, y: number, L: ReturnType<typeof dataTableLayout>): string {
+  const num = (i: number) => Boolean(t.numeric?.[i]);
+  const rows: Row[] = [
+    {
+      height: L.headH,
+      cells: t.head.map((h, i) => ({
+        paras: [para(h, { face: BODY, size: 1050, color: BG, bold: true, spacing: 50, align: num(i) ? "r" : "l" })],
+        fill: INK, ruleColor: GOLD, ruleW: 28575,
+      })),
+    },
+    ...t.rows.map((r, k) => ({
+      height: L.heights[k],
+      cells: r.map((c, i) => ({
+        paras: [para(c, {
+          face: i === 0 ? HEADING : BODY, size: i === 0 ? L.size + 100 : L.size,
+          color: INK, bold: i === 0, align: num(i) ? "r" as const : "l" as const,
+        })],
+        fill: k % 2 === 1 ? BAND : WHITE,
+        // The last row before the total carries the gold rule the total is read against.
+        ...(t.total && k === t.rows.length - 1 ? { ruleColor: GOLD, ruleW: 19050 } : {}),
+      })),
+    })),
+    ...(t.total
+      ? [{
+          height: L.heights[t.rows.length],
+          cells: t.total.map((c, i) => ({
+            paras: [para(c, {
+              face: i === 0 ? HEADING : BODY, size: i === 0 ? L.size + 100 : L.size,
+              color: INK, bold: true, align: num(i) ? "r" as const : "l" as const,
+            })],
+            fill: NUMBER_RAIL,
+          })),
+        }]
+      : []),
+  ];
+  return table(nid(), x, y, L.widths, rows, { rule: true });
+}
+
+// Explanatory cards ────────────────────────────────────────────────────────
+
+function noteCardsLayout(cards: { title: string; body: string }[], w: number, maxH: number) {
+  const n = Math.max(1, cards.length);
+  const gap = 200000;
+  const cw = Math.floor((w - gap * (n - 1)) / n);
+  const pad = 220000;
+  const textW = cw - 2 * pad - 50000;
+  const titleH = Math.max(...cards.map((c) => textH(c.title, textW, 1500, HEADING, 105)));
+  const bodyH = (z: number) => Math.max(...cards.map((c) => textH(c.body, textW, z, BODY, 135)));
+  const size = pickSize([1350, 1250, 1150, 1100, 1000], (z) => titleH + 110000 + bodyH(z) + 2 * pad <= maxH);
+  const h = Math.min(maxH, titleH + 110000 + bodyH(size) + 2 * pad);
+  return { gap, cw, pad, textW, titleH, size, h };
+}
+
+function noteCardsXml(cards: { title: string; body: string }[], x: number, y: number, L: ReturnType<typeof noteCardsLayout>): string {
+  return cards.map((c, i) => {
+    const cx = x + i * (L.cw + L.gap);
+    const ix = cx + 50000 + L.pad;
+    return shape(cx, y, L.cw, L.h, { prst: "rect", fill: WHITE, line: RULE, lineW: 9525 }) +
+      rect(nid(), cx, y, 50000, L.h, GOLD) +
+      textBox(nid(), ix, y + L.pad, L.textW, L.titleH + 30000, [
+        para(c.title, { face: HEADING, size: 1500, color: INK, bold: true, lineSpacing: 105 }),
+      ]) +
+      textBox(nid(), ix, y + L.pad + L.titleH + 110000, L.textW, L.h - 2 * L.pad - L.titleH - 110000 + 40000, [
+        para(c.body, { face: BODY, size: L.size, color: INK, lineSpacing: 135 }),
+      ]);
+  }).join("");
+}
+
+/** A panel of notes: a gold rule down its left edge, each note a gold-bulleted line. */
+function notesLayout(notes: string[], w: number, maxH: number) {
+  const pad = 160000;
+  const textW = w - 50000 - 2 * pad;
+  const capH = 220000;
+  const listH = (z: number) => notes.reduce((a, t) => a + textH(t, textW, z, BODY, 125) + Math.round(z / 100 * 0.35 * EMU_PT), 0);
+  const need = (z: number) => capH + listH(z) + 2 * pad;
+  const size = pickSize([1300, 1200, 1100, 1050, 1000, 950], (z) => need(z) <= maxH);
+  // `fits` is false when even the smallest size overflows `maxH` — the caller then has to
+  // find the room elsewhere, because the panel is drawn at its full height regardless.
+  return { pad, textW, capH, size, h: need(size), fits: need(size) <= maxH };
+}
+
+function notesXml(notes: string[], x: number, y: number, w: number, L: ReturnType<typeof notesLayout>): string {
+  return shape(x, y, w, L.h, { prst: "rect", fill: NUMBER_RAIL, line: RULE, lineW: 9525 }) +
+    rect(nid(), x, y, 50000, L.h, GOLD) +
+    textBox(nid(), x + 50000 + L.pad, y + L.pad - 30000, L.textW, L.capH, [caption("Notes")]) +
+    textBox(nid(), x + 50000 + L.pad, y + L.pad + L.capH, L.textW, L.h - 2 * L.pad - L.capH + 40000,
+      notes.map((t, k) => para(t, {
+        face: BODY, size: L.size, color: INK, bullet: true, bulletColor: GOLD, lineSpacing: 125,
+        spaceBefore: k ? Math.round(L.size * 0.35) : 0,
+      })));
+}
+
+/** A small pill — the "INDICATIVE" on a rate's card. */
+function pill(x: number, y: number, text: string, o: { fill?: string; color?: string } = {}): { xml: string; w: number; h: number } {
+  const size = 950;
+  const w = Math.round(textWidth(text, size, BODY) * 1.15) + 280000;
+  const h = 300000;
+  return {
+    w, h,
+    xml: shape(x, y, w, h, {
+      prst: "roundRect", fill: o.fill ?? WHITE, line: GOLD, lineW: 12700, adj: { adj: 50000 },
+      text: [para(text, { face: BODY, size, color: o.color ?? INK, bold: true, align: "ctr", spacing: 100 })],
+      anchor: "ctr", inset: 0,
+    }),
+  };
+}
+
+// metrics ──────────────────────────────────────────────────────────────────
+
+/**
+ * Key figures on tiles, then what they are made of: the perimeter's segments as a table, or
+ * the fee structure as a row of cards. The two blocks are centred together in the room.
+ */
+function metricsSlide(s: Extract<FigureSlide, { kind: "metrics" }>): string {
+  const top = figureHeader(s);
+  const avail = OPS_FLOOR - top.y;
+  // A perimeter of six segments needs the room the tiles' air takes: step down to compact
+  // tiles and a tighter gap before letting the table's text shrink past legibility.
+  const plan = (compact: boolean) => {
+    const T = tileLayout(s.tiles, CONTENT_W, compact);
+    const gap = compact ? 200000 : 300000;
+    const rest = avail - T.h - gap;
+    const tl = s.table ? dataTableLayout(s.table, CONTENT_W, rest) : null;
+    const cl = !tl && s.cards?.length ? noteCardsLayout(s.cards, CONTENT_W, rest) : null;
+    return { compact, T, gap, tl, cl, fits: !tl || tl.fits };
+  };
+  const loose = plan(false);
+  const { compact, T, gap, tl, cl } = loose.fits ? loose : plan(true);
+  const belowH = tl ? tl.h : cl ? cl.h : 0;
+  const total = T.h + (belowH ? gap + belowH : 0);
+  const y = top.y + Math.max(0, Math.round((avail - total) / 2));
+  return top.xml + tilesXml(s.tiles, M, y, CONTENT_W, compact) +
+    (tl ? dataTableXml(s.table!, M, y + T.h + gap, tl) : "") +
+    (cl ? noteCardsXml(s.cards!, M, y + T.h + gap, cl) : "");
+}
+
+// bars ─────────────────────────────────────────────────────────────────────
+
+/**
+ * One row per item: its name, the figure that drives it, and a bar as long as its value on a
+ * track as long as the largest — so the split of the premium reads before any number does.
+ * Under the rows, an equation in tiles: gross − fee = net.
+ */
+function barsSlide(s: Extract<FigureSlide, { kind: "bars" }>): string {
+  const top = figureHeader(s);
+  const avail = OPS_FLOOR - top.y;
+  const n = Math.max(1, s.rows.length);
+  // Past three rows the slide runs compact: the rate's qualifier and its source tag share one
+  // line, rows lose some air and the equation strip slims down. Six segments drawn at the
+  // three-segment spacing overprinted one another.
+  const compact = n > 3;
+  const eqH = s.equation ? (compact ? 720000 : 950000) : 0;
+  const eqGap = s.equation ? (compact ? 160000 : 320000) : 0;
+  const capH = s.captions ? (compact ? 240000 : 300000) : 0;
+  const rowPad = compact ? 40000 : 120000;
+  /** Under the rate: its qualifier and its tag, as separate lines — or one, when compact. */
+  const figRuns = (r: (typeof s.rows)[number]): Run[][] => {
+    const sub = r.figureSub ? [{ text: r.figureSub }] : [];
+    const tag = r.tag ? [{ text: r.tag, bold: true, color: GOLD }] : [];
+    if (!compact) return [sub, tag].filter((x) => x.length);
+    const both = [...sub, ...(sub.length && tag.length ? [{ text: " · " }] : []), ...tag];
+    return both.length ? [both] : [];
+  };
+  const runsText = (rs: Run[]) => rs.map((x) => x.text).join("");
+
+  // Compact, the rate column is wider: its one merged line is the longest thing in the row.
+  const labelW = Math.round(CONTENT_W * (compact ? 0.27 : 0.29));
+  const figW = Math.round(CONTENT_W * (compact ? 0.3 : 0.25));
+  const barX = M + labelW + figW + 150000;
+  const barArea = M + CONTENT_W - barX;
+  const maxVal = Math.max(1, ...s.rows.map((r) => r.value));
+  const valSize = 1800;
+  const valW = Math.max(...s.rows.map((r) => textWidth(r.valueText, valSize, HEADING))) + 160000;
+  const track = barArea - valW;
+
+  const lw = labelW - 150000;
+  const fw = figW - 100000;
+  const block = (z: number) => {
+    const sub = Math.round(z * 0.73);
+    const label = Math.max(...s.rows.map((r) =>
+      boldH(r.label, lw, z, HEADING, 105) + (r.sub ? 40000 + textH(r.sub, lw, sub, BODY, 115) : 0)));
+    const fig = Math.max(...s.rows.map((r) => figH(r, z, sub)));
+    return Math.max(label, fig, 340000);
+  };
+  const figH = (r: (typeof s.rows)[number], z: number, sub: number) =>
+    Math.round((z + 400) / 100 * 1.2 * EMU_PT) +
+    figRuns(r).reduce((a, rs) => a + 30000 + boldH(runsText(rs), fw, sub, BODY, 115), 0);
+  const rowsRoom = avail - eqH - eqGap - capH;
+  const size = pickSize([1600, 1500, 1400, 1300, 1200, 1100, 1000], (z) => n * (block(z) + 2 * rowPad) <= rowsRoom);
+  const subSize = Math.round(size * 0.73);
+  // Never shorter than what the row holds: a row squeezed under its text overprints the next.
+  const rowH = Math.max(block(size) + 2 * rowPad, Math.min(Math.floor(rowsRoom / n), 800000));
+  const total = capH + n * rowH + eqGap + eqH;
+  const y0 = top.y + Math.max(0, Math.round((avail - total) / 2));
+
+  let xml = "";
+  if (s.captions) {
+    xml +=
+      textBox(nid(), M, y0, labelW, capH, [caption(s.captions[0])], "ctr") +
+      textBox(nid(), M + labelW, y0, figW, capH, [caption(s.captions[1])], "ctr") +
+      textBox(nid(), barX, y0, barArea, capH, [caption(s.captions[2])], "ctr") +
+      rect(nid(), M, y0 + capH - 9525, CONTENT_W, 9525, INK);
+  }
+  const barH = Math.min(340000, Math.round(rowH * 0.4));
+  s.rows.forEach((r, i) => {
+    const y = y0 + capH + i * rowH;
+    const mid = y + Math.round(rowH / 2);
+    const lb = boldH(r.label, lw, size, HEADING, 105) + (r.sub ? 40000 + textH(r.sub, lw, subSize, BODY, 115) : 0);
+    const fb = figH(r, size, subSize);
+    const len = Math.max(30000, Math.round(track * r.value / maxVal));
+    xml +=
+      (i % 2 === 1 ? rect(nid(), M, y, CONTENT_W, rowH, BAND) : "") +
+      textBox(nid(), M + 100000, mid - Math.round(lb / 2), lw, lb + 40000, [
+        para(r.label, { face: HEADING, size, color: INK, bold: true, lineSpacing: 105 }),
+        ...(r.sub ? [para(r.sub, { face: BODY, size: subSize, color: MUTED, lineSpacing: 115, spaceBefore: 300 })] : []),
+      ]) +
+      textBox(nid(), M + labelW, mid - Math.round(fb / 2), fw, fb + 40000, [
+        para(r.figure, { face: HEADING, size: size + 400, color: INK, bold: true }),
+        ...figRuns(r).map((rs) => rich(rs, { face: BODY, size: subSize, color: MUTED, lineSpacing: 115, spaceBefore: 200 })),
+      ]) +
+      // The track is the largest bar's length: a bar is read against it, not against nothing.
+      rect(nid(), barX, mid - Math.round(barH / 2), track, barH, i % 2 === 1 ? WHITE : BAND) +
+      rect(nid(), barX, mid - Math.round(barH / 2), len, barH, INK) +
+      rect(nid(), barX, mid - Math.round(barH / 2), Math.min(len, 36000), barH, GOLD) +
+      textBox(nid(), barX + track + 120000, mid - 220000, valW - 120000, 440000, [
+        para(r.valueText, { face: HEADING, size: valSize, color: INK, bold: true }),
+      ], "ctr") +
+      rect(nid(), M, y + rowH - 9525, CONTENT_W, 9525, RULE);
+  });
+
+  if (s.equation) {
+    const ey = y0 + capH + n * rowH + eqGap;
+    const terms = s.equation.terms;
+    const opW = 560000;
+    const tw = Math.floor((CONTENT_W - opW * (terms.length - 1)) / terms.length);
+    const vz = pickSize((compact ? [2200, 2000] : [2800, 2600, 2400, 2200, 2000]), (z) =>
+      terms.every((t) => textWidth(t.value, z, HEADING) <= 0.9 * (tw - 400000)));
+    const capY = compact ? 90000 : 150000;
+    const valY = compact ? 300000 : 380000;
+    terms.forEach((t, i) => {
+      const tx = M + i * (tw + opW);
+      xml +=
+        shape(tx, ey, tw, eqH, { prst: "rect", fill: t.strong ? INK : WHITE, line: t.strong ? GOLD : RULE, lineW: t.strong ? 19050 : 9525 }) +
+        textBox(nid(), tx + 200000, ey + capY, tw - 400000, 260000, [caption(t.label)]) +
+        textBox(nid(), tx + 200000, ey + valY, tw - 400000, eqH - valY - (compact ? 60000 : 120000), [
+          para(t.value, { face: HEADING, size: vz, color: t.strong ? GOLD : INK, bold: true }),
+        ], "ctr");
+      const op = s.equation!.ops[i];
+      if (i < terms.length - 1 && op) {
+        const prst = op === "minus" ? "mathMinus" : op === "plus" ? "mathPlus" : "mathEqual";
+        xml += shape(tx + tw + opW / 2 - 200000, ey + eqH / 2 - 200000, 400000, 400000, { prst, fill: GOLD });
+      }
+    });
+  }
+  return top.xml + xml;
+}
+
+// stack ────────────────────────────────────────────────────────────────────
+
+/** The colours of a stacked bar's shares, in order: ink for the first, the golds after. */
+const STACK_FILLS = [INK, GOLD, GOLD_2, GOLD_3, INK_2];
+const onFill = (fill: string) => (fill === INK || fill === INK_2 ? BG : INK);
+
+/**
+ * The stack slide's spacing, most generous first. A slide with two bars and a notes panel, or
+ * one bar and a row of tiles, does not fit at the generous spacing — the first proof ran its
+ * notes into the footer — so the layout steps down until everything is above the floor.
+ */
+const STACK_DIMS = [
+  { barH1: 560000, barHn: 440000, labelH: 440000, subH: 280000, legendLineH: 300000, barGap: 340000, gap: 330000, compact: false },
+  { barH1: 470000, barHn: 380000, labelH: 410000, subH: 260000, legendLineH: 280000, barGap: 260000, gap: 250000, compact: true },
+  { barH1: 400000, barHn: 320000, labelH: 380000, subH: 250000, legendLineH: 260000, barGap: 200000, gap: 190000, compact: true },
+];
+
+/**
+ * Stacked horizontal bars on one scale: each a total, split into who it goes to. A share wide
+ * enough carries its figure inside; every share is named in a legend under the bar, so a
+ * sliver of €2 is still accounted for. Tiles and a notes panel can follow.
+ */
+function stackSlide(s: Extract<FigureSlide, { kind: "stack" }>): string {
+  const top = figureHeader(s);
+  const avail = OPS_FLOOR - top.y;
+  const scale = Math.max(1, ...s.bars.map((b) => b.parts.reduce((a, p) => a + Math.max(0, p.value), 0)));
+  const legendSize = 1150;
+  const swatch = 150000;
+  type Bar = (typeof s.bars)[number];
+
+  // The legend wraps when its items do not fit on one line.
+  const legendRows = (b: Bar) => {
+    const rows: { x: number; text: string; fill: string }[][] = [[]];
+    let x = 0;
+    b.parts.forEach((p, k) => {
+      if (p.value <= 0) return;
+      const text = `${p.label}  ${p.text}`;
+      const w = swatch + 90000 + textWidth(text, legendSize, BODY) + 320000;
+      if (x > 0 && x + w > CONTENT_W) { rows.push([]); x = 0; }
+      rows[rows.length - 1].push({ x, text, fill: STACK_FILLS[k % STACK_FILLS.length] });
+      x += w;
+    });
+    return rows;
+  };
+
+  const plan = (D: (typeof STACK_DIMS)[number]) => {
+    const barH = s.bars.length > 1 ? D.barHn : D.barH1;
+    const subH = (b: Bar) => (b.sub ? Math.max(D.subH, textH(b.sub, CONTENT_W, 1150, BODY, 110) + 40000) : 0);
+    const block = (b: Bar) => D.labelH + subH(b) + 80000 + barH + 120000 + legendRows(b).length * D.legendLineH;
+    const barsH = s.bars.reduce((a, b) => a + block(b), 0) + D.barGap * Math.max(0, s.bars.length - 1);
+    const T = s.tiles?.length ? tileLayout(s.tiles, CONTENT_W, D.compact) : null;
+    const rest = avail - barsH - (T ? D.gap + T.h : 0) - D.gap;
+    const NL = s.notes?.length ? notesLayout(s.notes, CONTENT_W, rest) : null;
+    const total = barsH + (T ? D.gap + T.h : 0) + (NL ? D.gap + NL.h : 0);
+    return { D, barH, subH, T, NL, total, fits: total <= avail && (!NL || NL.fits) };
+  };
+  const P = STACK_DIMS.map(plan).find((p) => p.fits) ?? plan(STACK_DIMS[STACK_DIMS.length - 1]);
+  const { D, barH, T, NL } = P;
+  let y = top.y + Math.max(0, Math.round((avail - P.total) / 2));
+
+  let xml = "";
+  for (const b of s.bars) {
+    const totalW = textWidth(b.total, 2400, HEADING) + 200000;
+    xml +=
+      textBox(nid(), M, y, CONTENT_W - totalW, D.labelH, [
+        para(b.label, { face: HEADING, size: 1700, color: INK, bold: true }),
+      ], "b") +
+      textBox(nid(), M + CONTENT_W - totalW, y, totalW, D.labelH, [
+        para(b.total, { face: HEADING, size: 2400, color: GOLD, bold: true, align: "r" }),
+      ], "b");
+    y += D.labelH;
+    if (b.sub) {
+      const sh = P.subH(b);
+      xml += textBox(nid(), M, y + 30000, CONTENT_W, sh - 30000, [
+        para(b.sub, { face: BODY, size: 1150, color: MUTED, lineSpacing: 110 }),
+      ]);
+      y += sh;
+    }
+    y += 80000;
+    const full = Math.round(CONTENT_W * b.parts.reduce((a, p) => a + Math.max(0, p.value), 0) / scale);
+    // The track: the longest bar's length, so the shorter one reads as shorter.
+    xml += rect(nid(), M, y, CONTENT_W, barH, BAND);
+    let x = M;
+    const live = b.parts.map((p, k) => ({ p, k })).filter(({ p }) => p.value > 0);
+    live.forEach(({ p, k }, j) => {
+      // The last share takes the rounding, so the bar ends exactly where its total says.
+      const w = j === live.length - 1 ? M + full - x : Math.round(CONTENT_W * p.value / scale);
+      const fill = STACK_FILLS[k % STACK_FILLS.length];
+      xml += rect(nid(), x, y, w, barH, fill);
+      const tz = barH >= 460000 ? 1500 : 1300;
+      if (textWidth(p.text, tz, HEADING) + 200000 <= w) {
+        xml += textBox(nid(), x + 100000, y, w - 200000, barH, [
+          para(p.text, { face: HEADING, size: tz, color: onFill(fill), bold: true, align: "ctr" }),
+        ], "ctr");
+      }
+      // A hairline of the ground between shares, so two golds side by side stay two.
+      if (j > 0) xml += rect(nid(), x - 6350, y, 12700, barH, BG);
+      x += w;
+    });
+    y += barH + 120000;
+    for (const row of legendRows(b)) {
+      for (const it of row) {
+        xml +=
+          rect(nid(), M + it.x, y + Math.round((D.legendLineH - swatch) / 2) - 20000, swatch, swatch, it.fill,
+            it.fill === GOLD_3 ? { lineColor: GOLD, lineWidth: 6350 } : {}) +
+          textBox(nid(), M + it.x + swatch + 90000, y, textWidth(it.text, legendSize, BODY) + 240000, D.legendLineH - 40000, [
+            para(it.text, { face: BODY, size: legendSize, color: INK }),
+          ], "ctr");
+      }
+      y += D.legendLineH;
+    }
+    y += D.barGap;
+  }
+  y -= D.barGap;
+  if (T) {
+    y += D.gap;
+    xml += tilesXml(s.tiles!, M, y, CONTENT_W, D.compact);
+    y += T.h;
+  }
+  if (NL) {
+    y += D.gap;
+    xml += notesXml(s.notes!, M, y, CONTENT_W, NL);
+  }
+  return top.xml + xml;
+}
+
+// sources ──────────────────────────────────────────────────────────────────
+
+/**
+ * Where each figure came from: a card per source, its rate set large, its provenance as a few
+ * lines under it — and, above them all when the figures are not yet this house's own, an ink
+ * block with the hazard sign that says so in a sentence. Under the cards, the model's notes.
+ *
+ * The three blocks are sized together: the first proof sized the cards first and handed the
+ * notes whatever was left, and the notes ran into the footer.
+ */
+function sourcesSlide(s: Extract<FigureSlide, { kind: "sources" }>): string {
+  const top = figureHeader(s);
+  const avail = OPS_FLOOR - top.y;
+
+  // The warning.
+  const blockW = 2300000;
+  const wPad = 170000;
+  const wTextW = CONTENT_W - blockW - 2 * wPad;
+  const warnPlan = (z: number, min: number) =>
+    s.warning ? Math.max(min, textH(s.warning.body, wTextW, z, BODY, 135) + 2 * wPad) : 0;
+
+  // The cards. Wide enough, a card sets its rate in a column to the left of its lines; narrow,
+  // the rate goes above them.
+  const n = s.cards.length;
+  const perRow = n <= 4 ? Math.max(1, n) : Math.ceil(n / Math.ceil(n / 4));
+  const rowsN = Math.max(1, Math.ceil(n / perRow));
+  const cGap = 200000;
+  const cw = Math.floor((CONTENT_W - cGap * (perRow - 1)) / perRow);
+  const wide = cw >= 3800000;
+  const pad = 170000;
+  const figColW = wide ? 1500000 : 0;
+  const linesW = cw - 2 * pad - (wide ? figColW + 190000 : 0);
+  const headTitle = 1400;
+  const headW = cw - 2 * pad;
+  const tagW = (c: Card) => (c.tag && wide ? pill(0, 0, c.tag.toUpperCase()).w + 120000 : 0);
+  const headH = n
+    ? Math.max(...s.cards.map((c) =>
+        boldH(c.title, headW - tagW(c), headTitle, HEADING, 105) +
+        (c.sub ? 30000 + textH(c.sub, headW - tagW(c), 1050, BODY, 110) : 0))) + 2 * 120000
+    : 0;
+  const figBlock = 560000 + 260000; // the rate and its unit
+  const tagH = 300000;
+  type Card = (typeof s.cards)[number];
+  const lineH = (t: string, k: number, z: number) =>
+    (k === 0 ? boldH(t, linesW, z, BODY, 120) : textH(t, linesW, z, BODY, 120)) + Math.round(z / 100 * 0.3 * EMU_PT);
+  const linesH = (c: Card, z: number) => c.lines.reduce((a, t, k) => a + lineH(t, k, z), 0);
+  // A wide card carries its pill in the header, where there is room beside the title; a
+  // narrow one at its foot. In the body of a wide card it made the rate's column the tallest
+  // thing on the slide, and the notes went through the footer.
+  const cardBody = (c: Card, z: number) => wide
+    ? Math.max(figBlock, linesH(c, z))
+    : figBlock + 100000 + linesH(c, z) + (c.tag ? 120000 + tagH : 0);
+  const cardH = (z: number) => headH + 30000 + 2 * pad + Math.max(0, ...s.cards.map((c) => cardBody(c, z)));
+
+  // More than three sources do not fit as cards under a warning and the notes — six came out
+  // twice the height of the slide. They are drawn as a banded list instead: a row per rate,
+  // its name, its rate, its provenance on two lines, and its pill.
+  const listMode = n > 3;
+  const lCapH = 250000;
+  const lPad = 60000;
+  const lTitleW = Math.round(CONTENT_W * 0.22);
+  const lFigW = Math.round(CONTENT_W * 0.12);
+  const lTagW = listMode ? Math.max(0, ...s.cards.map((c) => (c.tag ? pill(0, 0, c.tag.toUpperCase()).w + 120000 : 0))) : 0;
+  const lLinesW = CONTENT_W - lTitleW - lFigW - lTagW - 3 * 120000;
+  const listParas = (c: Card) => [c.lines[0] ?? "", c.lines.slice(1).join(" · ")].filter(Boolean);
+  const listRowH = (c: Card, z: number) => Math.max(
+    boldH(c.title, lTitleW, z + 100, HEADING, 105) + (c.sub ? 20000 + textH(c.sub, lTitleW, z - 100, BODY, 110) : 0),
+    Math.round((z + 700) / 100 * 1.2 * EMU_PT),
+    listParas(c).reduce((a, t, k) => a + (k === 0 ? boldH(t, lLinesW, z, BODY, 115) : textH(t, lLinesW, z, BODY, 115)), 0),
+  ) + 2 * lPad;
+  const listH = (z: number) => lCapH + s.cards.reduce((a, c) => a + listRowH(c, z), 0);
+
+  type Plan = { gap: number; wSize: number; warnH: number; cSize: number; ch: number; cardsH: number;
+    NL: ReturnType<typeof notesLayout> | null; total: number; fits: boolean };
+  const plans: Plan[] = [];
+  for (const gap of [240000, 180000, 140000]) {
+    for (const [wz, wmin] of [[1500, 900000], [1350, 800000], [1200, 700000], [1100, 600000]] as const) {
+      for (const cSize of [1250, 1150, 1100, 1050, 1000, 950]) {
+        const warnH = warnPlan(wz, wmin);
+        const ch = n && !listMode ? cardH(cSize) : 0;
+        const cardsH = !n ? 0 : listMode ? listH(cSize) : rowsN * ch + cGap * (rowsN - 1);
+        const used = (warnH ? warnH + gap : 0) + cardsH;
+        const NL = s.notes?.length ? notesLayout(s.notes, CONTENT_W, avail - used - (cardsH || warnH ? gap : 0)) : null;
+        const total = used + (NL ? (cardsH || warnH ? gap : 0) + NL.h : 0) - (!cardsH && warnH ? gap : 0);
+        plans.push({ gap, wSize: wz, warnH, cSize, ch, cardsH, NL, total, fits: total <= avail && (!NL || NL.fits) });
+      }
+    }
+  }
+  const P = plans.find((p) => p.fits) ?? plans.reduce((a, b) => (b.total < a.total ? b : a));
+  const { gap, warnH, cSize, ch, cardsH, NL } = P;
+  let y = top.y + Math.max(0, Math.round((avail - P.total) / 2));
+
+  let xml = "";
+  if (s.warning) {
+    const ic = 420000;
+    const labelW = blockW - 200000 - ic - 160000 - 100000;
+    const label = s.warning.label.toUpperCase();
+    // Letterspaced caps on one line: sized from the word's own width plus its spacing.
+    const lz = pickSize([1700, 1600, 1500, 1400, 1300, 1200], (z) =>
+      textWidth(label, z, HEADING) * 1.08 + label.length * 150 / 100 * EMU_PT <= labelW);
+    xml +=
+      shape(M, y, CONTENT_W, warnH, { prst: "rect", fill: WHITE, line: GOLD, lineW: 19050 }) +
+      shape(M, y, blockW, warnH, { prst: "rect", fill: INK }) +
+      icon("warning", M + 200000 + ic / 2, y + warnH / 2, ic, GOLD, INK) +
+      textBox(nid(), M + 200000 + ic + 160000, y, labelW, warnH, [
+        para(label, { face: HEADING, size: lz, color: GOLD, bold: true, spacing: 150 }),
+      ], "ctr") +
+      textBox(nid(), M + blockW + wPad, y + wPad, wTextW, warnH - 2 * wPad, [
+        para(s.warning.body, { face: BODY, size: P.wSize, color: INK, lineSpacing: 135 }),
+      ], "ctr");
+    y += warnH + gap;
+  }
+
+  if (listMode) {
+    const xT = M + 100000;
+    const xF = M + lTitleW + 120000;
+    const xL = xF + lFigW + 120000;
+    xml +=
+      textBox(nid(), xT, y, lTitleW, lCapH, [caption("Rate")], "ctr") +
+      textBox(nid(), xF, y, lFigW, lCapH, [caption("Of COGS")], "ctr") +
+      textBox(nid(), xL, y, lLinesW, lCapH, [caption("Where it comes from")], "ctr") +
+      rect(nid(), M, y + lCapH - 9525, CONTENT_W, 9525, INK);
+    let ry = y + lCapH;
+    s.cards.forEach((c, i) => {
+      const h = listRowH(c, cSize);
+      const paras = listParas(c);
+      const tH = boldH(c.title, lTitleW, cSize + 100, HEADING, 105) + (c.sub ? 20000 + textH(c.sub, lTitleW, cSize - 100, BODY, 110) : 0);
+      const lH = paras.reduce((a, t, k) => a + (k === 0 ? boldH(t, lLinesW, cSize, BODY, 115) : textH(t, lLinesW, cSize, BODY, 115)), 0);
+      xml +=
+        (i % 2 === 1 ? rect(nid(), M, ry, CONTENT_W, h, BAND) : "") +
+        (c.tag ? rect(nid(), M, ry, 40000, h, GOLD) : "") +
+        textBox(nid(), xT, ry + Math.round((h - tH) / 2), lTitleW - 100000, tH + 30000, [
+          para(c.title, { face: HEADING, size: cSize + 100, color: INK, bold: true, lineSpacing: 105 }),
+          ...(c.sub ? [para(c.sub, { face: BODY, size: cSize - 100, color: MUTED, lineSpacing: 110, spaceBefore: 150 })] : []),
+        ]) +
+        textBox(nid(), xF, ry, lFigW, h, [para(c.figure, { face: HEADING, size: cSize + 700, color: GOLD, bold: true })], "ctr") +
+        textBox(nid(), xL, ry + Math.round((h - lH) / 2), lLinesW, lH + 30000,
+          paras.map((t, k) => para(t, { face: BODY, size: cSize, color: k ? MUTED : INK, bold: k === 0, lineSpacing: 115 }))) +
+        (c.tag ? pill(M + CONTENT_W - lTagW + 120000, ry + Math.round((h - 300000) / 2), c.tag.toUpperCase(), { fill: GOLD }).xml : "") +
+        rect(nid(), M, ry + h - 9525, CONTENT_W, 9525, RULE);
+      ry += h;
+    });
+  }
+  if (!listMode) s.cards.forEach((c, i) => {
+    const r = Math.floor(i / perRow);
+    const x = M + (i % perRow) * (cw + cGap);
+    const cy = y + r * (ch + cGap);
+    xml +=
+      shape(x, cy, cw, ch, { prst: "rect", fill: WHITE, line: c.tag ? GOLD : RULE, lineW: c.tag ? 12700 : 9525, dash: c.tag ? "dash" : undefined }) +
+      shape(x, cy, cw, headH, { prst: "rect", fill: INK }) +
+      rect(nid(), x, cy + headH, cw, 30000, GOLD) +
+      textBox(nid(), x + pad, cy, headW - tagW(c), headH, [
+        para(c.title, { face: HEADING, size: headTitle, color: BG, bold: true, lineSpacing: 105 }),
+        ...(c.sub ? [para(c.sub, { face: BODY, size: 1050, color: MUTED_ON_INK, lineSpacing: 110, spaceBefore: 200 })] : []),
+      ], "ctr");
+    const by = cy + headH + 30000 + pad;
+    const fx = x + pad;
+    xml +=
+      textBox(nid(), fx, by, wide ? figColW : headW, 560000, [
+        para(c.figure, { face: HEADING, size: 3200, color: GOLD, bold: true }),
+      ], "b") +
+      textBox(nid(), fx, by + 580000, wide ? figColW : headW, 240000, [
+        para(c.unit ?? "", { face: BODY, size: 1100, color: MUTED, spacing: 60 }),
+      ]);
+    if (c.tag) {
+      xml += wide
+        ? pill(x + cw - pad - tagW(c) + 120000, cy + Math.round((headH - 300000) / 2), c.tag.toUpperCase(), { fill: GOLD }).xml
+        : pill(fx, cy + ch - pad - tagH, c.tag.toUpperCase(), { fill: GOLD }).xml;
+    }
+    const lx = wide ? fx + figColW + 150000 : fx;
+    const ly = wide ? by : by + figBlock + 100000;
+    xml += (wide ? rect(nid(), lx - 80000, by, 9525, ch - headH - 30000 - 2 * pad, RULE) : "") +
+      textBox(nid(), lx + (wide ? 40000 : 0), ly, linesW, linesH(c, cSize) + 60000,
+        c.lines.map((t, k) => para(t, {
+          face: BODY, size: cSize, color: INK, bold: k === 0, lineSpacing: 120,
+          spaceBefore: k ? Math.round(cSize * 0.3) : 0,
+        })));
+  });
+  if (cardsH) y += cardsH + gap;
+  if (NL) xml += notesXml(s.notes!, M, y, CONTENT_W, NL);
+  return top.xml + xml;
+}
+
 // ── Headers ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -726,8 +1458,12 @@ function equationCallout(
  */
 function opsHeader(
   title: string, lead?: string, part?: { of: number; index: number }, eyebrow?: string,
+  // The figure slides' two additions: the phrase to set in bold when the preposition rule
+  // would cut it ("Cost per piece" is one phrase, not "Cost" and the rest), and a pill that
+  // says something other than a part number — "Indicative", on every page it is true of.
+  opts: { key?: string; badge?: string } = {},
 ): { xml: string; y: number } {
-  const badge = part && part.of > 1 ? `${part.index} / ${part.of}` : null;
+  const badge = opts.badge ?? (part && part.of > 1 ? `${part.index} / ${part.of}` : null);
   const numbered = /^(\d+)\.\s+(\S[\s\S]*)$/.exec(title);
   const fromBrow = eyebrow ? /^(\d+)\./.exec(eyebrow) : null;
   const num = numbered?.[1] ?? fromBrow?.[1] ?? null;
@@ -752,15 +1488,25 @@ function opsHeader(
       para(num, { face: HEADING, size: 2600, color: GOLD, bold: true, align: "ctr" }),
     ], "ctr");
   }
-  const titleW = badge ? CONTENT_W - 1300000 : CONTENT_W;
+  const badgeSize = opts.badge ? 1150 : 1400;
+  const badgeW = badge
+    ? Math.max(1000000, Math.round(textWidth(badge, badgeSize, BODY) * 1.12) + (opts.badge ? 360000 : 0))
+    : 0;
+  const titleW = badge ? CONTENT_W - badgeW - 300000 : CONTENT_W;
   const size = textH(text, titleW, 2800, HEADING, 100) > 2800 / 100 * 1.25 * EMU_PT ? 2400 : 2800;
+  const runs: Run[] = opts.key && text.startsWith(opts.key)
+    ? [{ text: opts.key, bold: true }, { text: text.slice(opts.key.length) }]
+    : headline(text);
   xml += textBox(nid(), M, OPS_TITLE_Y, titleW, OPS_TITLE_H, [
-    rich(headline(text), { face: HEADING, size, color: INK }),
+    rich(runs, { face: HEADING, size, color: INK }),
   ], "ctr");
   if (badge) {
-    xml += shape(M + CONTENT_W - 1000000, OPS_TITLE_Y + (OPS_TITLE_H - 440000) / 2, 1000000, 440000, {
-      prst: "roundRect", fill: WHITE, line: GOLD, lineW: 15875, adj: { adj: 50000 },
-      text: [para(badge, { face: BODY, size: 1400, color: INK, bold: true, align: "ctr" })],
+    // A part number is a quiet pill; a free-text badge is a warning, so it is gold and loud.
+    xml += shape(M + CONTENT_W - badgeW, OPS_TITLE_Y + (OPS_TITLE_H - 440000) / 2, badgeW, 440000, {
+      prst: "roundRect", fill: opts.badge ? GOLD : WHITE, line: GOLD, lineW: 15875, adj: { adj: 50000 },
+      text: [para(opts.badge ? badge.toUpperCase() : badge, {
+        face: BODY, size: badgeSize, color: INK, bold: true, align: "ctr", spacing: opts.badge ? 120 : undefined,
+      })],
       anchor: "ctr", inset: 0,
     });
   }
@@ -864,13 +1610,24 @@ const ADVANCE: Record<string, { lower: number; upper: number; space: number }> =
   [HEADING]: { lower: 0.5, upper: 0.7, space: 0.26 },
 };
 
+/** A string's advance in em. Figures and € are set at the capitals' width. */
+function emWidth(text: string, face: string): number {
+  const a = ADVANCE[face] ?? ADVANCE[BODY];
+  return [...text].reduce((t, ch) =>
+    t + (/[A-ZÀ-Ý0-9%@€]/.test(ch) ? a.upper : /[.,;:'’()\/|·—–-]/.test(ch) ? 0.3 : /\s/.test(ch) ? a.space : a.lower), 0);
+}
+
+/** A single line's width in EMU at a size — for a figure that must not wrap. */
+function textWidth(text: string, size: number, face: string): number {
+  return Math.ceil(emWidth(text, face) * (size / 100) * EMU_PT);
+}
+
 function lineCount(text: string, width: number, size: number, face: string): number {
   const a = ADVANCE[face] ?? ADVANCE[BODY];
   // 6% short of the box: a line that fits by a hair in the estimate is the line that wraps in
   // the renderer, which breaks a little early and kerns differently.
   const room = 0.94 * width / (size / 100 * EMU_PT);
-  const wordW = (w: string) =>
-    [...w].reduce((t, ch) => t + (/[A-ZÀ-Ý0-9%@]/.test(ch) ? a.upper : /[.,;:'’()\/|·—–-]/.test(ch) ? 0.3 : a.lower), 0);
+  const wordW = (w: string) => emWidth(w, face);
   let n = 0;
   for (const hard of text.split("\n")) {
     n++;
@@ -888,6 +1645,15 @@ function lineCount(text: string, width: number, size: number, face: string): num
 /** A text's height in EMU, at a line spacing in percent. */
 function textH(text: string, width: number, size: number, face: string, lineSpacing = 100): number {
   return Math.ceil(lineCount(text, width, size, face) * (size / 100) * 1.2 * (lineSpacing / 100) * EMU_PT);
+}
+
+/**
+ * The same for text set entirely in bold, measured a tenth narrower: the advances above are
+ * the regular weights with a margin, and a bold label that "fits by a hair" — "Average price
+ * per piece" — is the one that wraps onto the line under it.
+ */
+function boldH(text: string, width: number, size: number, face: string, lineSpacing = 100): number {
+  return textH(text, width * 0.9, size, face, lineSpacing);
 }
 
 /** The largest size that fits, or the smallest on offer. */
@@ -1160,7 +1926,7 @@ function table(
  *
  * Not on the cover, which sets the lockup at full size in the middle of the page already.
  */
-function footer(page: Page, slide: Slide, hasMark: boolean): string {
+function footer(page: Page, slide: DeckSlide, hasMark: boolean): string {
   const isCover = slide.kind === "section" && Boolean(slide.sub);
   if (isCover) return "";
   const y = MARK.y - 52000;
