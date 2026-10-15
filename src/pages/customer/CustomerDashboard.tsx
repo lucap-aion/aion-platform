@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { ArrowRight, Star, ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import ProgressRing from "@/components/ui/progress-ring";
+import { profileCompletionPct } from "@/lib/profileCompletion";
 import { useTenant } from "@/contexts/TenantContext";
 import SmartLogo from "@/components/SmartLogo";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -91,20 +92,7 @@ const CustomerDashboard = () => {
   const { profile, loading: authLoading } = useAuth();
   const slugPrefix = useAuthSlug();
 
-  // Profile completion
-  const profileFields = [
-    profile?.first_name,
-    profile?.last_name,
-    profile?.email,
-    profile?.phone_number,
-    profile?.address,
-    profile?.city,
-    profile?.country,
-    profile?.postcode,
-    profile?.avatar,
-  ];
-  const filledCount = profileFields.filter(Boolean).length;
-  const completionPct = Math.round((filledCount / profileFields.length) * 100);
+  const completionPct = profileCompletionPct(profile ?? {});
 
   // Images: use brand images from DB, fall back to static assets
   const imgHero = tenant.topBannerImage || sectionHowItWorks;
@@ -191,7 +179,7 @@ const CustomerDashboard = () => {
   };
 
   const handleCompleteProfile = () => {
-    window.location.href = `${slugPrefix}/profile`;
+    window.location.href = `${slugPrefix}/profile?complete=1`;
   };
 
   return (

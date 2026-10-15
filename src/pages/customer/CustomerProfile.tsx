@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { forgetSignedUrl } from "@/lib/storage";
 import { toDateInputValue } from "@/lib/format";
+import { missingProfileFields, type ProfileCompletionField } from "@/lib/profileCompletion";
+import { cn } from "@/lib/utils";
+import { useSearchParams } from "react-router-dom";
 import SignedImage from "@/components/SignedImage";
 import { motion } from "framer-motion";
 import { User, Mail, Phone, MapPin, Shield, Camera, Save, CheckCircle, Calendar, Globe } from "lucide-react";
@@ -59,8 +62,45 @@ const CustomerProfile = () => {
     emailDigest: true,
   });
 
+  // The fields the dashboard ring is still waiting for, read live from the form so an
+  // outline clears as the customer types. Nothing is flagged until the form is seeded,
+  // or the first render would outline every field of a finished profile.
+  const [seeded, setSeeded] = useState(false);
+  const missing = new Set(
+    seeded
+      ? missingProfileFields({
+          first_name: profile.firstName,
+          last_name: profile.lastName,
+          phone_number: profile.phone,
+          date_of_birth: profile.dateOfBirth,
+          nationality: profile.nationality,
+          address: profile.address,
+          city: profile.city,
+          province: profile.province,
+          country: profile.country,
+          postcode: profile.postalCode,
+          avatar: avatarUrl,
+        })
+      : [],
+  );
+  const needs = (f: ProfileCompletionField) => (missing.has(f) ? "ring-2 ring-warning/60" : "");
+
+  // Arriving from the dashboard's "Complete profile": take them to the first gap.
+  const [searchParams] = useSearchParams();
+  const focusedGap = useRef(false);
+  useEffect(() => {
+    if (!seeded || focusedGap.current || !searchParams.get("complete")) return;
+    focusedGap.current = true;
+    const first = [...missing][0];
+    const el = first && document.getElementById(`pf-${first}`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.focus({ preventScroll: true });
+  }, [seeded]);
+
   useEffect(() => {
     if (!authProfile) return;
+    setSeeded(true);
     setAvatarUrl(authProfile.avatar ?? null);
     setProfile({
       firstName: authProfile.first_name || "",
@@ -191,10 +231,12 @@ const CustomerProfile = () => {
               )}
             </div>
             <button
+              id="pf-avatar"
               type="button"
+              aria-label="Change photo"
               disabled={uploadingAvatar}
               onClick={() => avatarInputRef.current?.click()}
-              className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:text-primary disabled:opacity-50"
+              className={cn(needs("avatar"), "absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:text-primary disabled:opacity-50")}
             >
               <Camera className="h-4 w-4" />
             </button>
@@ -229,14 +271,19 @@ const CustomerProfile = () => {
           <TabsContent value="personal" className="space-y-6">
             <div className="glass-card p-6 space-y-6">
               <h3 className="font-serif text-lg font-semibold text-foreground">Personal Information</h3>
+              {missing.size > 0 && (
+                <p className="-mt-3 text-sm text-muted-foreground">
+                  The {missing.size === 1 ? "field" : "fields"} outlined in orange{missing.has("avatar") ? " (and your photo)" : ""} {missing.size === 1 ? "is" : "are"} all that's left to complete your profile.
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">First Name</Label>
-                  <Input value={profile.firstName} onChange={(e) => handleProfileChange("firstName", e.target.value)} />
+                  <Input id="pf-first_name" className={needs("first_name")} value={profile.firstName} onChange={(e) => handleProfileChange("firstName", e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Last Name</Label>
-                  <Input value={profile.lastName} onChange={(e) => handleProfileChange("lastName", e.target.value)} />
+                  <Input id="pf-last_name" className={needs("last_name")} value={profile.lastName} onChange={(e) => handleProfileChange("lastName", e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Email</Label>
@@ -249,21 +296,21 @@ const CustomerProfile = () => {
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Phone</Label>
                   <div className="relative">
                     <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input className="pl-10" value={profile.phone} onChange={(e) => handleProfileChange("phone", e.target.value)} />
+                    <Input id="pf-phone_number" className={cn("pl-10", needs("phone_number"))} value={profile.phone} onChange={(e) => handleProfileChange("phone", e.target.value)} />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Date of Birth</Label>
                   <div className="relative">
                     <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input type="date" className="pl-10" value={profile.dateOfBirth} onChange={(e) => handleProfileChange("dateOfBirth", e.target.value)} />
+                    <Input id="pf-date_of_birth" type="date" className={cn("pl-10", needs("date_of_birth"))} value={profile.dateOfBirth} onChange={(e) => handleProfileChange("dateOfBirth", e.target.value)} />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Nationality</Label>
                   <div className="relative">
                     <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input className="pl-10" value={profile.nationality} onChange={(e) => handleProfileChange("nationality", e.target.value)} />
+                    <Input id="pf-nationality" className={cn("pl-10", needs("nationality"))} value={profile.nationality} onChange={(e) => handleProfileChange("nationality", e.target.value)} />
                   </div>
                 </div>
               </div>
@@ -276,24 +323,24 @@ const CustomerProfile = () => {
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Street Address</Label>
                   <div className="relative">
                     <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input className="pl-10" value={profile.address} onChange={(e) => handleProfileChange("address", e.target.value)} />
+                    <Input id="pf-address" className={cn("pl-10", needs("address"))} value={profile.address} onChange={(e) => handleProfileChange("address", e.target.value)} />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">City</Label>
-                  <Input value={profile.city} onChange={(e) => handleProfileChange("city", e.target.value)} />
+                  <Input id="pf-city" className={needs("city")} value={profile.city} onChange={(e) => handleProfileChange("city", e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Province</Label>
-                  <Input value={profile.province} onChange={(e) => handleProfileChange("province", e.target.value)} />
+                  <Input id="pf-province" className={needs("province")} value={profile.province} onChange={(e) => handleProfileChange("province", e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Country</Label>
-                  <Input value={profile.country} onChange={(e) => handleProfileChange("country", e.target.value)} />
+                  <Input id="pf-country" className={needs("country")} value={profile.country} onChange={(e) => handleProfileChange("country", e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">Postal Code</Label>
-                  <Input value={profile.postalCode} onChange={(e) => handleProfileChange("postalCode", e.target.value)} />
+                  <Input id="pf-postcode" className={needs("postcode")} value={profile.postalCode} onChange={(e) => handleProfileChange("postalCode", e.target.value)} />
                 </div>
               </div>
 
