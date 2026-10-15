@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { englishSitemapsFirst, preferCanonicalLocale } from "../../supabase/functions/_shared/crawl.ts";
+import { categorize as categorizePage, englishSitemapsFirst, preferCanonicalLocale } from "../../supabase/functions/_shared/crawl.ts";
 
 // Two pieces of logic that were wrong in production and are easy to break again.
 
@@ -220,5 +220,41 @@ describe("preferCanonicalLocale — which English market", () => {
     expect(preferCanonicalLocale([b("en_be"), b("en_us"), b("en_row")])).toEqual([b("en_row")]);
     expect(preferCanonicalLocale([b("en_be"), b("en_gb")])).toEqual([b("en_gb")]);
     expect(preferCanonicalLocale([b("en_be"), b("en_ae")])).toEqual([b("en_ae")]);
+  });
+});
+
+describe("categorize — a Magento product page", () => {
+  const footer = "Shipping and returns · Terms and conditions · Privacy policy · Warranty";
+  it("is a product by its item-code slug, whatever the footer says", () => {
+    expect(categorizePage("https://www.buccellati.com/en_us/hawaii-bracelet-jaubra004842.html", "HAWAII PINK GOLD BRACELET", footer)).toBe("product");
+    expect(categorizePage("https://www.buccellati.com/en_us/hawaii-earrings-jauear003993xxx000.html", "HAWAII EARRINGS", footer)).toBe("product");
+  });
+  it("leaves a numbered store page and a policy page alone", () => {
+    expect(categorizePage("https://x.com/en/store-12345", "Boutique", "")).not.toBe("product");
+    expect(categorizePage("https://www.buccellati.com/en_us/shipping-returns.html", "Shipping", footer)).not.toBe("product");
+  });
+});
+
+describe("extractContent — form fields are not page text", () => {
+  it("drops a country drop-down", async () => {
+    const { extractContent } = await import("../../supabase/functions/_shared/crawl.ts");
+    const html = `<html><body><p>Table Inspirations: silver for every season.</p>
+      <form><select name="country">
+        <option>Please select a country.</option>
+        <option>Afghanistan</option>
+        <option>Albania</option>
+      </select></form></body></html>`;
+    const { text } = extractContent(html);
+    expect(text).toContain("Table Inspirations");
+    expect(text).not.toMatch(/Afghanistan|Albania|select a country/);
+  });
+});
+
+describe("categorize — a footer is not a policy", () => {
+  it("files a page as policy by its URL or title, never by footer words in the body", () => {
+    const footer = "Privacy policy · Terms of use · Customer support";
+    expect(categorizePage("https://www.buccellati.com/en_row/table-inspirations", "Table Inspirations", footer)).toBe("other");
+    expect(categorizePage("https://www.buccellati.com/en_us/privacy-policy", "Privacy policy | Buccellati", footer)).toBe("policy");
+    expect(categorizePage("https://x.com/en/help", "Shipping and returns", "")).toBe("policy");
   });
 });

@@ -46,6 +46,12 @@ export function isJunkLine(l: string): boolean {
 // A product page IS a product page, whatever its prose says. This has to be
 // checked first and on the URL alone.
 const PRODUCT_URL = /\/(products?|p|item|articolo|prodotti?)\/[^/]+/i;
+// Magento houses put no /product/ in the path: the page is the slug plus the item code,
+// /en_us/hawaii-bracelet-jaubra004842.html. Without this, 362 of Buccellati's 513 pages —
+// almost all of them product pages — fell through to body text, where the footer's
+// shipping-and-returns links filed them as "policy". Letters then digits, so a store page
+// numbered /store-12345 is not taken for a piece.
+const PRODUCT_CODE_SLUG = /-[a-z]{2,}\d{4,}[a-z0-9]*(?:\.html?)?$/i;
 // Content that only a shop page has, for sites that don't put /products/ in the
 // path.
 const PRODUCT_BODY = /(add to (cart|bag)|aggiungi al carrello|select (a )?size|scegli la taglia|composition\s*:|composizione\s*:|sku\s*:|product details)/i;
@@ -63,13 +69,17 @@ const PRODUCT_BODY = /(add to (cart|bag)|aggiungi al carrello|select (a )?size|s
 export function categorize(url: string, title = "", text = ""): string {
   const path = (() => { try { return new URL(url).pathname; } catch { return url; } })();
 
-  if (PRODUCT_URL.test(path)) return "product";
+  if (PRODUCT_URL.test(path) || PRODUCT_CODE_SLUG.test(path)) return "product";
 
   const label = `${path} ${title}`;
   for (const r of CATEGORY_RULES) if (r.re.test(label)) return r.category;
 
   if (PRODUCT_BODY.test(text)) return "product";
-  for (const r of CATEGORY_RULES) if (r.re.test(text)) return r.category;
+  // Never "policy" on body text alone: every footer says privacy, terms and support, so the
+  // rule matched every page that fell this far — 114 of Buccellati's pages, exhibitions and
+  // gift guides among them, were filed as policy. A real policy page says so in its URL or
+  // title, which were checked above.
+  for (const r of CATEGORY_RULES) if (r.category !== "policy" && r.re.test(text)) return r.category;
   return "other";
 }
 
@@ -456,7 +466,10 @@ export function extractLinks(html: string, base: URL): { href: URL; text: string
 function htmlToText(html: string): string {
   let s = html;
   s = s.replace(/<head[\s\S]*?<\/head>/gi, " ");
-  s = s.replace(/<(script|style|noscript|svg|template|iframe)[\s\S]*?<\/\1>/gi, " ");
+  // A drop-down's options are a form, not prose. Buccellati's newsletter form lists every
+  // country one <option> per source line, so 133 of its pages opened with "Afghanistan /
+  // Albania / Algeria…" and that was what the assistant's sources panel quoted.
+  s = s.replace(/<(script|style|noscript|svg|template|iframe|select|datalist)[\s\S]*?<\/\1>/gi, " ");
   s = s.replace(/<!--[\s\S]*?-->/g, " ");
   // A table CELL is not a paragraph. Ending every </td> with a newline split "Sede Legale |
   // Piazza Damiano Grassi Damiani 1" into two lines, and a label with its value on the next
