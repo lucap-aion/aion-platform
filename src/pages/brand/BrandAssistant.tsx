@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import AssistantMarkdown from "@/components/assistant/AssistantMarkdown";
+import ClientList, { isClientResult } from "@/components/assistant/ClientList";
 import {
   ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
   Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown, LifeBuoy, Check,
@@ -1620,16 +1621,23 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
   // Photo grid: render whenever there are pieces to see (even one). Plain table:
   // only for multi-row rankings the model didn't already tabulate in prose —
   // a single-row lookup is spoken, not tabulated.
-  const showGrid = !streaming && rows.length > 0 && displayCols.length > 0 && hasImageCol;
+  // Clients are people, not pieces: they get compact rows (a face or an initials
+  // monogram) instead of the photo grid, whose empty squares made a list of
+  // clients without photos look broken. Same gating as the grid when there is a
+  // client photo column; without one, the same >= 6 rule as the plain table.
+  const clientResult = displayCols.length > 0 && isClientResult(displayCols);
+  const hasMdTable = /(^|\n)\s*\|?[\s:|-]*-{3,}[\s:|-]*\|/.test(summary);
+  const showClients = !streaming && rows.length > 0 && clientResult
+    && (hasImageCol || (rows.length >= 6 && !hasMdTable));
+  const showGrid = !streaming && rows.length > 0 && displayCols.length > 0 && hasImageCol && !clientResult;
   // Plain data tables are noise for a store manager (they've said so). Only show
   // one for a genuinely long list to scan (>= 6 rows); smaller numeric/aggregate
   // results are the model's own reasoning and stay hidden — it speaks the number.
   // The markdown check requires a real separator row (---) so prose like "S | M"
   // doesn't false-positive.
-  const hasMdTable = /(^|\n)\s*\|?[\s:|-]*-{3,}[\s:|-]*\|/.test(summary);
-  const showTable = !streaming && rows.length >= 6 && displayCols.length > 0 && !hasImageCol && !hasMdTable;
+  const showTable = !streaming && rows.length >= 6 && displayCols.length > 0 && !hasImageCol && !hasMdTable && !clientResult;
   const hasReport = !!report && Array.isArray(report.sections) && report.sections.length > 0;
-  const hasAnything = summary.trim() || sources.length > 0 || showGrid || showTable || hasReport || !!visit;
+  const hasAnything = summary.trim() || sources.length > 0 || showClients || showGrid || showTable || hasReport || !!visit;
 
   if (!hasAnything && streaming) {
     return (
@@ -1667,6 +1675,7 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
       {/* Pieces → big-image card grid (photos can't be duplicated in prose, so
           it always renders); multi-row numeric data → compact table with the
           technical columns stripped. Single-row lookups aren't tabulated. */}
+      {showClients && <ClientList columns={displayCols} rows={rows} locale={locale} />}
       {showGrid && <ProductGrid columns={displayCols} rows={rows} locale={locale} />}
       {showTable && <DataTable columns={displayCols} rows={rows} locale={locale} />}
 
@@ -1789,11 +1798,12 @@ const ProductCard = ({ row, cols, locale }: {
   const priceRaw = cols.price ? row[cols.price] : null;
   const price = cols.price ? formatCell(priceRaw, cols.price) : "";
   const cls = "group flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-md";
+  const [imgFailed, setImgFailed] = useState(false);
 
   const inner = (
     <>
-      <div className="aspect-square w-full overflow-hidden bg-muted/30">
-        {looksLikeImageUrl(img) ? (
+      <div className="flex aspect-square w-full items-center justify-center overflow-hidden bg-muted/30">
+        {looksLikeImageUrl(img) && !imgFailed ? (
           // no-referrer: these are the house's own CDN photos, hotlinked. A CDN
           // with hotlink protection refuses a foreign Referer but serves an empty
           // one (that is a typed-in URL), so sending none is the version that loads
@@ -1801,8 +1811,11 @@ const ProductCard = ({ row, cols, locale }: {
           // address in its logs anyway.
           <img src={img} alt={title} loading="lazy" referrerPolicy="no-referrer"
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-            onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
-        ) : <div className="h-full w-full" />}
+            onError={() => setImgFailed(true)} />
+        ) : (
+          // No photo, or one that failed to load: a quiet mark, not a blank box.
+          <ShoppingBag aria-hidden className="h-6 w-6 text-muted-foreground/30" />
+        )}
       </div>
       <div className="flex flex-1 flex-col gap-0.5 p-3">
         {subtitle && (

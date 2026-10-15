@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import SignedImage from "@/components/SignedImage";
+import ClientAvatar from "@/components/ClientAvatar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useListUrlState } from "@/hooks/useListUrlState";
@@ -478,7 +478,6 @@ const AdminCustomers = () => {
             render: (row) => {
               const r = row as unknown as Customer;
               const name = [r.first_name, r.last_name].filter(Boolean).join(" ") || "—";
-              const initials = `${(r.first_name?.[0] || r.email?.[0] || "?").toUpperCase()}${(r.last_name?.[0] || "").toUpperCase()}`;
               const briefLabel = name !== "—" ? name : r.email || "";
               return (
                 <div className="flex items-center gap-2">
@@ -500,9 +499,12 @@ const AdminCustomers = () => {
                     <TooltipContent>Customer 360 brief</TooltipContent>
                   </Tooltip>
                   <Link to={`/admin/customers/${r.id}`} className="group/cust flex items-center gap-2 min-w-0" title="View customer profile">
-                    <div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
-                      {r.avatar ? <SignedImage bucket="profile_pictures" value={r.avatar} alt={name} className="h-full w-full object-cover" /> : initials}
-                    </div>
+                    <ClientAvatar
+                      name={`${r.first_name || ""} ${r.last_name || ""}`}
+                      email={r.email}
+                      value={r.avatar}
+                      className="h-9 w-9 text-xs"
+                    />
                     <div className="min-w-0"><p className="font-medium text-foreground truncate group-hover/cust:text-primary group-hover/cust:underline">{name}</p><p className="text-xs text-muted-foreground truncate">{r.email}</p></div>
                   </Link>
                 </div>

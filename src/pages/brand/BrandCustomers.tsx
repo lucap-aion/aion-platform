@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import SignedImage from "@/components/SignedImage";
+import ClientAvatar from "@/components/ClientAvatar";
 import { Search, ChevronDown, Plus, Pencil, Trash2, X, ChevronLeft, ChevronRight, ArrowUpDown, Crown, Clock, AlertTriangle, Heart } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -555,11 +555,12 @@ const BrandCustomers = () => {
                   >
                     <td className="px-4 sm:px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0 overflow-hidden">
-                          {c.avatar
-                            ? <SignedImage bucket="profile_pictures" value={c.avatar} alt="" className="h-full w-full object-cover" />
-                            : <>{c.first_name?.[0] || ""}{c.last_name?.[0] || ""}</>}
-                        </div>
+                        <ClientAvatar
+                          name={`${c.first_name || ""} ${c.last_name || ""}`}
+                          email={c.email}
+                          value={c.avatar}
+                          className="h-9 w-9 text-xs"
+                        />
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
                             <p className="truncate text-sm font-medium text-foreground">

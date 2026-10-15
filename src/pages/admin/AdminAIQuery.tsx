@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import AssistantMarkdown from "@/components/assistant/AssistantMarkdown";
+import { isPersonImageColumn } from "@/components/assistant/ClientList";
+import ClientAvatar from "@/components/ClientAvatar";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -166,6 +168,19 @@ const isPercentColumn = (col: string) =>
 const isImageColumn = (col: string) =>
   /(^|_)(picture|avatar|photo|thumbnail)(_url)?$/i.test(col) ||
   /(^|_)image_url$/i.test(col);
+// The name to draw initials from when a client row's avatar is missing.
+const personName = (row: Record<string, unknown>): string => {
+  const pick = (re: RegExp) => {
+    const k = Object.keys(row).find((c) => re.test(c));
+    return k && row[k] != null ? String(row[k]).trim() : "";
+  };
+  return pick(/^(full_name|client_name|customer_name|customer|client)$/i)
+    || [pick(/^(first_name|firstname)$/i), pick(/^(last_name|lastname|surname)$/i)].filter(Boolean).join(" ");
+};
+const personEmail = (row: Record<string, unknown>): string => {
+  const k = Object.keys(row).find((c) => /(^|_)email$/i.test(c));
+  return k && row[k] != null ? String(row[k]) : "";
+};
 // Only ever called for a known image column (see DataTable), so accept ANY
 // http(s) URL — product feeds often serve images from extension-less endpoints
 // (e.g. .../Base/Image/154499). Truly broken URLs are hidden via <img onError>.
@@ -1401,7 +1416,12 @@ const ResultsTable = ({
             {visible.map((row, i) => (
               <tr key={i} className="border-b border-border/60 last:border-0 hover:bg-muted/20">
                 {columns.map((c) =>
-                  isImageColumn(c) ? (
+                  isPersonImageColumn(c) ? (
+                    // A client's face, or their initials — not an empty grey box.
+                    <td key={c} className="px-4 py-2">
+                      <ClientAvatar name={personName(row)} email={personEmail(row)} value={typeof row[c] === "string" ? (row[c] as string) : null} />
+                    </td>
+                  ) : isImageColumn(c) ? (
                     <td key={c} className="px-4 py-2">
                       <ImageCell url={row[c]} />
                     </td>

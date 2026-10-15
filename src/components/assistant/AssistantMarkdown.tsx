@@ -32,7 +32,12 @@ export default function AssistantMarkdown({ children }: { children: string }) {
                 // Hotlinked from the house's CDN: see ProductCard in BrandAssistant.
                 referrerPolicy="no-referrer"
                 className="h-full w-full object-cover"
-                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                // A dead link drops the whole thumbnail, frame included — an
+                // empty bordered square reads as something broken.
+                onError={(e) => {
+                  const frame = e.currentTarget.parentElement;
+                  if (frame) frame.style.display = "none";
+                }}
               />
             </a>
           );
