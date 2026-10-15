@@ -618,11 +618,14 @@ const BrandClaims = () => {
                         })()}
                       </td>
                       <td className="hidden md:table-cell px-4 md:px-6 py-4">
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex min-w-0 max-w-xs items-center gap-2.5">
                           {claim.policies?.catalogues?.picture
                             ? <img src={claim.policies.catalogues.picture} alt={claim.policies?.catalogues?.name || ""} className="h-9 w-9 rounded-lg object-contain bg-muted shrink-0" />
                             : <div className="h-9 w-9 rounded-lg bg-muted shrink-0" />}
-                          <span className="text-sm text-foreground whitespace-nowrap">{claim.policies?.catalogues?.name || "—"}</span>
+                          {/* Two lines at most, and allowed to break inside a word: a catalogue name is
+                              often one long run of capitals, and nowrap here pushed Type, Date, Status
+                              and Actions off the right of the table. */}
+                          <span className="min-w-0 text-sm text-foreground line-clamp-2 [overflow-wrap:anywhere]" title={claim.policies?.catalogues?.name || undefined}>{claim.policies?.catalogues?.name || "—"}</span>
                         </div>
                       </td>
                       <td className="hidden md:table-cell px-4 md:px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">

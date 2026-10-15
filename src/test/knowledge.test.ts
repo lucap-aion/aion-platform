@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { englishSitemapsFirst, preferCanonicalLocale } from "../../supabase/functions/_shared/crawl.ts";
 
 // Two pieces of logic that were wrong in production and are easy to break again.
 
@@ -90,29 +91,8 @@ describe("lexical fallback term selection", () => {
 // indexed the same page under ar-sa, ar-qa, ar-kw, en-sa and en-qa. 531
 // documents covering 139 pages. These pin the rule that collapses them.
 
-const LOCALE_SEG = /^[a-z]{2}(-[a-z]{2})?$/i;
-
-function preferCanonicalLocale(urls: string[]): string[] {
-  const best = new Map<string, { url: string; score: number }>();
-  for (const raw of urls) {
-    let u: URL;
-    try { u = new URL(raw); } catch { continue; }
-    const segs = u.pathname.split("/").filter(Boolean);
-    const hasLocale = segs.length > 0 && LOCALE_SEG.test(segs[0]);
-    const locale = hasLocale ? segs[0].toLowerCase() : "";
-    const key = `${u.hostname}/${(hasLocale ? segs.slice(1) : segs).join("/")}${u.search}`;
-    const score = !hasLocale ? 0 : locale.startsWith("en") ? 1 : 2;
-    const cur = best.get(key);
-    // Ties break on length, then lexically — never on which order the sitemap
-    // happened to list them, or the same crawl could pick en-sa one day and
-    // en-qa the next and re-index the whole base as "new" documents.
-    const better = !cur || score < cur.score ||
-      (score === cur.score && (raw.length < cur.url.length ||
-        (raw.length === cur.url.length && raw < cur.url)));
-    if (better) best.set(key, { url: raw, score });
-  }
-  return [...best.values()].map((v) => v.url);
-}
+// The real function, not a copy of it: the copy that used to live here kept passing while
+// the crawler's own pattern missed every Magento locale.
 
 describe("locale variants collapse to one page", () => {
   const page = (l: string) => `https://www.pasqualebruni.com/${l}/blogs/news/luce`;
@@ -158,6 +138,48 @@ describe("locale variants collapse to one page", () => {
   });
 });
 
+// Buccellati is Magento: /it_it/, /fr_fr/, /en_row/, and a slug translated per locale, so the
+// same bracelet is two different paths. Its knowledge base came out 528 Italian pages, 202
+// French and 56 English, with the boilerplate filter learned from the French ones.
+describe("Magento locales", () => {
+  const b = (p: string) => `https://www.buccellati.com/${p}`;
+
+  it("recognises underscore locales and three-letter regions", () => {
+    const out = preferCanonicalLocale([b("it_it/maison.html"), b("en_row/maison.html"), b("fr_fr/maison.html")]);
+    expect(out).toEqual([b("en_row/maison.html")]);
+  });
+
+  it("keeps one language when the slugs are translated", () => {
+    const urls = [
+      b("it_it/cuff-4-0-bracciale-jaubra012713.html"), b("it_it/anello-cocktail-jaurin008275.html"),
+      b("fr_fr/bracelet-cuff-4-0-jaubra012713.html"), b("fr_fr/bague-coloured-cocktail-jaurin008275.html"),
+      b("en_row/cuff-4-0-bracelet-jaubra012713.html"), b("en_us/cocktail-ring-jaurin008275.html"),
+    ];
+    const out = preferCanonicalLocale(urls);
+    expect(out.every((u) => /\/en_(row|us)\//.test(u))).toBe(true);
+    expect(out).toHaveLength(2);
+  });
+
+  it("falls back to the biggest language when English is a stub", () => {
+    const urls = [
+      ...Array.from({ length: 10 }, (_, i) => b(`it_it/pezzo-${i}.html`)),
+      ...Array.from({ length: 3 }, (_, i) => b(`fr_fr/piece-${i}.html`)),
+      b("en_row/privacy.html"),
+    ];
+    const out = preferCanonicalLocale(urls);
+    expect(out).toHaveLength(10);
+    expect(out.every((u) => u.includes("/it_it/"))).toBe(true);
+  });
+
+  it("never drops unprefixed pages or a two-letter section that is not a language", () => {
+    const urls = [b("it_it/a.html"), b("fr_fr/b.html"), b("maison.html"), b("go/boutiques.html")];
+    const out = preferCanonicalLocale(urls);
+    expect(out).toContain(b("maison.html"));
+    expect(out).toContain(b("go/boutiques.html"));
+    expect(out).toHaveLength(3);
+  });
+});
+
 describe("html entities in titles", () => {
   const NAMED: Record<string, string> = {
     nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
@@ -171,5 +193,32 @@ describe("html entities in titles", () => {
 
   it("leaves an unknown entity visible rather than eating it", () => {
     expect(decode("A &weirdthing; B")).toBe("A &weirdthing; B");
+  });
+});
+
+describe("englishSitemapsFirst", () => {
+  it("reads a house's English market sitemaps before the one it lists first", () => {
+    // Buccellati's robots.txt: Italian first, every sitemap the whole site.
+    const sm = (l: string) => `https://www.buccellati.com/media/sitemap/sitemap_${l}.xml`;
+    const out = englishSitemapsFirst([sm("it_it"), sm("fr_fr"), sm("en_us"), sm("jp_jp"), sm("en_row"), "https://www.buccellati.com/sitemap.xml"]);
+    expect(out).toEqual([sm("en_us"), sm("en_row"), sm("it_it"), sm("fr_fr"), sm("jp_jp"), "https://www.buccellati.com/sitemap.xml"]);
+  });
+
+  it("knows a market in the path, and leaves unmarked sitemaps alone", () => {
+    expect(englishSitemapsFirst(["https://x.com/it-it/sitemap.xml", "https://x.com/en-gb/sitemap.xml"]))
+      .toEqual(["https://x.com/en-gb/sitemap.xml", "https://x.com/it-it/sitemap.xml"]);
+    // "sitemap_pages.xml" is not a market, nor is a host that happens to contain "en-".
+    const plain = ["https://en-shop.com/sitemap_pages.xml", "https://en-shop.com/sitemap_products.xml"];
+    expect(englishSitemapsFirst(plain)).toEqual(plain);
+  });
+});
+
+describe("preferCanonicalLocale — which English market", () => {
+  it("prefers the international English market, then US, then UK, over any other English market", () => {
+    const b = (l: string) => `https://www.buccellati.com/${l}/caviar-set.html`;
+    expect(preferCanonicalLocale([b("en_be"), b("en_us"), b("en_gb")])).toEqual([b("en_us")]);
+    expect(preferCanonicalLocale([b("en_be"), b("en_us"), b("en_row")])).toEqual([b("en_row")]);
+    expect(preferCanonicalLocale([b("en_be"), b("en_gb")])).toEqual([b("en_gb")]);
+    expect(preferCanonicalLocale([b("en_be"), b("en_ae")])).toEqual([b("en_ae")]);
   });
 });

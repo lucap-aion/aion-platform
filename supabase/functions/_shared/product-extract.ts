@@ -17,6 +17,8 @@
 // already publishes for search engines. Pure and synchronous, so it can be
 // tested against real captured pages rather than mocked ones.
 
+import { decodeEntities } from "./html-entities.ts";
+
 /**
  * Every JSON-LD node a page publishes, flattened.
  *
@@ -46,22 +48,9 @@ export function jsonLdNodes(html: string): Record<string, unknown>[] {
 // "BANGLE&#x20;BRACCIALE" — a hex entity for a space — and that went into the catalogue, the
 // demo book and the deck exactly like that. Ampersands in image URLs arrive as "&amp;" for
 // the same reason, which turns every query parameter after the first into junk.
-const NAMED: Record<string, string> = {
-  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", ndash: "–", mdash: "—",
-  lsquo: "\u2018", rsquo: "\u2019", ldquo: "\u201C", rdquo: "\u201D", hellip: "…", eacute: "é",
-};
-
-export function decodeEntities(value: string): string {
-  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, body: string) => {
-    if (body[0] === "#") {
-      const code = body[1] === "x" || body[1] === "X"
-        ? parseInt(body.slice(2), 16)
-        : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
-    }
-    return NAMED[body.toLowerCase()] ?? whole;
-  });
-}
+// The decoder itself is shared with the crawl (html-entities.ts): this one knew fourteen
+// names, and an Italian or French product name needs the rest of Latin-1.
+export { decodeEntities };
 
 // "Price on request" as a number. These catalogues write it as a run of nines — Buccellati
 // publishes product:price:amount 9999999 on every piece that has no public price — and a

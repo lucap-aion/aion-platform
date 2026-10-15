@@ -91,6 +91,11 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+    /* A word longer than its box breaks instead of escaping it. Catalogue names are often one
+       long run of capitals, and an unbroken one ran across the dates and buttons beside it.
+       break-word (not anywhere) leaves min-content alone, so tables and flex rows lay out
+       exactly as before; the places that need a flex item to shrink set it themselves. */
+    overflow-wrap: break-word;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--heading-font);

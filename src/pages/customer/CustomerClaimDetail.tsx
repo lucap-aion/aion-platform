@@ -196,7 +196,7 @@ const CustomerClaimDetail = () => {
                   <status.icon className="h-3 w-3 mr-1" /> {status.label}
                 </Badge>
               </div>
-              <p className="mt-0.5 text-sm text-muted-foreground">
+              <p className="mt-0.5 text-sm text-muted-foreground [overflow-wrap:anywhere]">
                 {productName}{brandName ? ` · ${brandName}` : ""}
               </p>
             </div>
@@ -315,7 +315,7 @@ const CustomerClaimDetail = () => {
               <div className="space-y-2.5 text-sm">
                 <div>
                   <p className="text-xs text-muted-foreground">Product</p>
-                  <p className="font-medium text-foreground">{productName}</p>
+                  <p className="font-medium text-foreground [overflow-wrap:anywhere]">{productName}</p>
                 </div>
                 {brandName && (
                   <div>

@@ -3,6 +3,7 @@
 
 import { AION_UA } from "./robots.ts";
 import { fetchSite, fetchSiteText } from "./fetch-site.ts";
+import { decodeEntities } from "./html-entities.ts";
 
 /** Re-exported so the crawl's many callers keep one import. */
 export const UA = AION_UA;
@@ -36,6 +37,9 @@ export function isJunkLine(l: string): boolean {
   if (JUNK_LINE.test(t)) return true;
   if (/^[€$£%+\-\s\d.,:|/]+$/.test(t)) return true;
   if (/^[a-z]{2,3}([_/-][a-z]{2,3})?$/i.test(t) && !/\s/.test(t)) return true;
+  // A theme's placeholder copy. Buccellati's size-guide modal ships "Lorem ipsum dolor sit
+  // amet…" on every product page, and it was indexed as the product's description.
+  if (/\blorem ipsum\b|\bconsectetur adipiscing\b|\bsed do eiusmod\b|\but enim ad minim\b|\bduis aute irure\b|\bexcepteur sint occaecat\b/i.test(t)) return true;
   return false;
 }
 
@@ -182,6 +186,16 @@ function urlsInSitemap(xml: string, origin: URL): string[] {
   return out;
 }
 
+/**
+ * Sitemaps that name an English market first, the rest in the order given. A sitemap names
+ * its market as `sitemap_en_us.xml`, `sitemap-en-gb.xml` or `/en_us/sitemap.xml`; one that
+ * names none keeps its place among the rest.
+ */
+export function englishSitemapsFirst(urls: string[]): string[] {
+  const english = (u: string) => /(?:^|[/_.-])en[_-][a-z]{2,3}(?=[/_.-]|$)/i.test(u.replace(/^https?:\/\/[^/]+/i, ""));
+  return [...urls.filter(english), ...urls.filter((u) => !english(u))];
+}
+
 /** Pages only — what the crawl should queue. */
 export async function collectSitemapUrls(
   origin: URL, maxUrls = 3000, maxFiles = 24, jinaKey = "",
@@ -213,6 +227,11 @@ export async function collectSitemap(
   // Remember the order they were offered in: robots.txt lists the house's own primary market
   // first, and that is the sitemap worth paying a render for.
   const offered = [...queue];
+  // But READ the English ones first. Buccellati's robots.txt names twenty-seven sitemaps, one
+  // per market, Italian first; each holds the whole site (~1,840 pages), so the Italian one
+  // alone filled most of the budget, English arrived as a remainder, and preferCanonicalLocale
+  // — choosing a language by count — chose Italian for a house whose site is all in English too.
+  queue.splice(0, queue.length, ...englishSitemapsFirst(queue));
 
   const urls: string[] = [];
   const images: string[] = [];
@@ -447,33 +466,36 @@ function htmlToText(html: string): string {
   s = s.replace(/<\/(p|div|li|h[1-6]|section|article|tr)>/gi, "\n");
   s = s.replace(/<\/(td|th|dt|dd)>/gi, " ");
   s = s.replace(/<br\s*\/?>/gi, "\n");
+  // Quoted attribute values are skipped whole. A plain <[^>]+> ends a tag at the first ">"
+  // anywhere in it — and Magento puts JSON with markup in it into data-mage-init, so the rest
+  // of the attribute came out as page text: '"remEventSelector":"button",' in the middle of
+  // Buccellati's product description. The alternatives are disjoint, so this stays linear.
+  s = s.replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, " ");
   s = s.replace(/<[^>]+>/g, " ");
   s = decodeEntities(s);
   return s.replace(/[ \t\f\v]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
-// The named entities that actually turn up in luxury marketing copy. The list
-// used to stop at six, so every en-dash in a page title stayed as "&ndash;" —
-// visible in the knowledge list, and fed to the assistant and the embeddings
-// exactly like that.
-const NAMED_ENTITIES: Record<string, string> = {
-  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
-  ndash: "\u2013", mdash: "\u2014", lsquo: "\u2018", rsquo: "\u2019",
-  ldquo: "\u201c", rdquo: "\u201d", hellip: "\u2026", middot: "\u00b7",
-  laquo: "\u00ab", raquo: "\u00bb", bull: "\u2022", deg: "\u00b0",
-  eacute: "\u00e9", egrave: "\u00e8", agrave: "\u00e0", ccedil: "\u00e7",
-  uuml: "\u00fc", ouml: "\u00f6", auml: "\u00e4", szlig: "\u00df",
-  copy: "\u00a9", reg: "\u00ae", trade: "\u2122", euro: "\u20ac", pound: "\u00a3",
-};
+// The decoder lives in html-entities.ts, shared with the catalogue extractor. Each used to
+// carry its own short list, and an Italian house's "&ograve;" was on neither. Re-exported
+// so seed-crawl keeps its one import.
+export { decodeEntities };
 
-export function decodeEntities(s: string): string {
-  return s.replace(/&([a-z]+);/gi, (m, name) => NAMED_ENTITIES[String(name).toLowerCase()] ?? m)
-    .replace(/&#(\d+);/g, (_, n) => safeChar(parseInt(n, 10)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => safeChar(parseInt(n, 16)));
-}
-function safeChar(code: number): string { try { return Number.isFinite(code) ? String.fromCodePoint(code) : ""; } catch { return ""; } }
+// A locale-prefixed path, as Shopify markets serve them: /ar-sa/..., /en-qa/... — and as
+// Magento serves them, with an underscore and sometimes a three-letter region: /it_it/,
+// /fr_fr/, /en_row/ ("rest of world"). The hyphen-only pattern missed every Magento house,
+// so Buccellati's crawl kept four locales of the same site.
+const LOCALE_SEG = /^[a-z]{2}([-_][a-z]{2,3})?$/i;
 
-// A locale-prefixed path, as Shopify markets serve them: /ar-sa/..., /en-qa/...
-const LOCALE_SEG = /^[a-z]{2}(-[a-z]{2})?$/i;
+/** English markets in order of preference, as `language_region`. */
+const EN_MARKETS = ["en", "en_row", "en_int", "en_ww", "en_us", "en_gb"];
+
+// The languages a locale prefix can name. Only these take part in choosing ONE language for
+// the whole site, so a two-letter section that is not a language ("/go/", "/vr/") is never
+// thrown away as if it were a translation.
+const LANGUAGES = new Set([
+  "en", "it", "fr", "de", "es", "pt", "nl", "ru", "ja", "zh", "ko", "ar", "tr", "pl", "sv",
+  "da", "no", "nb", "fi", "cs", "el", "he", "hu", "ro", "uk", "th", "id", "ms", "vi", "hi",
+]);
 
 /**
  * Collapse a URL list to one URL per page, choosing between locale variants.
@@ -488,9 +510,18 @@ const LOCALE_SEG = /^[a-z]{2}(-[a-z]{2})?$/i;
  * Preference, most wanted first: no locale prefix at all (the canonical page),
  * then English, then whatever is left, breaking ties on the shortest URL so the
  * choice is stable between crawls.
+ *
+ * Then one LANGUAGE for the whole site. Collapsing by path only works when every locale
+ * shares the slug, and a Magento house translates it: Buccellati's bracelet is
+ * /it_it/cuff-4-0-bracciale-….html and /fr_fr/bracelet-cuff-4-0-….html, two keys that
+ * never meet. Its knowledge base came out 528 Italian pages, 202 French and 56 English —
+ * and the boilerplate filter, learned from a sample of French pages, let every Italian
+ * newsletter form and menu through into the assistant's sources. So when the paths name
+ * more than one language, keep English if it covers at least half as many pages as the
+ * biggest one, otherwise the biggest; unprefixed pages always stay.
  */
 export function preferCanonicalLocale(urls: string[]): string[] {
-  const best = new Map<string, { url: string; score: number }>();
+  const best = new Map<string, { url: string; score: number; lang: string }>();
   for (const raw of urls) {
     let u: URL;
     try { u = new URL(raw); } catch { continue; }
@@ -498,7 +529,14 @@ export function preferCanonicalLocale(urls: string[]): string[] {
     const hasLocale = segs.length > 0 && LOCALE_SEG.test(segs[0]);
     const locale = hasLocale ? segs[0].toLowerCase() : "";
     const key = `${u.hostname}/${(hasLocale ? segs.slice(1) : segs).join("/")}${u.search}`;
-    const score = !hasLocale ? 0 : locale.startsWith("en") ? 1 : 2;
+    // Among English markets, the international one, then the US, then the UK, then the rest.
+    // Alphabetical choice picked Buccellati's en_be — a market that lists every page in its
+    // sitemap and answers 404 for each of them — over en_us and en_row, which serve the site.
+    const enRank = EN_MARKETS.indexOf(locale.replace("-", "_"));
+    const score = !hasLocale ? 0
+      : locale.startsWith("en") ? 1 + (enRank >= 0 ? enRank : EN_MARKETS.length) / 10
+      : 2;
+    const lang = hasLocale && LANGUAGES.has(locale.slice(0, 2)) ? locale.slice(0, 2) : "";
     const cur = best.get(key);
     // Ties break on length, then lexically — never on which order the sitemap
     // happened to list them, or the same crawl could pick en-sa one day and
@@ -506,9 +544,19 @@ export function preferCanonicalLocale(urls: string[]): string[] {
     const better = !cur || score < cur.score ||
       (score === cur.score && (raw.length < cur.url.length ||
         (raw.length === cur.url.length && raw < cur.url)));
-    if (better) best.set(key, { url: raw, score });
+    if (better) best.set(key, { url: raw, score, lang });
   }
-  return [...best.values()].map((v) => v.url);
+  const kept = [...best.values()];
+
+  const perLang = new Map<string, number>();
+  for (const k of kept) if (k.lang) perLang.set(k.lang, (perLang.get(k.lang) ?? 0) + 1);
+  if (perLang.size < 2) return kept.map((k) => k.url);
+
+  const ranked = [...perLang.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const [biggest, biggestCount] = ranked[0];
+  const en = perLang.get("en") ?? 0;
+  const lang = en * 2 >= biggestCount ? "en" : biggest;
+  return kept.filter((k) => !k.lang || k.lang === lang).map((k) => k.url);
 }
 
 export function titleFromUrl(url: string, fallback: string): string {

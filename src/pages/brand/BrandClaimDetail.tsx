@@ -272,7 +272,7 @@ const BrandClaimDetail = () => {
                 )}
                 <div>
                   <p className="text-muted-foreground text-xs">Name</p>
-                  <p className="font-medium text-foreground">{productName}</p>
+                  <p className="font-medium text-foreground [overflow-wrap:anywhere]">{productName}</p>
                 </div>
                 {policy?.catalogues?.category && (
                   <div>
