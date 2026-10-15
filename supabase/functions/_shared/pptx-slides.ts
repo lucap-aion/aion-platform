@@ -1815,20 +1815,52 @@ type ShapeOpts = {
   fill?: string | null;
   line?: string; lineW?: number; dash?: "dash" | "sysDash";
   rot?: number; flipV?: boolean; flipH?: boolean;
-  /** Preset adjust values, by guide name. */
+  /** Preset adjust values, by guide name. Any guide left out is written at its default. */
   adj?: Record<string, number>;
   text?: string[]; anchor?: "t" | "ctr" | "b";
   /** Text insets in EMU — one value for all four, or [l, t, r, b]. */
   inset?: number | [number, number, number, number];
 };
 
+/**
+ * Every adjust guide of each preset this file adjusts, in the preset's own order, at its
+ * default (ECMA-376 presetShapeDefinitions.xml).
+ *
+ * PowerPoint wants a preset's adjust list whole or not at all. The "cycle" pictogram on the
+ * ops deck's contents slide set only adj1 and adj5 of `circularArrow`'s five — schema-valid,
+ * passes the Open XML SDK validator, renders in LibreOffice — and PowerPoint could not draw
+ * it: the deck failed to export and, once the slide was drawn, PowerPoint offered to repair
+ * the file. The same slide with all five guides, or with none, opens clean. So an override
+ * is merged over the full list here rather than written alone.
+ */
+const PRESET_GUIDES: Record<string, [string, number][]> = {
+  circularArrow: [["adj1", 12500], ["adj2", 1142319], ["adj3", 20457681], ["adj4", 10800000], ["adj5", 12500]],
+  pie: [["adj1", 0], ["adj2", 16200000]],
+  arc: [["adj1", 16200000], ["adj2", 0]],
+  round2SameRect: [["adj1", 16667], ["adj2", 0]],
+  roundRect: [["adj", 16667]],
+  can: [["adj", 25000]],
+};
+
+/** The `<a:avLst>` for a preset: empty, or every one of its guides with `adj` merged in. */
+function adjustList(prst: string, adj?: Record<string, number>): string {
+  if (!adj) return `<a:avLst/>`;
+  const guides = PRESET_GUIDES[prst];
+  // Loud, not lenient: a guide list written from a guess is exactly how this file came to
+  // need repairing. Look the preset up and add it above.
+  if (!guides) throw new Error(`no adjust guides on record for preset "${prst}"`);
+  for (const k of Object.keys(adj)) {
+    if (!guides.some(([name]) => name === k)) throw new Error(`preset "${prst}" has no adjust guide "${k}"`);
+  }
+  return `<a:avLst>${guides.map(([name, dflt]) =>
+    `<a:gd name="${name}" fmla="val ${Math.round(adj[name] ?? dflt)}"/>`).join("")}</a:avLst>`;
+}
+
 /** Any preset shape, optionally with text in it. */
 function shape(x: number, y: number, cx: number, cy: number, o: ShapeOpts): string {
   const id = nid();
   const xfrmAttr = (o.rot ? ` rot="${o.rot}"` : "") + (o.flipH ? ` flipH="1"` : "") + (o.flipV ? ` flipV="1"` : "");
-  const av = o.adj
-    ? `<a:avLst>${Object.entries(o.adj).map(([k, v]) => `<a:gd name="${k}" fmla="val ${v}"/>`).join("")}</a:avLst>`
-    : `<a:avLst/>`;
+  const av = adjustList(o.prst, o.adj);
   const fill = o.fill ? `<a:solidFill><a:srgbClr val="${o.fill}"/></a:solidFill>` : `<a:noFill/>`;
   const ln = o.line
     ? `<a:ln w="${o.lineW ?? 12700}"><a:solidFill><a:srgbClr val="${o.line}"/></a:solidFill>` +

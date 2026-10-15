@@ -145,6 +145,41 @@ describe("the graphic pass changes the drawing, not the words", () => {
     }
   });
 
+  it("writes a preset's adjust guides whole or not at all, or PowerPoint repairs the file", () => {
+    // The founder's "PowerPoint gives an error and asks to repair the document". The cycle
+    // pictogram on the contents slide drew `circularArrow` with only adj1 and adj5 of its five
+    // guides. Schema-valid and fine in LibreOffice; PowerPoint could not draw that slide —
+    // export failed, then it repaired the file. Bisected in PowerPoint 16.114 down to those
+    // two shapes: the same slide with all five guides, or with an empty list, opens clean.
+    //
+    // Guide names per preset, from ECMA-376 presetShapeDefinitions.xml — written out here
+    // rather than imported, so this does not just check the generator against itself. A
+    // preset that is not listed fails the test: look its guides up and add them.
+    const GUIDES: Record<string, string[]> = {
+      circularArrow: ["adj1", "adj2", "adj3", "adj4", "adj5"],
+      pie: ["adj1", "adj2"],
+      arc: ["adj1", "adj2"],
+      round2SameRect: ["adj1", "adj2"],
+      roundRect: ["adj"],
+      can: ["adj"],
+    };
+    let adjusted = 0;
+    const presets = new Set<string>();
+    for (const s of booklet) {
+      const xml = slideXml(s, "rId2", page);
+      for (const m of xml.matchAll(/<a:prstGeom prst="(\w+)"><a:avLst>(.*?)<\/a:avLst>/g)) {
+        const names = [...m[2].matchAll(/<a:gd name="(\w+)" fmla="val -?\d+"\/>/g)].map((g) => g[1]);
+        expect(GUIDES[m[1]], `${s.title}: preset ${m[1]} not in the table`).toBeDefined();
+        expect(names, `${s.title}: ${m[1]}`).toEqual(GUIDES[m[1]]);
+        adjusted++;
+        presets.add(m[1]);
+      }
+    }
+    // The pictograms really are in the deck, so the loop above checked something.
+    expect(presets.has("circularArrow")).toBe(true);
+    expect(adjusted).toBeGreaterThan(5);
+  });
+
   it("leaves the business case's plain bullet slide as it was", () => {
     // The business case deck passes no footer and has its own title-and-bullets look; the
     // ops deck's header band, tab and cards are not for it.
