@@ -31,7 +31,7 @@ type SourceCard = Extract<FigureSlide, { kind: "sources" }>["cards"][number];
  * record, for one category or for every category. A record-sourced rate may have no insurer,
  * quote or quote date at all, and must not be called a quote.
  */
-export type RateSource = "record_category" | "own_quote" | "record_brand" | "borrowed_quote";
+export type RateSource = "own_quote" | "record_category" | "record_brand" | "borrowed_quote";
 
 /** One rate the model used — `compute_business_case`'s `rates_used[]`. */
 export type RateUsed = {
@@ -88,6 +88,9 @@ export type BusinessCase = {
     service_months_discounted?: number | null; service_note?: string | null;
     /** True when at least one segment's activation rate came from the brand record. */
     activation_from_record?: boolean | null;
+    /** The discounts the totals apply. Absent from cases computed before 2026-10-15. */
+    service_discount?: number | null;
+    setup_discount?: number | null;
   } | null;
   aion_total_revenue: number;
   total_cost_to_brand: number;
@@ -104,7 +107,8 @@ export type BusinessCase = {
 
 // ── Sources ─────────────────────────────────────────────────────────────────────────────
 
-const SOURCES: RateSource[] = ["record_category", "own_quote", "record_brand", "borrowed_quote"];
+// In the order compute_business_case reaches for them (20261015000001).
+const SOURCES: RateSource[] = ["own_quote", "record_category", "record_brand", "borrowed_quote"];
 
 /**
  * A rate's source. A case computed before `rate_source` existed says only `own_quote`, and
@@ -260,7 +264,6 @@ export function businessCaseSlides(house: string, c: BusinessCase): DeckSlide[] 
   const badge = c.indicative ? "Indicative" : undefined;
 
   const activationPct = perSegment(segs, (s) => s.activation_fee_pct, "at the tier's rate");
-  const premiumShare = perSegment(segs, (s) => s.aion_premium_share, "at the standard share");
   const actFromRecord = Boolean(fees.activation_from_record);
   const mismatch = c.volume_band_mismatch
     ? "Rates were quoted at a different volume than this perimeter declares."
@@ -342,7 +345,10 @@ export function businessCaseSlides(house: string, c: BusinessCase): DeckSlide[] 
   slides.push({
     kind: "metrics", title: "3. AION fees — setup, service and activation", key: "AION fees", badge,
     tiles: [
-      { value: eur(fees.setup ?? 0), label: "Setup", note: "One-off" },
+      {
+        value: eur(fees.setup ?? 0), label: "Setup",
+        note: fees.setup_discount ? `One-off, ${pctShort(fees.setup_discount)} launch discount` : "One-off",
+      },
       svc
         ? { value: eur(fees.service ?? 0), label: "Service", note: `${eur(svc)}/month over the period` }
         : { value: "On quotation", label: "Service", note: cap(serviceNote) },
@@ -363,8 +369,13 @@ export function businessCaseSlides(house: string, c: BusinessCase): DeckSlide[] 
       svc
         ? {
             title: "Service months",
-            body: `${eur(svc)}/month → ${eur(fees.service ?? 0)} over the period: ${disc} month${disc === 1 ? "" : "s"} ` +
-              `discounted, ${full} at full rate.`,
+            // Says WHAT the discount is, not only that there is one: "6 months discounted" left
+            // the reader to guess by how much and on whose say-so.
+            body: `${eur(svc)}/month → ${eur(fees.service ?? 0)} over the period: ` +
+              (disc && fees.service_discount
+                ? `the first ${disc} month${disc === 1 ? "" : "s"} at ${pctShort(fees.service_discount)} off ` +
+                  `(${eur(svc * (1 - fees.service_discount))}/month) — AION's launch discount — then ${full} at full rate.`
+                : `${disc} month${disc === 1 ? "" : "s"} discounted, ${full} at full rate.`),
           }
         : {
             title: "Service fee",
@@ -420,11 +431,11 @@ export function businessCaseSlides(house: string, c: BusinessCase): DeckSlide[] 
   }
 
   // ── 5. Total cost ─────────────────────────────────────────────────────────
-  const insRev = c.aion_insurance_revenue != null
-    ? Number(c.aion_insurance_revenue)
-    : Number(c.aion_total_revenue) - Number(fees.total ?? 0);
+  // What the house pays, and nothing about what AION earns. This deck goes to the house; AION's
+  // share of the net premium is AION's business ("hide AION's share of the net premium"), and
+  // it stays on the admin panel.
   slides.push({
-    kind: "stack", title: `5. Total cost — ${months} months, and what AION earns`, key: "Total cost", badge,
+    kind: "stack", title: `5. Total cost — ${months} months`, key: "Total cost", badge,
     bars: [
       {
         label: `Total cost to ${H}`,
@@ -437,19 +448,8 @@ export function businessCaseSlides(house: string, c: BusinessCase): DeckSlide[] 
           { label: "AION activation", value: Number(fees.activation) || 0, text: eur(fees.activation ?? 0) },
         ],
       },
-      {
-        label: "AION revenue over the period",
-        sub: `Share of the net premium ${eur(insRev)}${premiumShare && !premiumShare.includes(" · ") ? ` (${premiumShare})` : ""} ` +
-          `and AION fees ${eur(fees.total ?? 0)}`,
-        total: eur(c.aion_total_revenue),
-        parts: [
-          { label: "Share of the net premium", value: insRev || 0, text: eur(insRev) },
-          { label: "AION fees", value: Number(fees.total) || 0, text: eur(fees.total ?? 0) },
-        ],
-      },
     ],
     notes: [
-      ...(premiumShare && premiumShare.includes(" · ") ? [`AION's share of the net premium, by segment: ${premiumShare}.`] : []),
       ...(svc ? [] : [`Service fee: ${serviceNote} — not included above.`]),
       ...(mismatch ? [mismatch] : []),
       model,

@@ -38,13 +38,13 @@ describe("the business case deck", () => {
       eur(c.gross_premium), eur(c.net_premium),
       // AION fees
       `Tier ${f.tier}`, eur(f.setup!), eur(f.service!), eur(f.activation!), eur(f.total!),
-      `${eur(f.service_fee_month!)}/month`, "12 months discounted", "24 at full rate",
+      `${eur(f.service_fee_month!)}/month`, "the first 12 months at 50% off", "then 24 at full rate",
       // per piece
       eurPiece(pp.insurer_fee), eurPiece(pp.aion_fee), `${eurPiece(pp.total)} per piece`,
       pct(pp.total_pct_of_price), pct(pp.total_pct_of_price_incl_vat), "VAT at 22%",
       eurPiece(pp.setup), eurPiece(pp.total_with_setup),
       // summary
-      eur(c.total_cost_to_brand), eur(c.aion_total_revenue), eur(c.aion_insurance_revenue!),
+      eur(c.total_cost_to_brand),
       "Figures are a model, not an offer — the formal insurer quotation governs.",
       "Rates were quoted at a different volume than this perimeter declares.",
       // provenance
@@ -121,16 +121,28 @@ describe("the business case deck", () => {
     expect(text).not.toContain("finance team");
   });
 
-  it("shows the activation rate per segment when the segments differ, and the premium share", () => {
+  it("never shows AION's share of the net premium, or what AION earns — the deck goes to the house", () => {
+    expect(text).not.toContain(eur(FIXTURE_CASE.aion_total_revenue));
+    expect(text).not.toContain(eur(FIXTURE_CASE.aion_insurance_revenue!));
+    expect(text).not.toMatch(/share of the net premium|AION revenue|AION earns|\(25%\)/i);
+  });
+
+  it("says what the service discount is, not only that there is one", () => {
+    const disc = clone((c) => { c.aion_fees = { ...c.aion_fees!, service_discount: 0.5, setup_discount: 0.5 }; });
+    const t = deckText(businessCaseSlides("X", disc));
+    const svc = disc.aion_fees!.service_fee_month!;
+    expect(t).toContain(`the first 12 months at 50% off (${eur(svc / 2)}/month) — AION's launch discount — then 24 at full rate.`);
+    expect(t).toContain("One-off, 50% launch discount");
+  });
+
+  it("shows the activation rate per segment when the segments differ", () => {
     expect(text).toContain("Bags and leather goods 0.08% · Shoes at the tier's rate");
-    expect(text).toContain("(25%)");
     const uniform = clone((c) => { c.segments = c.segments.map((s) => ({ ...s, activation_fee_pct: 0.001 })); });
     expect(deckText(businessCaseSlides("X", uniform))).toContain("0.1% of covered revenues");
     // Absent altogether: nothing claimed.
     const none = clone((c) => { c.segments = c.segments.map(({ activation_fee_pct, aion_premium_share, ...s }) => s); });
     const t = deckText(businessCaseSlides("X", none));
     expect(t).toContain("A share of the covered revenues set by the tier");
-    expect(t).not.toContain("(25%)");
   });
 
   it("says the service fee is on quotation when the tier has none", () => {

@@ -9,7 +9,7 @@ import { toast } from "@/hooks/use-toast";
 import { Loader2, Plus, Trash2, Download, AlertTriangle, Calculator, ChevronDown, ChevronRight, Upload, FileSpreadsheet, Check } from "lucide-react";
 import InsurerQuotes from "./InsurerQuotes";
 import {
-  CATEGORIES, COVERAGES, DAMAGE_SCOPES, RATE_SOURCE_LABEL, resolveRates,
+  CATEGORIES, COVERAGES, DAMAGE_SCOPES, RATE_SOURCE_LABEL, defaultMonths, resolveRates,
   type BusinessCase, type Quote, type RateUsed, type RecordCategory, type RecordRates,
 } from "./pricing-model";
 import { categoryName } from "@/lib/commercialCycle";
@@ -50,7 +50,8 @@ type Segment = {
 
 const emptySegment = (): Segment => ({
   name: "", category: "jewellery", coverage: "theft_and_damage", damage_scope: "",
-  revenues: "", cogs_ratio: "0.30", avg_price: "", start_month: "1",
+  // Blank = the record's COGS ratio for the category, else 30% — see resolveRates.
+  revenues: "", cogs_ratio: "", avg_price: "", start_month: "1",
 });
 
 // ── The perimeter, kept ─────────────────────────────────────────────────────
@@ -97,7 +98,7 @@ const fromStored = (r: StoredSegment): Segment => ({
   coverage: r.coverage ?? "theft_and_damage",
   damage_scope: r.damage_scope ?? "",
   revenues: r.revenues != null ? String(r.revenues) : "",
-  cogs_ratio: r.cogs_ratio != null ? String(r.cogs_ratio) : "0.30",
+  cogs_ratio: r.cogs_ratio != null ? String(r.cogs_ratio) : "",
   avg_price: r.avg_price != null ? String(r.avg_price) : "",
   start_month: String(r.start_month ?? 1),
 });
@@ -178,6 +179,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
   const [importedAt, setImportedAt] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [quotesLoaded, setQuotesLoaded] = useState(false);
   const [loadingRefs, setLoadingRefs] = useState(true);
   // The assumptions behind every figure on this screen. They were invisible —
   // the GVT fee, AION's share of the net premium, the setup fee and the tier
@@ -196,9 +198,10 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
   // Calculate button rather than as a failure out of it.
   const loadQuotes = useCallback(async () => {
     const { data } = await untyped.from("insurance_quotes")
-      .select("category, coverage, damage_scope, rate_of_cogs, brand_id, quoted_for, quoted_at, id, insurer, gmv_from, gmv_to, active")
+      .select("category, coverage, damage_scope, rate_of_cogs, brand_id, quoted_for, quoted_at, id, insurer, gmv_from, gmv_to, active, duration_years")
       .eq("active", true);
     setQuotes((data ?? []) as unknown as Quote[]);
+    setQuotesLoaded(true);
   }, []);
   useEffect(() => { void loadQuotes(); }, [loadQuotes]);
 
@@ -208,7 +211,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
     void (async () => {
       const [cats, rates] = await Promise.all([
         untyped.from("brand_category_fees")
-          .select("category, label, insurance_premium, activation_fee, aion_premium_fee")
+          .select("category, label, insurance_premium, activation_fee, aion_premium_fee, cogs_ratio")
           .eq("brand_id", brandId).order("id"),
         supabase.from("brands").select("insurance_premium, activation_fee, aion_premium_fee")
           .eq("id", brandId).maybeSingle(),
@@ -236,23 +239,26 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
   const seededFor = useRef<number | null>(null);
   const [serverSig, setServerSig] = useState<string | null>(null);
 
+  // The term the case models when nobody has typed one — read off the insurer quotes, so the
+  // seed waits for them.
+  const monthsDefault = useMemo(() => defaultMonths(quotes, brandId), [quotes, brandId]);
   useEffect(() => {
-    if (brandId == null || seededFor.current === brandId) return;
+    if (brandId == null || seededFor.current === brandId || !quotesLoaded) return;
     seededFor.current = brandId;
     const rows = (stored?.segments ?? []).map(fromStored);
-    setMonths(String(stored?.months ?? 36));
+    setMonths(String(stored?.months ?? monthsDefault.months));
     setSetupDiscount(stored?.setup_discounted !== false);
     setIncludeApi(stored?.include_api === true);
     setSegments(rows.length ? rows : [emptySegment()]);
     setImportedFrom(stored?.imported_from ?? null);
     setImportedAt(stored?.imported_at ?? null);
     setServerSig(JSON.stringify({
-      months: stored?.months ?? 36,
+      months: stored?.months ?? monthsDefault.months,
       setup_discounted: stored?.setup_discounted !== false,
       include_api: stored?.include_api === true,
       segments: rows.filter((r) => !isEmptySegment(r)).map(toStored),
     }));
-  }, [brandId, stored]);
+  }, [brandId, stored, quotesLoaded, monthsDefault]);
 
   // "If the data request is not available, compute the numbers based on the Record tab."
   // A brand nobody has priced starts from its record's categories rather than from one blank
@@ -405,7 +411,8 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
         coverage: s.coverage,
         damage_scope: s.damage_scope || undefined,
         revenues: Number(s.revenues),
-        cogs_ratio: Number(s.cogs_ratio) || 0.3,
+        // Left out when blank, so the model takes the record's ratio for the category.
+        cogs_ratio: Number(s.cogs_ratio) || undefined,
         avg_price: Number(s.avg_price) || undefined,
         start_month: Number(s.start_month) || 1,
       })),
@@ -426,11 +433,10 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
     .filter((s) => s.name.trim())
     .map((s) => {
       const r = resolveRates(s, recordRows ?? [], recordRates, quotes, brandId, terms?.aion_premium_share ?? null);
-      const cogs = Number(s.cogs_ratio) || 0.3;
-      const insurerPct = r.rate != null ? r.rate * cogs : null;
+      const insurerPct = r.rate != null ? r.rate * r.cogs : null;
       const total = insurerPct != null ? insurerPct + (r.activation ?? 0) : null;
       const price = Number(s.avg_price) || null;
-      return { name: s.name.trim(), source: r.source, rate: r.rate, insurerPct, activation: r.activation, total, price };
+      return { name: s.name.trim(), source: r.source, rate: r.rate, cogs: r.cogs, cogsFrom: r.cogsFrom, insurerPct, activation: r.activation, total, price };
     }),
   [segments, recordRows, recordRates, quotes, brandId, terms]);
 
@@ -509,9 +515,16 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
           <input value={months} onChange={(e) => setMonths(e.target.value)} inputMode="numeric"
             aria-invalid={!monthsValid}
             className={`w-28 ${field} ${monthsValid ? "" : "border-destructive"}`} />
-          {!monthsValid && (
+          {!monthsValid ? (
             <span className="max-w-56 text-[11px] text-destructive">
               A whole number between 1 and 120. Nothing on this panel is being saved until it is.
+            </span>
+          ) : Number(months) === monthsDefault.months ? (
+            <span className="max-w-56 text-[11px]">From {monthsDefault.basis}.</span>
+          ) : (
+            <span className="max-w-56 text-[11px]">
+              Set by hand — {monthsDefault.basis} would be {monthsDefault.months}.{" "}
+              <button type="button" className="underline" onClick={() => setMonths(String(monthsDefault.months))}>Use it</button>
             </span>
           )}
         </label>
@@ -638,7 +651,9 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
               </label>
               <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
                 COGS ratio
+                {/* Blank takes the record's ratio for this category; the placeholder says which. */}
                 <input className={field} inputMode="decimal" value={s.cogs_ratio}
+                  placeholder={String(resolveRates(s, recordRows ?? [], recordRates, quotes, brandId).cogs)}
                   onChange={(e) => setSeg(i, { cogs_ratio: e.target.value })} />
               </label>
               <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -683,7 +698,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
                   {perPiece.map((p, i) => (
                     <tr key={`${p.name}-${i}`} className="border-t border-border/60">
                       <td className="py-1 pr-3 text-foreground">{p.name}</td>
-                      <td className="py-1 pr-3">{p.insurerPct != null ? pct(p.insurerPct) : "—"}{p.rate != null && <span className="text-muted-foreground"> ({pct(p.rate)} of COGS)</span>}</td>
+                      <td className="py-1 pr-3">{p.insurerPct != null ? pct(p.insurerPct) : "—"}{p.rate != null && <span className="text-muted-foreground"> ({pct(p.rate)} of COGS at {pct(p.cogs, 0)}{p.cogsFrom === "record" ? ", record" : p.cogsFrom === "default" ? ", default" : ""})</span>}</td>
                       <td className="py-1 pr-3">{p.activation != null ? pct(p.activation) : "tier"}</td>
                       <td className="py-1 pr-3 font-medium text-foreground">{p.total != null ? pct(p.total) : "—"}</td>
                       <td className="py-1 pr-3">{p.total != null && p.price ? eur2(p.total * p.price) : "—"}</td>
@@ -853,8 +868,9 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
           </div>
           {terms.note && <p className="mt-2 text-[11px] text-muted-foreground">{terms.note}</p>}
           <p className="mt-2 text-[11px] text-muted-foreground">
-            The brand record's insurance premium, activation fee and AION premium fee — per category,
-            then house-wide — take precedence over these terms and over borrowed quotes.
+            Insurer rate: this house's own quote, then the brand record's category rate, then its
+            house-wide rate, then a quote for another house. Activation fee and AION premium fee:
+            the record per category, then house-wide, then these terms.
           </p>
         </div>
       )}

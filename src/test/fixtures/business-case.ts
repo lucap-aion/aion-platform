@@ -40,6 +40,7 @@ export const FIXTURE_CASE: BusinessCase = {
   aion_fees: {
     setup: 10000, service: 45000, activation: 4093, total: 59093, tier: 2,
     service_fee_month: 1500, service_months_full: 24, service_months_discounted: 12, service_note: null,
+    service_discount: 0.5, setup_discount: 0.5,
     activation_from_record: true,
   },
   aion_total_revenue: 78702,

@@ -33,13 +33,18 @@ type Row = {
   insurance_premium: number | null;
   activation_fee: number | null;
   aion_premium_fee: number | null;
+  cogs_ratio: number | null;
   min_covered_value: number | null;
   max_covered_value: number | null;
   note: string | null;
 };
 
-/** The five overridable numbers, and how each is written and read. */
+/** The overridable numbers, and how each is written and read. */
 const FIELDS = [
+  // "The COGS % are per category." The premium is a rate on the cost of goods, so the cost of
+  // goods as a share of the price is what turns that rate into a cost per piece. It has no
+  // house-wide value on the record; blank means the business case's 30%.
+  { key: "cogs_ratio", label: "COGS", unit: "pct", hint: "% of retail price", fallback: 0.3 },
   { key: "insurance_premium", label: "Insurance premium", unit: "pct", hint: "% of COGS" },
   { key: "aion_premium_fee", label: "AION premium fee", unit: "pct", hint: "% of net premium" },
   { key: "activation_fee", label: "Activation fee", unit: "pct", hint: "% of covered value" },
@@ -82,7 +87,7 @@ export default function CategoryFees({ brandId, readOnly, brandRates, focus }: {
     setLoading(true);
     const { data, error } = await untyped
       .from("brand_category_fees")
-      .select("id, category, label, insurance_premium, activation_fee, aion_premium_fee, min_covered_value, max_covered_value, note")
+      .select("id, category, label, insurance_premium, activation_fee, aion_premium_fee, cogs_ratio, min_covered_value, max_covered_value, note")
       .eq("brand_id", brandId)
       // Insertion order is the house's order — the data request numbers its segments by it.
       .order("id");
@@ -210,7 +215,7 @@ export default function CategoryFees({ brandId, readOnly, brandRates, focus }: {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[820px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">
@@ -263,7 +268,7 @@ export default function CategoryFees({ brandId, readOnly, brandRates, focus }: {
                         inputMode="decimal"
                         disabled={readOnly || busy === row.id}
                         defaultValue={toTyped(f.unit, row[f.key])}
-                        placeholder={toTyped(f.unit, brandRates[f.key] ?? null) || "—"}
+                        placeholder={toTyped(f.unit, brandRates[f.key] ?? ("fallback" in f ? f.fallback : null)) || "—"}
                         onBlur={(e) => void saveCell(row, f.key, f.unit, e.target.value)}
                         className="w-24 rounded-md border border-border bg-background px-2 py-1 text-sm disabled:opacity-60"
                         aria-label={`${row.category} ${f.label}`}
