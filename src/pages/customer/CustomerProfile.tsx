@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { toDateInputValue } from "@/lib/format";
 import { motion } from "framer-motion";
 import { User, Mail, Phone, MapPin, Shield, Camera, Save, CheckCircle, Calendar, Globe } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -64,7 +65,7 @@ const CustomerProfile = () => {
       lastName: authProfile.last_name || "",
       email: authProfile.email || "",
       phone: authProfile.phone_number || "",
-      dateOfBirth: authProfile.date_of_birth || "",
+      dateOfBirth: toDateInputValue(authProfile.date_of_birth),
       nationality: authProfile.nationality || "",
       address: authProfile.address || "",
       city: authProfile.city || "",

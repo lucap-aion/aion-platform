@@ -39,6 +39,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth, isBrandRole } from "@/contexts/AuthContext";
 import type { ImpersonatedProfile } from "@/integrations/supabase/impersonation";
+import { toDateInputValue } from "@/lib/format";
 
 interface Customer {
   id: string;
@@ -579,7 +580,7 @@ const AdminCustomers = () => {
             <FormField label="Last Name"><Input disabled={ro} value={editing.last_name ?? ""} onChange={(e) => set("last_name", e.target.value)} /></FormField>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <FormField label="Date of Birth"><Input type="date" disabled={ro} value={editing.date_of_birth ?? ""} onChange={(e) => set("date_of_birth", e.target.value)} /></FormField>
+            <FormField label="Date of Birth"><Input type="date" disabled={ro} value={toDateInputValue(editing.date_of_birth)} onChange={(e) => set("date_of_birth", e.target.value)} /></FormField>
             <FormField label="Nationality"><Input disabled={ro} value={editing.nationality ?? ""} onChange={(e) => set("nationality", e.target.value)} /></FormField>
           </div>
           <FormField label="Brand" required={mode === "add"}>
