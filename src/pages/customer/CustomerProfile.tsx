@@ -129,6 +129,9 @@ const CustomerProfile = () => {
       return;
     }
 
+    // The form is seeded from the auth profile on mount; without this the next
+    // visit re-seeds it from the stale copy and the saved change looks reverted.
+    await refreshProfile();
     toast({
       title: "Profile updated",
       description: "Your changes have been saved successfully.",
