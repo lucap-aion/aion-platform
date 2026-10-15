@@ -77,7 +77,6 @@ const CustomerProfile = () => {
           province: profile.province,
           country: profile.country,
           postcode: profile.postalCode,
-          avatar: avatarUrl,
         })
       : [],
   );
@@ -231,7 +230,7 @@ const CustomerProfile = () => {
               aria-label="Change photo"
               disabled={uploadingAvatar}
               onClick={() => avatarInputRef.current?.click()}
-              className={cn(needs("avatar"), "absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:text-primary disabled:opacity-50")}
+              className={cn("absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:text-primary disabled:opacity-50")}
             >
               <Camera className="h-4 w-4" />
             </button>
@@ -268,7 +267,7 @@ const CustomerProfile = () => {
               <h3 className="font-serif text-lg font-semibold text-foreground">Personal Information</h3>
               {missing.size > 0 && (
                 <p className="-mt-3 text-sm text-muted-foreground">
-                  The {missing.size === 1 ? "field" : "fields"} outlined in orange{missing.has("avatar") ? " (and your photo)" : ""} {missing.size === 1 ? "is" : "are"} all that's left to complete your profile.
+                  The {missing.size === 1 ? "field" : "fields"} outlined in orange{missing.size === 1 ? "is" : "are"} all that's left to complete your profile.
                 </p>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
