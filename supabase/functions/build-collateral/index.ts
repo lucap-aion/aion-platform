@@ -468,6 +468,9 @@ async function readSheets(zip: ZipLike): Promise<Sheet[]> {
 }
 
 // ── 2. Business case deck ───────────────────────────────────────────────────
+const shareOrNull = (v: unknown): number | null =>
+  v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
+
 async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>, body: Record<string, unknown>) {
   const segments = body.segments;
   if (!Array.isArray(segments) || !segments.length) {
@@ -481,6 +484,11 @@ async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: 
     p_terms_key: String(body.terms_key ?? "standard_2026"),
     p_include_api: body.include_api === true,
     p_setup_discounted: body.setup_discounted !== false,
+    // The case's own discounts; null takes the pricing terms' (20261016000001).
+    p_setup_discount: shareOrNull(body.setup_discount),
+    p_service_discount: shareOrNull(body.service_discount),
+    p_service_discount_months: body.service_discount_months == null || body.service_discount_months === ""
+      ? null : Number(body.service_discount_months),
   });
   if (error) throw new Error(error.message);
   const c = bc as Record<string, any>;

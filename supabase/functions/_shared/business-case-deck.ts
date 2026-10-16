@@ -372,10 +372,15 @@ export function businessCaseSlides(house: string, c: BusinessCase): DeckSlide[] 
             // Says WHAT the discount is, not only that there is one: "6 months discounted" left
             // the reader to guess by how much and on whose say-so.
             body: `${eur(svc)}/month → ${eur(fees.service ?? 0)} over the period: ` +
+              // The discount and its window are the case's since 20261016000001, so either can be
+              // zero, or cover the whole period.
               (disc && fees.service_discount
-                ? `the first ${disc} month${disc === 1 ? "" : "s"} at ${pctShort(fees.service_discount)} off ` +
-                  `(${eur(svc * (1 - fees.service_discount))}/month) — AION's launch discount — then ${full} at full rate.`
-                : `${disc} month${disc === 1 ? "" : "s"} discounted, ${full} at full rate.`),
+                ? `${full ? `the first ${disc} month${disc === 1 ? "" : "s"}` : `all ${disc} month${disc === 1 ? "" : "s"}`} ` +
+                  `at ${pctShort(fees.service_discount)} off (${eur(svc * (1 - fees.service_discount))}/month) — ` +
+                  `AION's launch discount${full ? ` — then ${full} at full rate.` : "."}`
+                : !disc
+                  ? `all ${full} month${full === 1 ? "" : "s"} at full rate, no launch discount.`
+                  : `${disc} month${disc === 1 ? "" : "s"} discounted, ${full} at full rate.`),
           }
         : {
             title: "Service fee",

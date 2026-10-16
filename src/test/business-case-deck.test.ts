@@ -135,6 +135,20 @@ describe("the business case deck", () => {
     expect(t).toContain("One-off, 50% launch discount");
   });
 
+  it("says so when a case sets no service discount, or one for the whole period", () => {
+    const none = clone((c) => {
+      c.aion_fees = { ...c.aion_fees!, service_discount: 0, service_months_discounted: 0, service_months_full: 36, setup_discount: 0 };
+    });
+    const t = deckText(businessCaseSlides("X", none));
+    expect(t).toContain("all 36 months at full rate, no launch discount.");
+    expect(t).not.toContain("launch discount — then");
+    expect(t).not.toContain("One-off, 0%");
+    const whole = clone((c) => {
+      c.aion_fees = { ...c.aion_fees!, service_discount: 0.3, service_months_discounted: 36, service_months_full: 0 };
+    });
+    expect(deckText(businessCaseSlides("X", whole))).toContain("all 36 months at 30% off");
+  });
+
   it("shows the activation rate per segment when the segments differ", () => {
     expect(text).toContain("Bags and leather goods 0.08% · Shoes at the tier's rate");
     const uniform = clone((c) => { c.segments = c.segments.map((s) => ({ ...s, activation_fee_pct: 0.001 })); });

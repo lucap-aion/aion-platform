@@ -69,6 +69,10 @@ export type StoredSegment = {
 export type StoredBusinessCase = {
   months: number | null;
   setup_discounted: boolean | null;
+  /** The case's own discounts, as shares. Null = the pricing terms'. Absent before 2026-10-16. */
+  setup_discount?: number | null;
+  service_discount?: number | null;
+  service_discount_months?: number | null;
   include_api: boolean | null;
   segments: StoredSegment[] | null;
   imported_from: string | null;
@@ -80,6 +84,31 @@ const numOrNull = (v: string): number | null => {
   const n = Number(String(v).trim());
   return String(v).trim() !== "" && Number.isFinite(n) ? n : null;
 };
+
+// Discounts are typed as percentages ("50") and stored as shares (0.5). Blank = the terms'.
+const pctToShare = (v: string): number | null => {
+  const n = numOrNull(v);
+  return n == null ? null : Math.round(n * 100) / 10000;
+};
+const shareToPct = (n: number | null | undefined): string =>
+  n == null ? "" : String(Math.round(Number(n) * 10000) / 100);
+
+/** The discounts as the form holds them, from a saved perimeter. */
+const discountsFromStored = (s: StoredBusinessCase | null | undefined) => ({
+  // A case saved with the setup discount switched off, before it took a figure, is 0%.
+  setup: s?.setup_discount != null ? shareToPct(s.setup_discount) : s?.setup_discounted === false ? "0" : "",
+  service: shareToPct(s?.service_discount),
+  serviceMonths: s?.service_discount_months != null ? String(s.service_discount_months) : "",
+});
+type Discounts = ReturnType<typeof discountsFromStored>;
+
+/** The discounts in the model's shape — what is saved and what compute_business_case takes. */
+const discountsPayload = (d: Discounts) => ({
+  setup_discounted: pctToShare(d.setup) !== 0,
+  setup_discount: pctToShare(d.setup),
+  service_discount: pctToShare(d.service),
+  service_discount_months: numOrNull(d.serviceMonths),
+});
 
 const toStored = (s: Segment): StoredSegment => ({
   name: s.name.trim() || null,
@@ -151,6 +180,35 @@ const eur2 = (n: unknown) =>
 const pct = (n: unknown, digits = 2) =>
   typeof n === "number" ? `${(n * 100).toFixed(digits)}%` : "—";
 
+/** A discount the case may set; blank shows, and applies, the pricing terms' figure. */
+function DiscountField({ label, suffix, value, standard, valid, onChange }: {
+  label: string; suffix: string; value: string; standard: string | null; valid: boolean;
+  onChange: (v: string) => void;
+}) {
+  const typed = value.trim() !== "";
+  return (
+    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+      {label}
+      <span className="flex items-center gap-1">
+        <input value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal"
+          placeholder={standard ?? ""} aria-invalid={!valid}
+          className={`w-20 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground ${valid ? "border-border" : "border-destructive"}`} />
+        <span>{suffix}</span>
+      </span>
+      {!valid ? (
+        <span className="max-w-40 text-[11px] text-destructive">{suffix === "%" ? "0 to 100." : "A whole number up to 120."}</span>
+      ) : !typed || value.trim() === standard ? (
+        <span className="max-w-40 text-[11px]">Standard terms{standard != null ? ` (${standard}${suffix === "%" ? "%" : ""})` : ""}.</span>
+      ) : (
+        <span className="max-w-40 text-[11px]">
+          Set by hand.{" "}
+          <button type="button" className="underline" onClick={() => onChange("")}>Standard</button>
+        </span>
+      )}
+    </label>
+  );
+}
+
 export default function BusinessCasePanel({ brandId, brands, stored, onArtifact }: {
   brandId: number | null;
   brands: { id: number; name: string | null }[];
@@ -166,7 +224,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
   // opens on that category and cover rather than on a blank form.
   const [openQuoteWith, setOpenQuoteWith] = useState<{ category: string; coverage: string } | null>(null);
   const [months, setMonths] = useState("36");
-  const [setupDiscount, setSetupDiscount] = useState(true);
+  const [discounts, setDiscounts] = useState<Discounts>(() => discountsFromStored(null));
   const [includeApi, setIncludeApi] = useState(false);
   const [segments, setSegments] = useState<Segment[]>([emptySegment()]);
   const [busy, setBusy] = useState<null | "preview" | "deck">(null);
@@ -247,14 +305,14 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
     seededFor.current = brandId;
     const rows = (stored?.segments ?? []).map(fromStored);
     setMonths(String(stored?.months ?? monthsDefault.months));
-    setSetupDiscount(stored?.setup_discounted !== false);
+    setDiscounts(discountsFromStored(stored));
     setIncludeApi(stored?.include_api === true);
     setSegments(rows.length ? rows : [emptySegment()]);
     setImportedFrom(stored?.imported_from ?? null);
     setImportedAt(stored?.imported_at ?? null);
     setServerSig(JSON.stringify({
       months: stored?.months ?? monthsDefault.months,
-      setup_discounted: stored?.setup_discounted !== false,
+      ...discountsPayload(discountsFromStored(stored)),
       include_api: stored?.include_api === true,
       segments: rows.filter((r) => !isEmptySegment(r)).map(toStored),
     }));
@@ -282,12 +340,16 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
 
   const perimeterSig = useMemo(() => JSON.stringify({
     months: Number(months),
-    setup_discounted: setupDiscount,
+    ...discountsPayload(discounts),
     include_api: includeApi,
     segments: segments.filter((r) => !isEmptySegment(r)).map(toStored),
-  }), [months, setupDiscount, includeApi, segments]);
+  }), [months, discounts, includeApi, segments]);
 
   const monthsValid = /^\d+$/.test(months.trim()) && Number(months) >= 1 && Number(months) <= 120;
+  // Blank is valid — it means the terms' figure.
+  const pctValid = (v: string) => v.trim() === "" || (/^\d+(\.\d+)?$/.test(v.trim()) && Number(v) <= 100);
+  const discountsValid = pctValid(discounts.setup) && pctValid(discounts.service) &&
+    (discounts.serviceMonths.trim() === "" || (/^\d+$/.test(discounts.serviceMonths.trim()) && Number(discounts.serviceMonths) <= 120));
 
   // Debounced, and only when something actually differs from what the server holds — a save
   // per keystroke on a form this size is a write storm, and re-saving the seed on mount
@@ -296,7 +358,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
     if (brandId == null || serverSig === null || perimeterSig === serverSig) return;
     // A months box mid-edit ("3" on the way to "36") is not worth persisting, and the
     // column is constrained to 1–120 so an out-of-range value would be rejected anyway.
-    if (!monthsValid) return;
+    if (!monthsValid || !discountsValid) return;
     setSaveState("saving");
     const t = setTimeout(() => {
       void (async () => {
@@ -315,7 +377,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
       })();
     }, 900);
     return () => clearTimeout(t);
-  }, [brandId, perimeterSig, serverSig, monthsValid, importedFrom, importedAt]);
+  }, [brandId, perimeterSig, serverSig, monthsValid, discountsValid, importedFrom, importedAt]);
 
   // ── Reading it out of the client's own workbook ───────────────────────────
   // The workbook AION generated, filled in and sent back. Retyping it is where the two
@@ -389,8 +451,8 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
   // Any change to the inputs invalidates what is on screen. Keeping stale
   // figures visible next to edited inputs is how a wrong number gets read out.
   const inputs = useMemo(
-    () => JSON.stringify({ brandId, months, setupDiscount, includeApi, segments }),
-    [brandId, months, setupDiscount, includeApi, segments],
+    () => JSON.stringify({ brandId, months, discounts, includeApi, segments }),
+    [brandId, months, discounts, includeApi, segments],
   );
   const computedFor = useRef<string | null>(null);
   // Clearing stale figures is right; doing it in silence is not. Half the screen used to
@@ -445,7 +507,7 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
       body: {
         brand_id: brandId, kind: "business_case",
         months: Number(months),
-        setup_discounted: setupDiscount,
+        ...discountsPayload(discounts),
         include_api: includeApi,
         segments: payloadSegments,
         ...extra,
@@ -464,6 +526,10 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
     }
     if (!monthsValid) {
       toast({ title: "Check the months modelled", description: "A whole number of months between 1 and 120.", variant: "destructive" });
+      return;
+    }
+    if (!discountsValid) {
+      toast({ title: "Check the discounts", description: "A percentage between 0 and 100, and a whole number of months up to 120 — or blank for the standard terms.", variant: "destructive" });
       return;
     }
     setBusy("preview"); setDeck(null);
@@ -528,10 +594,17 @@ export default function BusinessCasePanel({ brandId, brands, stored, onArtifact 
             </span>
           )}
         </label>
-        <label className="flex items-center gap-2 pb-2 text-sm">
-          <input type="checkbox" checked={setupDiscount} onChange={(e) => setSetupDiscount(e.target.checked)} />
-          Setup discounted
-        </label>
+        {/* "Lo sconto dovrebbe essere modellabile" — blank takes the standard terms, and says so. */}
+        <DiscountField label="Setup discount" suffix="%" value={discounts.setup}
+          standard={terms ? shareToPct(terms.setup_discount) : null} valid={pctValid(discounts.setup)}
+          onChange={(v) => setDiscounts((d) => ({ ...d, setup: v }))} />
+        <DiscountField label="Service discount" suffix="%" value={discounts.service}
+          standard={terms ? shareToPct(terms.service_discount) : null} valid={pctValid(discounts.service)}
+          onChange={(v) => setDiscounts((d) => ({ ...d, service: v }))} />
+        <DiscountField label="…for the first" suffix="months" value={discounts.serviceMonths}
+          standard={terms ? String(terms.service_discount_months) : null}
+          valid={discounts.serviceMonths.trim() === "" || (/^\d+$/.test(discounts.serviceMonths.trim()) && Number(discounts.serviceMonths) <= 120)}
+          onChange={(v) => setDiscounts((d) => ({ ...d, serviceMonths: v }))} />
         <label className="flex items-center gap-2 pb-2 text-sm">
           <input type="checkbox" checked={includeApi} onChange={(e) => setIncludeApi(e.target.checked)} />
           Include API fee
