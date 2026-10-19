@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
+import { portalSignIn } from "@/lib/portalSignIn";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
@@ -27,24 +28,13 @@ const AdminLogin = () => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Pre-login check: only admins may use this portal
-    const { data: eligibility } = await supabase.rpc("check_admin_eligibility", { p_email: email });
-    if (eligibility === "unconfirmed") {
+    // Password first, then "is this an admin?" — about this account only. See portalSignIn.
+    const result = await portalSignIn(email, password, { fn: "check_my_admin_access" });
+    if (!result.ok) {
       setIsLoading(false);
-      toast.error("Please verify your email before signing in. Check your inbox for the confirmation link.");
-      return;
-    }
-    if (eligibility !== "ok") {
-      setIsLoading(false);
-      toast.error("Access denied. This portal is for AION administrators only.");
-      return;
-    }
-
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (error) {
-      setIsLoading(false);
-      toast.error(error.message);
+      if (result.reason === "credentials") toast.error(result.message ?? "Invalid login credentials.");
+      else if (result.reason === "unconfirmed") toast.error("Please verify your email before signing in. Check your inbox for the confirmation link.");
+      else toast.error("Access denied. This portal is for AION administrators only.");
       return;
     }
 

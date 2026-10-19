@@ -6,6 +6,7 @@ import HeaderControls from "@/components/layout/HeaderControls";
 import { useTenant } from "@/contexts/TenantContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
+import { portalSignIn } from "@/lib/portalSignIn";
 import { isBrandRole } from "@/contexts/AuthContext";
 import SmartLogo from "@/components/SmartLogo";
 import AuthPanel from "@/components/AuthPanel";
@@ -32,49 +33,39 @@ const Login = () => {
 
     setIsLoading(true);
 
-    // Pre-login check: verify email has access to this brand portal
-    const { data: eligibility } = await supabase.rpc("check_brand_eligibility", {
-      p_email: email,
-      p_brand_id: tenant.id,
+    // Password first, then "may this account use this portal?" — see portalSignIn for why
+    // the order matters and why it happens on a throwaway client.
+    const result = await portalSignIn(email, password, {
+      fn: "check_my_brand_access",
+      args: { p_brand_id: tenant.id },
     });
-
-    if (eligibility === "is_admin") {
-      setIsLoading(false);
-      toast.error(
-        locale === "en"
-          ? "Admin accounts cannot access brand portals. Please use the admin portal."
-          : "Gli account admin non possono accedere ai portali brand. Usa il portale admin."
-      );
-      return;
-    }
-
-    if (eligibility === "unconfirmed") {
-      setIsLoading(false);
-      toast.error(
-        locale === "en"
-          ? "Please confirm your email before signing in."
-          : "Conferma la tua email prima di accedere."
-      );
-      return;
-    }
-
-    if (eligibility !== "ok") {
-      setIsLoading(false);
-      toast.error(
-        locale === "en"
-          ? "You don't have access to this brand portal."
-          : "Non hai accesso a questo portale brand."
-      );
-      return;
-    }
-
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     setIsLoading(false);
 
-    if (error) {
-      toast.error(error.message);
+    if (!result.ok) {
+      if (result.reason === "credentials") {
+        toast.error(result.message ?? (locale === "en" ? "Invalid login credentials." : "Credenziali non valide."));
+      } else if (result.reason === "unconfirmed") {
+        toast.error(
+          locale === "en"
+            ? "Please confirm your email before signing in."
+            : "Conferma la tua email prima di accedere."
+        );
+      } else if (result.status === "is_admin") {
+        toast.error(
+          locale === "en"
+            ? "Admin accounts cannot access brand portals. Please use the admin portal."
+            : "Gli account admin non possono accedere ai portali brand. Usa il portale admin."
+        );
+      } else {
+        toast.error(
+          locale === "en"
+            ? "You don't have access to this brand portal."
+            : "Non hai accesso a questo portale brand."
+        );
+      }
       return;
     }
+    const data = { user: { id: result.userId } };
 
     // Filter by brand_id so multi-brand users are routed correctly for this portal
     const { data: profileData } = await supabase

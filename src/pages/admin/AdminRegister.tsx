@@ -29,14 +29,14 @@ const AdminRegister = () => {
 
     setIsLoading(true);
 
-    // Verify the email is actually in the admins table before creating auth account
-    const { data: eligibility } = await supabase.rpc("check_admin_eligibility", {
-      p_email: emailFromInvite,
-    });
+    // Only an address with a pending admin invite may register. The check says nothing
+    // else about an address — not whether it is already an admin.
+    const { data: invitation } = await (supabase.rpc as unknown as (fn: string, args: object) => Promise<{ data: string | null }>)(
+      "check_admin_invitation", { p_email: emailFromInvite });
 
-    if (eligibility === "not_admin") {
+    if (invitation !== "invited") {
       setIsLoading(false);
-      toast.error("This email has not been invited as an admin. Please contact your administrator.");
+      toast.error("There is no pending admin invitation for this email. If you already have an account, sign in; otherwise ask your administrator.");
       return;
     }
 
