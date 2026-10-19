@@ -21,6 +21,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { originAllowed, originRefused } from "../_shared/origin.ts";
+import { isProduction } from "../_shared/environment.ts";
 import JSZip from "npm:jszip@3.10.1";
 import {
   sharedStrings, sheetGrid, extractPerimeter, decodeXml, filledNumericCells, type Sheet,
@@ -837,7 +838,8 @@ async function uploadDemoVideo(
 const GITHUB_TOKEN = Deno.env.get("GITHUB_TOKEN") ?? "";
 // owner/repo, e.g. "lucap-aion/aion-platform".
 const GITHUB_REPO = Deno.env.get("GITHUB_REPO") ?? "";
-const GITHUB_REF = Deno.env.get("GITHUB_REF_NAME") ?? "dev";
+// prod films run from main and file into prod; GITHUB_REF_NAME overrides either default.
+const GITHUB_REF = Deno.env.get("GITHUB_REF_NAME") ?? (isProduction() ? "main" : "dev");
 const WORKFLOW_FILE = "demo-video.yml";
 
 async function recordDemoVideo(brand: Record<string, unknown>, body: Record<string, unknown>) {
@@ -870,6 +872,8 @@ async function recordDemoVideo(brand: Record<string, unknown>, body: Record<stri
           questions: String(body.questions ?? 3),
           speed: String(body.speed ?? 1.5),
           ask: String(body.ask ?? ""),
+          // Which GitHub Environment's secrets the run uses: the project this function is in.
+          target: isProduction() ? "prod" : "dev",
           upload: true,
         },
       }),
