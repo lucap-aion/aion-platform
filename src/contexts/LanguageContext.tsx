@@ -63,6 +63,10 @@ const translations: Translations = {
   "brandCustomers.badge.lapsed": { en: "Lapsed", it: "Inattivo" },
   "brandCustomers.badge.incomplete": { en: "Incomplete", it: "Incompleto" },
   "brandCustomers.badge.happyIdle": { en: "Happy/idle", it: "Sodd./fermo" },
+  "brandCustomers.hint.vip": { en: "Bought on at least 2 different days, or spent €20,000 or more in total", it: "Ha acquistato in almeno 2 giorni diversi, oppure ha speso in totale €20.000 o più" },
+  "brandCustomers.hint.lapsed": { en: "No live cover, last purchase more than 12 months ago", it: "Nessuna copertura attiva, ultimo acquisto oltre 12 mesi fa" },
+  "brandCustomers.hint.incomplete": { en: "Missing date of birth, country, city, postcode or phone", it: "Manca data di nascita, paese, città, CAP o telefono" },
+  "brandCustomers.hint.highNpsIdle": { en: "Rated us 4 or 5, no purchase in the last 6 months", it: "Ci ha dato 4 o 5, nessun acquisto negli ultimi 6 mesi" },
 
   // Brand nav — renewals
   "nav.renewals": { en: "Renewals", it: "Rinnovi" },

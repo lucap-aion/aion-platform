@@ -26,12 +26,14 @@ type SegmentRow = {
   is_high_nps_idle: boolean;
 };
 
-const SEGMENTS: { key: SegmentKey; labelKey: string; icon: any; flag?: keyof SegmentRow }[] = [
+// hintKey says what the segment means — the rules live in brand_customer_segments,
+// so a change there must be mirrored in these hints.
+const SEGMENTS: { key: SegmentKey; labelKey: string; hintKey?: string; icon: any; flag?: keyof SegmentRow }[] = [
   { key: "all", labelKey: "brandCustomers.segment.all", icon: null as any },
-  { key: "vip", labelKey: "brandCustomers.segment.vip", icon: Crown, flag: "is_vip" },
-  { key: "lapsed", labelKey: "brandCustomers.segment.lapsed", icon: Clock, flag: "is_lapsed" },
-  { key: "incomplete", labelKey: "brandCustomers.segment.incomplete", icon: AlertTriangle, flag: "is_incomplete" },
-  { key: "highNpsIdle", labelKey: "brandCustomers.segment.highNpsIdle", icon: Heart, flag: "is_high_nps_idle" },
+  { key: "vip", labelKey: "brandCustomers.segment.vip", hintKey: "brandCustomers.hint.vip", icon: Crown, flag: "is_vip" },
+  { key: "lapsed", labelKey: "brandCustomers.segment.lapsed", hintKey: "brandCustomers.hint.lapsed", icon: Clock, flag: "is_lapsed" },
+  { key: "incomplete", labelKey: "brandCustomers.segment.incomplete", hintKey: "brandCustomers.hint.incomplete", icon: AlertTriangle, flag: "is_incomplete" },
+  { key: "highNpsIdle", labelKey: "brandCustomers.segment.highNpsIdle", hintKey: "brandCustomers.hint.highNpsIdle", icon: Heart, flag: "is_high_nps_idle" },
 ];
 
 type CustomerForm = {
@@ -81,23 +83,23 @@ const PAGE_SIZE = 25;
 const SegmentBadges = ({ seg }: { seg: SegmentRow | null }) => {
   const { t } = useLanguage();
   if (!seg) return null;
-  const items: { key: string; label: string; cls: string; Icon: any }[] = [];
+  const items: { key: string; label: string; hint: string; cls: string; Icon: any }[] = [];
   if (seg.is_vip)
-    items.push({ key: "vip", label: t("brandCustomers.badge.vip"), cls: "bg-amber-500/10 text-amber-700 border-amber-500/30", Icon: Crown });
+    items.push({ key: "vip", label: t("brandCustomers.badge.vip"), hint: t("brandCustomers.hint.vip"), cls: "bg-amber-500/10 text-amber-700 border-amber-500/30", Icon: Crown });
   if (seg.is_lapsed)
-    items.push({ key: "lapsed", label: t("brandCustomers.badge.lapsed"), cls: "bg-slate-500/10 text-slate-700 border-slate-500/30", Icon: Clock });
+    items.push({ key: "lapsed", label: t("brandCustomers.badge.lapsed"), hint: t("brandCustomers.hint.lapsed"), cls: "bg-slate-500/10 text-slate-700 border-slate-500/30", Icon: Clock });
   if (seg.is_incomplete)
-    items.push({ key: "incomplete", label: t("brandCustomers.badge.incomplete"), cls: "bg-rose-500/10 text-rose-700 border-rose-500/30", Icon: AlertTriangle });
+    items.push({ key: "incomplete", label: t("brandCustomers.badge.incomplete"), hint: t("brandCustomers.hint.incomplete"), cls: "bg-rose-500/10 text-rose-700 border-rose-500/30", Icon: AlertTriangle });
   if (seg.is_high_nps_idle)
-    items.push({ key: "nps", label: t("brandCustomers.badge.happyIdle"), cls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30", Icon: Heart });
+    items.push({ key: "nps", label: t("brandCustomers.badge.happyIdle"), hint: t("brandCustomers.hint.highNpsIdle"), cls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30", Icon: Heart });
   if (items.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1">
-      {items.map(({ key, label, cls, Icon }) => (
+      {items.map(({ key, label, hint, cls, Icon }) => (
         <span
           key={key}
           className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
-          title={label}
+          title={hint}
         >
           <Icon className="h-2.5 w-2.5" />
           {label}
@@ -488,6 +490,7 @@ const BrandCustomers = () => {
                 key={s.key}
                 type="button"
                 onClick={() => setSegment(s.key)}
+                title={s.hintKey ? t(s.hintKey) : undefined}
                 className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                   active
                     ? "border-primary bg-primary/10 text-primary"
