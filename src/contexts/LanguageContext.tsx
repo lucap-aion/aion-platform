@@ -20,6 +20,7 @@ const translations: Translations = {
   "nav.aiQuery": { en: "Ask the data", it: "Chiedi ai dati" },
   "nav.assistant": { en: "AI Assistant", it: "Assistente AI" },
   "nav.knowledge": { en: "Knowledge base", it: "Knowledge base" },
+  "nav.soon": { en: "Soon", it: "Presto" },
   "nav.shops": { en: "Shops", it: "Boutique" },
   "nav.settings": { en: "Settings", it: "Impostazioni" },
 

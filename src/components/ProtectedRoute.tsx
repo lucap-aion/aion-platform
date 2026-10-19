@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { isBrandRole, isCustomerRole, useAuth } from "@/contexts/AuthContext";
 import { useTenant } from "@/contexts/TenantContext";
+import { knowledgeComingSoon } from "@/lib/environment";
 
 // In an assistant-only demo these are the screens that stay. Everything else under a brand
 // slug belongs to the insurance programme and is sent back to the assistant — the sidebar
@@ -52,6 +53,11 @@ const ProtectedRoute = ({ children, mode }: ProtectedRouteProps) => {
 
   if (mode === "brand" && !isBrandRole(profile?.role)) {
     return <Navigate to={`${getSlugPrefix()}/home`} replace />;
+  }
+
+  // Listed as "Soon" on prod: a typed URL lands where the sidebar would have left them.
+  if (mode === "brand" && knowledgeComingSoon() && /\/knowledge(\/|$)/.test(location.pathname)) {
+    return <Navigate to={`${getSlugPrefix()}/${assistantOnly ? "assistant" : "dashboard"}`} replace />;
   }
 
   if (mode === "brand" && assistantOnly
