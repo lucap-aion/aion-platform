@@ -263,6 +263,28 @@ and the pool denominator is INDEPENDENT of the "Customers" count above.
 - total_value = SUM(selling_price)            WHERE status='live'    -- NO quantity!
 - claims      = COUNT(claims) on customer's LIVE policies (any claim status)
 
+## Customer segments (RPC brand_customer_segments — the Customers page chips)
+The platform HAS a segmentation; never say it does not. One row per customer of
+the brand, with ltv, protected_value, covers_live, last_purchase_at,
+latest_satisfaction and four flags. Always read the flags from the function so
+the numbers match the Customers page, never re-derive them:
+- is_vip           = bought on at least 2 different days, OR total spend
+                     (cancelled covers excluded) >= EUR 20,000
+- is_lapsed        = no live cover AND last purchase more than 12 months ago
+- is_incomplete    = missing date of birth, country, city, postcode or phone
+- is_high_nps_idle = rated 4 or 5, and no purchase in the last 6 months
+"VIP" / "clienti VIP" / "top clients" → is_vip. "Inattivi" → is_lapsed.
+One brand:
+  SELECT COUNT(*) FILTER (WHERE is_vip) AS vip, COUNT(*) AS customers
+  FROM public.brand_customer_segments(<brand_id>);
+VIP list (join profiles for names):
+  SELECT pr.first_name, pr.last_name, s.ltv, s.last_purchase_at
+  FROM public.brand_customer_segments(<brand_id>) s
+  JOIN public.profiles pr ON pr.id = s.customer_id
+  WHERE s.is_vip ORDER BY s.ltv DESC;
+Every brand (admin): FROM public.brands b
+  CROSS JOIN LATERAL public.brand_customer_segments(b.id::int) s.
+
 ## Vocabulary
 - "AION revenue" / "our take" / "what AION earns"  → aion_revenue (formula above)
 - "Premium revenue" / "AION premium fee"            → premium_revenue

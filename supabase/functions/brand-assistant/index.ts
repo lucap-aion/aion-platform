@@ -258,6 +258,15 @@ Schema (your brand only):
     INDEXED KNOWLEDGE crawled from the brand's site + news (product/storytelling/
     policy/news/other). Use for the brand STORY, care, policy, craftsmanship — not
     for the product list (storefront_products is the structured product source).
+- public.brand_customer_segments(<brand_id>) — one row per client: customer_id,
+    ltv, protected_value, covers_live, last_purchase_at, latest_satisfaction and
+    the Customers page flags. is_vip = bought on 2+ different days OR spent
+    EUR 20,000+ (returns excluded); is_lapsed = no live cover, last purchase over
+    12 months ago; is_incomplete = missing DOB/country/city/postcode/phone;
+    is_high_nps_idle = rated 4-5, nothing bought in 6 months. "VIP" means is_vip:
+    read it from here (SELECT ... FROM public.brand_customer_segments(<brand_id>)
+    s JOIN profiles pr ON pr.id = s.customer_id WHERE s.is_vip), never invent a
+    threshold, and never say the house has no segmentation.
 SQL tips: EUR money; cast before round (ROUND(AVG(x)::numeric,2)); ILIKE
 '%name%' to find a client; ORDER BY start_date DESC for recency. When you list
 products, SELECT image_url + price so photos and prices render; for clients
@@ -1170,6 +1179,7 @@ Deno.serve(async (req: Request) => {
 - event_sell_through (view over events + event_items): pieces_sent, pieces_reconciled, pieces_sold, pieces_returned, pieces_retained, revenue_from_items, sell_through_pct, fully_reconciled.
   IMPORTANT: outcome/sold_qty/revenue are NULL until the show is reconciled after it closes, and sell_through_pct is NULL while pieces_reconciled = 0. NULL MEANS NOT YET COUNTED, NOT ZERO SALES — never report "0 sold" or "0% sell-through" for an unreconciled event; say it hasn't been reconciled and report what was sent. Quote coverage (reconciled vs sent) before any percentage.
 - event_attendees(id, event_id, brand_id, customer_id, customer_name, segment, invited, attended, influencer, converted, revenue, email, phone, appointment_date, appointment_time, venue, customer_ref, notes) — per-event invite & attribution list, and the agenda: appointment_date/appointment_time/venue give the running order (one show can span several venues). appointment_time NULL = invited but unslotted, not absent. customer_ref NULL = a new prospect with no purchase history, not a client who spent nothing.
+- brand_customer_segments(p_brand_id int) — set-returning function, one row per client with ltv and the Customers page flags (is_vip = 2+ purchase days OR EUR 20,000+ spent; is_lapsed, is_incomplete, is_high_nps_idle). Use it for any VIP / lapsed question; across brands: FROM brands b CROSS JOIN LATERAL brand_customer_segments(b.id::int) s.
 - brand_knowledge_docs(id, brand_id, title, category, source_type, source_url, content) — indexed brand knowledge (story/care/policy, and for some brands client/product "Scheda …" cards). Prefer search_knowledge / lookup_knowledge_card over run_sql for these.`
     : "";
   const languageNote = locale === "it"
