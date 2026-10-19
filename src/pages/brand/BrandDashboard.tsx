@@ -88,7 +88,7 @@ const BrandDashboard = () => {
   ];
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+    <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
       <div className="mb-8">
         <h1 className="font-serif text-3xl font-bold text-foreground">Dashboard</h1>
         <p className="mt-1 text-sm text-muted-foreground">Overview of your brand's protection program.</p>

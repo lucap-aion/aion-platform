@@ -73,7 +73,7 @@ const AdminCustomerDetail = () => {
 
   if (isLoading) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+      <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
         <div className="mb-8 h-8 w-32 rounded-lg bg-muted animate-pulse" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
@@ -96,7 +96,7 @@ const AdminCustomerDetail = () => {
 
   if (!customer) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+      <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
         <div className="glass-card p-6">
           <p className="text-sm text-muted-foreground">Customer not found.</p>
           <button
@@ -116,7 +116,7 @@ const AdminCustomerDetail = () => {
   const initials = `${(customer.first_name?.[0] || customer.email?.[0] || "?").toUpperCase()}${(customer.last_name?.[0] || "").toUpperCase()}`;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+    <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
       <div className="mb-6 md:mb-8">
         <Link to="/admin/customers" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4">
           <ArrowLeft className="h-4 w-4" /> Back to Customers

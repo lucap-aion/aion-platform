@@ -386,7 +386,7 @@ const BrandCustomers = () => {
 
   if (isLoading) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+      <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
         <div className="mb-8 flex items-center justify-between">
           <div className="space-y-2">
             <div className="h-8 w-40 rounded-lg bg-muted animate-pulse" />
@@ -433,7 +433,7 @@ const BrandCustomers = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+    <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
       <div className="mb-6 md:mb-8 flex flex-col gap-4">
         <div className="flex items-start justify-between gap-4">
           <div>
