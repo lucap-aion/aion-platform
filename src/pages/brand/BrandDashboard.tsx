@@ -162,7 +162,7 @@ const BrandDashboard = () => {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl animate-fade-in px-4 py-6 md:px-6 md:py-8">
+    <div className="w-full animate-fade-in px-4 py-6 md:px-8 md:py-8">
       <div className="mb-8">
         <h1 className="font-serif text-3xl font-bold text-foreground">{greeting}</h1>
         <p className="mt-1 text-sm text-muted-foreground">

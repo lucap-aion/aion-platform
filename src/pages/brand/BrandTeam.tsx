@@ -185,7 +185,7 @@ const BrandTeam = () => {
 
   if (!canWrite) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8">
+      <div className="w-full px-4 py-6 md:px-8 md:py-8">
         <div className="glass-card p-6">
           <p className="text-sm text-muted-foreground">Access restricted to master users.</p>
         </div>
@@ -195,7 +195,7 @@ const BrandTeam = () => {
 
   if (isLoading) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+      <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
         <div className="mb-6 md:mb-8 space-y-4">
           <div className="flex items-start justify-between">
             <div className="space-y-2">
@@ -243,7 +243,7 @@ const BrandTeam = () => {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+    <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
       <div className="mb-6 md:mb-8 flex flex-col gap-4">
         <div className="flex items-start justify-between gap-4">
           <div>

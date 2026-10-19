@@ -105,7 +105,7 @@ const BrandShopDetail = () => {
 
   if (aggLoading) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+      <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
         <div className="mb-8 h-8 w-32 rounded-lg bg-muted animate-pulse" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
@@ -118,7 +118,7 @@ const BrandShopDetail = () => {
 
   if (!shop) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+      <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
         <div className="glass-card p-6">
           <p className="text-sm text-muted-foreground">Shop not found.</p>
           <button
@@ -144,7 +144,7 @@ const BrandShopDetail = () => {
     : 0;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+    <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
       <div className="mb-6 md:mb-8">
         <Link
           to={`${slugPrefix}/shops`}

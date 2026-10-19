@@ -450,7 +450,7 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-5xl flex-col gap-6 p-6">
+    <div className="flex h-full w-full flex-col gap-6 p-4 md:p-8">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-3">

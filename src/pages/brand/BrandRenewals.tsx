@@ -98,7 +98,7 @@ const BrandRenewals = () => {
   );
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+    <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
       <div className="mb-6 md:mb-8">
         <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">{t("brandRenewals.title")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">

@@ -190,7 +190,7 @@ const CustomerClaims = () => {
 
   if (isLoading || (isFetching && !claims?.length)) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+      <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
         <div className="mb-6 md:mb-8">
           <div className="h-8 w-32 bg-muted rounded-lg animate-pulse mb-2" />
           <div className="h-4 w-56 bg-muted rounded animate-pulse" />
@@ -215,7 +215,7 @@ const CustomerClaims = () => {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
+    <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
       <div className="mb-6 md:mb-8 flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
