@@ -226,6 +226,12 @@ export interface TenantConfig {
    * they have not bought. Off for every live brand.
    */
   assistantOnly: boolean;
+  /**
+   * Whether this brand's users see the AI Assistant and the knowledge base. Off for brands
+   * that were live before either existed: they keep "Ask the data" and the navigation they
+   * had, until AION turns the assistant on for them (Admin → brand → Assistant).
+   */
+  assistantEnabled: boolean;
 }
 
 /** Empty — no overrides. index.css defaults apply for any key not set. */
@@ -254,6 +260,7 @@ const DEFAULT_TENANT: TenantConfig = {
   faqEn: null,
   faqIt: null,
   assistantOnly: false,
+  assistantEnabled: true,
 };
 
 /** Parse theme_settings JSON — only keeps keys the brand explicitly set. */
@@ -281,13 +288,13 @@ type BrandRow = Database["public"]["Tables"]["brands"]["Row"];
 // from the URL before anyone signs in — so the house's contact address, its
 // registered address and every fee it pays us have no business being in the
 // response. Nothing outside this file ever read them.
-const BRAND_SELECT = "id, slug, name, description, website, logo_big, logo_small, auth_background_image, top_banner_image, theme_settings, faq_en, faq_it, faq_image, feedback_image, damage_image, theft_image, demo_assistant_only" as const;
+const BRAND_SELECT = "id, slug, name, description, website, logo_big, logo_small, auth_background_image, top_banner_image, theme_settings, faq_en, faq_it, faq_image, feedback_image, damage_image, theft_image, demo_assistant_only, assistant_enabled" as const;
 
 type BrandLookup = Pick<BrandRow,
   | "id" | "slug" | "name" | "description" | "website"
   | "logo_big" | "logo_small" | "auth_background_image" | "top_banner_image" | "theme_settings"
   | "faq_en" | "faq_it" | "faq_image" | "feedback_image" | "damage_image" | "theft_image"
-> & { demo_assistant_only?: boolean | null };
+> & { demo_assistant_only?: boolean | null; assistant_enabled?: boolean | null };
 
 const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
   const { colors: themeColors, fonts: themeFonts } = parseThemeSettings(brand.theme_settings);
@@ -307,6 +314,8 @@ const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
     themeColors,
     themeFonts,
     assistantOnly: brand.demo_assistant_only === true,
+    // An assistant-only demo is nothing but the assistant, so the flag cannot hide it there.
+    assistantEnabled: brand.assistant_enabled !== false || brand.demo_assistant_only === true,
     faqEn: brand.faq_en ?? null,
     faqIt: brand.faq_it ?? null,
     faqImage: brand.faq_image ?? null,
@@ -453,7 +462,7 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
     let cancelled = false;
 
     const fetchBrand = async () => {
-      // `untyped` for one column: types.ts predates demo_assistant_only, and the typed
+      // `untyped` for two columns: types.ts predates demo_assistant_only and assistant_enabled, and the typed
       // client turns an unknown column into an error on the WHOLE row rather than on that
       // field. Regenerating the types is the real fix and is its own job — see untyped.ts.
       const { data: brand, error } = await untyped

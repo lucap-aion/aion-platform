@@ -6,6 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuthSlug } from "@/hooks/useAuthSlug";
+import { useTenant } from "@/contexts/TenantContext";
 
 // The brand's home page: what happened, what needs attention, and who just
 // arrived — the things you want on opening the platform. The four headline
@@ -31,6 +32,7 @@ const CardSkeleton = ({ rows = 3 }: { rows?: number }) => (
 const BrandDashboard = () => {
   const { profile } = useAuth();
   const slugPrefix = useAuthSlug();
+  const { assistantEnabled } = useTenant();
   const navigate = useNavigate();
   const brandId = profile?.brand_id ?? -1;
   const enabled = !!profile?.brand_id;
@@ -313,8 +315,8 @@ const BrandDashboard = () => {
       )}
 
       <div className="mt-6 flex flex-wrap gap-3">
-        <Link to={`${slugPrefix}/assistant`} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
-          Ask the assistant <ArrowRight className="h-4 w-4" />
+        <Link to={`${slugPrefix}/${assistantEnabled ? "assistant" : "ai-query"}`} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+          {assistantEnabled ? "Ask the assistant" : "Ask the data"} <ArrowRight className="h-4 w-4" />
         </Link>
         <Link to={`${slugPrefix}/insights`} className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm">
           See insights

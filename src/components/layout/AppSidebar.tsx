@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import SignedImage from "@/components/SignedImage";
-import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, MessageSquare, Library } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, MessageSquare, Library, Sparkles } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useTenant } from "@/contexts/TenantContext";
@@ -98,14 +98,23 @@ const AppSidebar = () => {
   const faqItems = (() => {
     const source = locale === "it" ? tenant.faqIt : tenant.faqEn;
     if (Array.isArray(source) && source.length > 0) {
-      return (source as any[]).map((item) => ({
-        q: item.title ?? item.question ?? "",
-        a: item.content?.blocks
-          ? (item.content.blocks as any[]).filter((b: any) => b.text).map((b: any) => b.text).join(" ")
-          : (item.answer ?? ""),
-      }));
+      // A list block carries `items`, not `text` — filtering on `text` dropped every list,
+      // as it did on the FAQ page and the customer dashboard. Lists are kept as lists here.
+      return (source as any[]).map((item) => {
+        const blocks: { text?: string; items?: string[] }[] = Array.isArray(item.content?.blocks)
+          ? (item.content.blocks as any[])
+              .map((b: any) => (typeof b.text === "string" && b.text ? { text: b.text }
+                : Array.isArray(b.items) ? { items: b.items.map(String).filter(Boolean) } : {}))
+              .filter((b) => b.text || b.items?.length)
+          : [{ text: item.answer ?? "" }];
+        return {
+          q: item.title ?? item.question ?? "",
+          a: blocks.map((b) => b.text ?? b.items?.join(" ") ?? "").join(" "),
+          blocks,
+        };
+      });
     }
-    return [] as { q: string; a: string }[];
+    return [] as { q: string; a: string; blocks: { text?: string; items?: string[] }[] }[];
   })();
 
   const { profile, signOut, user } = useAuth();
@@ -116,9 +125,17 @@ const AppSidebar = () => {
   // recent claims, so keeping it would put the product we are not demonstrating on the first
   // screen the prospect sees. Still one section, still this order; the flag only removes.
   const assistantOnlyPaths = new Set(["/assistant", "/knowledge"]);
+  // Assistant off: the navigation the brand had before the assistant existed — "Ask the
+  // data" where the Assistant would be, no Knowledge, and Dashboard not Home.
+  const classicBrandPaths = brandPaths
+    .filter((p) => p.path !== "/knowledge")
+    .map((p) => p.path === "/assistant" ? { path: "/ai-query", icon: Sparkles, labelKey: "nav.aiQuery" }
+      : p.path === "/dashboard" ? { ...p, icon: BarChart3, labelKey: "nav.dashboard" }
+      : p);
   const paths = mode === "customer"
     ? customerPaths
-    : tenant.assistantOnly ? brandPaths.filter((p) => assistantOnlyPaths.has(p.path)) : brandPaths;
+    : tenant.assistantOnly ? brandPaths.filter((p) => assistantOnlyPaths.has(p.path))
+    : tenant.assistantEnabled ? brandPaths : classicBrandPaths;
   // Team is about who can log in, which is still a fair question in an assistant demo.
   const masterLinks = (mode === "brand" && canWrite)
     ? brandMasterPaths.map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }))
@@ -351,7 +368,11 @@ const AppSidebar = () => {
             .map((item, i) => (
             <AccordionItem key={i} value={`faq-${i}`}>
               <AccordionTrigger className="text-sm text-left font-medium">{item.q}</AccordionTrigger>
-              <AccordionContent className="text-sm text-muted-foreground leading-relaxed">{item.a}</AccordionContent>
+              <AccordionContent className="space-y-2 text-sm text-muted-foreground leading-relaxed">
+                {item.blocks.map((b, j) => b.items
+                  ? <ul key={j} className="list-disc space-y-1 pl-4">{b.items.map((li, k) => <li key={k}>{li}</li>)}</ul>
+                  : <p key={j}>{b.text}</p>)}
+              </AccordionContent>
             </AccordionItem>
           ))}
         </Accordion>

@@ -16,6 +16,8 @@ const ASSISTANT_ONLY_PATHS = [
   /\/assistant(\/|$)/, /\/knowledge(\/|$)/, /\/profile(\/|$)/, /\/team(\/|$)/,
 ];
 
+const ASSISTANT_PATHS = [/\/assistant(\/|$)/, /\/knowledge(\/|$)/];
+
 interface ProtectedRouteProps {
   children: React.ReactNode;
   mode?: "customer" | "brand";
@@ -28,7 +30,7 @@ const getSlugPrefix = () => {
 
 const ProtectedRoute = ({ children, mode }: ProtectedRouteProps) => {
   const { user, profile, loading } = useAuth();
-  const { assistantOnly } = useTenant();
+  const { assistantOnly, assistantEnabled } = useTenant();
   const location = useLocation();
 
   if (loading) {
@@ -55,6 +57,12 @@ const ProtectedRoute = ({ children, mode }: ProtectedRouteProps) => {
   if (mode === "brand" && assistantOnly
       && !ASSISTANT_ONLY_PATHS.some((re) => re.test(location.pathname))) {
     return <Navigate to={`${getSlugPrefix()}/assistant`} replace />;
+  }
+
+  // Assistant switched off for this brand: a bookmark, a typed URL or the chat host's
+  // landing lands on the dashboard instead of a screen the brand cannot see in its sidebar.
+  if (mode === "brand" && !assistantEnabled && ASSISTANT_PATHS.some((re) => re.test(location.pathname))) {
+    return <Navigate to={`${getSlugPrefix()}/dashboard`} replace />;
   }
 
   return <>{children}</>;
