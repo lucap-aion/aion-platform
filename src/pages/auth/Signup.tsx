@@ -58,21 +58,14 @@ const Signup = () => {
       p_brand_id: tenant.id,
     });
 
-    if (inviteStatus === "registered") {
-      setIsLoading(false);
-      toast.error(
-        locale === "en"
-          ? "This email is already registered. Please sign in."
-          : "Questa email è già registrata. Accedi."
-      );
-      return;
-    }
+    // 'invited' or 'none' only: the check no longer says whether an address is already a
+    // client, so an already-registered client sees the same message as a stranger.
     if (inviteStatus !== "invited") {
       setIsLoading(false);
       toast.error(
         locale === "en"
-          ? "No pending invitation found for this email. Please contact your brand representative."
-          : "Nessun invito in attesa trovato per questa email. Contatta il tuo rappresentante brand."
+          ? "No pending invitation found for this email. If you already have an account, please sign in; otherwise contact your brand representative."
+          : "Nessun invito in attesa per questa email. Se hai già un account, accedi; altrimenti contatta il tuo rappresentante brand."
       );
       return;
     }
