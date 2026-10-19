@@ -18,11 +18,13 @@ import {
   ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
   Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown, LifeBuoy, Check,
   Mic, Square, CalendarDays, History,
+  Info,
 } from "lucide-react";
 import { startRecording, isRecordingSupported, extensionFor, type Recorder } from "@/lib/speech";
 import VisitCard, { type Visit } from "@/components/visits/VisitCard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { sendEmail } from "@/utils/sendEmail";
@@ -1740,17 +1742,42 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
               //
               // "Hard to read" — and measurably so: 11px at 70% of the muted colour is
               // about #9C9C9C on the card, 2.8:1, where small text needs 4.5:1. Full
-              // strength at 12px is 4.7:1 and passes. Copy untouched: whether it wants an
-              // (i) saying what it is for is a question for the round with Luna.
-              <button
-                type="button"
-                onClick={onEscalate}
-                className="ml-1 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                title={tt(locale, "Send this question to the AION team", "Invia la domanda al team AION")}
-              >
-                <LifeBuoy className="h-3.5 w-3.5" />
-                {tt(locale, "Ask AION", "Chiedi ad AION")}
-              </button>
+              // strength at 12px is 4.7:1 and passes.
+              //
+              // Giulio: "maybe an (i) explaining what it is for". A popover, not a tooltip:
+              // the floor uses tablets and phones, where hover does not exist.
+              <span className="ml-1 flex items-center">
+                <button
+                  type="button"
+                  onClick={onEscalate}
+                  className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  title={tt(locale, "Send this question to the AION team", "Invia la domanda al team AION")}
+                >
+                  <LifeBuoy className="h-3.5 w-3.5" />
+                  {tt(locale, "Ask AION", "Chiedi ad AION")}
+                </button>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+                      aria-label={tt(locale, "What is Ask AION?", "Cos'è Chiedi ad AION?")}
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" align="start" className="w-72 text-xs leading-relaxed">
+                    <p className="mb-1 font-medium text-foreground">
+                      {tt(locale, "What is Ask AION?", "Cos'è Chiedi ad AION?")}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {tt(locale,
+                        "The answer was wrong, incomplete, or the assistant could not help? Send the question to the AION team. We read every one and use them to fix what is missing. Your question and the answer you got are sent; nothing is shared with clients.",
+                        "La risposta era sbagliata, incompleta, o l'assistente non ha saputo aiutarti? Invia la domanda al team AION: le leggiamo tutte e le usiamo per sistemare quello che manca. Inviamo la tua domanda e la risposta che hai ricevuto; nulla viene condiviso con i clienti.")}
+                    </p>
+                  </PopoverContent>
+                </Popover>
+              </span>
             )
           )}
         </div>
