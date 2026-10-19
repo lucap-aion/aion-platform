@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { untyped } from "@/integrations/supabase/untyped";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { isBrandRole, isCustomerRole, useAuth } from "@/contexts/AuthContext";
 import { TenantProvider, useTenantStatus } from "@/contexts/TenantContext";
@@ -144,8 +145,10 @@ const TenantSlugEntry = () => {
 
   useEffect(() => {
     if (!slug) { setBrandChecked("notfound"); return; }
-    supabase
-      .from("brands")
+    // brands_public: the presentation columns of every house, readable logged out. The
+    // brands table itself is AION's and each house's own staff's (20261019000006).
+    untyped
+      .from("brands_public")
       .select("id")
       .eq("slug", slug)
       .maybeSingle()
@@ -195,8 +198,8 @@ const RootEntry = () => {
   useEffect(() => {
     if (!chatHost || !profile?.brand_id) { setSlugChecked(true); return; }
     let active = true;
-    supabase
-      .from("brands")
+    untyped
+      .from("brands_public")
       .select("slug")
       .eq("id", profile.brand_id)
       .maybeSingle()

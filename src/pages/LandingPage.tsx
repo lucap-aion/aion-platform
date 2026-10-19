@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { untyped } from "@/integrations/supabase/untyped";
 import SmartLogo from "@/components/SmartLogo";
 import HeaderControls from "@/components/layout/HeaderControls";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -99,8 +99,9 @@ const LandingPage = () => {
   useEffect(() => {
     void (async () => {
       try {
-        const { data } = await supabase
-          .from("brands")
+        // brands_public, not brands: this page is logged out, and the table is not.
+        const { data } = await untyped
+          .from("brands_public")
           .select("id, slug, name, description, logo_big, logo_small, top_banner_image")
           .not("slug", "is", null)
           .neq("slug", "")

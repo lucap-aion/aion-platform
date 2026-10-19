@@ -466,7 +466,7 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
       // client turns an unknown column into an error on the WHOLE row rather than on that
       // field. Regenerating the types is the real fix and is its own job — see untyped.ts.
       const { data: brand, error } = await untyped
-        .from("brands")
+        .from("brands_public")
         .select(BRAND_SELECT)
         .eq("slug", slug)
         .maybeSingle();
