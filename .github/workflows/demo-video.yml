@@ -52,6 +52,11 @@ on:
         required: false
         default: ""
         type: string
+      target:
+        description: "dev or prod — which project's portal to film and file the film in. Each is a GitHub Environment holding that project's four AION_* secrets (repo-level ones are dev's)"
+        required: false
+        default: "dev"
+        type: string
       upload:
         description: "File it against the brand as well as attaching it here"
         required: false
@@ -67,6 +72,8 @@ concurrency:
 jobs:
   record:
     runs-on: ubuntu-latest
+    # prod's AION_* secrets live on the "prod" environment and override the repo-level (dev) ones.
+    environment: ${{ inputs.target == 'prod' && 'prod' || 'dev' }}
     # A slow answer is normal; a hung one should not hold a runner all day.
     timeout-minutes: 25
     steps:
