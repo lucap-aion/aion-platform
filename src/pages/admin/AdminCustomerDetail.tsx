@@ -1,5 +1,6 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
+import PurchasesCard, { type CoverForStats } from "@/components/PurchasesCard";
 import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin, Calendar, Globe } from "lucide-react";
 import { format } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
@@ -45,7 +46,7 @@ const AdminCustomerDetail = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("policies")
-        .select("id, start_date, expiration_date, status, selling_price, recommended_retail_price, catalogues(name, picture), brands(name, logo_small), shops(name)")
+        .select("id, start_date, expiration_date, status, selling_price, recommended_retail_price, catalogues(name, picture, category), brands(name, logo_small), shops(name)")
         .eq("customer_id", customerId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -113,7 +114,6 @@ const AdminCustomerDetail = () => {
   const brand = (customer as any).brands as { name: string | null; logo_small: string | null } | null;
   const fullName = `${customer.first_name || ""} ${customer.last_name || ""}`.trim() || customer.email || "Unknown";
   const initials = `${(customer.first_name?.[0] || customer.email?.[0] || "?").toUpperCase()}${(customer.last_name?.[0] || "").toUpperCase()}`;
-  const totalProtected = (covers || []).reduce((sum, c) => sum + (c.selling_price || 0), 0);
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 md:px-6 md:py-8 animate-fade-in">
@@ -284,23 +284,7 @@ const AdminCustomerDetail = () => {
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-            <div className="glass-card p-6">
-              <h3 className="text-base font-semibold text-foreground mb-4">Summary</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-muted-foreground">Covers</p>
-                  <p className="text-lg font-semibold text-foreground">{covers?.length || 0}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Claims</p>
-                  <p className="text-lg font-semibold text-foreground">{claims?.length || 0}</p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-xs text-muted-foreground">Total Protected Value</p>
-                  <p className="text-lg font-semibold text-foreground">€{totalProtected.toLocaleString()}</p>
-                </div>
-              </div>
-            </div>
+            <PurchasesCard covers={(covers || []) as CoverForStats[]} claimsCount={claims?.length || 0} />
           </motion.div>
         </div>
       </div>
