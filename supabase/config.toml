@@ -21,3 +21,13 @@ enable_confirmations = true
 enabled = true
 uri = "https://tlmdlskiubfdhywmzgzb.supabase.co/functions/v1/auth-email-hook"
 secrets = "v1,whsec_YWlvbmNvdmVyLXdlYmhvb2stc2VjcmV0LWtleS0xMjM="
+# Called without a user JWT: Supabase Auth signs the send-email hook with a Standard Webhooks
+# signature (checked in code), and the price sync is called by cron with the batch secret.
+# Without these the CLI deploys them with verify_jwt = true and the gateway answers
+# "Missing authorization header" before the code runs — which silently stopped every dev
+# auth email from 2026-09-11 to 2026-10-19.
+[functions.auth-email-hook]
+verify_jwt = false
+
+[functions.sync-catalogue-prices]
+verify_jwt = false
