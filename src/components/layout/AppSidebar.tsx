@@ -3,6 +3,7 @@ import SignedImage from "@/components/SignedImage";
 import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, MessageSquare, Library, Sparkles } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
+import { knowledgeComingSoon } from "@/lib/environment";
 import { useTenant } from "@/contexts/TenantContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -128,7 +129,7 @@ const AppSidebar = () => {
   // Assistant off: the navigation the brand had before the assistant existed — "Ask the
   // data" where the Assistant would be, no Knowledge, and Dashboard not Home.
   const classicBrandPaths = brandPaths
-    .filter((p) => p.path !== "/knowledge")
+    .filter((p) => p.path !== "/knowledge" || knowledgeComingSoon())
     .map((p) => p.path === "/assistant" ? { path: "/ai-query", icon: Sparkles, labelKey: "nav.aiQuery" }
       : p.path === "/dashboard" ? { ...p, icon: BarChart3, labelKey: "nav.dashboard" }
       : p);
@@ -140,7 +141,11 @@ const AppSidebar = () => {
   const masterLinks = (mode === "brand" && canWrite)
     ? brandMasterPaths.map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }))
     : [];
-  const links = paths.map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }));
+  // On prod the knowledge base is listed but not openable yet: a "Soon" badge, no link.
+  const links = paths.map((l) => ({
+    ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey),
+    soon: l.path === "/knowledge" && knowledgeComingSoon(),
+  }));
   const profileName = `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() || user?.email || "User";
   const profileInitials = `${(profile?.first_name?.[0] || user?.email?.[0] || "?").toUpperCase()}${(profile?.last_name?.[0] || "").toUpperCase()}`;
   const avatar = profile?.avatar;
@@ -222,6 +227,24 @@ const AppSidebar = () => {
             <SidebarMenu>
               {links.map((link) => {
                 const isActive = location.pathname === link.to || (!(link as any).exact && location.pathname.startsWith(link.to + "/"));
+                if (link.soon) {
+                  return (
+                    <SidebarMenuItem key={link.to}>
+                      <SidebarMenuButton aria-disabled tooltip={`${link.label} · ${t("nav.soon")}`}
+                        className="cursor-default gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60">
+                        <link.icon className="h-5 w-5 shrink-0" />
+                        {!collapsed && (
+                          <>
+                            <span>{link.label}</span>
+                            <span className="ml-auto rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                              {t("nav.soon")}
+                            </span>
+                          </>
+                        )}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                }
                 return (
                   <SidebarMenuItem key={link.to}>
                     <SidebarMenuButton asChild isActive={isActive} tooltip={link.label}>

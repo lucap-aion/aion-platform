@@ -13,6 +13,7 @@ import ShopifyConnection from "./_components/ShopifyConnection";
 import { StatusBadge } from "./_components/AdminTable";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import AssistantSwitch from "./_components/AssistantSwitch";
+import { knowledgeComingSoon } from "@/lib/environment";
 
 // Everything about one brand, in one place.
 //
@@ -174,15 +175,23 @@ export default function AdminBrandDetail() {
       </div>
 
       <div className="flex flex-wrap gap-1 border-b border-border">
-        {TABS.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
-              tab === t.key
-                ? "border-primary font-medium text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            {t.label}
-          </button>
-        ))}
+        {TABS.map((t) => {
+          // Not openable on prod yet: no Voyage/Jina keys there to crawl or embed with.
+          const soon = t.key === "knowledge" && knowledgeComingSoon();
+          return (
+            <button key={t.key} onClick={() => !soon && setTab(t.key)} disabled={soon}
+              className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
+                soon ? "cursor-default border-transparent text-muted-foreground/60"
+                : tab === t.key
+                  ? "border-primary font-medium text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+              {t.label}
+              {soon && (
+                <span className="ml-1.5 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Soon</span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Each tab is mounted only while it is the one being looked at. The cycle
@@ -202,7 +211,7 @@ export default function AdminBrandDetail() {
           whichever house you happened to be looking at yesterday — the database
           isolates brands properly, but nothing stopped you filing Pomellato's
           document under Luisa Beccaria. Here the brand is the page you are on. */}
-      {tab === "knowledge" && (
+      {tab === "knowledge" && !knowledgeComingSoon() && (
         <BrandKnowledge key={brand.id} brandIdOverride={brand.id} canWriteOverride />
       )}
       {tab === "integrations" && <ShopifyConnection brandId={brand.id} />}
