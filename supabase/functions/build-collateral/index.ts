@@ -1,0 +1,1053 @@
+// build-collateral: the rest of the commercial pack, per brand.
+//
+//   data_request  — the pilot data-request workbook: a blank form, with the
+//                   prospect's legal entity, address and product focus filled
+//                   into its three placeholders, and checked on the way out for
+//                   anything a previous client left in it
+//   read_data_request
+//                 — the SAME workbook, filled in and sent back, read into a
+//                   pricing perimeter instead of retyped by hand
+//   business_case — the pricing model as slides: perimeter, premium, AION fees,
+//                   cost per product, and the provenance of every rate used
+//   operations    — the ops booklet as a deck, in the intro deck's own style
+//
+// The two decks are generated INTO the teaser package: its theme, masters and
+// layouts are kept and only the slides are replaced, which is what makes them
+// look like the intro deck rather than like PowerPoint's defaults.
+//
+// Auth: AION admin, or batch.
+// Body: { brand_id, kind, segments?, months?, legal_name?, address?, focus?,
+//         file_base64?, file_name? }
+
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { originAllowed, originRefused } from "../_shared/origin.ts";
+import JSZip from "npm:jszip@3.10.1";
+import {
+  sharedStrings, sheetGrid, extractPerimeter, decodeXml, filledNumericCells, type Sheet,
+} from "../_shared/xlsx-grid.ts";
+// No document leaves here carrying another house's name. The matcher is subtle enough —
+// AION's own advisor is called Riccardo Ferragamo — to live where it can be unit tested.
+import { foreignNamesFound, readableText } from "../_shared/foreign-names.ts";
+import { stackSegments, rewriteSharedStrings } from "../_shared/data-request-layout.ts";
+import { opsBooklet } from "../_shared/ops-booklet.ts";
+import { slideXml, type DeckSlide } from "../_shared/pptx-slides.ts";
+import {
+  businessCaseSlides, borrowedForReview, isFromRecord, type BusinessCase,
+} from "../_shared/business-case-deck.ts";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
+const BUCKET = "decks";
+const STYLE_TEMPLATE = "templates/AION_Teaser_New.pptx";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-batch-secret",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+Deno.serve(async (req: Request) => {
+  // Refuse a browser origin that isn't ours before doing anything else.
+  if (!originAllowed(req)) return originRefused();
+
+  if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
+  if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+
+  const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const body = await req.json().catch(() => ({} as Record<string, unknown>));
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+
+  const isBatch =
+    (KNOWLEDGE_BATCH_SECRET && req.headers.get("x-batch-secret") === KNOWLEDGE_BATCH_SECRET) ||
+    token === SUPABASE_SERVICE_ROLE_KEY || jwtRole(token) === "service_role";
+  if (!isBatch) {
+    if (!token) return json({ error: "missing bearer token" }, 401);
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: authHeader } } });
+    const { data: { user } } = await userClient.auth.getUser();
+    if (!user) return json({ error: "invalid session" }, 401);
+    const { data: adminRow } = await userClient.from("admins").select("id").eq("user_id", user.id).maybeSingle();
+    if (!adminRow) return json({ error: "AION admin only" }, 403);
+  }
+
+  const brandId = Number(body.brand_id ?? 0);
+  const kind = String(body.kind ?? "");
+  if (!brandId) return json({ error: "brand_id required" }, 400);
+
+  // A read that failed is not a brand that does not exist — see the same fix in
+  // onboard-brand. 503 says "try again", which is what the tick does.
+  const { data: brand, error: brandErr } = await admin.from("brands")
+    .select("id, name, slug, hq_address, hq_city, hq_country, hq_postcode, legal_name, registered_address, product_focus, demo_assistant_only")
+    .eq("id", brandId).maybeSingle();
+  if (brandErr) return json({ error: `could not read brand ${brandId}: ${brandErr.message}` }, 503);
+  if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
+
+  try {
+    // Everything already built for this brand, with FRESH links. A signed URL
+    // lasts a week, so the one returned at generation time is dead by the time
+    // the deal comes back round — and the old panel had no way to get another
+    // one except by regenerating the file.
+    if (kind === "list") return json(await listArtifacts(admin, brand));
+    if (kind === "data_request") return json(await buildDataRequest(admin, brand, body));
+    if (kind === "business_case") return json(await buildBusinessCase(admin, brand, body));
+    if (kind === "operations") return json(await buildOperations(admin, brand));
+    if (kind === "read_data_request") return json(await readDataRequest(admin, brand, body));
+    // The one kind that is not about this brand — a template is shared. brand_id is still
+    // required by the handler above, which is harmless and keeps one auth path.
+    if (kind === "upload_template") return json(await uploadTemplate(admin, body));
+    // The two halves of an unattended demo film: what to log in as, and where to put the
+    // result. See demoLogin.
+    if (kind === "demo_login") return json(await demoLogin(admin, brand));
+    if (kind === "upload_demo_video") return json(await uploadDemoVideo(admin, brand, body));
+    if (kind === "record_demo_video") return json(await recordDemoVideo(brand, body));
+    return json({ error: "kind must be list | data_request | read_data_request | business_case | operations | upload_template | demo_login | upload_demo_video | record_demo_video" }, 400);
+  } catch (e) {
+    console.error("[build-collateral]", e);
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+// ── 0. What already exists, with links that still work ──────────────────────
+async function listArtifacts(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>) {
+  const { data: rows } = await admin.from("brand_deck_outputs")
+    .select("template_key, storage_path, generated_at, slots_filled")
+    .eq("brand_id", brand.id).order("generated_at", { ascending: false });
+
+  const artifacts = [];
+  for (const r of (rows ?? []) as { template_key: string; storage_path: string; generated_at: string; slots_filled: unknown[] }[]) {
+    const ext = r.storage_path.split(".").pop() ?? "pptx";
+    const fileName = `AION x ${brand.name} — ${r.template_key.replace(/_/g, " ")}.${ext}`;
+    const { data: signed } = await admin.storage.from(BUCKET)
+      .createSignedUrl(r.storage_path, 60 * 60 * 24 * 7, { download: fileName });
+    artifacts.push({
+      kind: r.template_key, file_name: fileName, generated_at: r.generated_at,
+      slots_filled: Array.isArray(r.slots_filled) ? r.slots_filled.length : 0,
+      storage_path: r.storage_path,
+      // A row whose file was deleted from storage signs fine but 404s on click.
+      download_url: signed?.signedUrl ?? null,
+    });
+  }
+  return { ok: true, brand: brand.name, artifacts };
+}
+
+// ── 1. Data request workbook ────────────────────────────────────────────────
+// A .xlsx keeps its text in xl/sharedStrings.xml, so branding it is a string
+// swap — the questions, structure and formatting are untouched.
+async function buildDataRequest(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>, body: Record<string, unknown>) {
+  const { data: tpl, error: tplErr } = await admin.from("deck_templates").select("*").eq("key", "data_request").maybeSingle();
+  // "Not registered" is a thing somebody has to go and fix; a read that failed is a thing to
+  // try again. Telling the second story as the first sends an admin to a migration that was
+  // never the problem.
+  if (tplErr) throw new Error(`could not read the data-request template: ${tplErr.message}`);
+  // Both of these used to surface as one unhelpful line. They are different
+  // problems with different fixes, so say which one it is and where the file
+  // belongs — this button failed on every brand for weeks because nothing ever
+  // registered the template and the error did not say so.
+  if (!tpl) {
+    throw new Error(
+      "the data-request template is not registered — run the commercial-cycle migration, " +
+      "then upload the workbook to the 'decks' bucket at the path that row names.",
+    );
+  }
+
+  const { data: file, error } = await admin.storage.from(BUCKET).download(tpl.storage_path);
+  if (error || !file) {
+    throw new Error(
+      `the data-request workbook is not in storage — upload it to the '${BUCKET}' bucket at ` +
+      `${tpl.storage_path} (${error?.message ?? "not found"})`,
+    );
+  }
+
+  // The record first, the request second, and NOTHING falls back to the trading
+  // name. It used to: `legal_name ?? brand.name` meant the workbook always had an
+  // answer in its most important cell, the "no legal entity" warning could never
+  // fire, and every client received a data request contracted to "Pomellato"
+  // rather than to whatever Pomellato's entity is actually called.
+  const composed = [brand.hq_address, brand.hq_postcode, brand.hq_city, brand.hq_country].filter(Boolean).join(", ");
+  const pick = (fromBody: unknown, fromRecord: unknown) =>
+    String(fromBody ?? fromRecord ?? "").trim();
+  const legalName = pick(body.legal_name, brand.legal_name);
+  const brandAddress = pick(body.address, brand.registered_address) || composed;
+  // ── Which categories the pilot covers ─────────────────────────────────────
+  // "Categories should flow into NDA & Data Request (instead of product focus, which is one
+  // field and cannot split into multiple categories)." The record's category table is the
+  // list — one row per category, named as the client reads it. The catalogue's product focus
+  // is the fallback for a house whose table is still empty. Same choice as pilotCategories()
+  // in src/lib/commercialCycle.ts, which is what the cycle screen previews.
+  const { data: categoryRows, error: categoryErr } = await admin.from("brand_category_fees")
+    .select("category, label").eq("brand_id", brand.id).order("id");
+  if (categoryErr) throw new Error(`could not read the record's categories: ${categoryErr.message}`);
+  const recordCategories = ((categoryRows ?? []) as { category: string; label: string | null }[])
+    .map((r) => r.label?.trim() || r.category.charAt(0).toUpperCase() + r.category.slice(1))
+    .filter(Boolean);
+  const focusSource = body.focus != null ? "request" : recordCategories.length ? "record" : "focus";
+  const focus = focusSource === "record"
+    ? recordCategories.join(", ")
+    : pick(body.focus, brand.product_focus);
+  const values: Record<string, string> = {
+    "{{BRAND_LEGAL_NAME}}": legalName,
+    "{{BRAND_ADDRESS}}": brandAddress,
+    "{{BRAND_FOCUS}}": focus,
+  };
+
+  // ── How many segments this house's pilot has ──────────────────────────────
+  // "Can we make the focus and the number of segments depend on the categories of the
+  // brand? If there is one category, one segment; two categories, two segments."
+  //
+  // It was always two, because the template has two side by side, and the two were called
+  // "Segment 1" and "Segment 2" with nothing to say which was which. The perimeter is
+  // already decided and already on the record: the category table, or failing that the
+  // product focus read off the catalogue. So the form asks about exactly those, by name. An
+  // explicit `segment_blocks` still wins — a pilot can be scoped to something the record does
+  // not say yet. The record's rows are taken whole, never re-split: "Silver / tableware" is
+  // one category somebody typed, not two.
+  const segmentLabels = focusSource === "record"
+    ? recordCategories
+    : focus.split(/[,;/]|\u2022/).map((c) => c.trim()).filter(Boolean);
+  const wantSegments = body.segment_blocks != null
+    ? Number(body.segment_blocks)
+    // No focus at all leaves the template's own two: better a spare block the client leaves
+    // empty than a form with one segment in it when the house has three.
+    : Math.max(1, Math.min(8, segmentLabels.length || 2));
+
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+
+  // ── The Data sheet, laid out down the page ─────────────────────────────────
+  // "I would put segment 2 below segment 1 and push down product mix (in case there are
+  // other segments)." The template has the two segments side by side, which has a hard
+  // ceiling of two; stacked, it holds as many as the pilot has. Done before the string
+  // swaps, because restacking APPENDS to the string table and the swaps then run over the
+  // whole of it — including the headings this just invented.
+  const layoutNotes: string[] = [];
+  const dataPath = await sheetPathNamed(zip, /^data$/i);
+  const ssPath = "xl/sharedStrings.xml";
+  let ssXml = await zip.file(ssPath)?.async("string");
+  if (!ssXml) throw new Error("workbook has no shared strings");
+
+  if (dataPath) {
+    const sheetXml = await zip.file(dataPath)?.async("string");
+    if (sheetXml) {
+      const shared = sharedStrings(ssXml);
+      const stacked = stackSegments(sheetXml, shared, wantSegments, segmentLabels);
+      zip.file(dataPath, stacked.xml);
+      ssXml = rewriteSharedStrings(ssXml, stacked.shared, stacked.shared.slice(shared.length));
+      layoutNotes.push(...stacked.notes);
+      // The calculation chain names every formula cell in the workbook, in the order Excel
+      // last worked them out. Restacking moves those cells and makes new ones, so the chain
+      // in the file is now a list of cells that mostly have no formula in them — and Excel
+      // opening a workbook whose chain does not match its sheets offers to REPAIR the file,
+      // which is what a prospect sees as "this came from somewhere untrustworthy". The part
+      // is optional and Excel rebuilds it on the first calculation, so the safe move is to
+      // take it out with its relationship and its content type, not to try to patch it.
+      zip.remove("xl/calcChain.xml");
+      const types = await zip.file("[Content_Types].xml")?.async("string");
+      if (types) zip.file("[Content_Types].xml", types.replace(/<Override[^>]*calcChain\.xml[^>]*\/>/g, ""));
+      const wbRels = await zip.file("xl/_rels/workbook.xml.rels")?.async("string");
+      if (wbRels) zip.file("xl/_rels/workbook.xml.rels", wbRels.replace(/<Relationship[^>]*calcChain\.xml[^>]*\/>/g, ""));
+    }
+  } else {
+    layoutNotes.push("no sheet called \"Data\" in the template, so the segment layout was left alone");
+  }
+
+  const path = ssPath;
+  let xml = ssXml;
+
+  const applied: string[] = [];
+  const missed: string[] = [];
+  for (const slot of (tpl.text_slots ?? []) as { find: string; replace_with: string }[]) {
+    const to = values[slot.replace_with] ?? slot.replace_with;
+    // An unanswered field is left blank rather than carrying another client's
+    // answer forward — a stale legal entity in a data request is a real problem.
+    if (xml.includes(slot.find)) {
+      xml = xml.replaceAll(slot.find, escapeXml(to));
+      applied.push(`${slot.find} → ${to || "(blank)"}`);
+    } else {
+      // A slot that never matched means the workbook was revised and the
+      // template map is stale. Silently shipping the previous client's text is
+      // the failure this has to be loud about.
+      missed.push(slot.find);
+    }
+  }
+  zip.file(path, xml);
+
+  // Whose file is this, really?
+  //
+  // The template was for a long time the first house's own returned workbook, and the three
+  // swaps above left the rest of it — their revenues, their units, their COGS, their broker
+  // — in a file addressed to somebody else. The template is blank now, but a template is a
+  // binary somebody re-uploads by hand, so this reads the file back before it leaves.
+  //
+  // Two tests, because the obvious one is the weaker one. Another client's NAME is caught by
+  // matching the brands table — but the leak that actually happened left no name behind: the
+  // three swaps replaced every string that named them and left every figure they had typed.
+  //
+  // So the test that matters is an invariant: a data REQUEST is a form nobody has filled in,
+  // and a blank form has no numbers in it. Any cached numeric value in the workbook we are
+  // about to send is somebody's answer, and it is not this prospect's.
+  // The name test now runs for EVERY artefact, inside store(). What stays here is the one
+  // that only makes sense for a form: a data request nobody has filled in has no numbers in
+  // it, so any cached numeric value is somebody else's answer. That is the invariant that
+  // would have caught the leak that actually happened, which left no name behind at all —
+  // the three swaps replaced every string that named them and kept every figure they typed.
+  const leaks = await answersLeftIn(zip);
+
+  const out = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+  return await store(admin, brand, "data_request", "xlsx", out,
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    {
+      replacements: applied,
+      unmatched: missed,
+      leaks,
+      review: [
+        ...(leaks.length
+          ? [`DO NOT SEND — ${leaks.join("; ")}. The template in storage is a filled-in ` +
+             `workbook. Run scripts/blank-data-request-template.py on it, re-upload it to ` +
+             `the decks bucket, and build this again.`]
+          : []),
+        legalName ? `Confirm "${legalName}" is the entity the pilot is contracted with.` : "No legal entity set — the workbook went out blank there.",
+        brandAddress ? "Check the registered address against the client's own records." : "No registered address set — fill it on the brand record or in the field above.",
+        focusSource === "record"
+          ? `Categories: ${focus} — from the brand record's category table, one segment each.`
+          : focus
+          ? `Categories: ${focus}. The record's category table is empty, so these are the catalogue's product focus — add the pilot's categories on the record to own them.`
+          : "No categories on the record and no product focus — the client will not know which categories the pilot covers.",
+        ...layoutNotes,
+        ...(missed.length ? [`${missed.length} template slot${missed.length === 1 ? "" : "s"} did not match the workbook — it has been revised since the template was mapped, so check those cells by hand.`] : []),
+      ],
+    });
+}
+
+/**
+ * Where a named sheet's XML lives in the package.
+ *
+ * Through the relationship ids, because sheet1.xml is not reliably the first tab and the tab
+ * ORDER in workbook.xml has nothing to do with the file names. Rewriting the wrong sheet
+ * would put the segment blocks on the company-structure tab.
+ */
+async function sheetPathNamed(zip: JSZip, name: RegExp): Promise<string | null> {
+  const workbookXml = (await zip.file("xl/workbook.xml")?.async("string")) ?? "";
+  const relsXml = (await zip.file("xl/_rels/workbook.xml.rels")?.async("string")) ?? "";
+  const targets = new Map<string, string>();
+  for (const m of relsXml.matchAll(/<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"[^>]*\/?>/g)) {
+    targets.set(m[1], m[2].replace(/^\/?xl\//, "").replace(/^\.\//, ""));
+  }
+  for (const m of workbookXml.matchAll(/<sheet\s([^>]*?)\/?>/g)) {
+    const attrs = m[1] ?? "";
+    const sheetName = decodeXml(/\bname="([^"]*)"/.exec(attrs)?.[1] ?? "");
+    if (!name.test(sheetName.trim())) continue;
+    const rid = /\br:id="([^"]+)"/.exec(attrs)?.[1] ?? "";
+    const target = targets.get(rid);
+    if (target) return `xl/${target}`;
+  }
+  return null;
+}
+
+/**
+ * Figures already filled in, in a form that is supposed to go out empty.
+ *
+ * The test itself is `filledNumericCells` in _shared/xlsx-grid.ts, where it can be unit
+ * tested; this walks the sheets and says where. Reported with the cells, because the first
+ * question is always "where?".
+ */
+async function answersLeftIn(zip: JSZip): Promise<string[]> {
+  const out: string[] = [];
+  for (const path of Object.keys(zip.files)) {
+    if (!/^xl\/worksheets\/sheet\d+\.xml$/.test(path)) continue;
+    const xml = await zip.file(path)?.async("string");
+    if (!xml) continue;
+    const filled = filledNumericCells(xml);
+    if (filled.length) {
+      const sheet = path.replace("xl/worksheets/", "").replace(".xml", "");
+      out.push(`${filled.length} figure${filled.length === 1 ? "" : "s"} are already filled in on ` +
+        `${sheet} (${filled.slice(0, 6).join(", ")}${filled.length > 6 ? ", …" : ""})`);
+    }
+  }
+  return out;
+}
+
+// ── 1b. The same workbook, filled in and sent back ──────────────────────────
+// The client returns the data request and somebody retypes it into the business
+// case: eight fields per segment, from a file AION generated in the first place.
+// That is where the two hours in step 4 go.
+//
+// This reads it instead. It proposes a perimeter and says, per figure, where it
+// came from and what it had to assume — it does NOT price anything and it does
+// not save anything. The admin looks at the segments, fixes what is wrong, and
+// presses Calculate as before. A workbook read wrongly and priced silently would
+// be far worse than one nobody read at all.
+const MAX_WORKBOOK_BYTES = 12 * 1024 * 1024;
+
+async function readDataRequest(
+  admin: ReturnType<typeof createClient>, brand: Record<string, unknown>, body: Record<string, unknown>,
+) {
+  const b64 = String(body.file_base64 ?? "").replace(/^data:[^;]*;base64,/, "");
+  if (!b64) return { ok: false, reason: "attach the workbook the client returned" };
+
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(b64);
+    if (binary.length > MAX_WORKBOOK_BYTES) {
+      return { ok: false, reason: `that file is ${Math.round(binary.length / 1024 / 1024)}MB — the reader takes up to 12MB` };
+    }
+    bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  } catch {
+    return { ok: false, reason: "could not decode the upload" };
+  }
+
+  const zip = await JSZip.loadAsync(bytes).catch(() => null);
+  if (!zip) return { ok: false, reason: "that is not a .xlsx workbook — an .xls or a PDF cannot be read" };
+  if (!zip.file("xl/workbook.xml")) {
+    return { ok: false, reason: "that is not a .xlsx workbook — it has no xl/workbook.xml" };
+  }
+
+  const sheets = await readSheets(zip);
+  if (!sheets.length) return { ok: false, reason: "the workbook has no readable sheets" };
+
+  const extraction = extractPerimeter(sheets);
+
+  // Keep what the client sent, whatever came of reading it. Six weeks later,
+  // "what did they actually declare" is a question about the file, not about the
+  // numbers somebody typed from it.
+  const fileName = String(body.file_name ?? "data request returned.xlsx");
+  let stored: Record<string, unknown> | null = null;
+  try {
+    stored = await store(admin, brand, "data_request_returned", "xlsx", bytes,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      { received_as: fileName });
+  } catch (e) {
+    // The reading is the point; failing to archive it must not lose the result.
+    extraction.notes.push(`The workbook could not be attached to the brand (${e instanceof Error ? e.message : "unknown error"}), but it was read.`);
+  }
+
+  return {
+    ok: true,
+    kind: "read_data_request",
+    brand: brand.name,
+    received_as: fileName,
+    segments: extraction.segments,
+    notes: extraction.notes,
+    sheets: extraction.scanned,
+    stored_as: stored?.storage_path ?? null,
+    download_url: stored?.download_url ?? null,
+  };
+}
+
+// Sheets in the order the workbook presents them, resolved through the
+// relationship ids — sheet1.xml is not reliably the first tab.
+// Structural, not `JSZip`: the only thing needed from the archive is "give me this entry as
+// a string", and naming that avoids depending on how the npm types happen to be exported.
+type ZipLike = { file(path: string): { async(type: "string"): Promise<string> } | null };
+
+async function readSheets(zip: ZipLike): Promise<Sheet[]> {
+  const workbookXml = (await zip.file("xl/workbook.xml")?.async("string")) ?? "";
+  const relsXml = (await zip.file("xl/_rels/workbook.xml.rels")?.async("string")) ?? "";
+
+  const targets = new Map<string, string>();
+  for (const m of relsXml.matchAll(/<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"[^>]*\/?>/g)) {
+    targets.set(m[1], m[2].replace(/^\/?xl\//, "").replace(/^\.\//, ""));
+  }
+
+  const sharedXml = (await zip.file("xl/sharedStrings.xml")?.async("string")) ?? "";
+  const shared = sharedXml ? sharedStrings(sharedXml) : [];
+
+  const sheets: Sheet[] = [];
+  for (const m of workbookXml.matchAll(/<sheet\s([^>]*?)\/?>/g)) {
+    const attrs = m[1] ?? "";
+    const name = /\bname="([^"]*)"/.exec(attrs)?.[1] ?? `Sheet ${sheets.length + 1}`;
+    const rid = /\br:id="([^"]+)"/.exec(attrs)?.[1] ?? "";
+    const target = targets.get(rid) ?? `worksheets/sheet${sheets.length + 1}.xml`;
+    const xml = await zip.file(`xl/${target}`)?.async("string");
+    if (!xml) continue;
+    sheets.push({ name: decodeXml(name), grid: sheetGrid(xml, shared) });
+    // A perimeter is never on the twelfth tab, and each one is a full parse.
+    if (sheets.length >= 12) break;
+  }
+  return sheets;
+}
+
+// ── 2. Business case deck ───────────────────────────────────────────────────
+const shareOrNull = (v: unknown): number | null =>
+  v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
+
+async function buildBusinessCase(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>, body: Record<string, unknown>) {
+  const segments = body.segments;
+  if (!Array.isArray(segments) || !segments.length) {
+    throw new Error("segments required, e.g. [{name, category, revenues, cogs_ratio, avg_price, start_month}]");
+  }
+
+  const { data: bc, error } = await admin.rpc("compute_business_case", {
+    p_brand_id: Number(brand.id),
+    p_segments: segments,
+    p_months: Number(body.months ?? 36),
+    p_terms_key: String(body.terms_key ?? "standard_2026"),
+    p_include_api: body.include_api === true,
+    p_setup_discounted: body.setup_discounted !== false,
+    // The case's own discounts; null takes the pricing terms' (20261016000001).
+    p_setup_discount: shareOrNull(body.setup_discount),
+    p_service_discount: shareOrNull(body.service_discount),
+    p_service_discount_months: body.service_discount_months == null || body.service_discount_months === ""
+      ? null : Number(body.service_discount_months),
+  });
+  if (error) throw new Error(error.message);
+  const c = bc as Record<string, any>;
+  if (c.ok === false) return { ok: false, reason: c.reason };
+
+  // Preview: the numbers, without building a deck. The perimeter gets adjusted
+  // several times before anyone wants a file, and generating a 10MB PPTX for
+  // each tweak is slow and litters storage.
+  if (body.preview === true) return { ok: true, preview: true, business_case: c };
+
+  // The slides are built by a pure function so the proof script and the tests read exactly
+  // what this sends — see _shared/business-case-deck.ts for what each slide shows and why.
+  const slides = businessCaseSlides(String(brand.name ?? ""), c as BusinessCase);
+
+  // The footer lockup the ops deck carries — AION × HOUSE — now that this deck is drawn in
+  // the same language. The house's own name, in caps; never anybody else's.
+  const out = await renderDeck(admin, slides, { brand: String(brand.name ?? "").trim().toUpperCase() });
+  return await store(admin, brand, "business_case", "pptx", out,
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    {
+      business_case: c,
+      indicative: c.indicative,
+      review: [
+        // The slide says "a comparable house"; this says which, because the person sending
+        // it has to know whose rate they are about to quote.
+        // Record-sourced rates are this house's own agreed rates, not borrowed ones, though
+        // they carry no quote — `isBorrowed` knows the difference, `!own_quote` did not.
+        c.indicative
+          ? (borrowedForReview(c as BusinessCase)
+              ? "Borrowed rates, named on screen but NOT on the slide: " + borrowedForReview(c as BusinessCase) +
+                ". Decide deliberately whether to show them, and keep the 'indicative' wording."
+              : (c.rates_used ?? []).some((r: any) => r.rate_source === "record_brand")
+              ? "Indicative because a segment uses the record's house-wide rate, not a category rate. Set the category's rate on the brand record, or keep the 'indicative' wording."
+              : "The case is marked indicative. Keep the 'indicative' wording until the formal quotation is in.")
+          : (c.rates_used ?? []).some((r: any) => isFromRecord(r))
+          ? "Rates are this brand's own: agreed on its record, or quoted for it."
+          : "Rates are this brand's own quote.",
+        ...((c.notes ?? []) as string[]),
+        "Check the perimeter against what the client actually declared in the data request.",
+        "A formal Chubb quotation takes 1–2 months and supersedes this.",
+      ],
+    });
+}
+
+// ── 3. Operations deck ──────────────────────────────────────────────────────
+// THE BOOKLET, not a summary of it.
+//
+// What this generated before was seven slides of bullets distilled from the approved
+// operations booklet, and the distillation threw away everything an operations team needs:
+// the fourteen steps of activation, the twelve of a claim, the insurer's SLAs, the
+// communications plan, the month-end money. So the booklet was being sent by hand instead,
+// which is the definition of an automation that is not used.
+//
+// The content now IS the booklet — section for section, figure for figure, in its own
+// Italian — with the house's legal entity and short name in place of the one it was written
+// for. Drawn with the slide shapes in _shared/pptx-slides.ts: numbered flows as numbered
+// flows, the four actors and the comms plan as tables, the two warnings as callouts.
+async function buildOperations(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>) {
+  // The booklet speaks in two registers and needs both names. The legal entity signs and is
+  // paid; the short name does things in a process line. Falling back to the trading name for
+  // the entity is fine HERE — unlike the data request, this document is not a contract and an
+  // ops booklet addressed to "Pomellato" is not a misstatement of who signed.
+  const legalName = String(brand.legal_name ?? "").trim() || String(brand.name ?? "").trim();
+  const shortName = String(brand.name ?? "").trim() || legalName;
+  const slides = opsBooklet({ legalName, shortName });
+
+  // The footer's "× HOUSE" is the short name, in caps — the lockup, not the contracting
+  // party. The legal entity signs the cover; it does not belong at the bottom of every page.
+  const out = await renderDeck(admin, slides, { brand: shortName.toUpperCase() });
+  return await store(admin, brand, "operations", "pptx", out,
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    { slides: slides.length, review: [
+      `The approved booklet, ${slides.length} slides, with ${legalName} in place of the house it was written for. Read it through before sending — it carries the booklet's own figures.`,
+      // Named a client here, on the review panel of every OTHER house's ops deck. The fact
+      // is the same without it, and which house the booklet came from is nobody else's
+      // business — see feedback: no client names in brand-facing material.
+      "SLA figures, the 2/10/15 working-day claim timings, the 15th and 20th of the month and the voucher duration are the booklet's; confirm they hold for this client before the deck goes out.",
+      ...(String(brand.legal_name ?? "").trim()
+        ? []
+        : [`No legal entity on the record, so the trading name "${shortName}" is used where the booklet names the contracting party. Set it on the brand record if this deck is going to a legal or finance team.`]),
+    ] });
+}
+
+// ── 4. A new deck template, uploaded ────────────────────────────────────────
+// The teaser gets revised, and until now revising it meant somebody with a service key
+// putting a binary into a private bucket by hand. That is not a footnote: the data-request
+// template spent months as a previous client's filled-in workbook precisely because
+// "re-upload the template" was a manual step nobody could see or check.
+//
+// So it is an operation, with the checks attached to it:
+//
+//   - it has to BE a .pptx, not a PDF of one (the generator opens the package)
+//   - it must not name another house — the same guard every generated artefact passes,
+//     applied here, where a leak would be baked into every deck built afterwards
+//   - the media map comes back with it, because a new deck renames every media part and the
+//     slot list has to be re-derived from what is actually in the file
+//
+// It does NOT touch `slots`. Guessing which picture is the boutique and which is the
+// ambassador is exactly the judgement this should not make silently; the inventory is
+// returned so a person can map them in one pass.
+const MAX_TEMPLATE_BYTES = 40 * 1024 * 1024;
+
+async function uploadTemplate(
+  admin: ReturnType<typeof createClient>, body: Record<string, unknown>,
+) {
+  const key = String(body.template_key ?? "intro_teaser");
+  const b64 = String(body.file_base64 ?? "").replace(/^data:[^;]*;base64,/, "");
+  if (!b64) return { ok: false, reason: "attach the .pptx" };
+
+  // A 13MB deck is a 17MB base64 string, and the worker has to hold the string, the decoded
+  // bytes and the parsed package at once. The first version of this ran out of memory before
+  // it reached the upload — it decoded with `Uint8Array.from(binary, …)`, which allocates an
+  // intermediate per element, and then parsed the archive TWICE, once here and once inside
+  // the name check. So: decode into a preallocated buffer, and parse once.
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(b64);
+    if (binary.length > MAX_TEMPLATE_BYTES) {
+      return { ok: false, reason: `that file is ${Math.round(binary.length / 1024 / 1024)}MB — the limit is 40MB` };
+    }
+    bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  } catch {
+    return { ok: false, reason: "could not decode the upload" };
+  }
+
+  const zip = await JSZip.loadAsync(bytes).catch(() => null);
+  if (!zip || !zip.file("ppt/presentation.xml")) {
+    return {
+      ok: false,
+      reason: "that is not a .pptx — a PDF export cannot be used, because the generator has " +
+        "to open the PowerPoint package to swap its pictures",
+    };
+  }
+
+  const { data: tpl } = await admin.from("deck_templates").select("*").eq("key", key).maybeSingle();
+  if (!tpl) return { ok: false, reason: `no deck template registered under "${key}"` };
+
+  // The same name check every artefact gets on the way out, applied on the way IN. A template
+  // naming a live client would put that name into every prospect's deck from here on.
+  const { data: houses } = await admin.from("brands").select("name, legal_name");
+  // The archive this already has, not a second copy of it.
+  const foreign = foreignNamesFound(
+    await readableText(bytes, () => Promise.resolve(zip) as never),
+    (houses ?? []) as { name: string | null; legal_name: string | null }[],
+  );
+
+  const inventory = await inspectDeck(zip);
+
+  const name = String(body.file_name ?? `${key}.pptx`).replace(/[^A-Za-z0-9._-]+/g, "_");
+  const path = `templates/${name.endsWith(".pptx") ? name : `${name}.pptx`}`;
+  const { error } = await admin.storage.from(BUCKET).upload(path, bytes, {
+    contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    upsert: true,
+  });
+  if (error) throw new Error(`upload failed: ${error.message}`);
+
+  const patch: Record<string, unknown> = { storage_path: path };
+  // The corner wordmark is what every generated deck's co-branding hangs off, and its media
+  // name changes with the file. Re-pointed here rather than left stale — a stale anchor is
+  // invisible: the deck still builds, it just quietly stops carrying the brand's logo.
+  if (inventory.corner_mark) patch.logo_anchor = `ppt/media/${inventory.corner_mark}`;
+  const { error: rowErr } = await admin.from("deck_templates").update(patch).eq("key", key);
+  if (rowErr) throw new Error(`template row not updated: ${rowErr.message}`);
+
+  return {
+    ok: true,
+    kind: "upload_template",
+    template_key: key,
+    storage_path: path,
+    previous_storage_path: tpl.storage_path,
+    logo_anchor: patch.logo_anchor ?? tpl.logo_anchor,
+    ...inventory,
+    leaks: foreign.map((n) => `it names ${n}`),
+    review: [
+      ...(foreign.length
+        ? [`DO NOT USE — this template names ${foreign.join(", ")}. Every deck built from it ` +
+           `would carry that name to a prospect.`]
+        : []),
+      inventory.corner_mark
+        ? `The AION wordmark in the corner is ${inventory.corner_mark}, on ${inventory.corner_mark_slides} slides — logo_anchor points at it.`
+        : "NO corner wordmark found, so the brand's logo has nothing to sit beside. Check logo_anchor by hand.",
+      `slots is UNCHANGED and now certainly wrong — a new deck renames every picture. Map it ` +
+      `from the ${inventory.pictures.length} pictures listed here before building anything.`,
+    ],
+  };
+}
+
+/**
+ * What is in this deck, in the terms the slot map is written in.
+ *
+ * Only pictures big enough to be imagery — an icon is not a slot, and a deck like this one
+ * carries forty of them. Positions as a percentage of the page, because that is what makes a
+ * list of media filenames readable as "the big one on the right of slide 4".
+ */
+async function inspectDeck(zip: JSZip) {
+  const pres = (await zip.file("ppt/presentation.xml")?.async("string")) ?? "";
+  const size = /<p:sldSz cx="(\d+)" cy="(\d+)"/.exec(pres);
+  const W = Number(size?.[1] ?? 12192000), H = Number(size?.[2] ?? 6858000);
+
+  const slideNumbers = Object.keys(zip.files)
+    .map((n) => /^ppt\/slides\/slide(\d+)\.xml$/.exec(n)?.[1])
+    .filter(Boolean).map(Number).sort((a, b) => a - b);
+
+  const pictures: {
+    slide: number; media: string; x: number; y: number; w: number; h: number; aspect: number;
+  }[] = [];
+  const cornerCount = new Map<string, number>();
+
+  for (const n of slideNumbers) {
+    const xml = (await zip.file(`ppt/slides/slide${n}.xml`)?.async("string")) ?? "";
+    const relsXml = (await zip.file(`ppt/slides/_rels/slide${n}.xml.rels`)?.async("string")) ?? "";
+    const targets = new Map<string, string>();
+    for (const m of relsXml.matchAll(/Id="([^"]+)"[^>]*Target="([^"]+)"/g)) {
+      targets.set(m[1], m[2].replace("../media/", ""));
+    }
+    for (const pic of xml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) ?? []) {
+      const emb = /r:embed="([^"]+)"/.exec(pic)?.[1] ?? "";
+      const media = targets.get(emb) ?? "";
+      const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(pic);
+      const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(pic);
+      if (!media || !off || !ext) continue;
+      const x = Number(off[1]), y = Number(off[2]), cx = Number(ext[1]), cy = Number(ext[2]);
+      if (!cx || !cy) continue;
+
+      if (looksLikeCornerMark(pic)) cornerCount.set(media, (cornerCount.get(media) ?? 0) + 1);
+      // A tenth of the page across: below that it is an icon, and the deck is full of them.
+      if (cx < W * 0.1 && cy < H * 0.1) continue;
+      pictures.push({
+        slide: n, media,
+        x: round1(100 * x / W), y: round1(100 * y / H),
+        w: round1(100 * cx / W), h: round1(100 * cy / H),
+        aspect: round1(cx / cy),
+      });
+    }
+  }
+
+  const [corner] = [...cornerCount.entries()].sort((a, b) => b[1] - a[1]);
+  return {
+    slides: slideNumbers.length,
+    media: Object.keys(zip.files).filter((n) => n.startsWith("ppt/media/")).length,
+    corner_mark: corner?.[0] ?? null,
+    corner_mark_slides: corner?.[1] ?? 0,
+    pictures,
+  };
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** Shared with brand-deck's co-branding: wide, short, in the bottom margin. */
+function looksLikeCornerMark(picXml: string): boolean {
+  const off = /<a:off x="(-?\d+)" y="(-?\d+)"\/>/.exec(picXml);
+  const ext = /<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(picXml);
+  if (!off || !ext) return false;
+  const y = Number(off[2]), cx = Number(ext[1]), cy = Number(ext[2]);
+  if (!cx || !cy) return false;
+  const aspect = cx / cy;
+  return aspect >= 2 && aspect <= 8 && cy <= 6858000 * 0.09 && cx <= 12192000 * 0.25 && y >= 6858000 * 0.82;
+}
+
+// ── 5. The demo film, made by something that is not a laptop ────────────────
+//
+// Recording the assistant needs a browser and a video encoder, which edge functions do not
+// have — so the recorder is a script, and for it to run unattended on a CI runner it needs
+// two things from here: the demo login for the brand, and somewhere to put the film.
+//
+// The login is not a new secret. onboard-brand's demo_users stage creates these accounts and
+// writes them into the stage row, where every AION admin already reads them off the screen to
+// hand to a prospect. This returns the same thing to the same audience — admin or batch — and
+// nothing else. They are throwaway accounts on demo brands; if that ever stops being true,
+// this is the first thing to take away.
+async function demoLogin(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>) {
+  const { data: row } = await admin.from("brand_onboarding")
+    .select("detail").eq("brand_id", brand.id).eq("stage", "demo_users").maybeSingle();
+  const accounts = (row?.detail as { accounts?: Record<string, { email: string; password: string; portal: string }> } | null)?.accounts;
+  const brandAdmin = accounts?.brand_admin ?? accounts?.sales_associate;
+  if (!brandAdmin?.email) {
+    return { ok: false, reason: "no demo logins for this brand — run the Demo logins stage first" };
+  }
+  return {
+    ok: true, kind: "demo_login", brand: brand.name, slug: brand.slug,
+    email: brandAdmin.email, password: brandAdmin.password, portal: brandAdmin.portal,
+    // "Full portal shall focus on the whole platform." The film tours the client side too,
+    // so it needs the demo client's login; and it films the assistant only when that is all
+    // the prospect will see.
+    client: accounts?.customer?.email ? { email: accounts.customer.email, password: accounts.customer.password } : null,
+    assistant_only: brand.demo_assistant_only === true,
+  };
+}
+
+/**
+ * The finished film, stored where every other piece of the pack is.
+ *
+ * Registered in brand_deck_outputs like a deck, so it appears in the commercial cycle's
+ * artefact list with a fresh signed link and nobody has to be told where it went.
+ */
+const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
+
+async function uploadDemoVideo(
+  admin: ReturnType<typeof createClient>, brand: Record<string, unknown>, body: Record<string, unknown>,
+) {
+  const b64 = String(body.file_base64 ?? "").replace(/^data:[^;]*;base64,/, "");
+  if (!b64) return { ok: false, reason: "attach the mp4" };
+
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(b64);
+    if (binary.length > MAX_VIDEO_BYTES) {
+      return { ok: false, reason: `that file is ${Math.round(binary.length / 1024 / 1024)}MB — the limit is 120MB` };
+    }
+    // Preallocated, not Uint8Array.from with a mapper: a large file decoded an element at a
+    // time is what ran the worker out of memory on the template upload.
+    bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  } catch {
+    return { ok: false, reason: "could not decode the upload" };
+  }
+  // An MP4 starts with a box length and "ftyp". Cheap, and it stops a failed run uploading
+  // its own error page as a film.
+  const ftyp = String.fromCharCode(...bytes.slice(4, 8));
+  if (ftyp !== "ftyp") return { ok: false, reason: "that is not an MP4" };
+
+  return await store(admin, brand, "demo_video", "mp4", bytes, "video/mp4", {
+    seconds: Number(body.seconds ?? 0) || null,
+    review: [
+      "Watch it before sending: it is a recording of the live demo brand, so it shows whatever " +
+      "that brand's data currently says.",
+      "The assistant's answers are generated, and a demo film is the one place a wrong figure " +
+      "travels without anybody present to correct it.",
+    ],
+  });
+}
+
+/**
+ * Start a recording, from the brand page.
+ *
+ * The film cannot be made here. It needs a browser and a video encoder, and an edge function
+ * has neither — so this presses the button on something that does: the repository's
+ * `demo-video` workflow, which runs on a GitHub runner, drives the portal, and posts the
+ * finished film back through `upload_demo_video`. It appears in this brand's artefact list a
+ * few minutes later, next to the decks.
+ *
+ * Dispatching returns nothing but 204, so the run's URL cannot be known exactly. The workflow
+ * page for the repo is returned instead, which is one click from the run that just started.
+ */
+const GITHUB_TOKEN = Deno.env.get("GITHUB_TOKEN") ?? "";
+// owner/repo, e.g. "lucap-aion/aion-platform".
+const GITHUB_REPO = Deno.env.get("GITHUB_REPO") ?? "";
+const GITHUB_REF = Deno.env.get("GITHUB_REF_NAME") ?? "dev";
+const WORKFLOW_FILE = "demo-video.yml";
+
+async function recordDemoVideo(brand: Record<string, unknown>, body: Record<string, unknown>) {
+  if (!GITHUB_TOKEN || !GITHUB_REPO) {
+    return {
+      ok: false,
+      reason: "recording is not wired up yet — set GITHUB_TOKEN (a fine-grained token with " +
+        "Actions: write on this repo) and GITHUB_REPO (owner/repo) as function secrets, and " +
+        "the four AION_* secrets on the repository itself. Until then, run it from a laptop: " +
+        "npm run demo:video -- --slug <slug> --brand-id <id> --upload",
+    };
+  }
+  if (!brand.slug) return { ok: false, reason: "this brand has no slug, so it has no portal to film" };
+
+  const res = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ref: GITHUB_REF,
+        inputs: {
+          slug: String(brand.slug),
+          brand_id: String(brand.id),
+          questions: String(body.questions ?? 3),
+          speed: String(body.speed ?? 1.5),
+          ask: String(body.ask ?? ""),
+          upload: true,
+        },
+      }),
+    },
+  );
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    return {
+      ok: false,
+      reason: `GitHub refused the run (${res.status}). ${detail.slice(0, 200)}`,
+    };
+  }
+
+  return {
+    ok: true,
+    kind: "record_demo_video",
+    brand: brand.name,
+    queued: true,
+    // 204 carries no body, so there is no run id to return — this is the list it is top of.
+    run_url: `https://github.com/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}`,
+    review: [
+      brand.demo_assistant_only === true
+        ? "The film takes a few minutes: it asks the assistant three questions and waits for each " +
+          "answer in full. It appears in this brand's files when it is done."
+        : "The film takes a few minutes: a tour of the whole platform, brand side then client side — " +
+          "clients, covers, claims, boutiques, insights. It appears in this brand's files when it is done.",
+      "It records the live demo brand, so it shows whatever that brand's data says right now.",
+    ],
+  };
+}
+
+// ── PPTX rendering ──────────────────────────────────────────────────────────
+// Slides are generated INTO the teaser package: theme, masters and layouts stay,
+// only the slide list is replaced. That is what makes these decks look like the
+// intro deck instead of like default PowerPoint.
+async function renderDeck(
+  admin: ReturnType<typeof createClient>, slides: DeckSlide[],
+  // The footer lockup, AION × HOUSE. Both decks pass it.
+  footer?: { brand: string },
+): Promise<Uint8Array> {
+  const { data: file, error } = await admin.storage.from(BUCKET).download(STYLE_TEMPLATE);
+  if (error || !file) {
+    throw new Error(
+      `the AION teaser is not in storage, and both decks are generated into it for their styling — ` +
+      `upload it to the '${BUCKET}' bucket at ${STYLE_TEMPLATE} (${error?.message ?? "not found"})`,
+    );
+  }
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+
+  // Drop the teaser's own slides — and its speaker notes with them. A notesSlide
+  // points back at its parent slide, so deleting slides alone leaves notes
+  // relationships dangling at parts that no longer exist.
+  for (const name of Object.keys(zip.files)) {
+    if (/^ppt\/slides\/(_rels\/)?slide\d+\.xml(\.rels)?$/.test(name)) zip.remove(name);
+    if (/^ppt\/notesSlides\//.test(name)) zip.remove(name);
+  }
+
+  const LAYOUT = "../slideLayouts/slideLayout2.xml"; // the layout the teaser's own content slides use
+  const MARK_IMG = "../media/image2.png";             // the AION wordmark
+  const hasMark = zip.file("ppt/media/image2.png") !== null;
+
+  slides.forEach((s, i) => {
+    const n = i + 1;
+    zip.file(`ppt/slides/slide${n}.xml`, slideXml(s, hasMark ? "rId2" : null, footer));
+    zip.file(`ppt/slides/_rels/slide${n}.xml.rels`,
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="${LAYOUT}"/>` +
+      (hasMark ? `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${MARK_IMG}"/>` : "") +
+      `</Relationships>`);
+  });
+
+  // presentation.xml.rels: keep every non-slide relationship, then re-add ours
+  // with fresh ids so nothing collides with the masters and theme.
+  const relsPath = "ppt/_rels/presentation.xml.rels";
+  const relsXml = await zip.file(relsPath)!.async("string");
+  // Match on the relationship TYPE, not on the target path: the teaser's targets
+  // are written as "slides/slide10.xml" with no leading slash, so a path filter
+  // silently kept them and left ten relationships pointing at deleted parts.
+  const kept = [...relsXml.matchAll(/<Relationship\b[^>]*\/>/g)].map((m) => m[0])
+    .filter((r) => !/relationships\/slide"/.test(r));
+  let maxId = 0;
+  for (const r of kept) {
+    const id = Number(r.match(/Id="rId(\d+)"/)?.[1] ?? 0);
+    if (id > maxId) maxId = id;
+  }
+  const slideRels = slides.map((_, i) =>
+    `<Relationship Id="rId${maxId + 1 + i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i + 1}.xml"/>`);
+  zip.file(relsPath,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${[...kept, ...slideRels].join("")}</Relationships>`);
+
+  // presentation.xml: rewrite the slide id list to match.
+  const presPath = "ppt/presentation.xml";
+  let pres = await zip.file(presPath)!.async("string");
+  const sldIdLst = `<p:sldIdLst>${slides.map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${maxId + 1 + i}"/>`).join("")}</p:sldIdLst>`;
+  pres = pres.includes("<p:sldIdLst>")
+    ? pres.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, sldIdLst)
+    : pres.replace(/(<p:sldMasterIdLst>[\s\S]*?<\/p:sldMasterIdLst>)/, `$1${sldIdLst}`);
+  zip.file(presPath, pres);
+
+  // [Content_Types].xml: one override per slide part.
+  const ctPath = "[Content_Types].xml";
+  let ct = await zip.file(ctPath)!.async("string");
+  ct = ct.replace(/<Override[^>]*PartName="\/ppt\/slides\/slide\d+\.xml"[^>]*\/>/g, "");
+  ct = ct.replace(/<Override[^>]*PartName="\/ppt\/notesSlides\/[^"]*"[^>]*\/>/g, "");
+  const overrides = slides.map((_, i) =>
+    `<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join("");
+  ct = ct.replace("</Types>", `${overrides}</Types>`);
+  zip.file(ctPath, ct);
+
+  return await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+}
+
+// The look, the geometry and every slide shape now live in _shared/pptx-slides.ts, which is
+// where the operations booklet's tables, numbered flows and callouts are drawn. The constants
+// that used to sit here — the cream ground, the wordmark's coordinates, Georgia and Montserrat
+// over the theme's Arial — moved with them, so the business case and the booklet cannot drift
+// apart the next time one of them is adjusted.
+
+// ── Shared ──────────────────────────────────────────────────────────────────
+async function store(
+  admin: ReturnType<typeof createClient>, brand: Record<string, unknown>,
+  kind: string, ext: string, bytes: Uint8Array, contentType: string, extra: Record<string, unknown>,
+) {
+  const slug = String(brand.slug ?? brand.name ?? brand.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const path = `brands/${brand.id}/aion-x-${slug}-${kind}.${ext}`;
+  const fileName = `AION x ${brand.name} — ${kind.replace(/_/g, " ")}.${ext}`;
+
+  // Every artefact, not just the workbook. The guard used to sit on the data request alone,
+  // because that is where a leak was found — but the intro deck, the operations deck and the
+  // business case are built from the same template store and go to the same prospect, and a
+  // client's name surviving into any of them is the same incident. One check, at the one
+  // point everything passes through, so a new artefact kind cannot be added without it.
+  const { data: houses } = await admin.from("brands").select("name, legal_name").neq("id", brand.id);
+  const foreign = foreignNamesFound(
+    await readableText(bytes, (b) => JSZip.loadAsync(b) as never),
+    (houses ?? []) as { name: string | null; legal_name: string | null }[],
+  ).map((n) => `it names ${n}`);
+  const existing = Array.isArray(extra.review) ? extra.review as string[] : [];
+  const review = foreign.length
+    ? [`DO NOT SEND — ${foreign.join("; ")}. Another house is named in this file. Check the ` +
+       `template in the decks bucket before this goes anywhere near a client.`, ...existing]
+    : existing;
+
+  const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType, upsert: true });
+  if (error) throw new Error(`upload failed: ${error.message}`);
+
+  await admin.from("brand_deck_outputs").upsert({
+    brand_id: brand.id, template_key: kind, storage_path: path, generated_at: new Date().toISOString(),
+    slots_filled: [],
+  }, { onConflict: "brand_id,template_key" });
+
+  const { data: signed } = await admin.storage.from(BUCKET).createSignedUrl(path, 60 * 60 * 24 * 7, { download: fileName });
+  return {
+    ok: true, kind, brand: brand.name, file_name: fileName, storage_path: path,
+    download_url: signed?.signedUrl ?? null,
+    ...extra,
+    // After the spread, so the universal check cannot be overwritten by a caller's own list.
+    leaks: [...foreign, ...(Array.isArray(extra.leaks) ? extra.leaks as string[] : [])],
+    review,
+  };
+}
+
+function escapeXml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function jwtRole(token: string): string | null {
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) return null;
+    const pad = payload.replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(pad + "=".repeat((4 - pad.length % 4) % 4)))?.role ?? null;
+  } catch { return null; }
+}
+
+function json(payload: unknown, code = 200) {
+  return new Response(JSON.stringify(payload), { status: code, headers: { ...CORS, "Content-Type": "application/json" } });
+}

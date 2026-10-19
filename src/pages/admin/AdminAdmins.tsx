@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import SignedImage from "@/components/SignedImage";
 import { supabase } from "@/integrations/supabase/client";
 import { useListUrlState } from "@/hooks/useListUrlState";
 import { sendEmail } from "@/utils/sendEmail";
@@ -238,7 +239,7 @@ const AdminAdmins = () => {
               return (
                 <div className="flex items-center gap-3">
                   {r.avatar ? (
-                    <img src={r.avatar} alt={name} className="h-8 w-8 rounded-full object-cover shrink-0" />
+                    <SignedImage bucket="profile_pictures" value={r.avatar} alt={name} className="h-8 w-8 rounded-full object-cover shrink-0" />
                   ) : (
                     <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
                       {`${r.first_name?.[0] ?? ""}${r.last_name?.[0] ?? ""}`.toUpperCase() || "A"}
@@ -295,7 +296,7 @@ const AdminAdmins = () => {
           <FormField label="Avatar">
             {ro ? (
               editing.avatar
-                ? <img src={editing.avatar} alt="" className="h-12 w-12 rounded-full border border-border object-cover" />
+                ? <SignedImage bucket="profile_pictures" value={editing.avatar} alt="" className="h-12 w-12 rounded-full border border-border object-cover" />
                 : <span className="text-sm text-muted-foreground">—</span>
             ) : (
               <ImageUpload

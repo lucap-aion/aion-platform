@@ -1,0 +1,221 @@
+import { useCallback, useEffect, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { ArrowLeft, ExternalLink } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import BrandRecordForm, { type Brand } from "./_components/BrandRecordForm";
+import NewBrand from "./_components/NewBrand";
+import CommercialCycle from "./_components/CommercialCycle";
+import BrandDocuments from "./_components/BrandDocuments";
+import GoLiveChecklist from "./_components/GoLiveChecklist";
+import BrandKnowledge from "@/pages/brand/BrandKnowledge";
+import ShopifyConnection from "./_components/ShopifyConnection";
+import { StatusBadge } from "./_components/AdminTable";
+import ConfirmDialog from "./_components/ConfirmDialog";
+import AssistantSwitch from "./_components/AssistantSwitch";
+
+// Everything about one brand, in one place.
+//
+// A brand used to be spread across three destinations: a row in a table, a
+// drawer over that table for its record, and a separate Commercial Cycle screen
+// with its own brand picker. They depend on each other constantly — the deck
+// needs the logo, the data request needs the HQ address, the demo needs the
+// website — so the common move was editing a field in one place and going back
+// to another to see whether it had fixed anything.
+//
+// Tabs rather than one long page: the record is a big form and the cycle is a
+// long accordion, and stacking them would mean scrolling past forty fields to
+// reach step 1. The tab is in the URL, so /admin/brands/18?tab=cycle is a link
+// you can send someone.
+
+type Tab = "record" | "cycle" | "golive" | "documents" | "knowledge" | "integrations";
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: "record", label: "Record" },
+  { key: "cycle", label: "Commercial cycle" },
+  // Go-live comes after the cycle because that is the order the work happens in: the cycle
+  // is how a house becomes a client, this is what has to be true before it can issue a real
+  // cover. It was written, tested and migrated, and then imported nowhere — a comment on
+  // this list claimed it was here while the tab itself was missing.
+  { key: "golive", label: "Go-live" },
+  { key: "documents", label: "Documents" },
+  { key: "knowledge", label: "Knowledge" },
+  // Where this house's commerce data comes from. The catalogue needs nothing
+  // from them; orders need a credential, which is why it has a home of its own
+  // rather than another field on the cycle.
+  { key: "integrations", label: "Integrations" },
+];
+
+export default function AdminBrandDetail() {
+  const { brandId } = useParams();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const isNew = brandId === "new";
+  const id = isNew ? null : Number(brandId);
+
+  const [brand, setBrand] = useState<Brand | null>(null);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [loading, setLoading] = useState(!isNew);
+  // The record form is unmounted the moment another tab is clicked, and it is forty fields
+  // long. Somebody who filled it in, went to check something on the cycle and came back
+  // found it freshly re-read from the database, with no warning and nothing to restore.
+  const [recordDirty, setRecordDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<Tab | null>(null);
+
+  const asked = params.get("tab") as Tab | null;
+  // A brand being created has no cycle and no documents yet, so there is only
+  // one tab to be on.
+  const tab: Tab = isNew ? "record" : (TABS.some((t) => t.key === asked) ? asked! : "record");
+
+  const load = useCallback(async () => {
+    if (id == null) return;
+    const [one, all] = await Promise.all([
+      supabase.from("brands").select("id, name, slug, website, logo_small, logo_big, status").eq("id", id).maybeSingle(),
+      // BusinessCasePanel needs the list to attribute an insurer quote to a house.
+      supabase.from("brands").select("id, name").order("name"),
+    ]);
+    setBrand((one.data ?? null) as Brand | null);
+    setBrands((all.data ?? []) as Brand[]);
+    setLoading(false);
+  }, [id]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  // Keeps ?step, so leaving the cycle to check a field on the record and coming
+  // back lands you on the step you were reading.
+  const goToTab = useCallback((t: Tab) => setParams((prev) => {
+    const next = new URLSearchParams(prev);
+    if (t === "record") next.delete("tab"); else next.set("tab", t);
+    return next;
+  }, { replace: true }), [setParams]);
+
+  const setTab = (t: Tab) => {
+    if (t !== tab && tab === "record" && recordDirty) { setPendingTab(t); return; }
+    goToTab(t);
+  };
+
+  if (isNew) {
+    return (
+      <div className="w-full space-y-6 p-4 md:p-8">
+        <Link to="/admin/brands" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Brands
+        </Link>
+        <div>
+          <h1 className="font-serif text-2xl font-bold text-foreground">New brand</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            A name and a website. Everything that can be discovered is discovered.
+          </p>
+        </div>
+        <NewBrand />
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-6 p-4 md:p-8">
+        <Skeleton className="h-4 w-24" />
+        <div className="flex items-center gap-4">
+          <Skeleton className="h-12 w-12 rounded" />
+          <div className="space-y-2"><Skeleton className="h-7 w-56" /><Skeleton className="h-3.5 w-40" /></div>
+        </div>
+        <Skeleton className="h-9 w-80 rounded-lg" />
+        <Skeleton className="h-64 w-full rounded-xl" />
+      </div>
+    );
+  }
+
+  if (!brand) {
+    return (
+      <div className="w-full space-y-4 p-4 md:p-8">
+        <Link to="/admin/brands" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Brands
+        </Link>
+        <p className="text-sm text-muted-foreground">No brand with id {brandId}.</p>
+      </div>
+    );
+  }
+
+  return (
+    // Full width with margins: on a wide window a max-width cap left the record in a strip
+    // with several hundred pixels of dead space either side, which reads as the page not
+    // fitting the screen. Still capped, because a form field three feet wide is worse.
+    <div className="w-full space-y-5 p-4 md:p-8">
+      <Link to="/admin/brands" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="h-4 w-4" /> Brands
+      </Link>
+
+      <div className="flex flex-wrap items-center gap-4">
+        {brand.logo_small ? (
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-white p-1.5">
+            <img src={brand.logo_small} alt="" className="h-full w-full object-contain" />
+          </div>
+        ) : (
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-muted text-lg font-semibold">
+            {(brand.name?.[0] ?? "?").toUpperCase()}
+          </div>
+        )}
+        <div className="min-w-0">
+          <h1 className="font-serif text-2xl font-bold text-foreground">{brand.name ?? `Brand ${brand.id}`}</h1>
+          <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            {brand.slug && <span>{brand.slug}</span>}
+            {brand.website && (
+              <a href={brand.website.startsWith("http") ? brand.website : `https://${brand.website}`}
+                target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-foreground">
+                {brand.website} <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <AssistantSwitch brandId={brand.id} brandName={brand.name ?? "This brand"} />
+          {brand.status && <StatusBadge status={brand.status} />}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1 border-b border-border">
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors ${
+              tab === t.key
+                ? "border-primary font-medium text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Each tab is mounted only while it is the one being looked at. The cycle
+          alone makes an RPC call, a function call and a handful of table reads;
+          mounting all three would fire every one of them to render one. */}
+      {tab === "record" && (
+        <BrandRecordForm brandId={brand.id} embedded onSaved={() => void load()}
+          onDirtyChange={setRecordDirty} />
+      )}
+      {tab === "cycle" && <CommercialCycle brand={brand} brands={brands} />}
+      {tab === "golive" && <GoLiveChecklist brandId={brand.id} brandName={brand.name} onBrandChanged={load} />}
+      {tab === "documents" && (
+        <BrandDocuments brandId={brand.id} brandName={brand.name ?? "the brand"} />
+      )}
+      {/* Knowledge was its own page with a brand picker that REMEMBERED your last
+          choice in localStorage. Open it, upload a contract, and it went to
+          whichever house you happened to be looking at yesterday — the database
+          isolates brands properly, but nothing stopped you filing Pomellato's
+          document under Luisa Beccaria. Here the brand is the page you are on. */}
+      {tab === "knowledge" && (
+        <BrandKnowledge key={brand.id} brandIdOverride={brand.id} canWriteOverride />
+      )}
+      {tab === "integrations" && <ShopifyConnection brandId={brand.id} />}
+
+      <ConfirmDialog
+        open={pendingTab !== null}
+        title="Leave the record with unsaved changes?"
+        description="The Record tab is only loaded while you are looking at it, so anything you have typed and not saved is lost when you move away."
+        confirmLabel="Leave and lose them"
+        onConfirm={() => { const t = pendingTab; setPendingTab(null); setRecordDirty(false); if (t) goToTab(t); }}
+        onCancel={() => setPendingTab(null)}
+      />
+    </div>
+  );
+}
+

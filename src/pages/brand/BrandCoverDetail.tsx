@@ -1,4 +1,5 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
+import SignedImage from "@/components/SignedImage";
 import { motion } from "framer-motion";
 import { ArrowLeft, Shield, User, Package, Store, Calendar, DollarSign } from "lucide-react";
 import { format } from "date-fns";
@@ -121,14 +122,14 @@ const BrandCoverDetail = () => {
           <ArrowLeft className="h-4 w-4" /> Back to Covers
         </Link>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
+          <div className="flex min-w-0 items-center gap-4">
             {catalogue?.picture && (
               <div className="h-16 w-16 shrink-0 rounded-xl bg-white p-2">
                 <img src={catalogue.picture} alt={catalogue.name || ""} className="h-full w-full object-contain" />
               </div>
             )}
-            <div>
-              <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">
+            <div className="min-w-0">
+              <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground [overflow-wrap:anywhere]">
                 {catalogue?.name || "Unknown Product"}
               </h1>
               <p className="mt-0.5 text-sm text-muted-foreground">{customerName}</p>
@@ -277,7 +278,7 @@ const BrandCoverDetail = () => {
               <div className="flex items-center gap-3 mb-4">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary shrink-0 overflow-hidden">
                   {customer?.avatar
-                    ? <img src={customer.avatar} alt="" className="h-full w-full object-cover" />
+                    ? <SignedImage bucket="profile_pictures" value={customer.avatar} alt="" className="h-full w-full object-cover" />
                     : initials}
                 </div>
                 <div className="min-w-0">
@@ -297,7 +298,7 @@ const BrandCoverDetail = () => {
               <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
                 <Package className="h-4 w-4" /> Product
               </h3>
-              <div className="space-y-2.5 text-sm">
+              <div className="space-y-2.5 text-sm [overflow-wrap:anywhere]">
                 <div>
                   <p className="text-xs text-muted-foreground">Name</p>
                   <p className="font-medium text-foreground">{catalogue?.name || "—"}</p>
@@ -331,7 +332,7 @@ const BrandCoverDetail = () => {
                 <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
                   <Store className="h-4 w-4" /> Store
                 </h3>
-                <div className="space-y-2.5 text-sm">
+                <div className="space-y-2.5 text-sm [overflow-wrap:anywhere]">
                   <div>
                     <p className="text-xs text-muted-foreground">Name</p>
                     <p className="font-medium text-foreground">{shop.name || "—"}</p>

@@ -1,0 +1,969 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { untyped } from "@/integrations/supabase/untyped";
+// The standalone `toast`, not `useToast().toast`: the hook returns a fresh
+// object every render, so a fetcher that lists it as a dependency re-runs on
+// every render — which for a fetcher that sets a loading flag is an infinite
+// loop that never leaves the spinner. This one is module-scoped and stable.
+import { toast } from "@/hooks/use-toast";
+import { Loader2, Plus, Trash2, Download, AlertTriangle, Calculator, ChevronDown, ChevronRight, Upload, FileSpreadsheet, Check } from "lucide-react";
+import InsurerQuotes from "./InsurerQuotes";
+import {
+  CATEGORIES, COVERAGES, DAMAGE_SCOPES, RATE_SOURCE_LABEL, defaultMonths, resolveRates,
+  type BusinessCase, type Quote, type RateUsed, type RecordCategory, type RecordRates,
+} from "./pricing-model";
+import { categoryName } from "@/lib/commercialCycle";
+import { Skeleton } from "@/components/ui/skeleton";
+
+// Step 4 of the commercial cycle: the pricing conversation.
+//
+// The model lives in compute_business_case (it mirrors the Ferragamo dataroom,
+// so the numbers reconcile with what clients have already been shown). This is
+// the perimeter that feeds it — declared once, adjusted a few times, then turned
+// into a deck.
+//
+// Two things this screen must never do. It must not quietly present another
+// house's insurer quote as if it were this brand's — that is why provenance is
+// on screen and on the slide. And it must not show figures that no longer match
+// the inputs above them: the previous version left the result cards standing
+// while you edited the perimeter, and left "Build deck" enabled, so the deck
+// could be built from numbers nobody had looked at.
+
+// What build-collateral answers with, for both the preview and the deck build.
+type CollateralResponse = {
+  ok?: boolean; error?: string; reason?: string;
+  business_case?: BusinessCase;
+  download_url?: string; file_name?: string;
+};
+
+type Terms = {
+  key: string; setup_fee: number; setup_discount: number; api_fee: number;
+  service_discount: number; service_discount_months: number;
+  gvt_fee: number; aion_premium_share: number; vat: number; note: string | null;
+  tiers: { tier: number; gmv_up_to: number | null; activation_fee_pct: number; service_fee_month: number | null }[];
+};
+
+type Segment = {
+  name: string; category: string; coverage: string; damage_scope: string;
+  revenues: string; cogs_ratio: string; avg_price: string; start_month: string;
+};
+
+const emptySegment = (): Segment => ({
+  name: "", category: "jewellery", coverage: "theft_and_damage", damage_scope: "",
+  // Blank = the record's COGS ratio for the category, else 30% — see resolveRates.
+  revenues: "", cogs_ratio: "", avg_price: "", start_month: "1",
+});
+
+// ── The perimeter, kept ─────────────────────────────────────────────────────
+// It used to be component state and nothing else, so leaving the tab lost it. A formal
+// Chubb quotation takes one to two months; the perimeter it applies to has to still be
+// there when it lands, and the person who opens it may not be the one who typed it.
+//
+// Stored in the MODEL's shape — numbers and nulls, exactly what compute_business_case
+// takes — rather than in the form's shape of strings, so the row is meaningful to anything
+// that reads it later. The two conversions below are the whole cost of that.
+export type StoredSegment = {
+  name: string | null; category: string | null; coverage: string | null; damage_scope: string | null;
+  revenues: number | null; cogs_ratio: number | null; avg_price: number | null; start_month: number | null;
+};
+export type StoredBusinessCase = {
+  months: number | null;
+  setup_discounted: boolean | null;
+  /** The case's own discounts, as shares. Null = the pricing terms'. Absent before 2026-10-16. */
+  setup_discount?: number | null;
+  service_discount?: number | null;
+  service_discount_months?: number | null;
+  include_api: boolean | null;
+  segments: StoredSegment[] | null;
+  imported_from: string | null;
+  imported_at: string | null;
+  updated_at: string | null;
+};
+
+const numOrNull = (v: string): number | null => {
+  const n = Number(String(v).trim());
+  return String(v).trim() !== "" && Number.isFinite(n) ? n : null;
+};
+
+// Discounts are typed as percentages ("50") and stored as shares (0.5). Blank = the terms'.
+const pctToShare = (v: string): number | null => {
+  const n = numOrNull(v);
+  return n == null ? null : Math.round(n * 100) / 10000;
+};
+const shareToPct = (n: number | null | undefined): string =>
+  n == null ? "" : String(Math.round(Number(n) * 10000) / 100);
+
+/** The discounts as the form holds them, from a saved perimeter. */
+const discountsFromStored = (s: StoredBusinessCase | null | undefined) => ({
+  // A case saved with the setup discount switched off, before it took a figure, is 0%.
+  setup: s?.setup_discount != null ? shareToPct(s.setup_discount) : s?.setup_discounted === false ? "0" : "",
+  service: shareToPct(s?.service_discount),
+  serviceMonths: s?.service_discount_months != null ? String(s.service_discount_months) : "",
+});
+type Discounts = ReturnType<typeof discountsFromStored>;
+
+/** The discounts in the model's shape — what is saved and what compute_business_case takes. */
+const discountsPayload = (d: Discounts) => ({
+  setup_discounted: pctToShare(d.setup) !== 0,
+  setup_discount: pctToShare(d.setup),
+  service_discount: pctToShare(d.service),
+  service_discount_months: numOrNull(d.serviceMonths),
+});
+
+const toStored = (s: Segment): StoredSegment => ({
+  name: s.name.trim() || null,
+  category: s.category,
+  coverage: s.coverage,
+  damage_scope: s.damage_scope || null,
+  revenues: numOrNull(s.revenues),
+  cogs_ratio: numOrNull(s.cogs_ratio),
+  avg_price: numOrNull(s.avg_price),
+  start_month: numOrNull(s.start_month) ?? 1,
+});
+
+const fromStored = (r: StoredSegment): Segment => ({
+  name: r.name ?? "",
+  category: r.category ?? "jewellery",
+  coverage: r.coverage ?? "theft_and_damage",
+  damage_scope: r.damage_scope ?? "",
+  revenues: r.revenues != null ? String(r.revenues) : "",
+  cogs_ratio: r.cogs_ratio != null ? String(r.cogs_ratio) : "",
+  avg_price: r.avg_price != null ? String(r.avg_price) : "",
+  start_month: String(r.start_month ?? 1),
+});
+
+/**
+ * The perimeter the brand record implies: one segment per category on the record, named as
+ * the data request names it, priced as its class. Revenue is the one thing the record does
+ * not know, so it is left for somebody to type — or for the returned workbook to fill.
+ */
+const fromRecord = (rows: RecordCategory[]): Segment[] =>
+  rows.map((r) => ({ ...emptySegment(), name: categoryName(r), category: r.category }));
+
+/** A wholly untouched row is not worth a database round trip. */
+const isEmptySegment = (s: Segment) =>
+  !s.name.trim() && !s.revenues.trim() && !s.avg_price.trim();
+
+/** An extracted row arrives in the model's shape already, so it reuses one conversion. */
+const fromExtracted = (r: {
+  name: string; category: string; coverage: string; damage_scope: string;
+  revenues: number; cogs_ratio: number | null; avg_price: number | null; start_month: number;
+}): Segment => fromStored({
+  name: r.name, category: r.category, coverage: r.coverage,
+  damage_scope: r.damage_scope || null,
+  revenues: r.revenues, cogs_ratio: r.cogs_ratio, avg_price: r.avg_price,
+  start_month: r.start_month,
+});
+
+const fileToBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result ?? "").replace(/^data:[^;]*;base64,/, ""));
+  reader.onerror = () => reject(new Error("could not read that file"));
+  reader.readAsDataURL(file);
+});
+
+// What build-collateral makes of the client's returned workbook.
+type ReadWorkbook = {
+  ok?: boolean; reason?: string;
+  segments?: { name: string; category: string; coverage: string; damage_scope: string;
+               revenues: number; cogs_ratio: number | null; avg_price: number | null;
+               start_month: number; source: string }[];
+  notes?: string[];
+  sheets?: string[];
+  received_as?: string;
+};
+
+const eur = (n: unknown) =>
+  typeof n === "number" ? `€${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n)}` : "—";
+const eur2 = (n: unknown) =>
+  typeof n === "number" ? `€${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)}` : "—";
+const pct = (n: unknown, digits = 2) =>
+  typeof n === "number" ? `${(n * 100).toFixed(digits)}%` : "—";
+
+/** A discount the case may set; blank shows, and applies, the pricing terms' figure. */
+function DiscountField({ label, suffix, value, standard, valid, onChange }: {
+  label: string; suffix: string; value: string; standard: string | null; valid: boolean;
+  onChange: (v: string) => void;
+}) {
+  const typed = value.trim() !== "";
+  return (
+    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+      {label}
+      <span className="flex items-center gap-1">
+        <input value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal"
+          placeholder={standard ?? ""} aria-invalid={!valid}
+          className={`w-20 rounded-md border bg-background px-2 py-1.5 text-sm text-foreground ${valid ? "border-border" : "border-destructive"}`} />
+        <span>{suffix}</span>
+      </span>
+      {!valid ? (
+        <span className="max-w-40 text-[11px] text-destructive">{suffix === "%" ? "0 to 100." : "A whole number up to 120."}</span>
+      ) : !typed || value.trim() === standard ? (
+        <span className="max-w-40 text-[11px]">Standard terms{standard != null ? ` (${standard}${suffix === "%" ? "%" : ""})` : ""}.</span>
+      ) : (
+        <span className="max-w-40 text-[11px]">
+          Set by hand.{" "}
+          <button type="button" className="underline" onClick={() => onChange("")}>Standard</button>
+        </span>
+      )}
+    </label>
+  );
+}
+
+export default function BusinessCasePanel({ brandId, brands, stored, onArtifact }: {
+  brandId: number | null;
+  brands: { id: number; name: string | null }[];
+  /** The perimeter as last saved, from the cycle overview. Null before anyone declared one. */
+  stored?: StoredBusinessCase | null;
+  onArtifact?: () => void;
+}) {
+  const quotesRef = useRef<HTMLDivElement | null>(null);
+  // Whether the perimeter on screen is the perimeter on the server. Null before the first
+  // read, so a brand nobody has touched does not claim to have saved anything.
+  const [saveState, setSaveState] = useState<null | "saving" | "saved">(null);
+  // Which combination the reader was sent here to fix. Handed to the quotes panel so it
+  // opens on that category and cover rather than on a blank form.
+  const [openQuoteWith, setOpenQuoteWith] = useState<{ category: string; coverage: string } | null>(null);
+  const [months, setMonths] = useState("36");
+  const [discounts, setDiscounts] = useState<Discounts>(() => discountsFromStored(null));
+  const [includeApi, setIncludeApi] = useState(false);
+  const [segments, setSegments] = useState<Segment[]>([emptySegment()]);
+  const [busy, setBusy] = useState<null | "preview" | "deck">(null);
+  const [result, setResult] = useState<BusinessCase | null>(null);
+  const [deck, setDeck] = useState<{ url: string; name: string } | null>(null);
+  const [showQuotes, setShowQuotes] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importNotes, setImportNotes] = useState<string[] | null>(null);
+  const [importedFrom, setImportedFrom] = useState<string | null>(null);
+  const [importedAt, setImportedAt] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [quotesLoaded, setQuotesLoaded] = useState(false);
+  const [loadingRefs, setLoadingRefs] = useState(true);
+  // The assumptions behind every figure on this screen. They were invisible —
+  // the GVT fee, AION's share of the net premium, the setup fee and the tier
+  // table all live in one row of aion_pricing_terms, and nothing showed you
+  // which row was being applied or what was in it.
+  const [terms, setTerms] = useState<Terms | null>(null);
+  // The brand record's rates — per category and house-wide. compute_business_case prices
+  // from them (20261014000002); the panel reads them too, to seed the perimeter and to show
+  // what a piece costs before anybody has a revenue figure.
+  const [recordRows, setRecordRows] = useState<RecordCategory[] | null>(null);
+  const [recordRates, setRecordRates] = useState<RecordRates | null>(null);
+  // Set when a workbook has just been read, so the figures follow without another click.
+  const calcAfterImport = useRef(false);
+
+  // Which categories can actually be priced, so the answer arrives before the
+  // Calculate button rather than as a failure out of it.
+  const loadQuotes = useCallback(async () => {
+    const { data } = await untyped.from("insurance_quotes")
+      .select("category, coverage, damage_scope, rate_of_cogs, brand_id, quoted_for, quoted_at, id, insurer, gmv_from, gmv_to, active, duration_years")
+      .eq("active", true);
+    setQuotes((data ?? []) as unknown as Quote[]);
+    setQuotesLoaded(true);
+  }, []);
+  useEffect(() => { void loadQuotes(); }, [loadQuotes]);
+
+  useEffect(() => {
+    if (brandId == null) return;
+    let live = true;
+    void (async () => {
+      const [cats, rates] = await Promise.all([
+        untyped.from("brand_category_fees")
+          .select("category, label, insurance_premium, activation_fee, aion_premium_fee, cogs_ratio")
+          .eq("brand_id", brandId).order("id"),
+        supabase.from("brands").select("insurance_premium, activation_fee, aion_premium_fee")
+          .eq("id", brandId).maybeSingle(),
+      ]);
+      if (!live) return;
+      setRecordRows((cats.data ?? []) as RecordCategory[]);
+      setRecordRates((rates.data ?? null) as RecordRates | null);
+    })();
+    return () => { live = false; };
+  }, [brandId]);
+
+  useEffect(() => {
+    void (async () => {
+      const { data } = await untyped.from("aion_pricing_terms")
+        .select("*").eq("key", "standard_2026").maybeSingle();
+      setTerms((data ?? null) as Terms | null);
+      setLoadingRefs(false);
+    })();
+  }, []);
+
+  // ── The perimeter survives the tab ────────────────────────────────────────
+  // Seeded once per brand from what was last saved, then written back as it is edited.
+  // Everything below used to be component state and nothing else: eight fields per segment,
+  // gone the moment you navigated away, retyped when the client came back with a question.
+  const seededFor = useRef<number | null>(null);
+  const [serverSig, setServerSig] = useState<string | null>(null);
+
+  // The term the case models when nobody has typed one — read off the insurer quotes, so the
+  // seed waits for them.
+  const monthsDefault = useMemo(() => defaultMonths(quotes, brandId), [quotes, brandId]);
+  useEffect(() => {
+    if (brandId == null || seededFor.current === brandId || !quotesLoaded) return;
+    seededFor.current = brandId;
+    const rows = (stored?.segments ?? []).map(fromStored);
+    setMonths(String(stored?.months ?? monthsDefault.months));
+    setDiscounts(discountsFromStored(stored));
+    setIncludeApi(stored?.include_api === true);
+    setSegments(rows.length ? rows : [emptySegment()]);
+    setImportedFrom(stored?.imported_from ?? null);
+    setImportedAt(stored?.imported_at ?? null);
+    setServerSig(JSON.stringify({
+      months: stored?.months ?? monthsDefault.months,
+      ...discountsPayload(discountsFromStored(stored)),
+      include_api: stored?.include_api === true,
+      segments: rows.filter((r) => !isEmptySegment(r)).map(toStored),
+    }));
+  }, [brandId, stored, quotesLoaded, monthsDefault]);
+
+  // "If the data request is not available, compute the numbers based on the Record tab."
+  // A brand nobody has priced starts from its record's categories rather than from one blank
+  // row — once, when the record arrives, and only while the perimeter is still untouched.
+  const recordSeededFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (brandId == null || !recordRows?.length || recordSeededFor.current === brandId) return;
+    if (seededFor.current !== brandId) return;
+    recordSeededFor.current = brandId;
+    if ((stored?.segments ?? []).length) return;
+    setSegments((prev) => (prev.every(isEmptySegment) ? fromRecord(recordRows) : prev));
+  }, [brandId, recordRows, stored]);
+
+  const startFromRecord = () => {
+    if (!recordRows?.length) return;
+    const touched = segments.some((s) => !isEmptySegment(s));
+    if (touched && !window.confirm("Replace the perimeter with the brand record's categories? Revenues typed here are cleared.")) return;
+    setSegments(fromRecord(recordRows));
+    setImportedFrom(null); setImportedAt(null);
+  };
+
+  const perimeterSig = useMemo(() => JSON.stringify({
+    months: Number(months),
+    ...discountsPayload(discounts),
+    include_api: includeApi,
+    segments: segments.filter((r) => !isEmptySegment(r)).map(toStored),
+  }), [months, discounts, includeApi, segments]);
+
+  const monthsValid = /^\d+$/.test(months.trim()) && Number(months) >= 1 && Number(months) <= 120;
+  // Blank is valid — it means the terms' figure.
+  const pctValid = (v: string) => v.trim() === "" || (/^\d+(\.\d+)?$/.test(v.trim()) && Number(v) <= 100);
+  const discountsValid = pctValid(discounts.setup) && pctValid(discounts.service) &&
+    (discounts.serviceMonths.trim() === "" || (/^\d+$/.test(discounts.serviceMonths.trim()) && Number(discounts.serviceMonths) <= 120));
+
+  // Debounced, and only when something actually differs from what the server holds — a save
+  // per keystroke on a form this size is a write storm, and re-saving the seed on mount
+  // would touch every brand you merely looked at.
+  useEffect(() => {
+    if (brandId == null || serverSig === null || perimeterSig === serverSig) return;
+    // A months box mid-edit ("3" on the way to "36") is not worth persisting, and the
+    // column is constrained to 1–120 so an out-of-range value would be rejected anyway.
+    if (!monthsValid || !discountsValid) return;
+    setSaveState("saving");
+    const t = setTimeout(() => {
+      void (async () => {
+        const payload = JSON.parse(perimeterSig) as Record<string, unknown>;
+        const { error } = await untyped.from("brand_business_case").upsert({
+          brand_id: brandId, ...payload,
+          imported_from: importedFrom, imported_at: importedAt,
+          updated_at: new Date().toISOString(),
+        } as never, { onConflict: "brand_id" });
+        if (error) {
+          toast({ title: "The perimeter could not be saved", description: error.message, variant: "destructive" });
+          return;
+        }
+        setServerSig(perimeterSig);
+        setSaveState("saved");
+      })();
+    }, 900);
+    return () => clearTimeout(t);
+  }, [brandId, perimeterSig, serverSig, monthsValid, discountsValid, importedFrom, importedAt]);
+
+  // ── Reading it out of the client's own workbook ───────────────────────────
+  // The workbook AION generated, filled in and sent back. Retyping it is where the two
+  // hours in this step actually go.
+  const onWorkbook = async (file: File) => {
+    if (brandId == null) return;
+    if (file.size > 12 * 1024 * 1024) {
+      toast({ title: "That file is too large", description: "The reader takes workbooks up to 12MB.", variant: "destructive" });
+      return;
+    }
+    setImporting(true);
+    setImportNotes(null);
+    try {
+      const b64 = await fileToBase64(file);
+      const { data, error } = await supabase.functions.invoke("build-collateral", {
+        body: { brand_id: brandId, kind: "read_data_request", file_base64: b64, file_name: file.name },
+      });
+      if (error) throw new Error(error.message);
+      const d = (data ?? {}) as ReadWorkbook & { error?: string };
+      if (d.error) throw new Error(d.error);
+      if (d.ok === false) {
+        toast({ title: "Could not read that workbook", description: d.reason, variant: "destructive" });
+        return;
+      }
+      // A block named after one of the record's categories is that category: its pricing
+      // class is the record's, not the reader's guess from the words ("Bags and leather
+      // goods" reads as leather, and would miss the bags quote).
+      const byName = new Map((recordRows ?? []).map((r) => [categoryName(r).toLowerCase(), r.category]));
+      const rows = (d.segments ?? []).map((seg) => fromExtracted({
+        ...seg, category: byName.get(seg.name.trim().toLowerCase()) ?? seg.category,
+      }));
+      setImportNotes(d.notes ?? []);
+      if (rows.length) {
+        // REPLACES the perimeter rather than appending to it: importing twice should not
+        // silently double what is being priced.
+        setSegments(rows);
+        setImportedFrom(d.received_as ?? file.name);
+        setImportedAt(new Date().toISOString());
+        // "Upload the Data Request sheet and compute the numbers based on it." The figures
+        // follow the read; the deck still waits for a person to press Build.
+        calcAfterImport.current = true;
+        toast({
+          title: `${rows.length} segment${rows.length === 1 ? "" : "s"} read from the workbook`,
+          description: "Priced from what they declared. Check every figure against what they meant before building the deck.",
+        });
+      } else {
+        toast({
+          title: "No perimeter in that workbook",
+          description: "It is attached to the brand either way — see the notes below.",
+          variant: "destructive",
+        });
+      }
+      // The returned workbook is an artifact now, so the cycle should re-sign its links.
+      onArtifact?.();
+    } catch (e) {
+      toast({ title: "Could not read the workbook", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
+    } finally {
+      setImporting(false);
+      // Clear the input, or picking the SAME file again fires no change event.
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const jumpToQuotes = (seg: { category: string; coverage: string }) => {
+    setShowQuotes(true);
+    setOpenQuoteWith({ category: seg.category, coverage: seg.coverage });
+    // After the panel has been laid out, not before.
+    requestAnimationFrame(() => quotesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+
+  // Any change to the inputs invalidates what is on screen. Keeping stale
+  // figures visible next to edited inputs is how a wrong number gets read out.
+  const inputs = useMemo(
+    () => JSON.stringify({ brandId, months, discounts, includeApi, segments }),
+    [brandId, months, discounts, includeApi, segments],
+  );
+  const computedFor = useRef<string | null>(null);
+  // Clearing stale figures is right; doing it in silence is not. Half the screen used to
+  // disappear the moment somebody fixed a digit, with nothing to say why.
+  const [staleCleared, setStaleCleared] = useState(false);
+  useEffect(() => {
+    if (computedFor.current !== null && computedFor.current !== inputs) {
+      setResult(null); setDeck(null); computedFor.current = null; setStaleCleared(true);
+    }
+  }, [inputs]);
+
+  const payloadSegments = useMemo(() =>
+    segments
+      .filter((s) => s.name.trim() && Number(s.revenues) > 0)
+      .map((s) => ({
+        name: s.name.trim(),
+        category: s.category,
+        coverage: s.coverage,
+        damage_scope: s.damage_scope || undefined,
+        revenues: Number(s.revenues),
+        // Left out when blank, so the model takes the record's ratio for the category.
+        cogs_ratio: Number(s.cogs_ratio) || undefined,
+        avg_price: Number(s.avg_price) || undefined,
+        start_month: Number(s.start_month) || 1,
+      })),
+  [segments]);
+
+  // Preflight, per segment: is there a rate that could price this at all?
+  // A segment is priceable when the record or a quote gives it a rate — the record's
+  // house-wide rate catches most, so this now fires only for a house with none on its record.
+  const uncovered = useMemo(() =>
+    loadingRefs || recordRows === null ? [] : payloadSegments.filter((s) =>
+      resolveRates(s, recordRows, recordRates, quotes, brandId).source === null),
+  [payloadSegments, quotes, loadingRefs, recordRows, recordRates, brandId]);
+
+  // What one piece costs the brand, per segment, before any revenue is known: the insurer's
+  // rate applies to cost of goods, the activation fee to the price. Service and setup are
+  // fixed sums and need a volume to become per-piece figures, so they are left to Calculate.
+  const perPiece = useMemo(() => segments
+    .filter((s) => s.name.trim())
+    .map((s) => {
+      const r = resolveRates(s, recordRows ?? [], recordRates, quotes, brandId, terms?.aion_premium_share ?? null);
+      const insurerPct = r.rate != null ? r.rate * r.cogs : null;
+      const total = insurerPct != null ? insurerPct + (r.activation ?? 0) : null;
+      const price = Number(s.avg_price) || null;
+      return { name: s.name.trim(), source: r.source, rate: r.rate, cogs: r.cogs, cogsFrom: r.cogsFrom, insurerPct, activation: r.activation, total, price };
+    }),
+  [segments, recordRows, recordRates, quotes, brandId, terms]);
+
+  const call = async (extra: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke("build-collateral", {
+      body: {
+        brand_id: brandId, kind: "business_case",
+        months: Number(months),
+        ...discountsPayload(discounts),
+        include_api: includeApi,
+        segments: payloadSegments,
+        ...extra,
+      },
+    });
+    if (error) throw new Error(error.message);
+    const d = (data ?? {}) as CollateralResponse;
+    if (d.error) throw new Error(d.error);
+    return d;
+  };
+
+  const calculate = async () => {
+    if (!payloadSegments.length) {
+      toast({ title: "Nothing to price yet", description: "A segment needs a name and a covered revenue above zero.", variant: "destructive" });
+      return;
+    }
+    if (!monthsValid) {
+      toast({ title: "Check the months modelled", description: "A whole number of months between 1 and 120.", variant: "destructive" });
+      return;
+    }
+    if (!discountsValid) {
+      toast({ title: "Check the discounts", description: "A percentage between 0 and 100, and a whole number of months up to 120 — or blank for the standard terms.", variant: "destructive" });
+      return;
+    }
+    setBusy("preview"); setDeck(null);
+    try {
+      const out = await call({ preview: true });
+      if (out.ok === false) { toast({ title: "Cannot price this yet", description: out.reason, variant: "destructive" }); setResult(null); return; }
+      setResult(out.business_case ?? null);
+      computedFor.current = inputs; setStaleCleared(false);
+    } catch (e) {
+      toast({ title: "Calculation failed", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
+    } finally { setBusy(null); }
+  };
+
+  useEffect(() => {
+    if (!calcAfterImport.current || busy !== null) return;
+    calcAfterImport.current = false;
+    if (payloadSegments.length) void calculate();
+    // calculate is recreated every render; the trigger is the imported perimeter landing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payloadSegments]);
+
+  const buildDeck = async () => {
+    setBusy("deck");
+    try {
+      const out = await call({});
+      if (out.ok === false) { toast({ title: "Cannot build the deck", description: out.reason, variant: "destructive" }); return; }
+      setResult(out.business_case ?? result);
+      computedFor.current = inputs; setStaleCleared(false);
+      setDeck({ url: String(out.download_url ?? ""), name: String(out.file_name ?? "business case.pptx") });
+      toast({ title: "Deck ready" });
+      onArtifact?.();
+    } catch (e) {
+      toast({ title: "Deck failed", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
+    } finally { setBusy(null); }
+  };
+
+  const setSeg = (i: number, patch: Partial<Segment>) =>
+    setSegments((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+
+  const fees = result?.aion_fees;
+  const pp = result?.per_product;
+  const field = "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-4 rounded-xl border border-border p-4">
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          Months modelled
+          <input value={months} onChange={(e) => setMonths(e.target.value)} inputMode="numeric"
+            aria-invalid={!monthsValid}
+            className={`w-28 ${field} ${monthsValid ? "" : "border-destructive"}`} />
+          {!monthsValid ? (
+            <span className="max-w-56 text-[11px] text-destructive">
+              A whole number between 1 and 120. Nothing on this panel is being saved until it is.
+            </span>
+          ) : Number(months) === monthsDefault.months ? (
+            <span className="max-w-56 text-[11px]">From {monthsDefault.basis}.</span>
+          ) : (
+            <span className="max-w-56 text-[11px]">
+              Set by hand — {monthsDefault.basis} would be {monthsDefault.months}.{" "}
+              <button type="button" className="underline" onClick={() => setMonths(String(monthsDefault.months))}>Use it</button>
+            </span>
+          )}
+        </label>
+        {/* "Lo sconto dovrebbe essere modellabile" — blank takes the standard terms, and says so. */}
+        <DiscountField label="Setup discount" suffix="%" value={discounts.setup}
+          standard={terms ? shareToPct(terms.setup_discount) : null} valid={pctValid(discounts.setup)}
+          onChange={(v) => setDiscounts((d) => ({ ...d, setup: v }))} />
+        <DiscountField label="Service discount" suffix="%" value={discounts.service}
+          standard={terms ? shareToPct(terms.service_discount) : null} valid={pctValid(discounts.service)}
+          onChange={(v) => setDiscounts((d) => ({ ...d, service: v }))} />
+        <DiscountField label="…for the first" suffix="months" value={discounts.serviceMonths}
+          standard={terms ? String(terms.service_discount_months) : null}
+          valid={discounts.serviceMonths.trim() === "" || (/^\d+$/.test(discounts.serviceMonths.trim()) && Number(discounts.serviceMonths) <= 120)}
+          onChange={(v) => setDiscounts((d) => ({ ...d, serviceMonths: v }))} />
+        <label className="flex items-center gap-2 pb-2 text-sm">
+          <input type="checkbox" checked={includeApi} onChange={(e) => setIncludeApi(e.target.checked)} />
+          Include API fee
+        </label>
+        <p className="pb-2 text-xs text-muted-foreground">
+          Covered revenue is the figure for the whole modelled period. A segment starting later contributes
+          only the months it is live.
+        </p>
+      </div>
+
+      <div className="space-y-3 rounded-xl border border-border p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              Perimeter
+              {saveState && (
+                <span className={`inline-flex items-center gap-1 text-[11px] font-normal ${
+                  saveState === "saving" ? "text-muted-foreground" : "text-emerald-700 dark:text-emerald-400"}`}>
+                  {saveState === "saving"
+                    ? <><Loader2 className="h-3 w-3 animate-spin" /> Saving…</>
+                    : <><Check className="h-3 w-3" /> Saved</>}
+                </span>
+              )}
+            </h3>
+            {!importedFrom && (
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Rates and fees come from the brand record. Import the returned data request to fill
+                the revenues, or type them.
+              </p>
+            )}
+            {importedFrom && (
+              <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <FileSpreadsheet className="h-3 w-3" />
+                Read from {importedFrom}
+                {importedAt ? ` on ${new Date(importedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* The workbook AION generated, filled in and sent back. Reading it is the
+                difference between checking eight fields per segment and typing them. */}
+            <label className={`inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs ${
+              importing || brandId == null ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-muted"}`}>
+              {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              {importing ? "Reading…" : "Import returned workbook"}
+              <input
+                ref={fileRef} type="file" className="sr-only"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                disabled={importing || brandId == null}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void onWorkbook(f); }}
+              />
+            </label>
+            {recordRows && recordRows.length > 0 && (
+              <button onClick={startFromRecord}
+                title="One segment per category on the brand record"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs hover:bg-muted">
+                Start from the record
+              </button>
+            )}
+            <button onClick={() => setSegments((p) => [...p, emptySegment()])}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs">
+              <Plus className="h-3.5 w-3.5" /> Add segment
+            </button>
+          </div>
+        </div>
+
+        {/* What the reader had to assume. Shown next to the fields it filled, because a
+            figure that came out of a guess and a figure the client declared look identical
+            once they are both in a box. */}
+        {importNotes && importNotes.length > 0 && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-400">What the reader did with their workbook</p>
+              <button onClick={() => setImportNotes(null)} className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground">
+                Dismiss
+              </button>
+            </div>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+              {importNotes.map((n) => <li key={n}>{n}</li>)}
+            </ul>
+          </div>
+        )}
+
+        {segments.map((s, i) => (
+          <div key={i} className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
+            <div className="grid gap-2 sm:grid-cols-4">
+              <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                Segment
+                <input className={field} placeholder="Pilot — EU" value={s.name}
+                  onChange={(e) => setSeg(i, { name: e.target.value })} />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                Category
+                <select className={field} value={s.category} onChange={(e) => setSeg(i, { category: e.target.value })}>
+                  {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                Cover
+                <select className={field} value={s.coverage} onChange={(e) => setSeg(i, { coverage: e.target.value })}>
+                  {COVERAGES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                Damage scope
+                <select className={field} value={s.damage_scope} disabled={s.coverage === "theft"}
+                  onChange={(e) => setSeg(i, { damage_scope: e.target.value })}>
+                  {DAMAGE_SCOPES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-4">
+              <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                Covered revenue €
+                <input className={field} inputMode="numeric" placeholder="12000000" value={s.revenues}
+                  onChange={(e) => setSeg(i, { revenues: e.target.value })} />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                COGS ratio
+                {/* Blank takes the record's ratio for this category; the placeholder says which. */}
+                <input className={field} inputMode="decimal" value={s.cogs_ratio}
+                  placeholder={String(resolveRates(s, recordRows ?? [], recordRates, quotes, brandId).cogs)}
+                  onChange={(e) => setSeg(i, { cogs_ratio: e.target.value })} />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                Average price €
+                <input className={field} inputMode="numeric" placeholder="4200" value={s.avg_price}
+                  onChange={(e) => setSeg(i, { avg_price: e.target.value })} />
+              </label>
+              <div className="flex items-end gap-2">
+                <label className="flex flex-1 flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Starts month
+                  <input className={field} inputMode="numeric" value={s.start_month}
+                    onChange={(e) => setSeg(i, { start_month: e.target.value })} />
+                </label>
+                {segments.length > 1 && (
+                  <button onClick={() => setSegments((p) => p.filter((_, j) => j !== i))}
+                    className="mb-1.5 rounded p-1.5 text-muted-foreground hover:text-destructive" aria-label="Remove segment">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {perPiece.some((p) => p.total != null) && (
+          <div className="rounded-lg border border-border bg-background p-3">
+            <p className="text-xs font-medium text-foreground">What a piece costs the brand, at these rates</p>
+            <p className="text-[11px] text-muted-foreground">Before service and setup, which are fixed sums and need the revenues to spread.</p>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[520px] text-xs">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="py-1 pr-3 font-medium">Segment</th>
+                    <th className="py-1 pr-3 font-medium">Insurer</th>
+                    <th className="py-1 pr-3 font-medium">Activation</th>
+                    <th className="py-1 pr-3 font-medium">Total, % of price</th>
+                    <th className="py-1 pr-3 font-medium">Per piece</th>
+                    <th className="py-1 font-medium">Rate from</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perPiece.map((p, i) => (
+                    <tr key={`${p.name}-${i}`} className="border-t border-border/60">
+                      <td className="py-1 pr-3 text-foreground">{p.name}</td>
+                      <td className="py-1 pr-3">{p.insurerPct != null ? pct(p.insurerPct) : "—"}{p.rate != null && <span className="text-muted-foreground"> ({pct(p.rate)} of COGS at {pct(p.cogs, 0)}{p.cogsFrom === "record" ? ", record" : p.cogsFrom === "default" ? ", default" : ""})</span>}</td>
+                      <td className="py-1 pr-3">{p.activation != null ? pct(p.activation) : "tier"}</td>
+                      <td className="py-1 pr-3 font-medium text-foreground">{p.total != null ? pct(p.total) : "—"}</td>
+                      <td className="py-1 pr-3">{p.total != null && p.price ? eur2(p.total * p.price) : "—"}</td>
+                      <td className="py-1 text-muted-foreground">{p.source ? RATE_SOURCE_LABEL[p.source] : "no rate"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {uncovered.length > 0 && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <span>
+              No rate for{" "}
+              {uncovered.map((s) => `${s.name} (${s.coverage === "theft" ? "theft only" : "theft + damage"})`).join(", ")}
+              {" "}— the brand record has no insurance premium and there is no quote.
+              {" "}Set one on the record, or <button onClick={() => jumpToQuotes(uncovered[0])} className="font-medium underline">add the quote</button>.
+            </span>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button onClick={() => void calculate()} disabled={busy !== null || !brandId}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
+            {busy === "preview" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />} Calculate
+          </button>
+          <button onClick={() => void buildDeck()} disabled={busy !== null || !result}
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm disabled:opacity-50">
+            {busy === "deck" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Build deck
+          </button>
+          {!result && (
+            <span className="self-center text-xs text-muted-foreground">
+              Calculate first — the deck is built from the figures you have checked.
+            </span>
+          )}
+          {deck && (
+            <a href={deck.url} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+              <Download className="h-4 w-4" /> {deck.name}
+            </a>
+          )}
+        </div>
+      </div>
+
+      {!result && staleCleared && (
+        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+          <Calculator className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>The inputs changed, so the figures below were cleared rather than left to be read out of date. Calculate again.</span>
+        </div>
+      )}
+
+      {result && (
+        <div className="space-y-4">
+          {result.indicative && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <span>
+                <strong>Indicative pricing.</strong> At least one rate below is a quote for a different house
+                or the brand record's house-wide default. Showing it is a commercial decision — the slide
+                carries the same warning.
+              </span>
+            </div>
+          )}
+
+          {(result.notes ?? []).length > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <p className="font-medium text-amber-700 dark:text-amber-400">Worth checking before you present this</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {(result.notes as string[]).map((n) => <li key={n}>{n}</li>)}
+              </ul>
+            </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-4">
+            {[
+              ["Covered revenue", eur(result.revenues_covered)],
+              ["Gross premium", eur(result.gross_premium)],
+              ["AION fees", eur(fees?.total)],
+              ["Cost to the brand", eur(result.total_cost_to_brand)],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-border p-4">
+                <p className="font-serif text-xl font-bold text-foreground">{value}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-xl border border-border p-4">
+              <h3 className="mb-2 text-sm font-semibold text-foreground">Per piece</h3>
+              {pp ? (
+                <ul className="space-y-1 text-sm text-muted-foreground">
+                  <li>Insurer <span className="text-foreground">{eur2(pp.insurer_fee)}</span></li>
+                  <li>AION <span className="text-foreground">{eur2(pp.aion_fee)}</span></li>
+                  <li>Recurring total <span className="text-foreground">{eur2(pp.total)}</span> — {pct(pp.total_pct_of_price)} of retail, {pct(pp.total_pct_of_price_incl_vat)} of retail incl. VAT</li>
+                  <li className="text-xs">Setup spread over the perimeter adds {eur2(pp.setup)} → <span className="text-foreground">{eur2(pp.total_with_setup)}</span> all-in</li>
+                </ul>
+              ) : <p className="text-sm text-muted-foreground">Add an average price per segment for per-piece figures.</p>}
+            </div>
+
+            <div className="rounded-xl border border-border p-4">
+              <h3 className="mb-2 text-sm font-semibold text-foreground">AION</h3>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li>Tier <span className="text-foreground">{fees?.tier ?? "—"}</span> on covered GMV</li>
+                <li>Setup <span className="text-foreground">{eur(fees?.setup)}</span> · Service <span className="text-foreground">{eur(fees?.service)}</span> · Activation <span className="text-foreground">{eur(fees?.activation)}</span></li>
+                {typeof fees?.service_fee_month === "number" && (
+                  <li className="text-xs">{fees.service_months_discounted} month{fees.service_months_discounted === 1 ? "" : "s"} discounted, {fees.service_months_full} at {eur(fees.service_fee_month)}/month</li>
+                )}
+                <li>Revenue over the period <span className="text-foreground">{eur(result.aion_total_revenue)}</span></li>
+                {fees?.service_note && <li className="text-amber-600">{fees.service_note}</li>}
+              </ul>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border p-4">
+            <h3 className="mb-2 text-sm font-semibold text-foreground">Where these rates come from</h3>
+            <ul className="space-y-1 text-xs text-muted-foreground">
+              {(result.rates_used ?? []).map((r: RateUsed, i: number) => {
+                const fromRecord = r.rate_source === "record_category" || r.rate_source === "record_brand";
+                const indicative = r.rate_source ? r.rate_source === "borrowed_quote" || r.rate_source === "record_brand" : !r.own_quote;
+                return (
+                  <li key={i}>
+                    <span className="text-foreground">{r.segment || r.category}</span>
+                    {" · "}{r.coverage === "theft" ? "theft only" : `theft + damage${r.damage_scope ? ` (${r.damage_scope})` : ""}`}
+                    {" — "}{pct(r.rate_of_cogs)} of COGS · {fromRecord
+                      ? `${RATE_SOURCE_LABEL[r.rate_source!]}${r.source ? ` (${r.source})` : ""}`
+                      : <>{r.insurer}{r.quoted_for ? `, quoted for ${r.quoted_for}` : ""}{r.quoted_at ? ` (${r.quoted_at})` : ""}</>}
+                    {indicative && <span className="ml-1 font-medium text-amber-600">— indicative</span>}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {loadingRefs ? (
+        <div className="space-y-2 rounded-xl border border-border p-4">
+          <Skeleton className="h-4 w-56" />
+          <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-3.5 w-full max-w-64" />)}
+          </div>
+          <Skeleton className="h-3.5 w-full max-w-md" />
+        </div>
+      ) : terms && (
+        <div className="rounded-xl border border-border p-4">
+          <h3 className="mb-2 text-sm font-semibold text-foreground">The terms these figures apply</h3>
+          <div className="grid gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-2">
+            <span>Setup <span className="text-foreground">{eur(terms.setup_fee)}</span>, discounted {pct(terms.setup_discount, 0)}</span>
+            <span>GVT fee <span className="text-foreground">{pct(terms.gvt_fee)}</span> between gross and net premium</span>
+            <span>API fee <span className="text-foreground">{eur(terms.api_fee)}</span> when included</span>
+            <span>AION takes <span className="text-foreground">{pct(terms.aion_premium_share, 0)}</span> of the net premium, unless the brand record says otherwise</span>
+            <span>Service discounted {pct(terms.service_discount, 0)} for the first {terms.service_discount_months} months</span>
+            <span>VAT <span className="text-foreground">{pct(terms.vat, 0)}</span></span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            {(terms.tiers ?? []).map((t) => (
+              <span key={t.tier}>
+                <span className="text-foreground">Tier {t.tier}</span>
+                {" "}to {t.gmv_up_to == null ? "no cap" : eur(t.gmv_up_to)} · {pct(t.activation_fee_pct, 2)} activation ·{" "}
+                {t.service_fee_month == null ? "service on quotation" : `${eur(t.service_fee_month)}/mo service`}
+              </span>
+            ))}
+          </div>
+          {terms.note && <p className="mt-2 text-[11px] text-muted-foreground">{terms.note}</p>}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Insurer rate: this house's own quote, then the brand record's category rate, then its
+            house-wide rate, then a quote for another house. Activation fee and AION premium fee:
+            the record per category, then house-wide, then these terms.
+          </p>
+        </div>
+      )}
+
+      <div ref={quotesRef} className="rounded-xl border border-border">
+        <button onClick={() => setShowQuotes((v) => !v)}
+          className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-foreground">
+          {showQuotes ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          Insurer quotes
+          {loadingRefs
+            ? <Skeleton className="h-3.5 w-20" />
+            : <span className="font-normal text-muted-foreground">· {quotes.length} on file</span>}
+        </button>
+        {showQuotes && (
+          <div className="border-t border-border p-4">
+            <InsurerQuotes brands={brands} brandId={brandId ?? undefined} openWith={openQuoteWith}
+              onChanged={() => void loadQuotes()} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -7,6 +7,9 @@ import {
   isAboveCoverageCap,
   policyCoveredValue,
   resolveMaxCoveredValue,
+  DEFAULT_MIN_COVERED_VALUE,
+  resolveMinCoveredValue,
+  policyStatusForRetail,
 } from "@/lib/coverage";
 
 describe("coverage cap", () => {
@@ -31,5 +34,34 @@ describe("coverage cap", () => {
     expect(isAboveCoverageCap(frozen, 100000)).toBe(true);
     expect(isAboveCoverageCap({ recommended_retail_price: 5030, covered_value: 5030 }, 100000)).toBe(false);
     expect(coveredUpToLabel(frozen, 100000)).toBe("Covered up to €100,000");
+  });
+});
+
+describe("activation floor", () => {
+  it("resolves the brand floor, falling back to the historic 999", () => {
+    expect(resolveMinCoveredValue(null)).toBe(DEFAULT_MIN_COVERED_VALUE);
+    expect(resolveMinCoveredValue({ min_covered_value: null })).toBe(999);
+    expect(resolveMinCoveredValue({ min_covered_value: 300 })).toBe(300);
+  });
+
+  it("treats 0 as a real floor — a brand that covers everything", () => {
+    expect(resolveMinCoveredValue({ min_covered_value: 0 })).toBe(0);
+    expect(policyStatusForRetail(1, 0)).toBe("live");
+  });
+
+  it("keeps Roberto Coin's behaviour at 999 exactly as before", () => {
+    expect(policyStatusForRetail(1000, 999)).toBe("live");
+    expect(policyStatusForRetail(999, 999)).toBe("blocked");
+    expect(policyStatusForRetail(998.99, 999)).toBe("blocked");
+  });
+
+  it("activates a EUR 450 Ferragamo belt once the floor is lowered to 300", () => {
+    expect(policyStatusForRetail(450, 999)).toBe("blocked");
+    expect(policyStatusForRetail(450, 300)).toBe("live");
+  });
+
+  it("blocks a missing or unparseable price rather than activating it", () => {
+    expect(policyStatusForRetail(null, 999)).toBe("blocked");
+    expect(policyStatusForRetail(undefined, 999)).toBe("blocked");
   });
 });

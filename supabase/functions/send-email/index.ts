@@ -1,4 +1,5 @@
 import { Resend } from "npm:resend@4";
+import { originAllowed, originRefused } from "../_shared/origin.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY")!);
@@ -42,6 +43,15 @@ function hslToHex(hsl: string): string {
 }
 
 const AION_PRIMARY = "#7A5F28";
+
+// The escalation email carries text an associate typed, straight into HTML. An
+// apostrophe or a stray angle bracket in a real question would mangle the mail;
+// a deliberate one would do worse.
+function esc(v: unknown): string {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 
 // ─── Shared styles (default = AION branded) ──────────────────────────────────
 function makeStyles(primaryHex: string) {
@@ -272,6 +282,26 @@ function supportInternalHtml(message: any): string {
     ${autoNote(S)}`);
 }
 
+// A question an associate could not get answered. Internal only — it carries
+// the brand's own words, so it never goes anywhere but AION.
+function assistantEscalationHtml(e: {
+  brand_name?: string | null; question?: string; note?: string | null;
+  answer_excerpt?: string | null; source?: string; asked_by?: string | null; inbox_url?: string;
+}): string {
+  const fromAssistant = e.source === "assistant";
+  return wrap(`
+    ${soloLogo(AION_LOGO, "AION Cover")}
+    <h1 style="${S.title}">${fromAssistant ? "The assistant couldn't answer this" : "An associate asked AION"}</h1>
+    <hr style="${S.rule}">
+    <p style="${S.label}">Brand</p><p style="${S.value}">${esc(e.brand_name ?? "—")}</p>
+    ${e.asked_by ? `<p style="${S.label}">Asked by</p><p style="${S.value}">${esc(e.asked_by)}</p>` : ""}
+    <p style="${S.label}">Question</p><p style="${S.value}">${esc(e.question ?? "")}</p>
+    ${e.note ? `<p style="${S.label}">What they added</p><p style="${S.value}">${esc(e.note)}</p>` : ""}
+    ${e.answer_excerpt ? `<p style="${S.label}">What the assistant had answered</p><p style="${S.value}">${esc(e.answer_excerpt)}</p>` : ""}
+    ${e.inbox_url ? `<div style="${S.btnWrap}"><a href="${e.inbox_url}" style="${S.btn}">Open the inbox</a></div>` : ""}
+    ${autoNote(S)}`);
+}
+
 function supportConfirmationHtml(user: any, brand: any, s: ReturnType<typeof makeStyles>): string {
   const greeting = user.firstName ? `Dear ${user.firstName},` : "Hello,";
   return wrap(`
@@ -343,9 +373,176 @@ function feedbackHtml(feedback: any): string {
     ${autoNote(S)}`);
 }
 
+// ─── Who may send what ────────────────────────────────────────────────────────
+//
+// This function had no authentication of its own. The gateway accepts the anon
+// key — which ships in the client bundle — so anyone at all could POST a type
+// and have the platform send a branded AION email, to any address, with any
+// content and any link in it. An invite is the worst case: a real AION invite,
+// from our domain, pointing wherever the sender liked.
+//
+// Three gates, in order. None of them changes a payload, so every existing
+// caller keeps working:
+//   1. WHO — a service-role caller (our own edge functions), or a signed-in
+//      user. The anon key alone is no longer enough.
+//   2. WHAT — each type names the kinds of caller allowed to send it. A
+//      customer cannot invite an admin.
+//   3. WHERE — the address has to be one the caller could already see. An
+//      admin may write to anyone in the system, a brand user to their own
+//      brand's people, a customer only to themselves. Links must point at one
+//      of our own hosts.
+//
+// The one deliberate exception is transfer_request, whose whole purpose is to
+// email someone not yet in the system: there the cover being transferred must
+// be one the caller can actually see.
+
+type CallerKind = "service" | "admin" | "brand" | "customer";
+type Caller = {
+  kind: CallerKind;
+  email: string | null;
+  brandId: number | null;
+};
+
+type Recipients = "internal" | "known" | "self_or_known" | "arbitrary";
+
+const POLICY: Record<string, { kinds: CallerKind[]; recipients: Recipients }> = {
+  customer_invite:          { kinds: ["service", "admin", "brand"],                        recipients: "known" },
+  customer_transfer_invite: { kinds: ["service", "admin", "customer"],                     recipients: "known" },
+  brand_user_invite:        { kinds: ["service", "admin", "brand"],                        recipients: "known" },
+  admin_invite:             { kinds: ["service", "admin"],                                 recipients: "known" },
+  claim_submitted:          { kinds: ["service", "admin", "brand", "customer"],            recipients: "self_or_known" },
+  claim_updated:            { kinds: ["service", "admin", "brand", "customer"],            recipients: "self_or_known" },
+  support_submitted:        { kinds: ["service", "admin", "brand", "customer"],            recipients: "self_or_known" },
+  transfer_request:         { kinds: ["service", "admin", "customer"],                     recipients: "arbitrary" },
+  feedback_submitted:       { kinds: ["service", "admin", "brand", "customer"],            recipients: "internal" },
+  assistant_escalation:     { kinds: ["service", "admin", "brand"],                        recipients: "internal" },
+};
+
+function jwtRole(token: string): string | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")))?.role ?? null;
+  } catch { return null; }
+}
+
+const norm = (v: unknown): string => String(v ?? "").trim().toLowerCase();
+
+async function identifyCaller(req: Request): Promise<Caller | null> {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const batchSecret = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
+  if (bearer && (bearer === serviceKey || jwtRole(bearer) === "service_role")) {
+    return { kind: "service", email: null, brandId: null };
+  }
+  if (batchSecret && req.headers.get("x-batch-secret") === batchSecret) {
+    return { kind: "service", email: null, brandId: null };
+  }
+  if (!bearer) return null;
+
+  const userClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: authHeader } } },
+  );
+  const { data: { user } } = await userClient.auth.getUser();
+  // The anon key is itself a JWT, so this is the check that stops the bundle's
+  // own public key from being a licence to send mail.
+  if (!user) return null;
+
+  const { data: adminRow } = await supabaseAdmin
+    .from("admins").select("id").eq("user_id", user.id).maybeSingle();
+  if (adminRow) return { kind: "admin", email: norm(user.email), brandId: null };
+
+  const { data: profile } = await supabaseAdmin
+    .from("profiles").select("role, brand_id").eq("user_id", user.id).maybeSingle();
+  const role = String(profile?.role ?? "");
+  const kind: CallerKind = ["brand", "brand_admin", "brand_user"].includes(role) ? "brand" : "customer";
+  return { kind, email: norm(user.email), brandId: (profile?.brand_id as number) ?? null };
+}
+
+/** The addresses a given payload would write to, outside our own team inbox. */
+function externalRecipients(type: string, data: any): string[] {
+  const pick = (v: unknown) => (norm(v) ? [norm(v)] : []);
+  switch (type) {
+    case "customer_invite":          return pick(data?.customer?.email);
+    case "customer_transfer_invite": return pick(data?.newCustomer?.email);
+    case "brand_user_invite":        return pick(data?.brandUser?.email);
+    case "admin_invite":             return pick(data?.admin?.email);
+    case "claim_submitted":          return pick(data?.claim?.policy?.customer?.email);
+    case "claim_updated":            return pick(data?.claim?.customerEmail);
+    case "support_submitted":        return pick(data?.user?.email);
+    case "transfer_request":         return pick(data?.recipient_email);
+    default:                         return [];
+  }
+}
+
+/** Every link we would put in the mail. */
+function linksIn(data: any): string[] {
+  return [data?.url, data?.portal_url].filter((u) => typeof u === "string" && u) as string[];
+}
+
+// A link in an AION email has to point at AION. Without this, an invite is a
+// ready-made phishing template with our logo on it.
+function linkAllowed(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (!isProd && (u.hostname === "localhost" || u.hostname === "127.0.0.1")) return true;
+    return u.protocol === "https:" && /(^|\.)aioncover\.com$/.test(u.hostname);
+  } catch { return false; }
+}
+
+/** Is this an address the caller could already look up? */
+async function recipientAllowed(caller: Caller, email: string): Promise<boolean> {
+  if (caller.kind === "service") return true;
+  if (caller.kind === "customer") return caller.email !== null && email === caller.email;
+
+  if (caller.kind === "brand") {
+    if (caller.brandId == null) return false;
+    const { data } = await supabaseAdmin
+      .from("profiles").select("id").eq("brand_id", caller.brandId).ilike("email", email).limit(1).maybeSingle();
+    return Boolean(data);
+  }
+  // Admin: anyone already in the system — a person we hold a record for.
+  const [{ data: p }, { data: a }] = await Promise.all([
+    supabaseAdmin.from("profiles").select("id").ilike("email", email).limit(1).maybeSingle(),
+    supabaseAdmin.from("admins").select("id").ilike("email", email).limit(1).maybeSingle(),
+  ]);
+  return Boolean(p || a);
+}
+
+/**
+ * transfer_request is the one type that may write to a stranger — that is what
+ * transferring a cover to someone means. So the gate is ownership instead:
+ * the cover has to be one this caller can see under their own RLS.
+ */
+async function ownsCover(req: Request, caller: Caller, data: any): Promise<boolean> {
+  if (caller.kind === "service" || caller.kind === "admin") return true;
+  const policyId = data?.cover?.policy_id;
+  if (!policyId) return false;
+  const userClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } },
+  );
+  const { data: row } = await userClient.from("policies").select("id").eq("id", policyId).maybeSingle();
+  return Boolean(row);
+}
+
+function deny(message: string, status: number) {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+  });
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
+  // Refuse a browser origin that isn't ours before doing anything else.
+  if (!originAllowed(req)) return originRefused();
+
   if (req.method === "OPTIONS") {
     return new Response(null, {
       headers: {
@@ -358,6 +555,33 @@ Deno.serve(async (req) => {
   try {
     const { type, data } = await req.json();
     let result: any;
+
+    // ── Gates ────────────────────────────────────────────────────────────────
+    const policy = POLICY[String(type)];
+    if (!policy) return deny(`Unknown type: ${type}`, 400);
+
+    const caller = await identifyCaller(req);
+    if (!caller) return deny("sign in to send mail", 401);
+    if (!policy.kinds.includes(caller.kind)) {
+      return deny(`a ${caller.kind} may not send ${type}`, 403);
+    }
+
+    for (const link of linksIn(data)) {
+      if (!linkAllowed(link)) return deny("links must point at aioncover.com", 400);
+    }
+
+    if (policy.recipients === "known" || policy.recipients === "self_or_known") {
+      for (const to of externalRecipients(String(type), data)) {
+        if (!(await recipientAllowed(caller, to))) {
+          // Deliberately the same sentence whoever you are: telling a caller
+          // whether an address exists is its own small leak.
+          return deny("that recipient is not one you can write to", 403);
+        }
+      }
+    }
+    if (policy.recipients === "arbitrary" && !(await ownsCover(req, caller, data))) {
+      return deny("that cover is not yours to transfer", 403);
+    }
 
     switch (type) {
       case "customer_invite": {
@@ -480,14 +704,27 @@ Deno.serve(async (req) => {
 
       case "transfer_request": {
         const { customer, recipient_email, cover, portal_url } = data;
-        // cover.policy_id = the policy being transferred
+        // cover.policy_id = the policy being transferred. Ownership of it was
+        // checked before this switch — a caller can only name a cover their own
+        // RLS lets them see.
+
+        // 0. The policy decides which brand the recipient belongs to. Taking
+        // cover.brand_id from the request body instead would let a caller file
+        // the new owner under a house that has nothing to do with the cover.
+        const { data: policyRow } = await supabaseAdmin
+          .from("policies")
+          .select("customer_id, former_customer_ids, brand_id")
+          .eq("id", cover.policy_id)
+          .single();
+        if (!policyRow) return deny("that cover no longer exists", 404);
+        const transferBrandId = policyRow.brand_id;
 
         // 1. Resolve or create recipient profile
         let { data: recipientProfile } = await supabaseAdmin
           .from("profiles")
           .select("id")
           .eq("email", recipient_email)
-          .eq("brand_id", cover.brand_id)
+          .eq("brand_id", transferBrandId)
           .maybeSingle();
 
         const isNewUser = !recipientProfile;
@@ -495,22 +732,15 @@ Deno.serve(async (req) => {
         if (isNewUser) {
           const { data: newProfile } = await supabaseAdmin
             .from("profiles")
-            .insert({ email: recipient_email, brand_id: cover.brand_id, status: "pending" })
+            .insert({ email: recipient_email, brand_id: transferBrandId, status: "pending" })
             .select("id")
             .single();
           recipientProfile = newProfile;
         }
 
-        // 2. Fetch current policy to get old customer_id and former_customer_ids
-        const { data: policy } = await supabaseAdmin
-          .from("policies")
-          .select("customer_id, former_customer_ids")
-          .eq("id", cover.policy_id)
-          .single();
-
-        // 3. Transfer ownership
-        const oldCustomerId = policy?.customer_id;
-        const prevFormer: any[] = policy?.former_customer_ids ?? [];
+        // 2. Transfer ownership, from the row read above.
+        const oldCustomerId = policyRow.customer_id;
+        const prevFormer: any[] = policyRow.former_customer_ids ?? [];
         const updatedFormer = oldCustomerId ? [...prevFormer, oldCustomerId] : prevFormer;
 
         await supabaseAdmin
@@ -583,6 +813,36 @@ Deno.serve(async (req) => {
           }),
         ]);
         result = { internal, confirmation };
+        break;
+      }
+
+      case "assistant_escalation": {
+        const { escalation } = data;
+        // The brand's name is resolved here rather than trusted from the caller:
+        // this email is the record of what was asked and by whom.
+        let brandName: string | null = escalation?.brand_name ?? null;
+        if (!brandName && escalation?.brand_id) {
+          const { data: b } = await supabaseAdmin
+            .from("brands").select("name").eq("id", escalation.brand_id).maybeSingle();
+          brandName = b?.name ?? null;
+        }
+        const appUrl = Deno.env.get("APP_URL") ?? (isProd ? "https://app.aioncover.com" : "https://dev.app.aioncover.com");
+        const html = assistantEscalationHtml({
+          ...escalation, brand_name: brandName,
+          // Built here, never taken from the caller: a link in a mail we send
+          // must not be something the sender got to choose.
+          inbox_url: `${appUrl}/admin/assistant-inbox`,
+        });
+        result = await resend.emails.send({
+          from: "AION Cover <team@aioncover.com>",
+          to: ["team@aioncover.com"],
+          bcc: ["luca@aioncover.com", "giulio@aioncover.com"],
+          subject: `${devPrefix}${brandName ? `${brandName}: ` : ""}${
+            escalation?.source === "assistant" ? "assistant couldn't answer" : "question for AION"
+          } — ${String(escalation?.question ?? "").slice(0, 80)}`,
+          html,
+          text: htmlToText(html),
+        });
         break;
       }
 

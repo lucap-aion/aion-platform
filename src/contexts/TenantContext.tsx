@@ -4,6 +4,7 @@ import logoAion from "@/assets/logo-aion.png";
 import logoIconAion from "@/assets/logo-icon-aion.png";
 import heroBg from "@/assets/hero-jewelry.jpg";
 import { supabase } from "@/integrations/supabase/client";
+import { untyped } from "@/integrations/supabase/untyped";
 import type { Database, Json } from "@/integrations/supabase/types";
 
 /** Customisable CSS colour slots stored in brands.theme_settings JSON.
@@ -22,14 +23,30 @@ export interface ThemeColors {
   destructive_hsl?: string;
 }
 
-/** Theme keys that brands can override.
- *  Only primary_hsl is commonly used — the rest are advanced/optional.
- *  secondary/accent are excluded because the UI uses neutral bg-muted
- *  and legacy DB values often contain stale gold colours. */
+/**
+ * Theme keys that brands can override — and, more importantly, the ones they
+ * cannot.
+ *
+ * THE CANVAS IS AION'S. background, foreground, card, sidebar and muted are not
+ * in this list and must not be added to it. They are the surfaces text sits on,
+ * and they only work as a set: every one of them was overridable, so a brand
+ * that supplied a single harvested colour got a black page with dark text on it
+ * (Prada), and two more houses were sitting on the same fault unseen
+ * (Buccellati at 6% lightness, Damiani at 0%). Deriving the companions made
+ * those pages legible and immediately produced the next version of the same
+ * problem — a black wordmark on a black sidebar — because a brand's logo is
+ * drawn for THEIR canvas, not for one we compute at runtime.
+ *
+ * So the rule is not "make the contrast work", it is "the contrast is not
+ * negotiable". A brand is expressed by its logo, its primary colour, its
+ * typeface and its photography, all of which sit ON the AION canvas and are
+ * legible there by construction.
+ *
+ * secondary/accent stay out for their own older reason: the UI uses neutral
+ * bg-muted and legacy rows often carry stale gold.
+ */
 const THEME_KEYS: (keyof ThemeColors)[] = [
-  "primary_hsl", "background_hsl",
-  "foreground_hsl", "card_hsl", "border_hsl", "sidebar_background_hsl",
-  "muted_hsl", "destructive_hsl",
+  "primary_hsl", "border_hsl", "destructive_hsl",
 ];
 
 /** Map each theme key → CSS custom properties it controls (light mode) */
@@ -98,6 +115,67 @@ function deriveDarkVariant(key: keyof ThemeColors, hsl: string): string {
   }
 }
 
+/**
+ * The brand's colour, spread thinly across the surfaces.
+ *
+ * A primary that only paints buttons leaves the rest of the portal looking like
+ * AION with someone else's logo on it. So the brand's HUE is carried into the
+ * cards, the muted fills, the borders and the sidebar accents — and its
+ * SATURATION and LIGHTNESS are not.
+ *
+ * That split is the whole safety argument, and it is what makes this different
+ * from the canvas colours that had to be taken away. Every surface below is
+ * pinned into a narrow near-white band (and, in dark mode, a narrow near-black
+ * one) whatever colour the brand supplies: Pomellato's deep red, Pasquale
+ * Bruni's near-black and Prada's slate all come out as a tint you notice only
+ * when you put two brands side by side. Text is never touched at all. So the
+ * contrast between text and surface cannot move, no matter what a brand sets —
+ * it is the same guarantee as before, made by construction rather than by
+ * checking.
+ *
+ * Anything the brand set explicitly still wins; this only fills what it left
+ * unsaid.
+ */
+function brandTint(primaryHsl: string, explicit: Set<keyof ThemeColors>, dark: boolean): string {
+  const [h, s] = parseHsl(primaryHsl);
+  // A brand's own saturation is usually far too strong for a surface. Borrow the
+  // hue, keep a whisper of the intensity.
+  const tint = (maxSat: number, lightness: number) =>
+    formatHsl(h, Math.min(s, maxSat), lightness);
+
+  const lines: string[] = [];
+  const put = (cssVar: string, value: string) => { lines.push(`  ${cssVar}: ${value};\n`); };
+
+  if (dark) {
+    put("--card", tint(10, 11));
+    put("--popover", tint(10, 11));
+    put("--muted", tint(10, 16));
+    put("--secondary", tint(10, 16));
+    put("--accent", tint(14, 20));
+    put("--sidebar-background", tint(10, 9));
+    put("--sidebar-accent", tint(14, 18));
+    if (!explicit.has("border_hsl")) {
+      put("--border", tint(12, 22));
+      put("--input", tint(12, 22));
+      put("--sidebar-border", tint(12, 20));
+    }
+  } else {
+    put("--card", tint(8, 99));
+    put("--popover", tint(8, 99));
+    put("--muted", tint(12, 96));
+    put("--secondary", tint(12, 96));
+    put("--accent", tint(16, 94));
+    put("--sidebar-background", tint(8, 99));
+    put("--sidebar-accent", tint(16, 94));
+    if (!explicit.has("border_hsl")) {
+      put("--border", tint(14, 90));
+      put("--input", tint(14, 90));
+      put("--sidebar-border", tint(14, 88));
+    }
+  }
+  return lines.join("");
+}
+
 const STYLE_TAG_ID = "aion-tenant-theme";
 
 /** Font settings stored alongside colours in theme_settings JSON */
@@ -119,7 +197,6 @@ export interface TenantConfig {
   slug: string;
   name: string;
   tagline: string;
-  email: string | null;
   website: string | null;
   // Branding
   logoUrl: string;
@@ -140,15 +217,21 @@ export interface TenantConfig {
   // FAQs
   faqEn: Json | null;
   faqIt: Json | null;
-  // HQ address
-  hqAddress: string | null;
-  hqCity: string | null;
-  hqCountry: string | null;
-  hqPostcode: string | null;
-  // Pricing
-  activationFee: number | null;
-  insurancePremium: number | null;
-  aionPremiumFee: number | null;
+  /**
+   * Demo mode: the portal shows only the assistant and the knowledge base.
+   *
+   * Covers, claims, customers, shops and insights belong to the insurance programme. In a
+   * meeting about the assistant they are somebody else's product in the sidebar, and a
+   * prospect who clicks Claims during their own demo finds seeded claims for a programme
+   * they have not bought. Off for every live brand.
+   */
+  assistantOnly: boolean;
+  /**
+   * Whether this brand's users see the AI Assistant and the knowledge base. Off for brands
+   * that were live before either existed: they keep "Ask the data" and the navigation they
+   * had, until AION turns the assistant on for them (Admin → brand → Assistant).
+   */
+  assistantEnabled: boolean;
 }
 
 /** Empty — no overrides. index.css defaults apply for any key not set. */
@@ -161,7 +244,6 @@ const DEFAULT_TENANT: TenantConfig = {
   slug: "default",
   name: "AION Cover",
   tagline: "Global Protection for Luxury Products",
-  email: null,
   website: null,
   logoUrl: "/aion_dark_logo.png",
   logoIconUrl: "/aion_dark_icon.png",
@@ -177,13 +259,8 @@ const DEFAULT_TENANT: TenantConfig = {
   theftImage: null,
   faqEn: null,
   faqIt: null,
-  hqAddress: null,
-  hqCity: null,
-  hqCountry: null,
-  hqPostcode: null,
-  activationFee: null,
-  insurancePremium: null,
-  aionPremiumFee: null,
+  assistantOnly: false,
+  assistantEnabled: true,
 };
 
 /** Parse theme_settings JSON — only keeps keys the brand explicitly set. */
@@ -207,15 +284,17 @@ const parseThemeSettings = (raw: Database["public"]["Tables"]["brands"]["Row"]["
 
 type BrandRow = Database["public"]["Tables"]["brands"]["Row"];
 
-const BRAND_SELECT = "id, slug, name, description, email, website, logo_big, logo_small, auth_background_image, top_banner_image, theme_settings, faq_en, faq_it, faq_image, feedback_image, damage_image, theft_image, hq_address, hq_city, hq_country, hq_postcode, activation_fee, insurance_premium, aion_premium_fee" as const;
+// Presentation only. This runs for anonymous visitors — the tenant is resolved
+// from the URL before anyone signs in — so the house's contact address, its
+// registered address and every fee it pays us have no business being in the
+// response. Nothing outside this file ever read them.
+const BRAND_SELECT = "id, slug, name, description, website, logo_big, logo_small, auth_background_image, top_banner_image, theme_settings, faq_en, faq_it, faq_image, feedback_image, damage_image, theft_image, demo_assistant_only, assistant_enabled" as const;
 
 type BrandLookup = Pick<BrandRow,
-  | "id" | "slug" | "name" | "description" | "email" | "website"
+  | "id" | "slug" | "name" | "description" | "website"
   | "logo_big" | "logo_small" | "auth_background_image" | "top_banner_image" | "theme_settings"
   | "faq_en" | "faq_it" | "faq_image" | "feedback_image" | "damage_image" | "theft_image"
-  | "hq_address" | "hq_city" | "hq_country" | "hq_postcode"
-  | "activation_fee" | "insurance_premium" | "aion_premium_fee"
->;
+> & { demo_assistant_only?: boolean | null; assistant_enabled?: boolean | null };
 
 const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
   const { colors: themeColors, fonts: themeFonts } = parseThemeSettings(brand.theme_settings);
@@ -225,7 +304,6 @@ const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
     slug: brand.slug || DEFAULT_TENANT.slug,
     name: brand.name || DEFAULT_TENANT.name,
     tagline: brand.description || DEFAULT_TENANT.tagline,
-    email: brand.email ?? null,
     website: brand.website ?? null,
     logoUrl: brand.logo_big || brand.logo_small || DEFAULT_TENANT.logoUrl,
     logoIconUrl: brand.logo_small || brand.logo_big || DEFAULT_TENANT.logoIconUrl,
@@ -235,19 +313,15 @@ const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
     primaryHsl: themeColors.primary_hsl || DEFAULT_TENANT.primaryHsl,
     themeColors,
     themeFonts,
+    assistantOnly: brand.demo_assistant_only === true,
+    // An assistant-only demo is nothing but the assistant, so the flag cannot hide it there.
+    assistantEnabled: brand.assistant_enabled !== false || brand.demo_assistant_only === true,
     faqEn: brand.faq_en ?? null,
     faqIt: brand.faq_it ?? null,
     faqImage: brand.faq_image ?? null,
     feedbackImage: brand.feedback_image ?? null,
     damageImage: brand.damage_image ?? null,
     theftImage: brand.theft_image ?? null,
-    hqAddress: brand.hq_address ?? null,
-    hqCity: brand.hq_city ?? null,
-    hqCountry: brand.hq_country ?? null,
-    hqPostcode: brand.hq_postcode ?? null,
-    activationFee: brand.activation_fee ?? null,
-    insurancePremium: brand.insurance_premium ?? null,
-    aionPremiumFee: brand.aion_premium_fee ?? null,
   };
 };
 
@@ -323,6 +397,16 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
       }
     }
 
+    // The brand's hue, thinly, on the surfaces it is safe to tint. Appended
+    // after the brand's own values so an explicit choice still wins, and never
+    // touching the text colours or the page canvas.
+    const primary = tenant.themeColors.primary_hsl;
+    if (primary) {
+      const explicit = new Set(keys);
+      lightVars += brandTint(primary, explicit, false);
+      darkVars += brandTint(deriveDarkVariant("primary_hsl", primary), explicit, true);
+    }
+
     tag.textContent = `:root {\n${lightVars}}\n.dark {\n${darkVars}}`;
 
     return () => { tag?.remove(); };
@@ -378,7 +462,10 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
     let cancelled = false;
 
     const fetchBrand = async () => {
-      const { data: brand, error } = await supabase
+      // `untyped` for two columns: types.ts predates demo_assistant_only and assistant_enabled, and the typed
+      // client turns an unknown column into an error on the WHOLE row rather than on that
+      // field. Regenerating the types is the real fix and is its own job — see untyped.ts.
+      const { data: brand, error } = await untyped
         .from("brands")
         .select(BRAND_SELECT)
         .eq("slug", slug)
@@ -388,7 +475,7 @@ export const TenantProvider = ({ children }: { children: ReactNode }) => {
       if (cancelled) return;
 
       if (!error && brand) {
-        setTenant(mergeWithBrandData(brand));
+        setTenant(mergeWithBrandData(brand as BrandLookup));
         setStatus({ loading: false, notFound: false });
         return;
       }

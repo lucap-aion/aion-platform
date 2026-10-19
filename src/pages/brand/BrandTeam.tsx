@@ -207,11 +207,11 @@ const BrandTeam = () => {
         </div>
         <div className="glass-card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[600px]">
+            <table className="w-full table-fixed sm:table-auto sm:min-w-[600px]">
               <thead>
                 <tr className="border-b border-border">
                   {["Member", "Role", "Status", "Actions"].map((h) => (
-                    <th key={h} className="px-6 py-4 text-left">
+                    <th key={h} className="px-4 sm:px-6 py-4 text-left">
                       <div className="h-3 w-16 rounded bg-muted animate-pulse" />
                     </th>
                   ))}
@@ -220,7 +220,7 @@ const BrandTeam = () => {
               <tbody className="divide-y divide-border">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <tr key={i}>
-                    <td className="px-6 py-4">
+                    <td className="px-4 sm:px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="h-9 w-9 rounded-full bg-muted animate-pulse shrink-0" />
                         <div className="space-y-1.5">
@@ -229,9 +229,9 @@ const BrandTeam = () => {
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4"><div className="h-3.5 w-16 rounded bg-muted animate-pulse" /></td>
-                    <td className="px-6 py-4"><div className="h-6 w-16 rounded-full bg-muted animate-pulse" /></td>
-                    <td className="px-6 py-4"><div className="h-7 w-14 rounded bg-muted animate-pulse" /></td>
+                    <td className="px-4 sm:px-6 py-4"><div className="h-3.5 w-16 rounded bg-muted animate-pulse" /></td>
+                    <td className="px-4 sm:px-6 py-4"><div className="h-6 w-16 rounded-full bg-muted animate-pulse" /></td>
+                    <td className="px-4 sm:px-6 py-4"><div className="h-7 w-14 rounded bg-muted animate-pulse" /></td>
                   </tr>
                 ))}
               </tbody>
@@ -277,13 +277,13 @@ const BrandTeam = () => {
         className="glass-card overflow-hidden"
       >
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[600px]">
+          <table className="w-full table-fixed sm:table-auto sm:min-w-[600px]">
             <thead>
               <tr className="border-b border-border">
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Member</th>
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Role</th>
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Status</th>
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Actions</th>
+                <th className="px-4 sm:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Member</th>
+                <th className="w-16 sm:w-auto px-4 sm:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Role</th>
+                <th className="w-16 sm:w-auto px-4 sm:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Status</th>
+                <th className="w-16 sm:w-auto px-4 sm:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -298,7 +298,7 @@ const BrandTeam = () => {
                   const isPending = m.status === "pending" || !m.status;
                   return (
                     <tr key={m.id} className="transition-colors hover:bg-muted">
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary shrink-0">
                             {(m.first_name?.[0] || m.email[0] || "?").toUpperCase()}
@@ -314,7 +314,7 @@ const BrandTeam = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         {m.is_master ? (
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
                             <Crown className="h-3 w-3" /> Master
@@ -325,7 +325,7 @@ const BrandTeam = () => {
                           </span>
                         )}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         <span className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${
                           isPending
                             ? "bg-warning/10 text-warning"
@@ -338,7 +338,7 @@ const BrandTeam = () => {
                           {isPending ? "Pending" : m.status === "verified" ? "Verified" : m.status === "blocked" ? "Blocked" : (m.status || "—")}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         <div className="flex items-center gap-1.5">
                           {isPending && (
                             <button
@@ -352,14 +352,14 @@ const BrandTeam = () => {
                           )}
                           <button
                             onClick={() => openEdit(m)}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            className="tap-target rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                             title="Edit"
                           >
                             <Pencil className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => setConfirmDeleteId(m.id)}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                            className="tap-target rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                             title="Remove"
                           >
                             <Trash2 className="h-4 w-4" />

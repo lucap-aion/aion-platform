@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import SignedImage from "@/components/SignedImage";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
 import { Search, XCircle, ChevronDown, Trash2, Plus, Pencil, X, ChevronLeft, ChevronRight, ArrowUpDown, FileText, Upload, LayoutGrid, List, AlertTriangle, ImageIcon, ShieldAlert, Repeat, MapPin } from "lucide-react";
@@ -330,8 +331,8 @@ const BrandClaims = () => {
         setIsSaving(false);
         return;
       }
-      const { data: { publicUrl } } = supabase.storage.from("claims_media").getPublicUrl(path);
-      uploadedUrls.push(publicUrl);
+      // The bucket is private: store the path and sign it when it is read.
+      uploadedUrls.push(path);
     }
 
     if (editingId) {
@@ -381,9 +382,11 @@ const BrandClaims = () => {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
-  const SortableTh = ({ col, label }: { col: SortKey; label: string }) => (
+  // `hide` stands a column down on a phone. Seven columns need 720px; a phone has 390,
+  // and what a claim is actually about is who it belongs to and where it has got to.
+  const SortableTh = ({ col, label, hide, w }: { col: SortKey; label: string; hide?: boolean; w?: string }) => (
     <th
-      className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+      className={`${hide ? "hidden md:table-cell " : ""}${w ? w + " md:w-auto " : ""}px-4 md:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors`}
       onClick={() => handleSort(col)}
     >
       <div className="flex items-center gap-1">
@@ -404,7 +407,7 @@ const BrandClaims = () => {
         </div>
         <div className="glass-card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px]">
+            <table className="w-full table-fixed md:table-auto md:min-w-[720px]">
               <thead>
                 <tr className="border-b border-border">
                   {["ID", "Customer", "Product", "Type", "Date", "Status", "Actions"].map((h) => (
@@ -417,8 +420,8 @@ const BrandClaims = () => {
               <tbody className="divide-y divide-border">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i}>
-                    <td className="px-6 py-4"><div className="h-3.5 w-8 rounded bg-muted animate-pulse" /></td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 md:px-6 py-4"><div className="h-3.5 w-8 rounded bg-muted animate-pulse" /></td>
+                    <td className="px-4 md:px-6 py-4">
                       <div className="flex items-center gap-2.5">
                         <div className="h-9 w-9 rounded-full bg-muted animate-pulse shrink-0" />
                         <div className="space-y-1.5">
@@ -555,19 +558,19 @@ const BrandClaims = () => {
           />
         ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px]">
+          <table className="w-full table-fixed md:table-auto md:min-w-[720px]">
             <thead>
               <tr className="border-b border-border">
-                <SortableTh col="id" label="ID" />
+                <SortableTh col="id" label="ID" hide />
                 <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Customer
                 </th>
-                <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <th className="hidden md:table-cell px-4 md:px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Product
                 </th>
-                <SortableTh col="type" label="Type" />
-                <SortableTh col="created_at" label="Date" />
-                <SortableTh col="status" label="Status" />
+                <SortableTh col="type" label="Type" hide />
+                <SortableTh col="created_at" label="Date" hide />
+                <SortableTh col="status" label="Status" w="w-24" />
                 <th className="px-6 py-4 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Actions
                 </th>
@@ -590,10 +593,10 @@ const BrandClaims = () => {
                       className="transition-colors hover:bg-muted cursor-pointer"
                       onClick={() => navigate(`${slugPrefix}/claims/${claim.id}`)}
                     >
-                      <td className="px-6 py-4 text-sm font-medium text-foreground">
+                      <td className="hidden md:table-cell px-4 md:px-6 py-4 text-sm font-medium text-foreground">
                         {claim.id}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 md:px-6 py-4">
                         {(() => {
                           const firstName = claim.policies?.profiles?.first_name || "";
                           const lastName = claim.policies?.profiles?.last_name || "";
@@ -603,7 +606,7 @@ const BrandClaims = () => {
                             <div className="flex items-center gap-2.5">
                               <div className="h-9 w-9 shrink-0 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary overflow-hidden">
                                 {claim.policies?.profiles?.avatar
-                                  ? <img src={claim.policies.profiles.avatar} alt="" className="h-full w-full object-cover" />
+                                  ? <SignedImage bucket="profile_pictures" value={claim.policies.profiles.avatar} alt="" className="h-full w-full object-cover" />
                                   : initials}
                               </div>
                               <div>
@@ -614,15 +617,18 @@ const BrandClaims = () => {
                           );
                         })()}
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2.5">
+                      <td className="hidden md:table-cell px-4 md:px-6 py-4">
+                        <div className="flex min-w-0 max-w-xs items-center gap-2.5">
                           {claim.policies?.catalogues?.picture
                             ? <img src={claim.policies.catalogues.picture} alt={claim.policies?.catalogues?.name || ""} className="h-9 w-9 rounded-lg object-contain bg-muted shrink-0" />
                             : <div className="h-9 w-9 rounded-lg bg-muted shrink-0" />}
-                          <span className="text-sm text-foreground whitespace-nowrap">{claim.policies?.catalogues?.name || "—"}</span>
+                          {/* Two lines at most, and allowed to break inside a word: a catalogue name is
+                              often one long run of capitals, and nowrap here pushed Type, Date, Status
+                              and Actions off the right of the table. */}
+                          <span className="min-w-0 text-sm text-foreground line-clamp-2 [overflow-wrap:anywhere]" title={claim.policies?.catalogues?.name || undefined}>{claim.policies?.catalogues?.name || "—"}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                      <td className="hidden md:table-cell px-4 md:px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-2">
                             <span>{toLabel(claim.type)}</span>
@@ -639,20 +645,20 @@ const BrandClaims = () => {
                           <FlagBadges flags={flagsByClaimId.get(claim.id) ?? []} />
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
+                      <td className="hidden md:table-cell px-4 md:px-6 py-4 text-sm text-muted-foreground whitespace-nowrap">
                         {claim.created_at ? format(new Date(claim.created_at), "MMM dd, yyyy") : "—"}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 md:px-6 py-4">
                         <span className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${state.color}`}>
                           {state.label}
                         </span>
                       </td>
-                      <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-4 md:px-6 py-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
                           {canWrite && (
                             <button
                               onClick={() => openEdit(claim)}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              className="tap-target rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                               title="Edit claim"
                             >
                               <Pencil className="h-4 w-4" />
@@ -661,7 +667,7 @@ const BrandClaims = () => {
                           {canWrite && key === "open" && (
                             <button
                               onClick={() => handleClose(claim.id)}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              className="tap-target rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                               title="Close claim"
                             >
                               <XCircle className="h-4 w-4" />
@@ -670,7 +676,7 @@ const BrandClaims = () => {
                           {canWrite && (
                             <button
                               onClick={() => setConfirmDeleteId(claim.id)}
-                              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                              className="tap-target rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                               title="Delete claim"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -863,7 +869,7 @@ const BrandClaims = () => {
                             className="h-16 w-16 shrink-0 rounded-lg border border-border overflow-hidden bg-muted flex items-center justify-center hover:border-primary/40 transition-colors"
                           >
                             {isImage
-                              ? <img src={url} alt="" className="h-full w-full object-cover" />
+                              ? <SignedImage bucket="claims_media" value={url} alt="" className="h-full w-full object-cover" />
                               : <FileText className="h-6 w-6 text-muted-foreground" />}
                           </a>
                           <button
@@ -1064,7 +1070,7 @@ const TriageGrid = ({
           >
             <div className="relative aspect-[16/10] w-full bg-muted/60">
               {isImage ? (
-                <img src={cover} alt="" className="h-full w-full object-cover" />
+                <SignedImage bucket="claims_media" value={cover} alt="" className="h-full w-full object-cover" />
               ) : claim.policies?.catalogues?.picture ? (
                 <img
                   src={claim.policies.catalogues.picture}

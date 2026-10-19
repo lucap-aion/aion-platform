@@ -27,6 +27,7 @@ type SidebarContext = {
   setOpenMobile: (open: boolean) => void;
   isMobile: boolean;
   toggleSidebar: () => void;
+  setHovered: (hovered: boolean) => void;
 };
 
 const SidebarContext = React.createContext<SidebarContext | null>(null);
@@ -50,6 +51,9 @@ const SidebarProvider = React.forwardRef<
 >(({ defaultOpen = true, open: openProp, onOpenChange: setOpenProp, className, style, children, ...props }, ref) => {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
+  // Transient "peek" state: when the sidebar is collapsed, hovering it expands
+  // it temporarily without touching the persisted `open` preference.
+  const [hovered, setHovered] = React.useState(false);
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
@@ -90,7 +94,8 @@ const SidebarProvider = React.forwardRef<
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
-  const state = open ? "expanded" : "collapsed";
+  // `hovered` lets a collapsed sidebar peek open on hover (see Sidebar below).
+  const state = open || hovered ? "expanded" : "collapsed";
 
   const contextValue = React.useMemo<SidebarContext>(
     () => ({
@@ -101,8 +106,9 @@ const SidebarProvider = React.forwardRef<
       openMobile,
       setOpenMobile,
       toggleSidebar,
+      setHovered,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar],
+    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, setHovered],
   );
 
   return (
@@ -136,7 +142,10 @@ const Sidebar = React.forwardRef<
     collapsible?: "offcanvas" | "icon" | "none";
   }
 >(({ side = "left", variant = "sidebar", collapsible = "offcanvas", className, children, ...props }, ref) => {
-  const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+  const { isMobile, state, open, openMobile, setOpenMobile, setHovered } = useSidebar();
+  // Only the icon rail peeks open on hover; other modes never set `hovered`.
+  const peekable = collapsible === "icon";
+  const peeking = peekable && !open && state === "expanded";
 
   if (collapsible === "none") {
     return (
@@ -176,18 +185,24 @@ const Sidebar = React.forwardRef<
       className="group peer hidden text-sidebar-foreground md:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
+      data-peek={peeking ? "true" : undefined}
       data-variant={variant}
       data-side={side}
+      onMouseEnter={peekable ? () => setHovered(true) : undefined}
+      onMouseLeave={peekable ? () => setHovered(false) : undefined}
     >
-      {/* This is what handles the sidebar gap on desktop */}
+      {/* This is what handles the sidebar gap on desktop. Its width tracks the
+          PERSISTED open state (via `open`, not the hover-aware data-collapsible)
+          so a hover-peek overlays the page rather than reflowing it. */}
       <div
         className={cn(
           "relative h-svh w-[--sidebar-width] bg-transparent transition-[width] duration-200 ease-linear",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
-          variant === "floating" || variant === "inset"
-            ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]"
-            : "group-data-[collapsible=icon]:w-[--sidebar-width-icon]",
+          collapsible === "icon" && !open &&
+            (variant === "floating" || variant === "inset"
+              ? "w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]"
+              : "w-[--sidebar-width-icon]"),
         )}
       />
       <div
@@ -200,6 +215,10 @@ const Sidebar = React.forwardRef<
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
             : "group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l",
+          // While peeking (collapsed rail hovered open) float above the page —
+          // including above the sticky top bar (z-30) so it overlays cleanly as
+          // a drawer instead of being clipped by the header / view-as banner.
+          "group-data-[peek=true]:z-40 group-data-[peek=true]:shadow-2xl",
           className,
         )}
         {...props}
@@ -210,6 +229,17 @@ const Sidebar = React.forwardRef<
         >
           {children}
         </div>
+        {/* Collapse toggle pinned to the sidebar's top-right corner — the same
+            for every sidebar (admin / brand / customer). Hidden on the bare icon
+            rail; the rail peeks open on hover and the toggle appears here. */}
+        {collapsible === "icon" && (
+          <SidebarTrigger
+            className={cn(
+              "absolute right-2 top-3.5 z-10 hidden h-7 w-7 text-muted-foreground transition-opacity hover:text-foreground md:inline-flex",
+              state === "collapsed" ? "pointer-events-none opacity-0" : "opacity-100",
+            )}
+          />
+        )}
       </div>
     </div>
   );

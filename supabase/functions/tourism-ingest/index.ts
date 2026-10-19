@@ -11,6 +11,7 @@
 // Default range: last 36 months ending current month.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { originAllowed, originRefused } from "../_shared/origin.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -89,6 +90,9 @@ function periodToDates(yyyymm: string): { start: string; end: string } {
 }
 
 Deno.serve(async (req: Request) => {
+  // Refuse a browser origin that isn't ours before doing anything else.
+  if (!originAllowed(req)) return originRefused();
+
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST" && req.method !== "GET") {
     return new Response("method not allowed", { status: 405, headers: CORS });

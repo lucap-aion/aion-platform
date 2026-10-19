@@ -193,22 +193,22 @@ const CustomerCovers = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-muted-foreground">#{cover.id || '-'}</p>
-                  <h3 className="font-serif text-sm md:text-base font-semibold text-foreground">{getProductName(cover)}</h3>
-                  <p className="text-xs text-muted-foreground">{getBrandName(cover)}</p>
+                  <h3 className="font-serif text-sm md:text-base font-semibold text-foreground line-clamp-2 [overflow-wrap:anywhere]" title={getProductName(cover)}>{getProductName(cover)}</h3>
+                  <p className="text-xs text-muted-foreground truncate">{getBrandName(cover)}</p>
                   <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 md:hidden">
                     <span className="text-xs text-muted-foreground">Start: <span className="text-foreground font-medium">{formatDate(cover.start_date)}</span></span>
                     <span className="text-xs text-muted-foreground">Exp: <span className="text-foreground font-medium">{formatDate(cover.expiration_date)}</span></span>
                   </div>
                 </div>
-                <div className="hidden md:block text-center">
+                <div className="hidden md:block shrink-0 whitespace-nowrap text-center">
                   <p className="text-sm font-semibold text-foreground">{formatDate(cover.start_date)}</p>
                   <p className="text-xs text-muted-foreground">Start Date</p>
                 </div>
-                <div className="hidden md:block text-center">
+                <div className="hidden md:block shrink-0 whitespace-nowrap text-center">
                   <p className="text-sm font-semibold text-foreground">{formatDate(cover.expiration_date)}</p>
                   <p className="text-xs text-muted-foreground">Expiration</p>
                 </div>
-                <div className="hidden md:block text-center">
+                <div className="hidden md:block shrink-0 whitespace-nowrap text-center">
                   <p className="text-sm font-semibold text-foreground">€{(cover.selling_price || 0).toLocaleString()}</p>
                   <p className="text-xs text-muted-foreground">Selling Price</p>
                 </div>
@@ -244,7 +244,7 @@ const CustomerCovers = () => {
                   <p className="text-xs text-muted-foreground">{getBrandName(cover)}</p>
                   <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5 capitalize text-[10px]">{getStatus(cover)}</Badge>
                 </div>
-                <h3 className="font-serif text-sm font-semibold text-foreground mb-3">{getProductName(cover)}</h3>
+                <h3 className="font-serif text-sm font-semibold text-foreground mb-3 line-clamp-2 [overflow-wrap:anywhere]" title={getProductName(cover)}>{getProductName(cover)}</h3>
                 <div className="space-y-1 mb-4">
                   <div className="flex justify-between text-xs"><span className="text-muted-foreground">Start</span><span className="text-foreground font-medium">{formatDate(cover.start_date)}</span></div>
                   <div className="flex justify-between text-xs"><span className="text-muted-foreground">Expiration</span><span className="text-foreground font-medium">{formatDate(cover.expiration_date)}</span></div>

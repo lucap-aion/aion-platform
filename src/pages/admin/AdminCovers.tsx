@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import SignedImage from "@/components/SignedImage";
 import { Link } from "react-router-dom";
 import { useListUrlState } from "@/hooks/useListUrlState";
 import { supabase } from "@/integrations/supabase/client";
@@ -380,7 +381,7 @@ const AdminCovers = () => {
               const inner = (
                 <div className="flex items-center gap-2.5">
                   <div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
-                    {r.profiles_avatar ? <img src={r.profiles_avatar} alt="" className="h-full w-full object-cover" /> : initials}
+                    {r.profiles_avatar ? <SignedImage bucket="profile_pictures" value={r.profiles_avatar} alt="" className="h-full w-full object-cover" /> : initials}
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm text-foreground truncate group-hover/cust:text-primary group-hover/cust:underline">{fullName || r.profiles_email}</p>

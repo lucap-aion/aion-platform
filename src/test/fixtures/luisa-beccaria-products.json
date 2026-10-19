@@ -1,0 +1,418 @@
+{
+ "products": [
+  {
+   "handle": "sage-cardigan-v-line",
+   "title": "Sage Cardigan V-line",
+   "body_html": "<p>Softly knitted, this piece falls with gentle ease, the V-line shaping a delicate frame that feels both graceful and effortless. Light as a whisper, it brings a touch of poetic charm to everyday moments, perfect for layering over sunlit, carefree daywear.</p>\n<p>Product Details<br>\n• Dry Clean Only<br>\n• Made in Italy</p>",
+   "product_type": "",
+   "tags": [
+    "Day-Wear",
+    "P26",
+    "SAPG::8027 ~ Color"
+   ],
+   "options": [
+    {
+     "name": "Size"
+    }
+   ],
+   "variants": [
+    {
+     "id": 65046844309853,
+     "title": "38",
+     "sku": "P26-8027-9805-785-38",
+     "price": "600.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 1
+    },
+    {
+     "id": 65046844342621,
+     "title": "40",
+     "sku": "P26-8027-9805-785-40",
+     "price": "600.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 2
+    },
+    {
+     "id": 65046844375389,
+     "title": "42",
+     "sku": "P26-8027-9805-785-42",
+     "price": "600.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 3
+    },
+    {
+     "id": 65046844408157,
+     "title": "44",
+     "sku": "P26-8027-9805-785-44",
+     "price": "600.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 4
+    },
+    {
+     "id": 65046844440925,
+     "title": "46",
+     "sku": "P26-8027-9805-785-46",
+     "price": "600.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 5
+    }
+   ],
+   "images": [
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P26-8027-9805_785_1.jpg?v=1782213568"
+    },
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P26-8027-9805_785_2.jpg?v=1782213568"
+    }
+   ]
+  },
+  {
+   "handle": "cotton-blouse-with-rose-print",
+   "title": "Cotton blouse with printed roses",
+   "body_html": "<p>A cotton blouse with printed floral patterns, featuring fabric bands designed to create a beautiful bow. The intricate design combines elegance with a touch of whimsy, offering a feminine and refined look. Perfect for adding a soft, romantic flair to any outfit.</p>\n<p>Product Details<br>• 100% CO<br>• Dry Clean Only<br>• Made in Italy</p>",
+   "product_type": "",
+   "tags": [
+    "Cocktail",
+    "Day-Wear",
+    "Matching Sets"
+   ],
+   "options": [
+    {
+     "name": "Size"
+    }
+   ],
+   "variants": [
+    {
+     "id": 64841166848349,
+     "title": "38",
+     "sku": "P25-1296-6821-13-38",
+     "price": "798.00",
+     "compare_at_price": null,
+     "available": false,
+     "position": 1
+    },
+    {
+     "id": 64841166881117,
+     "title": "40",
+     "sku": "P25-1296-6821-13-40",
+     "price": "798.00",
+     "compare_at_price": null,
+     "available": false,
+     "position": 2
+    },
+    {
+     "id": 64841166913885,
+     "title": "42",
+     "sku": "P25-1296-6821-13-42",
+     "price": "798.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 3
+    },
+    {
+     "id": 64841166946653,
+     "title": "44",
+     "sku": "P25-1296-6821-13-44",
+     "price": "798.00",
+     "compare_at_price": null,
+     "available": false,
+     "position": 4
+    },
+    {
+     "id": 64841166979421,
+     "title": "46",
+     "sku": "P25-1296-6821-13-46",
+     "price": "798.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 5
+    }
+   ],
+   "images": [
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P25-1296-6821-1366x2048_10da6ba7-ed55-492f-bbab-b59d482c14b9.jpg?v=1783355885"
+    },
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P25-1296-6821_2-1366x2048_6d0d325f-0822-4d16-9236-95948316ca98.jpg?v=1783355885"
+    }
+   ]
+  },
+  {
+   "handle": "jacquard-striped-shirt",
+   "title": "Jacquard Striped Shirt",
+   "body_html": "<p>Crafted with a soft, romantic sensibility, this piece combines gentle structure with refined texture. The woven stripes create delicate dimension, while the fluid silhouette brings an effortless elegance that transitions beautifully from day to evening.</p>\n<p>Product Details<br>\n• Dry Clean Only<br>\n• Made in Italy</p>",
+   "product_type": "",
+   "tags": [
+    "Cocktail",
+    "Day-Wear",
+    "Matching Sets",
+    "P26",
+    "SAPG::7655 ~ Color"
+   ],
+   "options": [
+    {
+     "name": "Size"
+    }
+   ],
+   "variants": [
+    {
+     "id": 64673173373277,
+     "title": "38",
+     "sku": "P26-7655-7856-785-38",
+     "price": "756.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 1
+    },
+    {
+     "id": 64673173406045,
+     "title": "40",
+     "sku": "P26-7655-7856-785-40",
+     "price": "756.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 2
+    },
+    {
+     "id": 64673173438813,
+     "title": "42",
+     "sku": "P26-7655-7856-785-42",
+     "price": "756.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 3
+    },
+    {
+     "id": 64673173471581,
+     "title": "44",
+     "sku": "P26-7655-7856-785-44",
+     "price": "756.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 4
+    },
+    {
+     "id": 64673173504349,
+     "title": "46",
+     "sku": "P26-7655-7856-785-46",
+     "price": "756.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 5
+    }
+   ],
+   "images": [
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P26-7655-7856-785_1_9bdd5e0b-4265-4221-a0eb-71f3c16d65ea.jpg?v=1783356476"
+    },
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P26-5525-7856_P26-7655-7856-785_2_bfaa2401-81d8-4b5a-b643-c542527c1fb0.jpg?v=1783356476"
+    }
+   ]
+  },
+  {
+   "handle": "chine-floral-leather-belt",
+   "title": "Chiné Floral Leather Belt",
+   "body_html": "<p>A refined accent designed to elevate any silhouette, this accessory pairs smooth leather with a delicate chiné floral motif for a subtle touch of romance.</p>\n<p>Product Details<br>\n• Dry Clean Only<br>\n• Made in Italy</p>",
+   "product_type": "",
+   "tags": [
+    "Chiné Floral",
+    "Day-Wear",
+    "P26",
+    "Pansy Flower",
+    "SAPG::3348 ~ Color"
+   ],
+   "options": [
+    {
+     "name": "Size"
+    }
+   ],
+   "variants": [
+    {
+     "id": 64673173700957,
+     "title": "S",
+     "sku": "P26-3348-6920-20-S",
+     "price": "265.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 1
+    },
+    {
+     "id": 64673173733725,
+     "title": "M",
+     "sku": "P26-3348-6920-20-M",
+     "price": "265.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 2
+    },
+    {
+     "id": 64673173766493,
+     "title": "L",
+     "sku": "P26-3348-6920-20-L",
+     "price": "265.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 3
+    }
+   ],
+   "images": [
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P26-3348-6920-20_1_bb2ba8a2-1d2c-4dce-a07d-4438b518d539.jpg?v=1783356477"
+    },
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P26-3348-6920-20_2_80c1ebd2-f841-4c4e-8012-da2778c779f5.jpg?v=1783356476"
+    }
+   ]
+  },
+  {
+   "handle": "chine-floral-organza-blouse",
+   "title": "Chiné Floral Organza Blouse",
+   "body_html": "<p>Light and ethereal, this piece is crafted in sheer organza adorned with delicate chiné florals that create a softly diffused, romantic effect. The airy silhouette and luminous texture bring a sense of graceful femininity, perfect for both daytime elegance and special occasions.</p>\n<p>Product details:<br>\nDry cleaning only<br>\nMade in Italy</p>",
+   "product_type": "",
+   "tags": [
+    "Day-Wear",
+    "P26",
+    "Pansy Flower",
+    "SAPG::7735 ~ Color"
+   ],
+   "options": [
+    {
+     "name": "Size"
+    }
+   ],
+   "variants": [
+    {
+     "id": 64673173537117,
+     "title": "38",
+     "sku": "P26-7735-6925-20-38",
+     "price": "1020.00",
+     "compare_at_price": null,
+     "available": false,
+     "position": 1
+    },
+    {
+     "id": 64673173569885,
+     "title": "40",
+     "sku": "P26-7735-6925-20-40",
+     "price": "1020.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 2
+    },
+    {
+     "id": 64673173602653,
+     "title": "42",
+     "sku": "P26-7735-6925-20-42",
+     "price": "1020.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 3
+    },
+    {
+     "id": 64673173635421,
+     "title": "44",
+     "sku": "P26-7735-6925-20-44",
+     "price": "1020.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 4
+    },
+    {
+     "id": 64673173668189,
+     "title": "46",
+     "sku": "P26-7735-6925-20-46",
+     "price": "1020.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 5
+    }
+   ],
+   "images": [
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P26-7735-6925-20_1_490c6996-dc1f-48c7-b03b-ec478b91ace5.jpg?v=1783356477"
+    },
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P26-7735-6925-20_P26-3348-6920_P26-6043-6920_P26-9050-6920_P26-8027-9805-412_2_b4b737e0-d470-4464-8c66-0b60d6fe9940.jpg?v=1783356479"
+    }
+   ]
+  },
+  {
+   "handle": "chine-floral-cotton-pants",
+   "title": "Chiné Floral Cotton Pants",
+   "body_html": "<p>Crafted from soft, breathable cotton, these pants are adorned with a delicate Chiné floral motif that evokes the gentle charm of a sunlit garden. Their relaxed, flowing silhouette moves with ease, combining comfort and elegance for effortless daytime sophistication. </p>\n<p>Product Details<br>\n• Dry Clean Only<br>\n• Made in Italy</p>",
+   "product_type": "",
+   "tags": [
+    "Day-Wear",
+    "P26",
+    "Pansy Flower",
+    "SAPG::6043 ~ Color"
+   ],
+   "options": [
+    {
+     "name": "Size"
+    }
+   ],
+   "variants": [
+    {
+     "id": 64673173897565,
+     "title": "38",
+     "sku": "P26-6043-6920-20-38",
+     "price": "812.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 1
+    },
+    {
+     "id": 64673173930333,
+     "title": "40",
+     "sku": "P26-6043-6920-20-40",
+     "price": "812.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 2
+    },
+    {
+     "id": 64673173963101,
+     "title": "42",
+     "sku": "P26-6043-6920-20-42",
+     "price": "812.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 3
+    },
+    {
+     "id": 64673173995869,
+     "title": "44",
+     "sku": "P26-6043-6920-20-44",
+     "price": "812.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 4
+    },
+    {
+     "id": 64673174028637,
+     "title": "46",
+     "sku": "P26-6043-6920-20-46",
+     "price": "812.00",
+     "compare_at_price": null,
+     "available": true,
+     "position": 5
+    }
+   ],
+   "images": [
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P26-6043-6920-20_1B_a722ab9d-b2f6-445c-afbf-9d1ca9d9779b.jpg?v=1783356484"
+    },
+    {
+     "src": "https://cdn.shopify.com/s/files/1/1046/8071/8685/files/P26-7735-6925-20_P26-3348-6920_P26-6043-6920_P26-9050-6920_P26-8027-9805-412_2_ac28dbec-ad1b-491f-8596-95d548d2731a.jpg?v=1783356485"
+    }
+   ]
+  }
+ ]
+}

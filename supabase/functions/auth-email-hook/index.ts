@@ -1,8 +1,10 @@
 import { Resend } from "npm:resend@4";
+import { verifyWebhookSignature, safeRedirect } from "../_shared/auth-hook.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY")!);
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const isProd = Deno.env.get("ENV") === "production";
 
 const supabaseAdmin = createClient(
   SUPABASE_URL,
@@ -224,9 +226,42 @@ function userResetHtml(
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
+// ─── Is this really Supabase? ─────────────────────────────────────────────────
+//
+// This endpoint sends "verify your email" and "reset your password" — the two
+// messages a person is most primed to click — and it verified nothing. Anyone
+// who knew the URL could POST a payload and have AION send a branded
+// verification mail to any address, with redirect_to pointing wherever they
+// liked. The hook secret existed all along; the function simply never used it.
+//
+// Standard Webhooks: HMAC-SHA256 over `${id}.${timestamp}.${body}`, keyed on the
+// base64 part of whsec_..., compared against the webhook-signature header, with
+// a five-minute window so a captured call cannot be replayed tomorrow.
+//
+// Fails CLOSED. If the secret is missing the hook refuses rather than falling
+// back to trusting the caller, which is the state it has been in until now.
+
+const HOOK_SECRET = Deno.env.get("AUTH_HOOK_SECRET") ?? "";
+
 Deno.serve(async (req) => {
   try {
-    const payload = await req.json();
+    // Read the body as TEXT first: the signature covers the exact bytes sent,
+    // so re-serialising a parsed object would not verify.
+    const raw = await req.text();
+    const signed = await verifyWebhookSignature({
+      body: raw,
+      id: req.headers.get("webhook-id"),
+      timestamp: req.headers.get("webhook-timestamp"),
+      signature: req.headers.get("webhook-signature"),
+      secret: HOOK_SECRET,
+    });
+    if (!signed) {
+      console.warn("[auth-email-hook] rejected an unsigned or badly signed call");
+      return new Response(JSON.stringify({ error: "invalid signature" }), {
+        status: 401, headers: { "Content-Type": "application/json" },
+      });
+    }
+    const payload = JSON.parse(raw);
     const { user, email_data } = payload;
 
     const email: string = user?.email ?? "";
@@ -240,7 +275,7 @@ Deno.serve(async (req) => {
 
     const actionType: string = email_data?.email_action_type ?? "";
     const tokenHash: string = email_data?.token_hash ?? "";
-    const redirectTo: string = email_data?.redirect_to ?? SUPABASE_URL;
+    const redirectTo: string = safeRedirect(email_data?.redirect_to ?? SUPABASE_URL, SUPABASE_URL, !isProd);
 
     const verifyUrl =
       `${SUPABASE_URL}/auth/v1/verify?token=${tokenHash}&type=${actionType}&redirect_to=${encodeURIComponent(redirectTo)}`;

@@ -1,4 +1,5 @@
-import { House, Users, Building2, ClipboardList, Store, UserCog, LogOut, ChevronsUpDown, UserCircle, Package, TrendingUp, ShieldCheck, Users2, LineChart, Star, Sparkles } from "lucide-react";
+import { House, Users, Building2, ClipboardList, Store, UserCog, LogOut, ChevronsUpDown, UserCircle, Package, TrendingUp, ShieldCheck, Users2, LineChart, Star, Sparkles, BookOpen, LifeBuoy } from "lucide-react";
+import SignedImage from "@/components/SignedImage";
 import { useLocation, useNavigate } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,8 +26,9 @@ import {
 
 const adminLinks = [
   { path: "/admin", icon: House, label: "Home" },
-  { path: "/admin/ai-query", icon: Sparkles, label: "Ask the data" },
+  { path: "/admin/ai-query", icon: Sparkles, label: "AI Assistant" },
   { path: "/admin/admins", icon: UserCog, label: "Admins" },
+  { path: "/admin/assistant-inbox", icon: LifeBuoy, label: "Assistant Inbox" },
   { path: "/admin/shop-assistants", icon: Users2, label: "Brand Users" },
   { path: "/admin/brands", icon: Building2, label: "Brands" },
   { path: "/admin/catalogues", icon: Package, label: "Catalogues" },
@@ -69,10 +71,10 @@ const AdminSidebar = () => {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-xs uppercase tracking-widest text-muted-foreground">
-            {collapsed ? "" : "Management"}
-          </SidebarGroupLabel>
+        <SidebarGroup className="pt-1">
+          {/* Same as the brand sidebar: the heading said nothing the items
+              didn't. Kept for screen readers only. */}
+          <SidebarGroupLabel className="sr-only">Management</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {adminLinks.map((link) => {
@@ -107,7 +109,7 @@ const AdminSidebar = () => {
             <button className={`flex w-full items-center rounded-lg hover:bg-muted transition-colors cursor-pointer ${collapsed ? "justify-center p-2" : "gap-3 px-3 py-2.5"}`}>
               <div className={`flex shrink-0 items-center justify-center rounded-full overflow-hidden ${collapsed ? "h-8 w-8" : "h-10 w-10"}`}>
                 {avatarUrl ? (
-                  <img src={avatarUrl} alt={profileName} className="h-full w-full object-cover" />
+                  <SignedImage bucket="profile_pictures" value={avatarUrl} alt={profileName} className="h-full w-full object-cover" />
                 ) : (
                   <div className="h-full w-full flex items-center justify-center bg-primary/10">
                     <span className={`font-semibold text-primary ${collapsed ? "text-xs" : "text-sm"}`}>{profileInitials}</span>

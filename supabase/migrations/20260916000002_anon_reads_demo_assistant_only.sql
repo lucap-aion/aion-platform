@@ -1,0 +1,21 @@
+-- The brand portal could not load any brand.
+--
+-- `anon` does not have SELECT on public.brands. It has SELECT on SEVENTEEN NAMED COLUMNS of
+-- it — the public branding ones — which is a deliberate and good design: a logged-out visitor
+-- on a brand's login page needs the logo, the colours and the FAQ, and has no business
+-- reading that brand's fee rates.
+--
+-- The consequence is not obvious and it cost a live outage on dev. A column-level grant means
+-- PostgREST refuses the WHOLE row when the select list mentions one ungranted column: adding
+-- `demo_assistant_only` to the tenant lookup turned every anonymous brand lookup into
+-- "42501 permission denied for table brands", so useTenantStatus reported notFound and every
+-- /:slug/login redirected away. The column was added and the client shipped in lockstep; the
+-- GRANT is the third thing that had to move with them, and nothing in the schema says so.
+--
+-- Whether the portal shows only the assistant decides which navigation a logged-out visitor's
+-- brand renders, so it belongs in the same public set as the logo and the colours. It is a
+-- display flag, not a commercial term.
+grant select (demo_assistant_only) on public.brands to anon;
+
+-- Not granted to anon: product_focus_manual. Nothing logged-out reads it, and the rule for
+-- this table is that a column is public only when a login page needs it.

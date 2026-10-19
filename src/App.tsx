@@ -36,6 +36,8 @@ import BrandCoverDetail from "./pages/brand/BrandCoverDetail";
 import BrandTeam from "./pages/brand/BrandTeam";
 import BrandInsights from "./pages/brand/BrandInsights";
 import BrandAIQuery from "./pages/brand/BrandAIQuery";
+import BrandAssistant from "./pages/brand/BrandAssistant";
+import BrandKnowledge from "./pages/brand/BrandKnowledge";
 import BrandShops from "./pages/brand/BrandShops";
 import BrandShopDetail from "./pages/brand/BrandShopDetail";
 import BrandRenewals from "./pages/brand/BrandRenewals";
@@ -46,6 +48,10 @@ import AdminCustomerDetail from "./pages/admin/AdminCustomerDetail";
 import AdminCovers from "./pages/admin/AdminCovers";
 import AdminClaims from "./pages/admin/AdminClaims";
 import AdminShops from "./pages/admin/AdminShops";
+import AdminKnowledge from "./pages/admin/AdminKnowledge";
+import AdminBusinessCase from "./pages/admin/AdminBusinessCase";
+import AdminCommercial from "./pages/admin/AdminCommercial";
+import AdminBrandDetail from "./pages/admin/AdminBrandDetail";
 import AdminShopAssistants from "./pages/admin/AdminShopAssistants";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminForgotPassword from "./pages/admin/AdminForgotPassword";
@@ -56,6 +62,7 @@ import AdminCatalogues from "./pages/admin/AdminCatalogues";
 import AdminReports from "./pages/admin/AdminReports";
 import AdminInsights from "./pages/admin/AdminInsights";
 import AdminFeedback from "./pages/admin/AdminFeedback";
+import AdminAssistantInbox from "./pages/admin/AdminAssistantInbox";
 import AdminAIQuery from "./pages/admin/AdminAIQuery";
 import NotFound from "./pages/NotFound";
 
@@ -166,6 +173,52 @@ const AdminProtectedLayout = () => (
   </AdminRoute>
 );
 
+// True on chat.aioncover.com / dev.chat.aioncover.com — the dedicated
+// sales-assistant subdomain. The same SPA build serves every host (Vercel's
+// catch-all rewrite), so the chat experience is selected here at runtime.
+const isChatHost = () =>
+  /(^|\.)chat\./i.test(window.location.hostname);
+
+/**
+ * Root `/` entry.
+ * - On the normal app host: keep the historical redirect to /rc.
+ * - On the chat subdomain: send the signed-in brand user straight to their
+ *   brand's assistant; admins to /admin; everyone else to the brand selector.
+ */
+const RootEntry = () => {
+  const { user, profile, isAdmin, loading } = useAuth();
+  const [slug, setSlug] = useState<string | null>(null);
+  const [slugChecked, setSlugChecked] = useState(false);
+
+  const chatHost = isChatHost();
+
+  useEffect(() => {
+    if (!chatHost || !profile?.brand_id) { setSlugChecked(true); return; }
+    let active = true;
+    supabase
+      .from("brands")
+      .select("slug")
+      .eq("id", profile.brand_id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!active) return;
+        setSlug((data?.slug as string | undefined) ?? null);
+        setSlugChecked(true);
+      });
+    return () => { active = false; };
+  }, [chatHost, profile?.brand_id]);
+
+  if (!chatHost) return <Navigate to="/rc" replace />;
+  if (loading) return <Spinner />;
+  if (isAdmin) return <Navigate to="/admin" replace />;
+  // Not signed in (or no brand profile): let them pick a brand, then log in.
+  if (!user) return <LandingPage />;
+  if (!slugChecked) return <Spinner />;
+  if (slug) return <Navigate to={`/${slug}/assistant`} replace />;
+  // Brand unknown — fall back to the selector rather than a dead end.
+  return <LandingPage />;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider delayDuration={150} skipDelayDuration={100}>
@@ -176,8 +229,8 @@ const App = () => (
         <AuthProvider>
           <Clarity />
           <Routes>
-            {/* Root */}
-            <Route path="/" element={<Navigate to="/rc" replace />} />
+            {/* Root — host-aware (chat subdomain → assistant, else /rc) */}
+            <Route path="/" element={<RootEntry />} />
 
             {/* Landing page bypass — view brand selector without auto-redirect to /rc */}
             <Route path="/all" element={<LandingPage />} />
@@ -196,6 +249,11 @@ const App = () => (
               <Route path="/admin/covers" element={<AdminCovers />} />
               <Route path="/admin/claims" element={<AdminClaims />} />
               <Route path="/admin/stores" element={<AdminShops />} />
+              <Route path="/admin/knowledge" element={<AdminKnowledge />} />
+              <Route path="/admin/assistant-inbox" element={<AdminAssistantInbox />} />
+              <Route path="/admin/brands/:brandId" element={<AdminBrandDetail />} />
+              <Route path="/admin/commercial" element={<AdminCommercial />} />
+              <Route path="/admin/business-case" element={<AdminBusinessCase />} />
               <Route path="/admin/shop-assistants" element={<AdminShopAssistants />} />
               <Route path="/admin/profile" element={<AdminProfile />} />
               <Route path="/admin/admins" element={<AdminAdmins />} />
@@ -233,6 +291,8 @@ const App = () => (
               <Route path="/:slug/team" element={<ProtectedRoute mode="brand"><BrandTeam /></ProtectedRoute>} />
               <Route path="/:slug/insights" element={<ProtectedRoute mode="brand"><BrandInsights /></ProtectedRoute>} />
               <Route path="/:slug/ai-query" element={<ProtectedRoute mode="brand"><BrandAIQuery /></ProtectedRoute>} />
+              <Route path="/:slug/assistant" element={<ProtectedRoute mode="brand"><BrandAssistant /></ProtectedRoute>} />
+              <Route path="/:slug/knowledge" element={<ProtectedRoute mode="brand"><BrandKnowledge /></ProtectedRoute>} />
               <Route path="/:slug/shops" element={<ProtectedRoute mode="brand"><BrandShops /></ProtectedRoute>} />
               <Route path="/:slug/shops/:shopId" element={<ProtectedRoute mode="brand"><BrandShopDetail /></ProtectedRoute>} />
               <Route path="/:slug/renewals" element={<ProtectedRoute mode="brand"><BrandRenewals /></ProtectedRoute>} />

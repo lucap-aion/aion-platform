@@ -1,14 +1,37 @@
+# The pitch deck is served so that a link can be SENT, not so that it can be found: it names
+# houses that are prospects rather than clients, and a deck naming them is not ours to publish
+# into a search index. The URLs keep working for anyone holding one.
+#
+# The block is repeated per crawler on purpose. A crawler with a group of its own ignores the
+# "*" group completely, so a Disallow written only under "*" would have applied to nobody
+# here except the agents nobody was worried about.
+
 User-agent: Googlebot
 Allow: /
+Disallow: /AION_Pitch_Deck.pdf
+Disallow: /pitch-deck.html
+Disallow: /slides/
 
 User-agent: Bingbot
 Allow: /
+Disallow: /AION_Pitch_Deck.pdf
+Disallow: /pitch-deck.html
+Disallow: /slides/
 
 User-agent: Twitterbot
 Allow: /
+Disallow: /AION_Pitch_Deck.pdf
+Disallow: /pitch-deck.html
+Disallow: /slides/
 
 User-agent: facebookexternalhit
 Allow: /
+Disallow: /AION_Pitch_Deck.pdf
+Disallow: /pitch-deck.html
+Disallow: /slides/
 
 User-agent: *
 Allow: /
+Disallow: /AION_Pitch_Deck.pdf
+Disallow: /pitch-deck.html
+Disallow: /slides/

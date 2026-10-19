@@ -1,6 +1,7 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { motion } from "framer-motion";
+import ClientAvatar from "@/components/ClientAvatar";
 import PurchasesCard, { type CoverForStats } from "@/components/PurchasesCard";
+import { motion } from "framer-motion";
 import { ArrowLeft, User, Shield, AlertTriangle, Mail, Phone, MapPin, Calendar, Globe } from "lucide-react";
 import { format } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
@@ -113,7 +114,6 @@ const AdminCustomerDetail = () => {
 
   const brand = (customer as any).brands as { name: string | null; logo_small: string | null } | null;
   const fullName = `${customer.first_name || ""} ${customer.last_name || ""}`.trim() || customer.email || "Unknown";
-  const initials = `${(customer.first_name?.[0] || customer.email?.[0] || "?").toUpperCase()}${(customer.last_name?.[0] || "").toUpperCase()}`;
 
   return (
     <div className="w-full px-4 py-6 md:px-8 md:py-8 animate-fade-in">
@@ -122,11 +122,12 @@ const AdminCustomerDetail = () => {
           <ArrowLeft className="h-4 w-4" /> Back to Customers
         </Link>
         <div className="flex items-center gap-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-lg font-semibold text-primary shrink-0 overflow-hidden">
-            {customer.avatar
-              ? <img src={customer.avatar} alt="" className="h-full w-full object-cover" />
-              : initials}
-          </div>
+          <ClientAvatar
+            name={`${customer.first_name || ""} ${customer.last_name || ""}`}
+            email={customer.email}
+            value={customer.avatar}
+            className="h-14 w-14 text-lg"
+          />
           <div>
             <h1 className="font-serif text-2xl md:text-3xl font-bold text-foreground">{fullName}</h1>
             <p className="mt-0.5 text-sm text-muted-foreground flex items-center gap-2">

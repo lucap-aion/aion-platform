@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Sparkles, Store } from "lucide-react";
+import SignedImage from "@/components/SignedImage";
+import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, MessageSquare, Library, Sparkles } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { useTenant } from "@/contexts/TenantContext";
@@ -61,9 +62,14 @@ const customerPaths = [
 // after Dashboard — because they're the marquee features. Position carries
 // the prominence; no separate group, no icon tinting.
 const brandPaths = [
-  { path: "/dashboard", icon: BarChart3, labelKey: "nav.dashboard", exact: true },
+  // The brand landing page: "Home", not "Dashboard" — it is where the day
+  // starts, not a reporting screen (Insights is the reporting screen).
+  { path: "/dashboard", icon: Home, labelKey: "nav.home", exact: true },
   { path: "/insights", icon: LineChart, labelKey: "nav.insights" },
-  { path: "/ai-query", icon: Sparkles, labelKey: "nav.aiQuery" },
+  // "Ask the data" (/ai-query) retired for brand users — the merged Assistant
+  // now handles data questions too, scoped to the brand. One entry only.
+  { path: "/assistant", icon: MessageSquare, labelKey: "nav.assistant" },
+  { path: "/knowledge", icon: Library, labelKey: "nav.knowledge" },
   { path: "/customers", icon: Users, labelKey: "nav.customers" },
   { path: "/covers", icon: Shield, labelKey: "nav.covers" },
   { path: "/claims", icon: FileText, labelKey: "nav.claims" },
@@ -92,20 +98,45 @@ const AppSidebar = () => {
   const faqItems = (() => {
     const source = locale === "it" ? tenant.faqIt : tenant.faqEn;
     if (Array.isArray(source) && source.length > 0) {
-      return (source as any[]).map((item) => ({
-        q: item.title ?? item.question ?? "",
-        a: item.content?.blocks
-          ? (item.content.blocks as any[]).filter((b: any) => b.text).map((b: any) => b.text).join(" ")
-          : (item.answer ?? ""),
-      }));
+      // A list block carries `items`, not `text` — filtering on `text` dropped every list,
+      // as it did on the FAQ page and the customer dashboard. Lists are kept as lists here.
+      return (source as any[]).map((item) => {
+        const blocks: { text?: string; items?: string[] }[] = Array.isArray(item.content?.blocks)
+          ? (item.content.blocks as any[])
+              .map((b: any) => (typeof b.text === "string" && b.text ? { text: b.text }
+                : Array.isArray(b.items) ? { items: b.items.map(String).filter(Boolean) } : {}))
+              .filter((b) => b.text || b.items?.length)
+          : [{ text: item.answer ?? "" }];
+        return {
+          q: item.title ?? item.question ?? "",
+          a: blocks.map((b) => b.text ?? b.items?.join(" ") ?? "").join(" "),
+          blocks,
+        };
+      });
     }
-    return [] as { q: string; a: string }[];
+    return [] as { q: string; a: string; blocks: { text?: string; items?: string[] }[] }[];
   })();
 
   const { profile, signOut, user } = useAuth();
   const navigate = useNavigate();
   const slugPrefix = useAuthSlug();
-  const paths = mode === "customer" ? customerPaths : brandPaths;
+  // An assistant-only demo keeps the two screens the demo is about and drops the insurance
+  // programme's own. Home goes with them: that page is covers, open claims, renewals and
+  // recent claims, so keeping it would put the product we are not demonstrating on the first
+  // screen the prospect sees. Still one section, still this order; the flag only removes.
+  const assistantOnlyPaths = new Set(["/assistant", "/knowledge"]);
+  // Assistant off: the navigation the brand had before the assistant existed — "Ask the
+  // data" where the Assistant would be, no Knowledge, and Dashboard not Home.
+  const classicBrandPaths = brandPaths
+    .filter((p) => p.path !== "/knowledge")
+    .map((p) => p.path === "/assistant" ? { path: "/ai-query", icon: Sparkles, labelKey: "nav.aiQuery" }
+      : p.path === "/dashboard" ? { ...p, icon: BarChart3, labelKey: "nav.dashboard" }
+      : p);
+  const paths = mode === "customer"
+    ? customerPaths
+    : tenant.assistantOnly ? brandPaths.filter((p) => assistantOnlyPaths.has(p.path))
+    : tenant.assistantEnabled ? brandPaths : classicBrandPaths;
+  // Team is about who can log in, which is still a fair question in an assistant demo.
   const masterLinks = (mode === "brand" && canWrite)
     ? brandMasterPaths.map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }))
     : [];
@@ -179,9 +210,13 @@ const AppSidebar = () => {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-xs uppercase tracking-widest text-muted-foreground">
-            {collapsed ? "" : mode === "customer" ? t("nav.menu") : t("nav.management")}
+        {/* No visible section header: everything in this sidebar is "management",
+            so the word was pure noise above the first item. The label stays for
+            screen readers — removing it outright would drop a navigation
+            landmark — and the space it freed goes to the nav itself. */}
+        <SidebarGroup className="pt-1">
+          <SidebarGroupLabel className="sr-only">
+            {mode === "customer" ? t("nav.menu") : t("nav.management")}
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -207,11 +242,13 @@ const AppSidebar = () => {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Master-only links */}
+        {/* Master-only links. They ARE a different concern, so they keep a
+            separation — but a hairline says it more quietly than a second
+            shouted heading. */}
         {masterLinks.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-xs uppercase tracking-widest text-muted-foreground">
-              {collapsed ? "" : t("nav.settings") || "Settings"}
+          <SidebarGroup className="mt-2 border-t border-border/60 pt-3">
+            <SidebarGroupLabel className="sr-only">
+              {t("nav.settings") || "Settings"}
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
@@ -273,7 +310,7 @@ const AppSidebar = () => {
             <button className={`flex w-full items-center rounded-lg hover:bg-muted transition-colors cursor-pointer ${collapsed ? "justify-center p-2" : "gap-3 px-3 py-2.5"}`}>
               <div className={`flex shrink-0 items-center justify-center rounded-full bg-primary/10 overflow-hidden ${collapsed ? "h-8 w-8" : "h-10 w-10"}`}>
                 {avatar ? (
-                  <img src={avatar} alt="Profile" className="h-full w-full object-cover" />
+                  <SignedImage bucket="profile_pictures" value={avatar} alt="Profile" className="h-full w-full object-cover" />
                 ) : (
                   <span className={`font-semibold text-primary ${collapsed ? "text-xs" : "text-sm"}`}>{profileInitials}</span>
                 )}
@@ -331,7 +368,11 @@ const AppSidebar = () => {
             .map((item, i) => (
             <AccordionItem key={i} value={`faq-${i}`}>
               <AccordionTrigger className="text-sm text-left font-medium">{item.q}</AccordionTrigger>
-              <AccordionContent className="text-sm text-muted-foreground leading-relaxed">{item.a}</AccordionContent>
+              <AccordionContent className="space-y-2 text-sm text-muted-foreground leading-relaxed">
+                {item.blocks.map((b, j) => b.items
+                  ? <ul key={j} className="list-disc space-y-1 pl-4">{b.items.map((li, k) => <li key={k}>{li}</li>)}</ul>
+                  : <p key={j}>{b.text}</p>)}
+              </AccordionContent>
             </AccordionItem>
           ))}
         </Accordion>

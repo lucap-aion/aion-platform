@@ -1,3 +1,4 @@
+import type React from "react";
 import { AlertTriangle } from "lucide-react";
 
 interface Props {
@@ -5,12 +6,16 @@ interface Props {
   title: string;
   description: string;
   confirmLabel?: string;
+  /** Held shut until the caller says otherwise — a typed-in name, for instance. */
+  confirmDisabled?: boolean;
+  /** Anything the confirmation needs to ask for before it will proceed. */
+  children?: React.ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
   loading?: boolean;
 }
 
-const ConfirmDialog = ({ open, title, description, confirmLabel = "Delete", onConfirm, onCancel, loading }: Props) => {
+const ConfirmDialog = ({ open, title, description, confirmLabel = "Delete", confirmDisabled, children, onConfirm, onCancel, loading }: Props) => {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -23,6 +28,7 @@ const ConfirmDialog = ({ open, title, description, confirmLabel = "Delete", onCo
           <div>
             <p className="text-sm font-semibold text-foreground">{title}</p>
             <p className="text-sm text-muted-foreground mt-1">{description}</p>
+            {children && <div className="mt-3">{children}</div>}
           </div>
         </div>
         <div className="flex justify-end gap-2">
@@ -34,7 +40,7 @@ const ConfirmDialog = ({ open, title, description, confirmLabel = "Delete", onCo
           </button>
           <button
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-white hover:bg-destructive/90 disabled:opacity-60 transition-colors"
           >
             {loading ? "Deleting…" : confirmLabel}

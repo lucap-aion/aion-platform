@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
+import { Link } from "react-router-dom";
 import {
   Search, Plus, Pencil, Trash2, Eye, EyeOff,
   ChevronDown, X, ChevronsUpDown, Download, SlidersHorizontal, Pin, GripVertical,
@@ -148,6 +149,14 @@ export interface Column<T> {
   sortKey?: string;
   width?: number;
   render?: (row: T) => React.ReactNode;
+  /**
+   * Do not turn this cell into the row's link.
+   *
+   * For a first column that already has a control of its own — the catalogue list opens its
+   * item from a button in that cell — because a button inside a button is invalid markup and
+   * ambiguous to click.
+   */
+  noRowLink?: boolean;
 }
 
 export interface FilterDef {
@@ -173,6 +182,19 @@ interface AdminTableProps<T extends Record<string, unknown>> {
   onAdd?: () => void;
   addLabel?: string;
   onView?: (row: T) => void;
+  /**
+   * Where this row's own page is, when it has one.
+   *
+   * The first column then renders as a real link: the name is visibly clickable, it opens in
+   * a new tab on cmd-click, it is reachable by keyboard, and the browser shows the
+   * destination on hover. Reaching a brand used to mean hovering the row to reveal an eye
+   * icon at the far right of a twelve-column table and clicking that — after moving the
+   * pointer across the whole row, with nothing about the name suggesting it led anywhere.
+   *
+   * Without it, a table that has `onView` gets the same affordance on the first column,
+   * opening whatever that view is (most of these lists open a drawer rather than a page).
+   */
+  rowHref?: (row: T) => string | null | undefined;
   onEdit?: (row: T) => void;
   onDelete?: (row: T) => void;
   filters?: FilterDef[];
@@ -329,6 +351,7 @@ function AdminTable<T extends Record<string, unknown>>({
   filterValues = {},
   onFilterChange,
   extraRowAction,
+  rowHref,
   onExport,
   exportFilename = title,
   exportSchema,
@@ -602,16 +625,29 @@ function AdminTable<T extends Record<string, unknown>>({
   });
 
   // ────────────────────────────────────────────────────────────────────
-  return (
-    <div className="h-full flex flex-col p-6 md:p-8 gap-6">
+  // One cell's content, shared by the table and the phone card list below it so the two can
+  // never drift into rendering the same column differently.
+  const cellContent = (col: Column<T>, row: T): React.ReactNode => {
+    if (col.render) return col.render(row);
+    const v = row[col.key];
+    if (isDateLikeValue(v, col.key)) return <span className="block truncate">{fmtDate(v as string)}</span>;
+    return <span className="block truncate">{v == null || v === "" ? "—" : String(v)}</span>;
+  };
 
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between">
-        <div>
+  return (
+    <div className="h-full flex flex-col p-4 sm:p-6 md:p-8 gap-4 sm:gap-6">
+
+      {/* ── Header ──
+          Wraps, and the title gets its own line on a phone. Held on one row, "Catalogues /
+          517 records" and the Export + New Item pair are wider than 390px, and because the
+          shell clips rather than scrolls the buttons do not go off the edge — they go
+          through the title. */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="font-serif text-2xl font-bold text-foreground">{title}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{total.toLocaleString()} records</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {action}
           {onExport && (
             <button
@@ -824,8 +860,87 @@ function AdminTable<T extends Record<string, unknown>>({
       {/* ── Table ── */}
       <div className="flex-1 flex flex-col rounded-xl border border-border overflow-hidden min-h-0">
         <div className="flex-1 overflow-auto">
+
+          {/* ── The same rows, as cards, on a phone ──
+              The grid cannot be made to fit: its columns are chosen by the user and there
+              can be thirty-four of them, so it is 1,418px wide on Brands against a 390px
+              screen. Forcing it to fit would truncate every column to nothing; leaving it
+              is a sideways swipe past columns you cannot see the headers of.
+
+              So below `sm` the row is turned on its side: the first column is the row's
+              identity and becomes the heading and the link, and the next three become
+              labelled values. The column picker still decides what those are, and pinning a
+              column to the left — which is how an admin says "this is the one that matters"
+              — moves it into the card for free.
+
+              Row actions are laid out plainly here rather than reusing the table's, because
+              the table's are opacity-0 until group-hover and a touch screen has no hover:
+              on a phone they were not dimmed, they were unreachable. */}
+          <div className="sm:hidden divide-y divide-border">
+            {!data.length ? (
+              <p className="px-4 py-12 text-center text-sm text-muted-foreground">No records found.</p>
+            ) : data.map((row, i) => {
+              const [lead, ...rest] = visibleColumns;
+              const href = lead && !lead.noRowLink ? rowHref?.(row) : null;
+              const heading = lead ? cellContent(lead, row) : null;
+              return (
+                <div key={i} className="px-4 py-3">
+                  <div className="font-medium text-foreground">
+                    {href ? (
+                      <Link to={href} className="block min-w-0 hover:underline">{heading}</Link>
+                    ) : onView ? (
+                      <button type="button" onClick={() => onView(row)} className="block w-full min-w-0 text-left hover:underline">
+                        {heading}
+                      </button>
+                    ) : heading}
+                  </div>
+                  <dl className="mt-1.5 grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1">
+                    {rest.slice(0, 3).map((col) => (
+                      <Fragment key={col.key}>
+                        <dt className="text-xs text-muted-foreground">{col.label}</dt>
+                        <dd className="min-w-0 text-xs text-foreground">{cellContent(col, row)}</dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                  {hasRowActions && (
+                    <div className="mt-2 flex items-center gap-1.5">
+                      {extraRowAction && extraRowAction(row)}
+                      {onView && (
+                        <button
+                          onClick={() => onView(row)}
+                          className="tap-target rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                          aria-label="View"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      )}
+                      {onEdit && (
+                        <button
+                          onClick={() => onEdit(row)}
+                          className="tap-target rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                          aria-label="Edit"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          onClick={() => onDelete(row)}
+                          className="tap-target rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                          aria-label="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
           <table
-            className="text-sm border-collapse"
+            className="hidden sm:table text-sm border-collapse"
             style={{ tableLayout: "fixed", width: "100%", minWidth: totalMinWidth }}
           >
             <colgroup>
@@ -919,23 +1034,44 @@ function AdminTable<T extends Record<string, unknown>>({
                     key={i}
                     className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors group"
                   >
-                    {visibleColumns.map((col) => {
+                    {visibleColumns.map((col, colIndex) => {
                       const isFrozen = frozenVisible.includes(col.key);
+                      const content = col.render
+                        ? col.render(row)
+                        : (() => {
+                            const v = row[col.key];
+                            if (isDateLikeValue(v, col.key)) {
+                              return <span className="block truncate">{fmtDate(v as string)}</span>;
+                            }
+                            return <span className="block truncate">{v == null || v === "" ? "—" : String(v)}</span>;
+                          })();
+                      // The first column is the row's identity — the brand, the customer, the
+                      // claim — so that is what leads to it.
+                      const leads = colIndex === 0 && !col.noRowLink;
+                      const href = leads ? rowHref?.(row) : null;
+                      const opens = leads && !href && onView ? () => onView(row) : null;
                       return (
                         <td
                           key={col.key}
                           className="px-4 py-3 text-foreground"
                           style={isFrozen ? frozenTdStyle(col.key) : normalTdStyle(col.key)}
                         >
-                          {col.render
-                            ? col.render(row)
-                            : (() => {
-                                const v = row[col.key];
-                                if (isDateLikeValue(v, col.key)) {
-                                  return <span className="block truncate">{fmtDate(v as string)}</span>;
-                                }
-                                return <span className="block truncate">{v == null || v === "" ? "—" : String(v)}</span>;
-                              })()}
+                          {href ? (
+                            <Link
+                              to={href}
+                              className="block min-w-0 rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-primary/40"
+                            >
+                              {content}
+                            </Link>
+                          ) : opens ? (
+                            <button
+                              type="button"
+                              onClick={opens}
+                              className="block w-full min-w-0 cursor-pointer rounded-sm text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-primary/40"
+                            >
+                              {content}
+                            </button>
+                          ) : content}
                         </td>
                       );
                     })}
@@ -993,16 +1129,18 @@ function AdminTable<T extends Record<string, unknown>>({
         </div>
 
         {/* ── Pagination ── */}
-        <div className="flex items-center justify-between border-t border-border px-4 py-3 bg-background shrink-0">
+        {/* Wraps: five controls plus the record count do not fit 390px, and on a phone the
+            "1 / 21" indicator was breaking across two lines inside its own row. */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 bg-background shrink-0">
           <p className="text-xs text-muted-foreground">
             {total === 0 ? "No records" : `${from}–${to} of ${total.toLocaleString()}`}
           </p>
           <div className="flex items-center gap-1">
-            <button onClick={() => onPageChange(0)} disabled={page === 0} className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">«</button>
-            <button onClick={() => onPageChange(page - 1)} disabled={page === 0} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Previous</button>
+            <button onClick={() => onPageChange(0)} disabled={page === 0} className="tap-target rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">«</button>
+            <button onClick={() => onPageChange(page - 1)} disabled={page === 0} className="tap-target rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Previous</button>
             <span className="px-3 py-1.5 text-xs text-muted-foreground">{page + 1} / {Math.max(1, pageCount)}</span>
-            <button onClick={() => onPageChange(page + 1)} disabled={page >= pageCount - 1} className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next</button>
-            <button onClick={() => onPageChange(pageCount - 1)} disabled={page >= pageCount - 1} className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">»</button>
+            <button onClick={() => onPageChange(page + 1)} disabled={page >= pageCount - 1} className="tap-target rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Next</button>
+            <button onClick={() => onPageChange(pageCount - 1)} disabled={page >= pageCount - 1} className="tap-target rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors">»</button>
           </div>
         </div>
       </div>

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import SignedImage from "@/components/SignedImage";
+import SignedLink from "@/components/SignedLink";
 import { useListUrlState } from "@/hooks/useListUrlState";
 import { Upload, X, FileText } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -50,6 +52,7 @@ interface Claim {
   item_picture?: string | null;
   customer_name?: string | null;
   customer_email?: string;
+  customer_profile_id?: string | null;
   customer_first?: string | null;
   customer_last?: string | null;
 }
@@ -111,6 +114,7 @@ const AdminClaims = () => {
         item_name: c.policies?.catalogues?.name ?? "—",
         item_picture: c.policies?.catalogues?.picture ?? null,
         customer_email: c.policies?.profiles?.email ?? "—",
+        customer_profile_id: c.policies?.profiles?.id ?? null,
         customer_first: c.policies?.profiles?.first_name ?? null,
         customer_last: c.policies?.profiles?.last_name ?? null,
         customer_name: [c.policies?.profiles?.first_name, c.policies?.profiles?.last_name].filter(Boolean).join(" ") || null,
@@ -165,11 +169,15 @@ const AdminClaims = () => {
       const uploads = await Promise.all(
         pendingFiles.map(async (file) => {
           const ext = file.name.split(".").pop();
-          const path = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+          // Under the CLIENT's folder, not the bucket root. The bucket is
+          // private now and access is decided by that first segment, so a file
+          // dropped at the root would be readable by nobody but an admin — a
+          // photo the client can no longer see on their own claim.
+          const owner = editing.customer_profile_id ?? "unassigned";
+          const path = `${owner}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
           const { error: upErr } = await supabase.storage.from("claims_media").upload(path, file);
           if (upErr) return null;
-          const { data: { publicUrl } } = supabase.storage.from("claims_media").getPublicUrl(path);
-          return publicUrl;
+          return path;
         })
       );
       uploadedUrls = uploads.filter(Boolean) as string[];
@@ -362,17 +370,18 @@ const AdminClaims = () => {
                   const ext = url.split("?")[0].split(".").pop()?.toLowerCase() || "";
                   const isImage = ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg"].includes(ext);
                   return (
-                    <a
+                    <SignedLink
                       key={idx}
-                      href={url}
+                      bucket="claims_media"
+                      value={url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="h-16 w-16 shrink-0 rounded-lg border border-border overflow-hidden bg-muted/40 flex items-center justify-center hover:border-primary/40 transition-colors"
                     >
                       {isImage
-                        ? <img src={url} alt="" className="h-full w-full object-cover" />
+                        ? <SignedImage bucket="claims_media" value={url} alt="" className="h-full w-full object-cover" />
                         : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
-                    </a>
+                    </SignedLink>
                   );
                 })}
               </div>

@@ -20,7 +20,9 @@ const AppLayout = () => {
             <ImpersonationBanner />
             <header className="flex h-14 items-center justify-between border-b border-border bg-background/80 backdrop-blur-sm px-4 md:px-6">
               <div className="flex items-center gap-3">
-                <SidebarTrigger />
+                {/* Desktop toggle now lives in the sidebar header; on mobile we
+                    still need a trigger here to open the off-canvas drawer. */}
+                <SidebarTrigger className="md:hidden" />
                 <div className="md:hidden">
                   {tenant.logoUrl ? (
                     <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="h-7 max-w-[120px] object-contain" />
@@ -32,7 +34,9 @@ const AppLayout = () => {
               <HeaderControls />
             </header>
           </div>
-          <main className="flex-1 overflow-y-auto min-h-0">
+          {/* overflow-x-hidden for the same reason as the admin shell: one child wider
+              than the column would otherwise make the whole portal scroll sideways. */}
+          <main className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
             <Outlet />
           </main>
         </div>

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import AssistantMarkdown from "@/components/assistant/AssistantMarkdown";
+import { isPersonImageColumn } from "@/components/assistant/ClientList";
+import ClientAvatar from "@/components/ClientAvatar";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -167,12 +168,24 @@ const isPercentColumn = (col: string) =>
 const isImageColumn = (col: string) =>
   /(^|_)(picture|avatar|photo|thumbnail)(_url)?$/i.test(col) ||
   /(^|_)image_url$/i.test(col);
+// The name to draw initials from when a client row's avatar is missing.
+const personName = (row: Record<string, unknown>): string => {
+  const pick = (re: RegExp) => {
+    const k = Object.keys(row).find((c) => re.test(c));
+    return k && row[k] != null ? String(row[k]).trim() : "";
+  };
+  return pick(/^(full_name|client_name|customer_name|customer|client)$/i)
+    || [pick(/^(first_name|firstname)$/i), pick(/^(last_name|lastname|surname)$/i)].filter(Boolean).join(" ");
+};
+const personEmail = (row: Record<string, unknown>): string => {
+  const k = Object.keys(row).find((c) => /(^|_)email$/i.test(c));
+  return k && row[k] != null ? String(row[k]) : "";
+};
+// Only ever called for a known image column (see DataTable), so accept ANY
+// http(s) URL — product feeds often serve images from extension-less endpoints
+// (e.g. .../Base/Image/154499). Truly broken URLs are hidden via <img onError>.
 const looksLikeImageUrl = (v: unknown): v is string =>
-  typeof v === "string" &&
-  /^https?:\/\//i.test(v) &&
-  // Either an image extension OR a known Supabase Storage path — the latter
-  // covers signed URLs without an extension.
-  (/\.(jpe?g|png|gif|webp|avif|svg)(\?|$)/i.test(v) || /\/storage\/v1\/object\//i.test(v));
+  typeof v === "string" && /^https?:\/\/\S+/i.test(v.trim());
 
 const formatNumber = (n: number, col: string, bcp: string): string => {
   if (!Number.isFinite(n)) return "—";
@@ -607,7 +620,9 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
       const accessToken = sessionData.session?.access_token;
       if (!accessToken) throw new Error("Not signed in");
 
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/query-ai`, {
+      // Merged assistant: admins hit the same function brand users do, but with
+      // all-brand (or view-as) scope and the analyst persona + charts + exports.
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/brand-assistant`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${accessToken}`,
@@ -1091,8 +1106,18 @@ const PlaybookCard = ({
   );
 };
 
+// Make the ILIKE wildcards literal, so a user typing "50%" searches for "50%"
+// rather than matching everything.
 const escapeIlike = (s: string) =>
-  s.replace(/[\\%_,()]/g, (c) => `\\${c}`);
+  s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+// ...and then QUOTE the value for PostgREST. Backslash-escaping a comma does not
+// work: or() is split on commas BEFORE anything is unescaped, so "\," still ends
+// the term and the next fragment starts with "%", which is not a field name.
+// Measured: any admin question containing a comma — "Rank our brands by revenue,
+// biggest first" — made this 400 with PGRST100. It is caught and returns [], so
+// the customer lookup silently found nobody instead of failing visibly.
+const quoteVal = (s: string) => `"${s.replace(/["\\]/g, (c) => `\\${c}`)}"`;
 
 // Split the user input on whitespace so a multi-token query like
 // "Angela G" matches a row where the tokens live in different columns
@@ -1110,7 +1135,7 @@ const searchCustomers = async (q: string): Promise<SearchResult[]> => {
     .select("id, first_name, last_name, email, brands(name)")
     .or("role.is.null,role.eq.customer");
   for (const tok of tokens) {
-    const pattern = `%${escapeIlike(tok)}%`;
+    const pattern = quoteVal(`%${escapeIlike(tok)}%`);
     query = query.or(
       `first_name.ilike.${pattern},last_name.ilike.${pattern},email.ilike.${pattern},phone_number.ilike.${pattern}`,
     );
@@ -1146,7 +1171,7 @@ const searchProducts = async (q: string): Promise<SearchResult[]> => {
     .from("catalogues")
     .select("id, name, sku, category, brands(name)");
   for (const tok of tokens) {
-    const pattern = `%${escapeIlike(tok)}%`;
+    const pattern = quoteVal(`%${escapeIlike(tok)}%`);
     query = query.or(`name.ilike.${pattern},sku.ilike.${pattern}`);
   }
   const { data, error } = await query.limit(8);
@@ -1255,7 +1280,7 @@ const AssistantBlock = ({
     <div className="flex flex-col gap-4">
       {(summary || streaming) && (
         <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-a:text-primary prose-code:text-foreground prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-table:text-xs prose-th:bg-muted/40">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown>
+          <AssistantMarkdown>{summary}</AssistantMarkdown>
           {streaming && !summary && (
             <span className="inline-block h-3 w-1.5 animate-pulse bg-foreground/40 align-middle" />
           )}
@@ -1391,7 +1416,12 @@ const ResultsTable = ({
             {visible.map((row, i) => (
               <tr key={i} className="border-b border-border/60 last:border-0 hover:bg-muted/20">
                 {columns.map((c) =>
-                  isImageColumn(c) ? (
+                  isPersonImageColumn(c) ? (
+                    // A client's face, or their initials — not an empty grey box.
+                    <td key={c} className="px-4 py-2">
+                      <ClientAvatar name={personName(row)} email={personEmail(row)} value={typeof row[c] === "string" ? (row[c] as string) : null} />
+                    </td>
+                  ) : isImageColumn(c) ? (
                     <td key={c} className="px-4 py-2">
                       <ImageCell url={row[c]} />
                     </td>

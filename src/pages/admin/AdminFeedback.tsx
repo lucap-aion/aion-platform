@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import SignedImage from "@/components/SignedImage";
 import { supabase } from "@/integrations/supabase/client";
 import { useListUrlState } from "@/hooks/useListUrlState";
 import AdminTable from "./_components/AdminTable";
@@ -154,7 +155,7 @@ const AdminFeedback = () => {
               return (
                 <div className="flex items-center gap-2.5">
                   <div className="h-9 w-9 shrink-0 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
-                    {r.customer_avatar ? <img src={r.customer_avatar} alt={name} className="h-full w-full object-cover" /> : initials}
+                    {r.customer_avatar ? <SignedImage bucket="profile_pictures" value={r.customer_avatar} alt={name} className="h-full w-full object-cover" /> : initials}
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">{name}</p>
