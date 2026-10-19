@@ -78,7 +78,7 @@ export default function PurchasesCard({ covers, claimsCount }: { covers: CoverFo
         </div>
         <div className="col-span-2">
           <p className="text-xs text-muted-foreground">Last purchase</p>
-          <p className="text-sm font-semibold text-foreground">{fmt(stats.last)}</p>
+          <p className="text-lg font-semibold text-foreground tabular-nums">{fmt(stats.last)}</p>
         </div>
         {stats.categories.length > 0 && (
           <div className="col-span-2">
