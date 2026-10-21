@@ -237,6 +237,7 @@ const AdminClaims = () => {
     <>
       <AdminTable
         title="Claims"
+        cardColumns={["status", "item_name", "customer_email", "brand_name"]}
         data={claims as unknown as Record<string, unknown>[]}
         loading={loading}
         total={total}

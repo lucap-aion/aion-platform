@@ -204,6 +204,16 @@ interface AdminTableProps<T extends Record<string, unknown>> {
   onExport?: () => Promise<Record<string, unknown>[]>;
   exportFilename?: string;
   exportSchema?: ExportColumn[];
+  /**
+   * The columns a phone card leads with, after the name, most important first.
+   *
+   * A card has room for four values and the grid has a dozen-plus columns, so "the next four
+   * in the grid" picked Brand, Shop and Location on Customers and left Status and Sign Up
+   * Date — the facts someone on a phone is actually checking — out of reach. Pinned columns
+   * still come first; `status`, when visible, is always on the card even without this.
+   * Everything else visible is one tap away under "more".
+   */
+  cardColumns?: string[];
 }
 
 /** Persisted per-table column preferences */
@@ -355,6 +365,7 @@ function AdminTable<T extends Record<string, unknown>>({
   onExport,
   exportFilename = title,
   exportSchema,
+  cardColumns,
 }: AdminTableProps<T>) {
 
   // ── Auto-detect extra columns from data ─────────────────────────────
@@ -483,6 +494,29 @@ function AdminTable<T extends Record<string, unknown>>({
     .map((k) => allColMap.get(k)!)
     .filter(Boolean);
 
+  // ── Phone card order ──
+  // The name stays first; then what the admin pinned, then what the page says matters, then
+  // status, then the grid's own order. See `cardColumns`.
+  const CARD_FIELDS = 4;
+  const cardOrder = (() => {
+    const [lead, ...others] = visibleColumns;
+    if (!lead) return [];
+    const byKey = new Map(others.map((c) => [c.key, c]));
+    const keys = [
+      ...frozenVisible,
+      ...(cardColumns ?? []),
+      "status",
+      ...others.map((c) => c.key),
+    ];
+    const seen = new Set<string>([lead.key]);
+    const ordered: Column<T>[] = [lead];
+    for (const k of keys) {
+      const c = byKey.get(k);
+      if (c && !seen.has(k)) { seen.add(k); ordered.push(c); }
+    }
+    return ordered;
+  })();
+
   // Compute sticky left offsets for frozen columns
   const stickyLeft: Record<string, number> = {};
   let leftAcc = 0;
@@ -520,6 +554,17 @@ function AdminTable<T extends Record<string, unknown>>({
 
   // ── Search debounce ─────────────────────────────────────────────────
   const [inputValue, setInputValue] = useState("");
+
+  // Which phone cards are showing every column. Indexed by position on the page, so it is
+  // cleared whenever the page's rows change.
+  const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
+  useEffect(() => { setExpandedCards(new Set()); }, [data]);
+  const toggleCard = (i: number) =>
+    setExpandedCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
   useEffect(() => {
     const t = setTimeout(() => { onSearch(inputValue); }, 350);
     return () => clearTimeout(t);
@@ -868,10 +913,11 @@ function AdminTable<T extends Record<string, unknown>>({
               is a sideways swipe past columns you cannot see the headers of.
 
               So below `sm` the row is turned on its side: the first column is the row's
-              identity and becomes the heading and the link, and the next three become
-              labelled values. The column picker still decides what those are, and pinning a
-              column to the left — which is how an admin says "this is the one that matters"
-              — moves it into the card for free.
+              identity and becomes the heading and the link, and four more become
+              labelled values: pinned columns, then the page's `cardColumns`, then status,
+              then the grid's order. The rest of the visible columns open under "more".
+              Pinning a column to the left — which is how an admin says "this is the one that
+              matters" — still moves it into the card for free.
 
               Row actions are laid out plainly here rather than reusing the table's, because
               the table's are opacity-0 until group-hover and a touch screen has no hover:
@@ -880,7 +926,10 @@ function AdminTable<T extends Record<string, unknown>>({
             {!data.length ? (
               <p className="px-4 py-12 text-center text-sm text-muted-foreground">No records found.</p>
             ) : data.map((row, i) => {
-              const [lead, ...rest] = visibleColumns;
+              const [lead, ...rest] = cardOrder;
+              const shown = rest.slice(0, CARD_FIELDS);
+              const more = rest.slice(CARD_FIELDS);
+              const open = expandedCards.has(i);
               const href = lead && !lead.noRowLink ? rowHref?.(row) : null;
               const heading = lead ? cellContent(lead, row) : null;
               return (
@@ -895,13 +944,24 @@ function AdminTable<T extends Record<string, unknown>>({
                     ) : heading}
                   </div>
                   <dl className="mt-1.5 grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1">
-                    {rest.slice(0, 3).map((col) => (
+                    {(open ? rest : shown).map((col) => (
                       <Fragment key={col.key}>
                         <dt className="text-xs text-muted-foreground">{col.label}</dt>
                         <dd className="min-w-0 text-xs text-foreground">{cellContent(col, row)}</dd>
                       </Fragment>
                     ))}
                   </dl>
+                  {more.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => toggleCard(i)}
+                      aria-expanded={open}
+                      className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary"
+                    >
+                      {open ? "Less" : `${more.length} more`}
+                      <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+                    </button>
+                  )}
                   {hasRowActions && (
                     <div className="mt-2 flex items-center gap-1.5">
                       {extraRowAction && extraRowAction(row)}
