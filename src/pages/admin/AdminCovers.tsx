@@ -314,6 +314,7 @@ const AdminCovers = () => {
     <>
       <AdminTable
         title="Covers"
+        cardColumns={["status", "catalogues_name", "profiles_email", "brands_name"]}
         data={covers as unknown as Record<string, unknown>[]}
         loading={loading}
         total={total}

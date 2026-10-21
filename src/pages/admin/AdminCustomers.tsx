@@ -401,6 +401,7 @@ const AdminCustomers = () => {
     <>
       <AdminTable
         title="Customers"
+        cardColumns={["status", "registered_at", "brand_name", "shop_name"]}
         data={customers as unknown as Record<string, unknown>[]}
         loading={loading}
         total={total}
