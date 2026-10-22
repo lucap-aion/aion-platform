@@ -58,6 +58,109 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// The "top N clients, and what each should buy next" playbook. One copy, used by BOTH
+// prompts: the sales-floor SYSTEM below and the admin supplement — see the note on the
+// two schema lists. It is a template literal like SYSTEM, so no backticks inside.
+const TOP_CLIENTS_PLAYBOOK = `# Top clients + what each should buy next — "top 10 of the quarter, and a suggestion for each"
+This is ONE question about a set, not ten client briefs. Answer it in at most FOUR
+run_sql calls. Never query client by client: ten clients one at a time runs out of
+steps, and the associate gets no answer at all.
+1. The ranking AND what each of them owns, in ONE query. "Last quarter" is the
+   previous complete calendar quarter (say which months in your answer); "this
+   quarter" is the current one so far:
+    WITH q AS (
+      SELECT po.customer_id, SUM(po.selling_price) AS spend, COUNT(*) AS pieces
+      FROM policies po JOIN profiles c ON c.id = po.customer_id
+      WHERE po.start_date >= date_trunc('quarter', CURRENT_DATE) - interval '3 months'
+        AND po.start_date <  date_trunc('quarter', CURRENT_DATE)
+        AND po.status <> 'cancelled'
+        AND (c.role IS NULL OR c.role = 'customer')
+      GROUP BY po.customer_id ORDER BY spend DESC, po.customer_id LIMIT 10)
+    SELECT pr.first_name || ' ' || pr.last_name AS client, pr.city, q.spend, q.pieces,
+           SUM(q.spend) OVER () AS spent_by_the_ten,
+           h.avg_ticket, h.categories, h.owned
+    FROM q JOIN profiles pr ON pr.id = q.customer_id
+    CROSS JOIN LATERAL (
+      SELECT ROUND(AVG(p.selling_price)::numeric) AS avg_ticket,
+             string_agg(DISTINCT c.category, ', ') AS categories,
+             string_agg(DISTINCT c.name, ' / ') AS owned
+      FROM policies p JOIN catalogues c ON c.id = p.item_id
+      WHERE p.customer_id = q.customer_id AND p.status <> 'cancelled') h
+    ORDER BY q.spend DESC, q.customer_id
+   That ORDER BY is the ranking; keep it, tie-breaker included, in both queries. owned / categories cover her WHOLE
+   history, not only the quarter — say "she owns", not "she bought this quarter".
+   If online orders are connected for this house, add them to the quarter's spend.
+2. The candidates PER CLIENT, in ONE query: the same ten, and for each of them four
+   pieces she does not own, inside her band (half to twice her average ticket),
+   her own categories first, and from a men's or women's line only if she has
+   bought from that line. The band, the not-owned rule and the line are in the SQL
+   so they cannot be forgotten:
+    WITH q AS ( …the same q as step 1, without pieces… ),
+    h AS (
+      SELECT q.customer_id, q.spend, AVG(p.selling_price) AS avg_ticket,
+             array_agg(DISTINCT c.category) AS cats, array_agg(DISTINCT c.name) AS owned,
+             array_agg(DISTINCT c.collection) AS lines
+      FROM q JOIN policies p ON p.customer_id = q.customer_id AND p.status <> 'cancelled'
+      JOIN catalogues c ON c.id = p.item_id
+      GROUP BY q.customer_id, q.spend),
+    cand AS (
+      SELECT h.customer_id, h.spend, s.name, s.category, s.collection, s.price,
+             ROW_NUMBER() OVER (PARTITION BY h.customer_id
+               ORDER BY (s.category = ANY (h.cats)) DESC, abs(s.price - h.avg_ticket)) AS rn
+      FROM h JOIN (SELECT DISTINCT ON (name) name, category, collection, price
+                   FROM storefront_products
+                   WHERE available = true AND price IS NOT NULL ORDER BY name, price) s
+        ON s.price BETWEEN h.avg_ticket * 0.5 AND h.avg_ticket * 2
+       AND s.name <> ALL (h.owned)
+       AND (s.collection IS NULL
+            OR s.collection !~* '^(uomo|donna|men|women|man|woman|homme|femme)$'
+            OR s.collection = ANY (h.lines)))
+    SELECT pr.first_name || ' ' || pr.last_name AS client,
+           MAX(cand.name) FILTER (WHERE cand.rn = 1) AS pick,
+           MAX(cand.price) FILTER (WHERE cand.rn = 1) AS pick_price,
+           MAX(cand.collection) FILTER (WHERE cand.rn = 1) AS pick_line,
+           string_agg(cand.name || ' (' || COALESCE(cand.collection, '-') || ', EUR '
+                      || ROUND(cand.price) || ')', ' | ' ORDER BY cand.rn)
+             FILTER (WHERE cand.rn > 1) AS alternatives
+    FROM cand JOIN profiles pr ON pr.id = cand.customer_id
+    WHERE cand.rn <= 3
+    GROUP BY pr.id, pr.first_name, pr.last_name, cand.spend
+    ORDER BY cand.spend DESC, pr.id
+   ONE ROW PER CLIENT, on purpose: you are shown only the first 30 rows of a
+   result, and four rows per client cut the tenth client off — she then got a
+   piece from outside her band that she already owned.
+   The line rule is there because nothing on a client record says whether she
+   shops menswear, and a men's swim short shown to a woman as "a swimsuit" was
+   the result. Never guess it from a name: the lines she has bought from are the
+   only signal. When pick_line is a men's or women's line (Uomo, Donna…), say so in
+   words ("from the men's line, which she already buys from").
+3. Suggest each client's pick — it is already ranked for her (her categories
+   first, then closest to her ticket). ONE piece, not "this, or else that". Take
+   one of HER OWN alternatives only when the same pick has already gone to two
+   clients above her, and never a piece from another client's row: reading across
+   rows is how a €511 client was handed a €2,600 hoodie. The same holds if you
+   would rather not lead with her pick for any other reason, its line included:
+   her own alternatives or nothing. And speak as the associate's colleague — never
+   about "the algorithm", "the query", "candidates" or how the picks were made.
+   Quote the name and price
+   exactly as the row gives them. If a client has no row, say there is nothing
+   available in her band right now rather than reaching outside it.
+4. LAST, ONE query that returns exactly the pieces you chose, once each, WITH
+   image_url and price:
+    SELECT DISTINCT ON (name) name, category, price, image_url, product_url
+    FROM storefront_products WHERE available = true AND name IN ('…', '…')
+    ORDER BY name, price
+   It must be your final query with an image column: the cards show the last
+   photo result, and a catalogue sweep left on screen reads as the answer.
+Shape: one line with the window and what the ten spent together — spent_by_the_ten
+as the query returned it, never your own addition (three runs added the same ten
+figures up to €25,500, €26,700 and €26,800) — then a numbered
+list 1–10 in the query's order: **Name** (city) — quarter spend — what she owns, in
+a few words — the suggestion by name and price, and why it fits, in one line. No
+table: the numbered list IS the ranking. If fewer than ten clients bought in the
+window, say how many did. Close by offering generate_report for a version to keep.
+`;
+
 // Sales-floor persona + a COMPACT, customer-facing schema. Deliberately omits
 // the AION revenue/premium math (store associates don't price the insurance) —
 // this assistant is about the client in front of them and the product on the
@@ -271,6 +374,9 @@ SQL tips: EUR money; cast before round (ROUND(AVG(x)::numeric,2)); ILIKE
 '%name%' to find a client; ORDER BY start_date DESC for recency. When you list
 products, SELECT image_url + price so photos and prices render; for clients
 SELECT avatar. If a query errors, retry once, simpler.
+Never write a semicolon anywhere in the SQL — not at the end, not inside a string
+('; ' as a separator): the runner reads it as a second statement and refuses the
+whole query. Separate with ' / ' or ', '.
 Dates are timestamps: for a SINGLE calendar day always filter start_date::date =
 'YYYY-MM-DD' (a bare start_date = 'YYYY-MM-DD' matches only midnight and silently
 misses the day — never use it). For a month use date_trunc('month', start_date).
@@ -563,6 +669,7 @@ line of signals (open claim / feedback), then the cross-sell cards with ONE line
 on why they fit. Close with ONE concrete next step (renewal, open claim, ask for
 feedback, or the strongest cross-sell). Speak the numbers; never show a raw table.
 
+${TOP_CLIENTS_PLAYBOOK}
 # Product analysis — "who buys <piece> and why"
 When asked who buys a piece / to analyse a product's buyers ("chi compra…",
 "analizza i clienti di…", "che clientela ha <pezzo>"), resolve the piece first
@@ -1180,7 +1287,14 @@ Deno.serve(async (req: Request) => {
   IMPORTANT: outcome/sold_qty/revenue are NULL until the show is reconciled after it closes, and sell_through_pct is NULL while pieces_reconciled = 0. NULL MEANS NOT YET COUNTED, NOT ZERO SALES — never report "0 sold" or "0% sell-through" for an unreconciled event; say it hasn't been reconciled and report what was sent. Quote coverage (reconciled vs sent) before any percentage.
 - event_attendees(id, event_id, brand_id, customer_id, customer_name, segment, invited, attended, influencer, converted, revenue, email, phone, appointment_date, appointment_time, venue, customer_ref, notes) — per-event invite & attribution list, and the agenda: appointment_date/appointment_time/venue give the running order (one show can span several venues). appointment_time NULL = invited but unslotted, not absent. customer_ref NULL = a new prospect with no purchase history, not a client who spent nothing.
 - brand_customer_segments(p_brand_id int) — set-returning function, one row per client with ltv and the Customers page flags (is_vip = 2+ purchase days OR EUR 20,000+ spent; is_lapsed, is_incomplete, is_high_nps_idle). Use it for any VIP / lapsed question; across brands: FROM brands b CROSS JOIN LATERAL brand_customer_segments(b.id::int) s.
-- brand_knowledge_docs(id, brand_id, title, category, source_type, source_url, content) — indexed brand knowledge (story/care/policy, and for some brands client/product "Scheda …" cards). Prefer search_knowledge / lookup_knowledge_card over run_sql for these.`
+- brand_knowledge_docs(id, brand_id, title, category, source_type, source_url, content) — indexed brand knowledge (story/care/policy, and for some brands client/product "Scheda …" cards). Prefer search_knowledge / lookup_knowledge_card over run_sql for these.
+
+${TOP_CLIENTS_PLAYBOOK}
+For an admin: the queries above are written for ONE brand. In single-brand view the
+scope does that for you. In the all-brands view either ask which house, or pin
+every one of them to it — po.brand_id = <id> in q and storefront_products.brand_id
+= <id> in the catalogue subqueries — or the ranking mixes houses and a client gets
+another house's piece.`
     : "";
   const languageNote = locale === "it"
     ? "\n\n# Language\nThe associate's UI is in Italian — reply in Italian by default unless they write in another language. SQL identifiers stay English."
@@ -1331,17 +1445,39 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        let sawText = false;
+        // Whether the LAST turn wrote text — not any turn. The UI clears the reply
+        // on every turn_start, so a "let me pull their history…" preamble in turn
+        // 1 is gone from the screen by turn 2. Counting it as the answer is how a
+        // top-10 question that used every turn came back as an empty bubble with
+        // the last query's product cards under it.
+        let answered = false;
         const textGuard = makeTableOrderGuard(emit, question);
+        // tool_choice is newer than this SDK's types; the API accepts it.
+        const noTools = { type: "none" } as unknown as Anthropic.MessageCreateParams["tool_choice"];
+        // Without tools AND without being told, the model still writes "now let me
+        // pull the catalogue…" and stops — so the instruction goes in as well.
+        // Folded into the trailing tool results when there are some, so the
+        // conversation still alternates.
+        const nudge = "Write the answer NOW as text, from the data already gathered above. Do not call any tools. Follow your normal format; if a part is missing, say so plainly. Never reply empty.";
+        const closing = (msgs: Anthropic.MessageParam[]): Anthropic.MessageParam[] => {
+          const last = msgs[msgs.length - 1];
+          return last?.role === "user" && Array.isArray(last.content)
+            ? [...msgs.slice(0, -1), { role: "user", content: [...last.content, { type: "text", text: nudge }] }]
+            : [...msgs, { role: "user", content: nudge }];
+        };
         for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
           emit("turn_start", { turn });
+          answered = false;
+          // The last turn is the answer: out of steps, it writes from what it has.
+          const lastTurn = turn === MAX_TOOL_TURNS - 1;
 
           const llmStream = anthropic.messages.stream({
             model: MODEL,
             max_tokens: MAX_TOKENS,
             system: systemBlocks,
             tools: activeTools as Anthropic.Tool[],
-            messages,
+            ...(lastTurn ? { tool_choice: noTools } : {}),
+            messages: lastTurn ? closing(messages) : messages,
           });
 
           for await (const ev of llmStream) {
@@ -1350,7 +1486,7 @@ Deno.serve(async (req: Request) => {
               (ev.delta as { type?: string }).type === "text_delta"
             ) {
               const text = (ev.delta as { text?: string }).text ?? "";
-              if (text) { textGuard.push(text); sawText = true; }
+              if (text) { textGuard.push(text); answered = true; }
             }
           }
 
@@ -1666,21 +1802,22 @@ Deno.serve(async (req: Request) => {
         // Recovery: the model gathered data via tools but produced NO answer text
         // (or ran out of tool turns). Never leave the user with an empty reply —
         // force ONE final text-only turn from what was gathered.
-        if (!sawText) {
+        if (!answered) {
           try {
+            // The tools are still declared: a history holding tool_use blocks is
+            // refused without them.
             const recovery = anthropic.messages.stream({
               model: MODEL,
               max_tokens: MAX_TOKENS,
-                system: systemBlocks,
-              messages: [
-                ...messages,
-                { role: "user", content: "Write the answer NOW as text, from the data already gathered above. Do not call any tools. Follow your normal format; if a part is missing, say so plainly. Never reply empty." },
-              ],
+              system: systemBlocks,
+              tools: activeTools as Anthropic.Tool[],
+              tool_choice: noTools,
+              messages: closing(messages),
             });
             for await (const ev of recovery) {
               if (ev.type === "content_block_delta" && (ev.delta as { type?: string }).type === "text_delta") {
                 const text = (ev.delta as { text?: string }).text ?? "";
-                if (text) { textGuard.push(text); sawText = true; }
+                if (text) { textGuard.push(text); answered = true; }
               }
             }
             await recovery.finalMessage();
