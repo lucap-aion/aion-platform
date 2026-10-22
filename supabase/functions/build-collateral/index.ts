@@ -128,9 +128,22 @@ async function listArtifacts(admin: ReturnType<typeof createClient>, brand: Reco
       storage_path: r.storage_path,
       // A row whose file was deleted from storage signs fine but 404s on click.
       download_url: signed?.signedUrl ?? null,
+      ...(ext === "mp4" ? { watch_url: await watchUrl(admin, r.storage_path) } : {}),
     });
   }
   return { ok: true, brand: brand.name, artifacts };
+}
+
+/**
+ * The film as a link that plays, not a file that downloads. "Non sarebbe meglio condividere
+ * link e farla vedere online?" — the download link forces Content-Disposition: attachment, so
+ * it lands in Downloads, and sending the mp4 itself goes through WhatsApp's recompression.
+ * Without `download` the same object streams in the browser (the mp4 is faststart). Thirty
+ * days, because it is sent to a prospect who may open it next week, not next minute.
+ */
+async function watchUrl(admin: ReturnType<typeof createClient>, path: string): Promise<string | null> {
+  const { data } = await admin.storage.from(BUCKET).createSignedUrl(path, 60 * 60 * 24 * 30);
+  return data?.signedUrl ?? null;
 }
 
 // ── 1. Data request workbook ────────────────────────────────────────────────

@@ -35,7 +35,7 @@ import {
 // now, and the only thing on a timer is a single RPC that the screen was already reading.
 
 type Brand = { id: number; name: string | null; website: string | null; slug: string | null; logo_small: string | null; logo_big: string | null };
-type Artifact = { kind: string; file_name: string; generated_at: string; slots_filled: number; download_url: string | null };
+type Artifact = { kind: string; file_name: string; generated_at: string; slots_filled: number; download_url: string | null; watch_url?: string | null };
 type ProgressRow = { state: string; note: string | null; happened_on: string | null; updated_at: string };
 type OverviewBrand = {
   id: number; name: string | null; website: string | null;

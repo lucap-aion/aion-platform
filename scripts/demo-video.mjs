@@ -52,8 +52,8 @@
  */
 
 import { chromium } from "playwright-core";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -256,7 +256,13 @@ const work = mkdtempSync(join(tmpdir(), "aion-demo-"));
 console.log(`recording ${slug}${mode ? ` (${mode})` : ""}`);
 
 // No executablePath means Playwright's own download, which is the CI case.
-const browser = await chromium.launch(chromePath ? { executablePath: chromePath, headless: true } : { headless: true })
+// The forced scale factor is what makes the screencast 2×. The context's deviceScaleFactor
+// renders the page at 2× but the screencast still hands back 1440-wide frames; with the
+// flag they are 2880×1800. Measured, both ways.
+const launchArgs = ["--force-device-scale-factor=2"];
+const browser = await chromium.launch(chromePath
+  ? { executablePath: chromePath, headless: true, args: launchArgs }
+  : { headless: true, args: launchArgs })
   .catch((e) => {
     console.error(
       "could not start a browser. Install one with `npx playwright install chromium`, " +
@@ -281,12 +287,58 @@ const userAgent = await (async () => {
 const context = await browser.newContext({
   viewport: SIZE,
   userAgent,
-  // Playwright writes one webm per page, closed when the context closes.
-  recordVideo: { dir: work, size: SIZE },
   deviceScaleFactor: 2,
   locale: "it-IT",
 });
 const page = await context.newPage();
+
+// THE PICTURE. Not Playwright's recordVideo: that takes its frames at the CSS size, 1440×900,
+// whatever the device scale, and writes them as realtime VP8 at about a megabit — so the page
+// was rendered at 2× and the film kept none of it, and no re-encode afterwards can put back
+// what was never captured. "Qualità dell'MP4 troppo bassa" was that. The same screencast
+// Playwright uses underneath, taken here at 2880×1800 (see launchArgs).
+//
+// Streamed, not kept: the first version wrote every frame to disk as a still, and Chrome
+// paints about sixty a second while text streams — 8,900 stills, 1.3 GB, in under three
+// minutes, which filled the Mac it ran on. So a clock at 30 fps hands the latest frame to an
+// ffmpeg that is already running, and what lands on disk is one near-lossless 1920-wide
+// file, mostly a static screen and so small. The speed-up and the real encode come after.
+const RATE = 30;
+const raw = join(work, "raw.mp4");
+const capture = spawn("ffmpeg", [
+  "-y", "-hide_banner", "-loglevel", "error",
+  "-f", "image2pipe", "-framerate", String(RATE), "-c:v", "mjpeg", "-i", "-",
+  "-vf", `scale=1920:${Math.round((1920 * SIZE.height) / SIZE.width / 2) * 2}:flags=lanczos`,
+  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "10", "-pix_fmt", "yuv420p", raw,
+], { stdio: ["pipe", "ignore", "inherit"] });
+const captureDone = new Promise((res, rej) => {
+  capture.on("error", rej);
+  capture.on("close", (code) => (code === 0 ? res() : rej(new Error(`ffmpeg capture exited ${code}`))));
+});
+let latest = null;
+let startedAt = 0;
+let written = 0;
+/** Frames owed by the wall clock, not by the timer: setInterval runs late under load, and a
+ *  film counted in ticks would come out shorter than what happened. */
+const tick = () => {
+  if (!latest) return;
+  const due = Math.floor(((Date.now() - startedAt) / 1000) * RATE) + 1;
+  for (; written < due; written++) capture.stdin.write(latest);
+};
+const cdp = await context.newCDPSession(page);
+cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
+  cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
+  // The first frames are painted before the viewport is applied — 1440×813, not ×900 — and
+  // the pipe takes its size from the first frame it gets, so one of those squashed the whole
+  // film by a tenth. Only full-viewport frames go in.
+  if (metadata.deviceWidth !== SIZE.width || metadata.deviceHeight !== SIZE.height) return;
+  latest = Buffer.from(data, "base64");
+  if (!startedAt) startedAt = Date.now();
+});
+await cdp.send("Page.startScreencast", {
+  format: "jpeg", quality: 92, maxWidth: SIZE.width * 2, maxHeight: SIZE.height * 2, everyNthFrame: 1,
+});
+const clock = setInterval(tick, 1000 / RATE);
 /** Per answer, or per screen of the tour: how many photos it had and how many actually drew. */
 const photos = [];
 
@@ -310,17 +362,22 @@ try {
   }
 } catch (e) {
   console.error("recording failed:", e instanceof Error ? e.message : e);
+  clearInterval(clock);
+  capture.kill();
   await context.close().catch(() => {});
   await browser.close().catch(() => {});
   process.exit(1);
 }
 
-// The video is only written out when the context closes.
+tick();
+clearInterval(clock);
+await cdp.send("Page.stopScreencast").catch(() => {});
+capture.stdin.end();
 await context.close();
 await browser.close();
 
-const webm = readdirSync(work).filter((f) => f.endsWith(".webm")).map((f) => join(work, f))[0];
-if (!webm) { console.error("no video was recorded"); process.exit(1); }
+if (!written) { console.error("no video was recorded"); process.exit(1); }
+await captureDone;
 
 // ── Cut ────────────────────────────────────────────────────────────────────
 // Sped up, not trimmed. Cutting the waits out would be the same lie as rendering the thing:
@@ -333,11 +390,14 @@ const out = outArg || `AION-${slug}-${mode === "assistant" ? "assistant" : "plat
 mkdirSync(dirname(out) || ".", { recursive: true });
 
 console.log("encoding…");
+// 1920 wide: the 2× capture scaled down is sharper text than 1440 ever was, and still plays
+// on any laptop or phone. CRF 18 because the picture is mostly flat colour and small type,
+// which is exactly what a higher CRF smears.
 execFileSync("ffmpeg", [
-  "-y", "-hide_banner", "-loglevel", "error", "-i", webm,
-  "-filter:v", `setpts=${(1 / speed).toFixed(4)}*PTS,fps=30,scale=1440:-2:flags=lanczos`,
+  "-y", "-hide_banner", "-loglevel", "error", "-i", raw,
+  "-filter:v", `setpts=${(1 / speed).toFixed(4)}*PTS,fps=30`,
   "-an",
-  "-c:v", "libx264", "-preset", "slow", "-crf", "22", "-pix_fmt", "yuv420p",
+  "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p",
   "-movflags", "+faststart",
   out,
 ], { stdio: ["ignore", "ignore", "inherit"] });
