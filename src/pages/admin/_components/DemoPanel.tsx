@@ -23,7 +23,7 @@ type PurgePreview = {
 };
 
 /** The finished film, as the cycle's artefact list carries it. */
-type Film = { file_name: string; generated_at: string; download_url: string | null };
+type Film = { file_name: string; generated_at: string; download_url: string | null; watch_url?: string | null };
 
 type Props = {
   brandId: number;
@@ -343,7 +343,7 @@ export default function DemoPanel({
         {film?.download_url && (
           <div className="mt-3 space-y-2">
             <video
-              src={film.download_url}
+              src={film.watch_url ?? film.download_url}
               controls
               playsInline
               preload="metadata"
@@ -351,6 +351,17 @@ export default function DemoPanel({
             />
             <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
               <span>Recorded {new Date(film.generated_at).toLocaleString()}</span>
+              {/* What to send: a link that plays in the browser, sharp, for thirty days. The mp4
+                * itself goes through WhatsApp's recompression and arrives as a download. */}
+              {film.watch_url && (
+                <button
+                  type="button"
+                  onClick={() => { void navigator.clipboard.writeText(film.watch_url!); toast({ title: "Link copied", description: "It plays in the browser for 30 days." }); }}
+                  className="inline-flex items-center gap-1 text-primary hover:underline"
+                >
+                  <Copy className="h-3 w-3" /> Copy the link to watch it
+                </button>
+              )}
               <a href={film.download_url} download={film.file_name}
                 className="inline-flex items-center gap-1 text-primary hover:underline">
                 Download the mp4
