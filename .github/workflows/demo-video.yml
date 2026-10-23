@@ -93,10 +93,22 @@ jobs:
       # the first run drove the whole demo, asked all three questions, waited for every
       # answer, and then died on `spawnSync ffmpeg ENOENT` at the encode. Two minutes of live
       # assistant thrown away at the last step.
+      #
+      # A static build off GitHub's own release storage first, apt only as the fallback. On
+      # 2026-10-23 the Ubuntu mirror was so slow that `apt-get update` alone hung past the
+      # job's 25 minutes, twice, and Brunello Cucinelli's film was never recorded. The
+      # download is one request to the same network the runner is on.
       - name: Install ffmpeg
+        timeout-minutes: 8
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
+          if curl -fsSL --max-time 120 -o /tmp/ffmpeg.tar.xz \
+               https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz \
+             && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp; then
+            sudo install -m 755 /tmp/ffmpeg-master-latest-linux64-gpl/bin/ffmpeg /usr/local/bin/ffmpeg
+          else
+            timeout 300 sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg
+          fi
           ffmpeg -version | head -1
 
       - name: Record
