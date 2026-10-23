@@ -355,6 +355,17 @@ export function nextAction(facts: CycleFacts): NextAction {
     }
 
     if (!built(facts, step.artifact)) {
+      // The intro deck swaps their pieces in. With no catalogue the card offered "Build it"
+      // directly above the step's own warning that there was nothing to swap. Somebody who
+      // met them with a deck made by hand marks the step, and the card moves on.
+      if (step.n === 1 && facts.products === 0) {
+        if (settled) continue;
+        return {
+          kind: "blocked", step: 1,
+          title: "No catalogue for the intro deck",
+          detail: "The deck shows their own pieces. Run the Catalogue stage, or add a feed URL on the catalogue source.",
+        };
+      }
       if (step.n === 4 && !facts.perimeterDeclared) {
         // Not a build: there is nothing to build from yet. The work is in the panel.
         return {
