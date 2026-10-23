@@ -343,6 +343,9 @@ export function nextAction(facts: CycleFacts): NextAction {
     if (step.n === 3) {
       // A brand that may not have a demo at all does not owe anyone a demo step.
       if (!facts.demoAllowed) continue;
+      // Marked first: a house with no catalogue can still be shown the assistant, and once
+      // somebody records that the demo happened, the missing catalogue is no longer the news.
+      if (settled) continue;
       if (facts.products === 0) {
         return {
           kind: "blocked", step: 3,
@@ -350,7 +353,6 @@ export function nextAction(facts: CycleFacts): NextAction {
           detail: "The demo shows their own pieces. Run the Catalogue stage, or add a feed URL on the catalogue source.",
         };
       }
-      if (settled) continue;
       return recordAction(step);
     }
 

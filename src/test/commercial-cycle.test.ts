@@ -342,6 +342,13 @@ describe("what to do next", () => {
     expect(n.step).toBe(2);
   });
 
+  it("moves past a demo somebody marked, catalogue or not", () => {
+    const n = nextAction(facts({
+      artifacts: { intro_teaser: {}, data_request: {} }, products: 0, progress: marked(1, 2, 3),
+    }));
+    expect(n.step).toBe(4);
+  });
+
   it("does not ask for a catalogue on a brand that may not have a demo at all", () => {
     const n = nextAction(facts({
       artifacts: { intro_teaser: {}, data_request: {} }, products: 0, demoAllowed: false,

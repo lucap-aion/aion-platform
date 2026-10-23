@@ -154,12 +154,16 @@ export default function DemoPanel({
     && !preview.will_remove_logins?.length;
 
   const c = counts ?? {};
-  const ready = (c.knowledge_chunks ?? 0) > 0 && (c.policies ?? 0) > 0
-    && (c.customers ?? 0) > 0 && (c.brand_users ?? 0) > 0;
+  // An assistant-only demo shows the assistant and nothing else, so it needs no book of
+  // business. Asking for covers anyway locked the film behind a catalogue Brunello Cucinelli
+  // cannot give us — the one house the assistant-only demo was the way round.
+  const bookNeeded = assistantOnly !== true;
+  const ready = (c.knowledge_chunks ?? 0) > 0 && (c.brand_users ?? 0) > 0
+    && (!bookNeeded || ((c.policies ?? 0) > 0 && (c.customers ?? 0) > 0));
   const blocking = [
     (c.knowledge_chunks ?? 0) === 0 && "nothing indexed yet (Website & news)",
-    (c.customers ?? 0) === 0 && "no clients (Demo book of business)",
-    (c.policies ?? 0) === 0 && "no covers (Demo book of business)",
+    bookNeeded && (c.customers ?? 0) === 0 && "no clients (Demo book of business)",
+    bookNeeded && (c.policies ?? 0) === 0 && "no covers (Demo book of business)",
     (c.brand_users ?? 0) === 0 && "no logins (Demo logins)",
   ].filter(Boolean) as string[];
 
@@ -217,7 +221,9 @@ export default function DemoPanel({
     <div className="space-y-4">
       <div className={`rounded-lg border p-3 text-sm ${ready ? "border-emerald-500/40 bg-emerald-500/10" : "border-border bg-muted/40"}`}>
         {ready
-          ? <span className="font-medium text-emerald-700 dark:text-emerald-400">Demo ready — both portals have something to show.</span>
+          ? <span className="font-medium text-emerald-700 dark:text-emerald-400">{bookNeeded
+              ? "Demo ready — both portals have something to show."
+              : "Demo ready — the assistant has the site to answer from, and the logins exist."}</span>
           : <span className="text-muted-foreground">Not demo ready yet: {blocking.join(" · ")}</span>}
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span>{c.customers ?? 0} clients</span>
@@ -315,7 +321,9 @@ export default function DemoPanel({
             type="button"
             onClick={() => void recordFilm()}
             disabled={busy !== null || !ready}
-            title={ready ? undefined : "The demo needs its book of business and its logins first"}
+            title={ready ? undefined : bookNeeded
+              ? "The demo needs its book of business and its logins first"
+              : "The demo needs the site indexed and its logins first"}
             className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50"
           >
             {busy === "film" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
