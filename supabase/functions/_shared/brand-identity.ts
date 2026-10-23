@@ -184,7 +184,7 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   // markup search below only ever found logos that happened to be <img> tags
   // with a helpful class, which missed every site using a CSS background or an
   // inline SVG. Ferragamo publishes it and we were ignoring it.
-  const declaredLogo = abs(
+  let declaredLogo = abs(
     jsonLdNodes(html)
       .filter((n) => {
         const t = n["@type"];
@@ -200,10 +200,17 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
       .find(Boolean),
   );
 
+  // A declared logo can be the shop platform's own. brunellocucinelli.com declares
+  // /images/logo.svg, which is the Salesforce Commerce Cloud template's placeholder — the
+  // site's header draws the real crest from logo-black.svg — and it went on the brand record
+  // and into the intro deck.
+  if (declaredLogo && isPlatformPlaceholderLogo(declaredLogo, (await fetchText(declaredLogo)) ?? "")) {
+    out.notes.push(`the logo the site declares (${declaredLogo}) is its shop platform's placeholder, not the house's — took the one in the page header instead`);
+    declaredLogo = undefined;
+  }
+
   // Failing that, an <img> whose class, id, alt or filename says logo.
-  const logoImg = [...html.matchAll(/<img\b[^>]*>/gi)]
-    .map((m) => m[0])
-    .find((tag) => /logo|brand-?mark|wordmark/i.test(tag) && !/sprite|placeholder|payment|card/i.test(tag));
+  const logoImg = pickLogoImg(html);
   const logo = declaredLogo ?? abs(logoImg ? (getAttr(logoImg, "src") ?? getAttr(logoImg, "data-src")) : undefined);
   if (logo) { out.logo_big = logo; out.found.push(declaredLogo ? "logo (declared)" : "logo (markup)"); }
   else { out.notes.push("no logo found — the deck will carry only AION's mark until one is set on the record"); }
@@ -418,6 +425,28 @@ async function fetchText(url: string): Promise<string | null> {
   try {
     return await got.response.text();
   } catch { return null; }
+}
+
+/**
+ * A logo file that belongs to the shop platform rather than to the house — the template's
+ * placeholder that nobody replaced. Read from the file itself: Salesforce's ships with
+ * `<title>2016sf_CommerceCloud_logo_RGB</title>`, under a path that says only "logo.svg".
+ */
+export function isPlatformPlaceholderLogo(url: string, body: string): boolean {
+  if (/placeholder/i.test(url)) return true;
+  return /commerce_?cloud|salesforce|shopify_logo|magento_logo|woocommerce_logo/i.test(body.slice(0, 4000));
+}
+
+/**
+ * The header logo from the markup. A header often carries two — a white one for the
+ * transparent header over the hero picture, and a dark one for the solid header — and the
+ * white comes first. On the deck's cream slides and the portal's white header it is invisible.
+ */
+export function pickLogoImg(html: string): string | undefined {
+  const tags = [...html.matchAll(/<img\b[^>]*>/gi)]
+    .map((m) => m[0])
+    .filter((tag) => /logo|brand-?mark|wordmark/i.test(tag) && !/sprite|placeholder|payment|card/i.test(tag));
+  return tags.find((tag) => !/white|inverse|negative|reverse/i.test(tag)) ?? tags[0];
 }
 
 function meta(html: string, name: string): string | undefined {
