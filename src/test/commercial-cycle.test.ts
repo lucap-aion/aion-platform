@@ -329,6 +329,19 @@ describe("what to do next", () => {
     expect(n.step).toBe(3);
   });
 
+  it("does not offer to build an intro deck with no catalogue to put in it", () => {
+    const n = nextAction(facts({ products: 0 }));
+    expect(n.kind).toBe("blocked");
+    expect(n.step).toBe(1);
+    expect(n.title).toMatch(/catalogue/i);
+  });
+
+  it("moves past the intro deck once somebody marks it, catalogue or not", () => {
+    const n = nextAction(facts({ products: 0, progress: { "1": { state: "skipped" } } }));
+    expect(n.kind).toBe("build");
+    expect(n.step).toBe(2);
+  });
+
   it("does not ask for a catalogue on a brand that may not have a demo at all", () => {
     const n = nextAction(facts({
       artifacts: { intro_teaser: {}, data_request: {} }, products: 0, demoAllowed: false,
