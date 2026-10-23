@@ -16,7 +16,7 @@ import type { FeedVariant, RawShopifyProduct } from "../_shared/shopify-feed.ts"
 import { parseProductFeed } from "../_shared/product-feed.ts";
 import { categoryFromSlug } from "../_shared/sitemap-products.ts";
 import { AION_UA } from "../_shared/robots.ts";
-import { rankCatalogueUrls, preferredLocale, inLocale, localeOf } from "../_shared/catalogue-urls.ts";
+import { rankCatalogueUrls, preferredLocale, inLocale, localeOf, onSite } from "../_shared/catalogue-urls.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const JINA_API_KEY = Deno.env.get("JINA_API_KEY") ?? "";
@@ -377,7 +377,10 @@ async function fetchStructured(
   // Deterministic order, because the cursor indexes into it. Sorting by score alone leaves
   // ties in whatever order PostgREST returned them, and a list that reshuffles between runs
   // makes a cursor meaningless.
-  const ranked = rankCatalogueUrls([base, ...((queued ?? []) as { url: string }[]).map((r) => r.url)]);
+  // The house's own pages only: the queue also holds the press coverage `sources` found.
+  const ranked = rankCatalogueUrls(
+    [base, ...((queued ?? []) as { url: string }[]).map((r) => r.url)].filter((u) => onSite(u, base)),
+  );
 
   // One locale, so the catalogue is priced in one currency. Ferragamo's 135 products were
   // all read off /shop/us/en — dollar prices, stored as euros, straight into the demo book

@@ -39,7 +39,7 @@ import { blockedBy, revivableStages, type StageName } from "../_shared/stage-gra
 import { refusalKeepsSource } from "../_shared/storefront-source.ts";
 // Honest agent first, browser agent only where a wall refuses us — see the file.
 import { fetchSite } from "../_shared/fetch-site.ts";
-import { rankCatalogueUrls, catalogueSample } from "../_shared/catalogue-urls.ts";
+import { rankCatalogueUrls, catalogueSample, onSite } from "../_shared/catalogue-urls.ts";
 // The last resort when no page of a site can be read: its own sitemap names the pieces and
 // the packshots, and the item code joins them.
 import { collectSitemap } from "../_shared/crawl.ts";
@@ -1610,7 +1610,10 @@ async function detectStructured(
   // first — only to have found them.
   const { data: queued } = await admin.from("knowledge_crawl_queue")
     .select("url").eq("brand_id", brandId).limit(400);
-  const crawled = rankCatalogueUrls(((queued ?? []) as { url: string }[]).map((r) => r.url));
+  // The house's own pages only: the queue also holds the press coverage `sources` found.
+  const crawled = rankCatalogueUrls(
+    ((queued ?? []) as { url: string }[]).map((r) => r.url).filter((u) => onSite(u, base)),
+  );
 
   // Guessed paths last: they are the only hope before the crawl has run, and worthless
   // after it.

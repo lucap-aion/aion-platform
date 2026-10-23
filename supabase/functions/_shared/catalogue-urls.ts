@@ -244,6 +244,25 @@ export function catalogueSample(ranked: string[], n: number, best = 3): string[]
   return out;
 }
 
+/**
+ * Whether a url is on the house's own site — the base host or a subdomain of it, `www.` aside.
+ *
+ * The crawl queue is not only the site: `sources` enqueues the press coverage it finds, and a
+ * Google News article id (`CBMi5wFBVV95cUxPR1Fn…`) passes the item-code rule. On Brunello
+ * Cucinelli six of the eight pages detection sampled were Google News articles; they answered
+ * 200 with no product on them, which outvoted the shop's own 403s, and a house behind Akamai
+ * was recorded as publishing no catalogue rather than as locked out.
+ */
+export function onSite(url: string, base: string): boolean {
+  try {
+    const host = new URL(/^https?:\/\//i.test(base) ? base : `https://${base}`).hostname.replace(/^www\./, "");
+    const h = new URL(url).hostname.replace(/^www\./, "");
+    return h === host || h.endsWith(`.${host}`);
+  } catch {
+    return false;
+  }
+}
+
 export function rankCatalogueUrls(urls: string[]): string[] {
   return [...new Set(urls)]
     // Score 0 is not "unlikely to carry a product", it is "never": a FAQ, a privacy notice
