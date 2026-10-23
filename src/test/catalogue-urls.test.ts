@@ -1,8 +1,33 @@
 import { describe, it, expect } from "vitest";
 import {
   productUrlScore, rankCatalogueUrls, hasItemCode, localeOf, preferredLocale, inLocale,
-  catalogueSample,
+  catalogueSample, onSite,
 } from "../../supabase/functions/_shared/catalogue-urls.ts";
+
+describe("the house's own site", () => {
+  const base = "https://shop.brunellocucinelli.com";
+  // The crawl queue carries press coverage too, and an article id passes the item-code rule.
+  const news = "https://news.google.com/rss/articles/CBMi5wFBVV95cUxPR1FnWDlDdExySnotVHdGeC12QjB0azNsX2p0c?oc=5";
+
+  it("keeps the house's pages, on either scheme", () => {
+    expect(onSite("https://shop.brunellocucinelli.com/it-it/giacca-mb4084600.html", base)).toBe(true);
+    expect(onSite("http://shop.brunellocucinelli.com/en-us/", base)).toBe(true);
+  });
+
+  it("drops press coverage, however product-like its path", () => {
+    expect(productUrlScore(news)).toBeGreaterThan(0);
+    expect(onSite(news, base)).toBe(false);
+  });
+
+  it("keeps a shop subdomain of a www base, and not a lookalike host", () => {
+    expect(onSite("https://shop.ferragamo.com/x-123456", "https://www.ferragamo.com")).toBe(true);
+    expect(onSite("https://notferragamo.com/x-123456", "https://www.ferragamo.com")).toBe(false);
+  });
+
+  it("reads a base stored without a scheme", () => {
+    expect(onSite("https://www.pomellato.com/it_it/ring-1234", "pomellato.com")).toBe(true);
+  });
+});
 
 // Which of a site's pages to read first when looking for a catalogue. A run reads a handful,
 // so this ordering decides whether the first batch returns sixty products or none.
