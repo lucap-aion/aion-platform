@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sniffFormat, imageSize, EMBEDDABLE, MEDIA_TYPES } from "../../supabase/functions/_shared/image-bytes.ts";
+import { sniffFormat, imageSize, EMBEDDABLE, MEDIA_TYPES, decodePng, pngIsLight } from "../../supabase/functions/_shared/image-bytes.ts";
 
 // Real headers, byte for byte, because the whole point of this module is that headers and
 // extensions lie and only the bytes do not. A fixture built from what the code expects would
@@ -106,5 +106,32 @@ describe("how big it is", () => {
     // than leaving the logo off.
     expect(imageSize(avif())).toBe(null);
     expect(imageSize(new Uint8Array(8))).toBe(null);
+  });
+});
+
+describe("a white PNG logo", () => {
+  // Pasquale Bruni's own wordmark (red on transparency, from pasqualebruni.com), and white
+  // copies of it in each PNG layout a site can serve: RGBA, 16-bit, palette at 8 and 2 bits
+  // per pixel, grey + alpha. And the red one flattened onto white, which is not a white logo.
+  const { readFileSync } = require("node:fs") as typeof import("node:fs");
+  const { join } = require("node:path") as typeof import("node:path");
+  const fx = (f: string) => new Uint8Array(readFileSync(join(__dirname, "fixtures", f)));
+
+  it("decodes the pixels ImageMagick reads", async () => {
+    const px = await decodePng(fx("logo-red.png"));
+    expect(px).toMatchObject({ width: 400, height: 40 });
+    const at = (x: number, y: number) => [...px!.rgba.subarray((y * 400 + x) * 4, (y * 400 + x) * 4 + 4)];
+    expect(at(67, 1)).toEqual([207, 18, 46, 255]); // ink
+    expect(at(16, 0)[3]).toBe(0);                   // transparent
+  });
+
+  it("is told from a coloured one in every layout", async () => {
+    for (const f of ["logo-white.png", "logo-white-16bit.png", "logo-white-palette.png", "logo-white-2bit.png", "logo-white-gray.png"]) {
+      expect(await pngIsLight(fx(f)), f).toBe(true);
+    }
+    expect(await pngIsLight(fx("logo-red.png"))).toBe(false);
+    // Opaque: it carries its own white background, which is not a white logo.
+    expect(await pngIsLight(fx("logo-opaque.png"))).toBe(false);
+    expect(await pngIsLight(new Uint8Array([1, 2, 3]))).toBe(false);
   });
 });

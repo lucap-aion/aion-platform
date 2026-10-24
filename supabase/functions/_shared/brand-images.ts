@@ -186,6 +186,32 @@ export async function mirrorImage(
   return await keep(admin, brandId, slot, where, bytes, `served as ${headerType || "no content type"}`);
 }
 
+/**
+ * The largest PNG frame inside a .ico, or null. A favicon.ico is often the only icon a house
+ * declares (oris.ch: `<link rel="icon" href="/favicon.ico">`), and a browser cannot show an
+ * .ico in an <img> reliably, so it was skipped and the record kept a hotlink to it. Modern
+ * .ico files carry their big frames as embedded PNGs, which are kept as they are; a
+ * BMP-only (old, small) .ico still yields nothing.
+ */
+export function pngFromIco(b: Uint8Array): Uint8Array | null {
+  if (b.length < 6 || b[0] !== 0 || b[1] !== 0 || b[2] !== 1 || b[3] !== 0) return null;
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const count = view.getUint16(4, true);
+  let best: { size: number; bytes: Uint8Array } | null = null;
+  for (let i = 0; i < count; i++) {
+    const o = 6 + i * 16;
+    if (o + 16 > b.length) break;
+    const w = b[o] || 256;
+    const len = view.getUint32(o + 8, true);
+    const at = view.getUint32(o + 12, true);
+    if (at + len > b.length || len < 8) continue;
+    const frame = b.subarray(at, at + len);
+    const isPng = frame[0] === 0x89 && frame[1] === 0x50 && frame[2] === 0x4e && frame[3] === 0x47;
+    if (isPng && (!best || w > best.size)) best = { size: w, bytes: frame };
+  }
+  return best?.bytes ?? null;
+}
+
 /** Sniff, store under the slot's fixed path, and return our url — the half of mirroring
  *  that does not care where the bytes came from. */
 async function keep(
@@ -196,6 +222,7 @@ async function keep(
   bytes: Uint8Array,
   origin: string,
 ): Promise<MirrorOutcome> {
+  bytes = pngFromIco(bytes) ?? bytes;
   const contentType = sniff(bytes);
   if (!contentType) {
     return {
