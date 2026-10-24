@@ -27,6 +27,11 @@ function analyzeContrast(src: string): Promise<Contrast> {
           luminanceSum += 0.299 * (data[i] / 255) + 0.587 * (data[i + 1] / 255) + 0.114 * (data[i + 2] / 255);
         }
         if (count === 0) { resolve("unknown"); return; }
+        // An opaque image carries its own background (a crest on a white tile, a letter on
+        // black), and the filters below recolour every pixel — brightness(0) turned
+        // Buccellati's and Eberhard's icons into solid black squares. Only a cut-out logo,
+        // ink on transparency, can be recoloured; anything else is shown as it is.
+        if (count > SIZE * SIZE * 0.97) { resolve("unknown"); return; }
         resolve(luminanceSum / count < 0.5 ? "dark" : "light");
       } catch {
         resolve("unknown");
