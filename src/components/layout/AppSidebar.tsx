@@ -208,7 +208,7 @@ const AppSidebar = () => {
               : <span className="text-lg font-serif font-bold text-foreground">{tenant.logoInitial}</span>
           ) : (
             tenant.logoUrl
-              ? <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="block h-10 max-w-[160px] object-contain object-left" />
+              ? <SmartLogo src={tenant.logoUrl} alt={tenant.name} className="block h-auto w-auto max-h-14 max-w-[180px]" />
               : <span className="text-2xl font-serif font-bold text-foreground tracking-tight">{tenant.name}</span>
           )}
         </div>
