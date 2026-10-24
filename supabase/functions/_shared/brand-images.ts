@@ -126,12 +126,28 @@ export async function mirrorImage(
   const url = String(sourceUrl ?? "").trim();
   if (!url) return { slot, status: "skipped", reason: "no url" };
   if (servedByAion(url)) return { slot, status: "already_ours" };
-  if (!/^https?:\/\//i.test(url)) {
-    return { slot, status: "skipped", reason: "not an http url" };
-  }
 
   const where = SLOT_STORAGE[slot];
   if (!where) return { slot, status: "skipped", reason: `unknown slot ${slot}` };
+
+  // A logo the page draws inline (brand-identity's inlineSvgLogo) arrives as a data: URL —
+  // there is nothing to download, only bytes to keep.
+  if (/^data:image\//i.test(url)) {
+    const comma = url.indexOf(",");
+    const head = url.slice(0, comma);
+    let bytes: Uint8Array;
+    try {
+      bytes = /;base64/i.test(head)
+        ? Uint8Array.from(atob(url.slice(comma + 1)), (c) => c.charCodeAt(0))
+        : new TextEncoder().encode(decodeURIComponent(url.slice(comma + 1)));
+    } catch {
+      return { slot, status: "skipped", reason: "the inline image could not be decoded" };
+    }
+    return await keep(admin, brandId, slot, where, bytes, "inline");
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    return { slot, status: "skipped", reason: "not an http url" };
+  }
 
   let res: Response;
   try {
@@ -167,12 +183,25 @@ export async function mirrorImage(
   // and left broken in the portal forever. Every format the portal can render is sniffable,
   // so nothing legitimate is lost by refusing to take the label's word for it.
   const headerType = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  return await keep(admin, brandId, slot, where, bytes, `served as ${headerType || "no content type"}`);
+}
+
+/** Sniff, store under the slot's fixed path, and return our url — the half of mirroring
+ *  that does not care where the bytes came from. */
+async function keep(
+  admin: AdminClient,
+  brandId: number | string,
+  slot: ImageSlot,
+  where: { bucket: string; name: string },
+  bytes: Uint8Array,
+  origin: string,
+): Promise<MirrorOutcome> {
   const contentType = sniff(bytes);
   if (!contentType) {
     return {
       slot,
       status: "skipped",
-      reason: `what came back is not an image the portal can render (served as ${headerType || "no content type"})`,
+      reason: `what came back is not an image the portal can render (${origin})`,
     };
   }
 

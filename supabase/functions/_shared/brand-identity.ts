@@ -209,10 +209,16 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
     declaredLogo = undefined;
   }
 
-  // Failing that, an <img> whose class, id, alt or filename says logo.
+  // Failing that, an <img> whose class, id, alt or filename says logo — and failing that,
+  // the logo the header draws inline as SVG.
   const logoImg = pickLogoImg(html);
-  const logo = declaredLogo ?? abs(logoImg ? (getAttr(logoImg, "src") ?? getAttr(logoImg, "data-src")) : undefined);
-  if (logo) { out.logo_big = logo; out.found.push(declaredLogo ? "logo (declared)" : "logo (markup)"); }
+  const markupLogo = abs(logoImg ? (getAttr(logoImg, "src") ?? getAttr(logoImg, "data-src")) : undefined);
+  const inlineLogo = declaredLogo || markupLogo ? undefined : inlineSvgLogo(html);
+  const logo = declaredLogo ?? markupLogo ?? inlineLogo;
+  if (logo) {
+    out.logo_big = logo;
+    out.found.push(declaredLogo ? "logo (declared)" : markupLogo ? "logo (markup)" : "logo (inline SVG)");
+  }
   else { out.notes.push("no logo found — the deck will carry only AION's mark until one is set on the record"); }
 
   // ── Where the company is ──────────────────────────────────────────────────
@@ -445,8 +451,64 @@ export function isPlatformPlaceholderLogo(url: string, body: string): boolean {
 export function pickLogoImg(html: string): string | undefined {
   const tags = [...html.matchAll(/<img\b[^>]*>/gi)]
     .map((m) => m[0])
-    .filter((tag) => /logo|brand-?mark|wordmark/i.test(tag) && !/sprite|placeholder|payment|card/i.test(tag));
+    // "No Logo" is how a campaign photographer labels the clean version of a key visual —
+    // messika.com's hero is "…Key Visual - 169 - No Logo - 150 DPI…jpg" — and it went on
+    // the record as the house's logo. A tag that says logo only to say there is none is not one.
+    .filter((tag) => /logo|brand-?mark|wordmark/i.test(tag.replace(/no(?:[\s_-]|%20)*logo/gi, "")))
+    .filter((tag) => !/sprite|placeholder|payment|card/i.test(tag));
   return tags.find((tag) => !/white|inverse|negative|reverse/i.test(tag)) ?? tags[0];
+}
+
+/**
+ * The header logo when it is drawn inline rather than linked: an `<svg>` in the page, often
+ * just `<use href="#messika-logo-2025">` pointing at a `<symbol>` elsewhere in the document.
+ * Most modern storefronts do this, and none of it is an <img>, so the markup search found
+ * nothing and the next best thing on the page — a campaign photo — went on the record.
+ *
+ * Returned as a data: URL of a standalone SVG. The branding stage copies it into our storage
+ * like any other logo (mirrorImage reads data: URLs), so the record ends up with our URL.
+ *
+ * Which inline SVG: one the markup calls a logo (its class/id/aria/title, the id it uses, or
+ * the link around it), or the first one inside a link home that is clearly a wordmark — wider
+ * than twice its height. Icons are square and are never it.
+ */
+export function inlineSvgLogo(html: string): string | undefined {
+  const symbols = new Map<string, { viewBox?: string; body: string }>();
+  for (const m of html.matchAll(/<symbol\b([^>]*)>([\s\S]*?)<\/symbol>/gi)) {
+    const id = getAttr(m[1], "id");
+    if (id) symbols.set(id, { viewBox: getAttr(m[1], "viewBox"), body: m[2] });
+  }
+  const ratio = (viewBox?: string) => {
+    const [, , w, h] = (viewBox ?? "").trim().split(/[\s,]+/).map(Number);
+    return w > 0 && h > 0 ? w / h : 0;
+  };
+
+  type Found = { score: number; svg: string };
+  const found: Found[] = [];
+  for (const m of html.matchAll(/<svg\b([^>]*)>([\s\S]*?)<\/svg>/gi)) {
+    const [, attrs, inner] = m;
+    const ref = /<use\b[^>]*(?:xlink:)?href=["']#([^"']+)["']/i.exec(inner)?.[1];
+    const symbol = ref ? symbols.get(ref) : undefined;
+    if (ref && !symbol) continue;
+    const viewBox = getAttr(attrs, "viewBox") ?? symbol?.viewBox;
+    const body = symbol ? symbol.body : inner;
+    if (!/<(path|polygon|rect|circle|ellipse|text|g)\b/i.test(body)) continue;
+
+    // The 300 characters before the <svg> hold the link (or wrapper) it sits in.
+    const before = html.slice(Math.max(0, (m.index ?? 0) - 300), m.index);
+    const wrapper = before.slice(before.lastIndexOf("<")) ?? "";
+    const saysLogo = /logo|brand-?mark|wordmark/i.test(`${attrs} ${ref ?? ""} ${/<title>([^<]*)/i.exec(inner)?.[1] ?? ""} ${wrapper}`);
+    const linksHome = /<a\b[^>]*(aria-label=["'](home|homepage)["']|href=["'](\/|https?:\/\/[^"'/]+\/?(?:[a-z]{2}(?:[-_][a-z]{2})?\/?)?)["'])/i.test(wrapper);
+    const wide = ratio(viewBox) >= 2;
+    if (!(saysLogo || (linksHome && wide))) continue;
+    if (!wide && ratio(viewBox) > 0 && ratio(viewBox) < 0.9) continue; // a tall glyph is an icon
+    found.push({
+      score: (saysLogo ? 2 : 0) + (linksHome ? 1 : 0) + (wide ? 1 : 0),
+      svg: `<svg xmlns="http://www.w3.org/2000/svg"${viewBox ? ` viewBox="${viewBox}"` : ""}>${body}</svg>`,
+    });
+  }
+  const best = found.sort((a, b) => b.score - a.score)[0];
+  return best ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(best.svg)}` : undefined;
 }
 
 function meta(html: string, name: string): string | undefined {
