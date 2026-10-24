@@ -318,10 +318,14 @@ const captureDone = new Promise((res, rej) => {
 let latest = null;
 let startedAt = 0;
 let written = 0;
+/** Off until the first login page has drawn (see logIn): the frames before it are the SPA's
+ *  loading spinner, and a film should not open on one. */
+let rolling = false;
+const roll = () => { if (!rolling) { rolling = true; startedAt = Date.now(); } };
 /** Frames owed by the wall clock, not by the timer: setInterval runs late under load, and a
  *  film counted in ticks would come out shorter than what happened. */
 const tick = () => {
-  if (!latest) return;
+  if (!latest || !rolling) return;
   const due = Math.floor(((Date.now() - startedAt) / 1000) * RATE) + 1;
   for (; written < due; written++) capture.stdin.write(latest);
 };
@@ -333,7 +337,6 @@ cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
   // film by a tenth. Only full-viewport frames go in.
   if (metadata.deviceWidth !== SIZE.width || metadata.deviceHeight !== SIZE.height) return;
   latest = Buffer.from(data, "base64");
-  if (!startedAt) startedAt = Date.now();
 });
 await cdp.send("Page.startScreencast", {
   format: "jpeg", quality: 92, maxWidth: SIZE.width * 2, maxHeight: SIZE.height * 2, everyNthFrame: 1,
@@ -451,6 +454,7 @@ async function logIn(page, who, secret) {
   // camera ran from domcontentloaded, and Brunello's film opened on "Brunello Cucinelli" in
   // alt text over a grey half-screen without the log saying a word.
   await photosDrawn(page, who === clientEmail ? "client login" : "login");
+  roll();
   await page.fill('input[type="email"]', who);
   await page.fill('input[type="password"]', secret);
   // BY ITS NAME, not by button[type="submit"]. The login page has three submit buttons and
@@ -489,6 +493,10 @@ async function filmAssistant(page, { count, arrive = "url" }) {
   // Into the assistant the way a person gets there: from the sidebar mid-tour, by URL when
   // it is the whole film (where the login has landed on a page the film is not about).
   if (arrive === "sidebar" && await viaSidebar(page, "/assistant", "assistant")) {
+    await page.waitForSelector(COMPOSER, { timeout: 45_000 });
+  } else if (new URL(page.url()).pathname === `/${slug}/assistant`) {
+    // An assistant-only demo lands here from the login. Loading it again only filmed the
+    // SPA's spinner between the login's dissolve and the same screen.
     await page.waitForSelector(COMPOSER, { timeout: 45_000 });
   } else {
     await gotoAndSettle(`${base}/${slug}/assistant`, COMPOSER);
