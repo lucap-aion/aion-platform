@@ -204,20 +204,72 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   // /images/logo.svg, which is the Salesforce Commerce Cloud template's placeholder — the
   // site's header draws the real crest from logo-black.svg — and it went on the brand record
   // and into the intro deck.
-  if (declaredLogo && isPlatformPlaceholderLogo(declaredLogo, (await fetchText(declaredLogo)) ?? "")) {
-    out.notes.push(`the logo the site declares (${declaredLogo}) is its shop platform's placeholder, not the house's — took the one in the page header instead`);
-    declaredLogo = undefined;
+  //
+  // And any logo can be the WHITE one — drawn for the transparent header over the hero
+  // picture, invisible on the portal's white header and the deck's cream slides. A filename
+  // that says "white" is caught by pickLogoImg; eberhard-co-watches.ch's says "logo-2.svg"
+  // and paints everything #fff, so an SVG is also judged by the colours it declares
+  // (svgIsLight). A light logo is kept only when there is no other.
+  //
+  // A declared logo can also be the site's ICON. WordPress publishes its site icon as the
+  // Organization logo — eberhard-co-watches.ch declares cropped-favico-eb.png, the "E"
+  // shield — and it went on the record as the logo the open sidebar shows by name. A
+  // wordmark is never square, so a square one (or one named as an icon) gives way to the
+  // header's logo, and is kept as the monogram if the site declared no bigger one.
+  let lightLogo: string | undefined;
+  let siteIcon: string | undefined;
+  if (declaredLogo) {
+    const body = (await fetchText(declaredLogo)) ?? "";
+    if (isPlatformPlaceholderLogo(declaredLogo, body)) {
+      out.notes.push(`the logo the site declares (${declaredLogo}) is its shop platform's placeholder, not the house's — took the one in the page header instead`);
+      declaredLogo = undefined;
+    } else if (svgIsLight(body)) {
+      lightLogo = declaredLogo;
+      declaredLogo = undefined;
+    } else if (await isSiteIcon(declaredLogo, body)) {
+      siteIcon = declaredLogo;
+      declaredLogo = undefined;
+      if (!out.logo_small) out.logo_small = siteIcon;
+    }
   }
 
   // Failing that, an <img> whose class, id, alt or filename says logo — and failing that,
   // the logo the header draws inline as SVG.
-  const logoImg = pickLogoImg(html);
-  const markupLogo = abs(logoImg ? (getAttr(logoImg, "src") ?? getAttr(logoImg, "data-src")) : undefined);
-  const inlineLogo = declaredLogo || markupLogo ? undefined : inlineSvgLogo(html);
-  const logo = declaredLogo ?? markupLogo ?? inlineLogo;
+  let markupLogo: string | undefined;
+  if (!declaredLogo) {
+    // A few, not all: each SVG candidate costs a fetch, and the header's are first.
+    for (const tag of logoImgCandidates(html).slice(0, 4)) {
+      const url = abs(getAttr(tag, "src") ?? getAttr(tag, "data-src"));
+      if (!url) continue;
+      if (/\.svg(?:[?#]|$)/i.test(url) && svgIsLight((await fetchText(url)) ?? "")) {
+        lightLogo ??= url;
+        continue;
+      }
+      markupLogo = url;
+      break;
+    }
+  }
+  let inlineLogo = declaredLogo || markupLogo ? undefined : inlineSvgLogo(html);
+  if (inlineLogo && svgIsLight(decodeURIComponent(inlineLogo.slice(inlineLogo.indexOf(",") + 1)))) {
+    lightLogo ??= inlineLogo;
+    inlineLogo = undefined;
+  }
+  const logo = declaredLogo ?? markupLogo ?? inlineLogo ?? siteIcon ?? lightLogo;
   if (logo) {
     out.logo_big = logo;
-    out.found.push(declaredLogo ? "logo (declared)" : markupLogo ? "logo (markup)" : "logo (inline SVG)");
+    out.found.push(
+      declaredLogo ? "logo (declared)" : markupLogo ? "logo (markup)" : inlineLogo ? "logo (inline SVG)"
+        : logo === siteIcon ? "logo (site icon)" : "logo (white)",
+    );
+    if (siteIcon && logo !== siteIcon) {
+      out.notes.push(`the logo the site declares (${siteIcon}) is its square site icon — took the one in the page header for the name, kept the icon as the monogram`);
+    }
+    if (logo === siteIcon) {
+      out.notes.push("the only logo the site offers is its square icon — the open sidebar needs the house's name; set a wordmark by hand");
+    }
+    if (logo === lightLogo) {
+      out.notes.push("the only logo the site offers is a white one — it will not show on the portal's white header; set a dark version by hand");
+    }
   }
   else { out.notes.push("no logo found — the deck will carry only AION's mark until one is set on the record"); }
 
@@ -449,6 +501,12 @@ export function isPlatformPlaceholderLogo(url: string, body: string): boolean {
  * white comes first. On the deck's cream slides and the portal's white header it is invisible.
  */
 export function pickLogoImg(html: string): string | undefined {
+  return logoImgCandidates(html)[0];
+}
+
+/** Every <img> that is plausibly the logo, best first: a dark-by-name one before one whose
+ *  name says white, document order otherwise. */
+export function logoImgCandidates(html: string): string[] {
   const tags = [...html.matchAll(/<img\b[^>]*>/gi)]
     .map((m) => m[0])
     // "No Logo" is how a campaign photographer labels the clean version of a key visual —
@@ -456,7 +514,59 @@ export function pickLogoImg(html: string): string | undefined {
     // the record as the house's logo. A tag that says logo only to say there is none is not one.
     .filter((tag) => /logo|brand-?mark|wordmark/i.test(tag.replace(/no(?:[\s_-]|%20)*logo/gi, "")))
     .filter((tag) => !/sprite|placeholder|payment|card/i.test(tag));
-  return tags.find((tag) => !/white|inverse|negative|reverse/i.test(tag)) ?? tags[0];
+  const light = (tag: string) => /white|inverse|negative|reverse/i.test(tag);
+  return [...tags.filter((t) => !light(t)), ...tags.filter(light)];
+}
+
+/** A site icon passed off as the logo: named as one, or measured (from an SVG's viewBox, or a
+ *  raster's header bytes) to be roughly square. Unmeasurable → false: no claim either way. */
+async function isSiteIcon(url: string, body: string): Promise<boolean> {
+  if (/fav-?icon|favico|site-?icon|apple-touch|touch-icon/i.test(url)) return true;
+  let ratio = 0;
+  const viewBox = /<svg\b[^>]*viewBox=["']([^"']+)["']/i.exec(body)?.[1];
+  if (viewBox) {
+    const [, , w, h] = viewBox.trim().split(/[\s,]+/).map(Number);
+    ratio = w > 0 && h > 0 ? w / h : 0;
+  } else {
+    const [m] = await measureImages([url]);
+    ratio = m.width && m.height ? m.width / m.height : 0;
+  }
+  return ratio > 0.8 && ratio < 1.25;
+}
+
+/**
+ * Is this SVG a white (or near-white) logo? Judged from every colour it declares — fill,
+ * stroke and gradient stops, as attributes or CSS — and true only when there is at least
+ * one and all of them are light. An SVG that declares nothing paints black, so it is not.
+ * `none`, `transparent`, `currentColor` and `url(#…)` say nothing about the ink and are
+ * skipped. Not an SVG (a PNG's bytes as text, an empty body) → false: no claim either way.
+ */
+export function svgIsLight(body: string): boolean {
+  if (!/<svg\b/i.test(body)) return false;
+  const values = [
+    ...body.matchAll(/\b(?:fill|stroke|stop-color)\s*=\s*["']([^"']+)["']/gi),
+    ...body.matchAll(/\b(?:fill|stroke|stop-color)\s*:\s*([^;"'}]+)/gi),
+  ].map((m) => m[1].trim().toLowerCase());
+  const lum: number[] = [];
+  for (const v of values) {
+    if (/^(none|transparent|currentcolor|inherit)$/.test(v) || v.startsWith("url(")) continue;
+    const rgb = parseColour(v);
+    if (!rgb) continue;
+    lum.push(0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]);
+  }
+  return lum.length > 0 && lum.every((l) => l > 0.85 * 255);
+}
+
+function parseColour(v: string): [number, number, number] | null {
+  if (v === "white") return [255, 255, 255];
+  if (v === "black") return [0, 0, 0];
+  const hex = /^#([0-9a-f]{3,8})$/.exec(v)?.[1];
+  if (hex) {
+    const full = hex.length <= 4 ? hex.slice(0, 3).split("").map((c) => c + c).join("") : hex.slice(0, 6);
+    return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16)) as [number, number, number];
+  }
+  const rgb = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/.exec(v);
+  return rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : null;
 }
 
 /**
