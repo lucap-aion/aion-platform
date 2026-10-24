@@ -17,7 +17,8 @@ const blocked = () => new Response("<html>Access denied</html>", { status: 403 }
 
 /** A site that answers some paths and refuses the rest. */
 function site(routes: Record<string, () => Response>, onRender?: (url: string) => Response) {
-  return vi.fn((input: string | URL) => {
+  // The init is unused here but declared, so a test can read a call's headers (calls[i][1]).
+  return vi.fn((input: string | URL, _init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith("https://r.jina.ai/")) {
       const target = url.slice("https://r.jina.ai/".length);
