@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { jsonLdNodes } from "../../supabase/functions/_shared/product-extract";
-import { inlineSvgLogo, isPlatformPlaceholderLogo, pickLogoImg } from "../../supabase/functions/_shared/brand-identity";
+import { harvestBrandIdentity, inlineSvgLogo, isPlatformPlaceholderLogo, pickLogoImg, svgIsLight } from "../../supabase/functions/_shared/brand-identity";
 
 const html = readFileSync(join(__dirname, "fixtures/ferragamo-home.html"), "utf8");
 
@@ -90,5 +90,73 @@ describe("a logo drawn inline", () => {
 
   it("takes a wide inline wordmark in the link home", () => {
     expect(inlineSvgLogo(`<a href="/"><svg viewBox="0 0 300 40"><path d="M0 0h300v40H0z"/></svg></a>`)).toBeDefined();
+  });
+});
+
+describe("a white logo", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  // eberhard-co-watches.ch: two header logos, the white one first, neither named "white".
+  const DARK = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 235 121"><rect width="235" height="121" fill="none"/><path d="M0 0" fill="#001834"/><path d="M1 1" fill="#001834"/></svg>`;
+  const WHITE = DARK.replace(/#001834/g, "#fff");
+
+  it("is told from a dark one by the colours it paints", () => {
+    expect(svgIsLight(WHITE)).toBe(true);
+    expect(svgIsLight(DARK)).toBe(false);
+    // Nothing declared paints black; currentColor follows the page.
+    expect(svgIsLight(`<svg><path d="M0 0"/></svg>`)).toBe(false);
+    expect(svgIsLight(`<svg><path fill="currentColor" d="M0 0"/></svg>`)).toBe(false);
+    // Through CSS, in rgb(), and a white mark on a dark tile is not a white logo.
+    expect(svgIsLight(`<svg><style>.a{fill:rgb(250, 250, 250)}</style><path class="a"/></svg>`)).toBe(true);
+    expect(svgIsLight(`<svg><rect fill="#111"/><path fill="#fff"/></svg>`)).toBe(false);
+    expect(svgIsLight("")).toBe(false);
+  });
+
+  it("is passed over for the dark one in the header", async () => {
+    const page = `<html><head><title>Eberhard</title></head><body><header>
+      <img width="800" height="413" src="https://www.eberhard.example/uploads/logo-2.svg" class="attachment-large size-large wp-image-34" alt="">
+      </header><footer><img width="235" height="121" src="https://www.eberhard.example/uploads/logo.svg" class="attachment-full size-full wp-image-13" alt=""></footer></body></html>`;
+    const files: Record<string, string> = {
+      "https://www.eberhard.example/": page,
+      "https://www.eberhard.example/uploads/logo-2.svg": WHITE,
+      "https://www.eberhard.example/uploads/logo.svg": DARK,
+    };
+    vi.stubGlobal("fetch", vi.fn((input: string | URL) => {
+      const body = files[String(input)];
+      return Promise.resolve(body == null ? new Response("", { status: 404 }) : new Response(body, { status: 200 }));
+    }));
+    const id = await harvestBrandIdentity("https://www.eberhard.example/");
+    expect(id.logo_big).toBe("https://www.eberhard.example/uploads/logo.svg");
+  });
+
+  it("is still taken when it is the only logo there is, and says so", async () => {
+    const page = `<html><body><img class="logo" src="https://www.solo.example/logo.svg"></body></html>`;
+    vi.stubGlobal("fetch", vi.fn((input: string | URL) => Promise.resolve(
+      String(input) === "https://www.solo.example/" ? new Response(page)
+        : String(input).endsWith("/logo.svg") ? new Response(WHITE)
+        : new Response("", { status: 404 }),
+    )));
+    const id = await harvestBrandIdentity("https://www.solo.example/");
+    expect(id.logo_big).toBe("https://www.solo.example/logo.svg");
+    expect(id.notes.join(" ")).toMatch(/white one/);
+  });
+});
+
+describe("a declared logo that is the site icon", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("gives way to the header's wordmark, and is kept as the monogram", async () => {
+    // WordPress publishes its site icon as the Organization logo — Eberhard's did.
+    const page = `<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Eberhard","logo":"https://www.wp.example/uploads/cropped-favico-eb.png"}</script></head>
+      <body><img class="site-logo" src="https://www.wp.example/uploads/logo.svg"></body></html>`;
+    vi.stubGlobal("fetch", vi.fn((input: string | URL) => {
+      const u = String(input);
+      if (u === "https://www.wp.example/") return Promise.resolve(new Response(page));
+      if (u.endsWith("/logo.svg")) return Promise.resolve(new Response(`<svg viewBox="0 0 235 57"><path fill="#001834" d="M0 0"/></svg>`));
+      return Promise.resolve(new Response("", { status: 404 }));
+    }));
+    const id = await harvestBrandIdentity("https://www.wp.example/");
+    expect(id.logo_big).toBe("https://www.wp.example/uploads/logo.svg");
+    expect(id.logo_small).toBe("https://www.wp.example/uploads/cropped-favico-eb.png");
   });
 });
