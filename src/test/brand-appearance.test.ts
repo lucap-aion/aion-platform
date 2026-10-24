@@ -44,6 +44,17 @@ describe("telling a photograph from page furniture", () => {
     expect(widestFromSrcset("only.jpg")).toBe("only.jpg");
     expect(widestFromSrcset("")).toBeNull();
   });
+
+  it("keeps the commas inside a CDN url", () => {
+    // Brunello Cucinelli's markup, verbatim. Split on commas it became ".../upload/f_auto",
+    // a 404 that went behind the sign-in form on prod.
+    const hero = "https://media.brunellocucinelli.com/brunellocucinelli/image/upload/f_auto,q_auto/v1/corporate/WELCOME/sito_Busto_Kant_desk?_i=AH";
+    expect(widestFromSrcset(hero)).toBe(hero);
+    expect(widestFromSrcset("https://cdn.x/upload/w_400,c_fill/a.jpg 400w, https://cdn.x/upload/w_1600,c_fill/a.jpg 1600w"))
+      .toBe("https://cdn.x/upload/w_1600,c_fill/a.jpg");
+    expect(widestFromSrcset("a.jpg 1x,b.jpg 2x")).toBe("b.jpg");
+    expect(widestFromSrcset("a.jpg, b.jpg 2x")).toBe("b.jpg");
+  });
 });
 
 describe("collecting candidates from a page", () => {

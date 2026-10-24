@@ -414,6 +414,13 @@ if (missing.length) {
       .join("; ")}. Watch it before sending it.`,
   );
 }
+const stood_in = [...new Set(photos.flatMap((p) => p.fellBack ?? []))];
+if (stood_in.length) {
+  console.warn(
+    `WARNING: the brand's own imagery did not load, so the film shows AION's default in its place — ` +
+    `${stood_in.join(" ")}. Fix the brand record (Brand → Appearance) and film again.`,
+  );
+}
 
 const seconds = Number(execFileSync("ffprobe", [
   "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", out,
@@ -439,6 +446,11 @@ if (process.argv.includes("--upload")) {
 /** Log in as the prospect would — or as their client would; it is the same page. */
 async function logIn(page, who, secret) {
   await gotoAndSettle(`${base}/${slug}/login`, 'input[type="email"]');
+  // The login is the first frame of the film and the brand's own background is half of it,
+  // so it is waited for and counted like any other screen's photos. It used not to be: the
+  // camera ran from domcontentloaded, and Brunello's film opened on "Brunello Cucinelli" in
+  // alt text over a grey half-screen without the log saying a word.
+  await photosDrawn(page, who === clientEmail ? "client login" : "login");
   await page.fill('input[type="email"]', who);
   await page.fill('input[type="password"]', secret);
   // BY ITS NAME, not by button[type="submit"]. The login page has three submit buttons and
@@ -732,7 +744,25 @@ async function screenReady(page, label, expect) {
   });
   took.content = Date.now() - t0 - took.loaders;
 
-  // The photos, as for an answer: eager, waited for, counted.
+  await photosDrawn(page, label, { settle: false });
+  took.photos = Date.now() - t0 - took.loaders - took.content;
+  // Every wait here is held on film under the curtain, so a slow screen is a long still.
+  // Said, so the log explains a film that drags.
+  const all = Date.now() - t0;
+  if (all > 4000) {
+    console.log(`  (${label}: ready in ${(all / 1000).toFixed(1)}s — loaders ${(took.loaders / 1000).toFixed(1)}s, ` +
+      `content ${(took.content / 1000).toFixed(1)}s, photos ${(took.photos / 1000).toFixed(1)}s)`);
+  }
+  // One frame for the decoded photos to paint before the camera moves.
+  await page.waitForTimeout(film(250));
+}
+
+/**
+ * The photos on screen, as for an answer: eager, waited for, counted. A broken one is
+ * reported with the host it came from — and the URL itself, because "brunellocucinelli.com"
+ * does not say that the address stops at `/upload/f_auto`.
+ */
+async function photosDrawn(page, label, { settle = true } = {}) {
   const total = await page.evaluate(() => {
     const imgs = [...document.querySelectorAll("img")];
     for (const img of imgs) img.loading = "eager";
@@ -744,6 +774,8 @@ async function screenReady(page, label, expect) {
       null, { timeout: 20_000 },
     ).catch(() => {});
   }
+  // A beat for an onError fallback (AuthPanel's, the client banner's) to swap and load.
+  await page.waitForTimeout(300);
   const health = await page.evaluate(() => {
     const imgs = [...document.querySelectorAll("img")];
     const bad = imgs.filter((i) => !(i.complete && i.naturalWidth > 0));
@@ -751,20 +783,19 @@ async function screenReady(page, label, expect) {
       total: imgs.length,
       loaded: imgs.length - bad.length,
       hosts: [...new Set(bad.map((i) => { try { return new URL(i.src).host; } catch { return "?"; } }))],
+      urls: bad.map((i) => i.src).slice(0, 3),
+      // Drew, but AION's picture in place of the brand's (data-fell-back holds the one that failed).
+      fellBack: [...document.querySelectorAll("img[data-fell-back]")].map((i) => i.dataset.fellBack),
     };
   });
-  took.photos = Date.now() - t0 - took.loaders - took.content;
-  if (health.total > health.loaded) console.warn(`  (${label}: ${health.loaded}/${health.total} photos drew — ${health.hosts.join(", ")})`);
-  photos.push({ label, ...health });
-  // Every wait here is held on film under the curtain, so a slow screen is a long still.
-  // Said, so the log explains a film that drags.
-  const all = Date.now() - t0;
-  if (all > 4000) {
-    console.log(`  (${label}: ready in ${(all / 1000).toFixed(1)}s — loaders ${(took.loaders / 1000).toFixed(1)}s, ` +
-      `content ${(took.content / 1000).toFixed(1)}s, photos ${(took.photos / 1000).toFixed(1)}s)`);
+  if (health.total > health.loaded) {
+    console.warn(`  (${label}: ${health.loaded}/${health.total} photos drew — ${health.urls.join(" ")})`);
   }
-  // One frame for the decoded photos to paint before the camera moves.
-  await page.waitForTimeout(film(250));
+  if (health.fellBack.length) {
+    console.warn(`  (${label}: the brand's own image would not load, AION's default is showing — ${health.fellBack.join(" ")})`);
+  }
+  photos.push({ label, ...health });
+  if (settle) await page.waitForTimeout(film(250));
 }
 
 /**

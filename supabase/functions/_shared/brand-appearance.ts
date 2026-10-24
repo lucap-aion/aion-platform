@@ -54,13 +54,44 @@ export function looksLikePhoto(url: string): boolean {
   return true;
 }
 
+/**
+ * A srcset's candidates, read the way a browser reads them.
+ *
+ * NOT split(","). A comma inside a URL is legal, and image CDNs put one in every URL they
+ * serve — Cloudinary's `…/upload/f_auto,q_auto/v1/hero` — so splitting on it cut Brunello
+ * Cucinelli's login background and top banner to `…/upload/f_auto`, a 404, and that is what
+ * the portal and its demo film showed. The spec's rule: a URL runs to the next whitespace;
+ * the comma that ends a candidate is either trailing on that URL or after its descriptor.
+ */
+export function srcsetCandidates(srcset: string): { url: string; w: number }[] {
+  const out: { url: string; w: number }[] = [];
+  let i = 0;
+  while (i < srcset.length) {
+    while (i < srcset.length && /[\s,]/.test(srcset[i])) i++;
+    let url = "";
+    while (i < srcset.length && !/\s/.test(srcset[i])) url += srcset[i++];
+    if (!url) break;
+    let descriptor = "";
+    if (url.endsWith(",")) {
+      url = url.replace(/,+$/, "");
+    } else {
+      // Up to the comma that ends this candidate; none inside parentheses, per the spec.
+      let depth = 0;
+      while (i < srcset.length && !(srcset[i] === "," && depth === 0)) {
+        if (srcset[i] === "(") depth++;
+        else if (srcset[i] === ")") depth = Math.max(0, depth - 1);
+        descriptor += srcset[i++];
+      }
+    }
+    const w = Number(/(\d+(?:\.\d+)?)[wx]/i.exec(descriptor)?.[1] ?? 0);
+    if (url) out.push({ url, w });
+  }
+  return out;
+}
+
 /** The widest candidate a srcset offers. "a.jpg 400w, b.jpg 1600w" -> b.jpg */
 export function widestFromSrcset(srcset: string): string | null {
-  const best = srcset.split(",")
-    .map((part) => part.trim().split(/\s+/))
-    .map(([url, size]) => ({ url, w: Number((size ?? "").replace(/[wx]$/i, "")) || 0 }))
-    .filter((c) => c.url)
-    .sort((a, b) => b.w - a.w)[0];
+  const best = srcsetCandidates(srcset).sort((a, b) => b.w - a.w)[0];
   return best?.url ?? null;
 }
 

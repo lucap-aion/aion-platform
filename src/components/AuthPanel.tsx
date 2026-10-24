@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import heroBg from "@/assets/hero-jewelry.jpg";
 
 type Contrast = "dark" | "light" | "unknown";
 
@@ -64,7 +65,18 @@ const AuthPanel = ({ logoUrl, bgUrl, name }: AuthPanelProps) => {
 
   return (
     <div className="hidden lg:block lg:w-1/2 relative">
-      <img src={bgUrl} alt={name} className="h-full w-full object-cover" />
+      {/* A brand image that will not load (a moved or mis-scraped URL) gives way to AION's
+          own hero rather than leaving its alt text on a grey half-screen. */}
+      <img
+        src={bgUrl}
+        alt={name}
+        className="h-full w-full object-cover"
+        onError={(e) => {
+          if (e.currentTarget.src === new URL(heroBg, window.location.href).href) return;
+          e.currentTarget.dataset.fellBack = bgUrl; // read by scripts/demo-video.mjs
+          e.currentTarget.src = heroBg;
+        }}
+      />
       <div className={`absolute inset-0 ${overlayClass} transition-colors duration-300`} />
     </div>
   );
