@@ -77,6 +77,20 @@ describe("copying a picture into our storage", () => {
     if (out.status === "mirrored") expect(out.url).toContain("/storage/v1/object/public/brand_logos/brands/22-full.png");
   });
 
+  it("keeps a logo the page drew inline, without fetching anything", async () => {
+    // inlineSvgLogo hands the branding stage a data: URL; it must land in storage like a
+    // downloaded logo, or the record would carry a kilobytes-long data URL forever.
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { admin, uploads } = fakeAdmin();
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 464 105"><path d="M0 0h10v10z"/></svg>';
+    const out = await mirrorImage(admin, 23, "logo_big", `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+    expect(out.status).toBe("mirrored");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(uploads[0]).toMatchObject({ bucket: "brand_logos", path: "brands/23-full.svg", contentType: "image/svg+xml" });
+    expect(new TextDecoder().decode(uploads[0].bytes)).toBe(svg);
+  });
+
   it("puts the six section images in the media bucket, each under its own name", async () => {
     vi.stubGlobal("fetch", serve(PNG, "image/png"));
     const { admin, uploads } = fakeAdmin();

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { jsonLdNodes } from "../../supabase/functions/_shared/product-extract";
-import { isPlatformPlaceholderLogo, pickLogoImg } from "../../supabase/functions/_shared/brand-identity";
+import { inlineSvgLogo, isPlatformPlaceholderLogo, pickLogoImg } from "../../supabase/functions/_shared/brand-identity";
 
 const html = readFileSync(join(__dirname, "fixtures/ferragamo-home.html"), "utf8");
 
@@ -54,5 +54,41 @@ describe("brand identity, when the site's own claims are wrong", () => {
 
   it("still takes a white logo when it is the only one", () => {
     expect(pickLogoImg(`<img class="logo" src="/logo-white.png">`)).toMatch(/logo-white/);
+  });
+
+  it("does not take a photo labelled 'No Logo' for the logo", () => {
+    // messika.com's hero, verbatim. It went on the record as Messika's logo.
+    const hero = `<img alt src="https://www.messika.com/media-cms/Messika - Worldwide Campaign - Kiko Mizuhara - Key Visual - 169 - No Logo - 150 DPI.jpg" class="h-full w-full object-cover">`;
+    expect(pickLogoImg(hero)).toBeUndefined();
+    expect(pickLogoImg(hero.replace(/ /g, "%20"))).toBeUndefined();
+    expect(pickLogoImg(`${hero}<img class="site-logo" src="/m.svg">`)).toMatch(/m\.svg/);
+  });
+});
+
+describe("a logo drawn inline", () => {
+  // messika.com's header: the logo is a <use> of a sprite symbol, inside the link home.
+  const messika = `
+    <svg class="hidden"><symbol id="messika-logo-2025" viewBox="0 0 464.88 105.82667"><path d="M0 0h464v78H0z"/></symbol>
+      <symbol id="icon-bag" viewBox="0 0 24 24"><path d="M1 1h22v22H1z"/></symbol></svg>
+    <a href="https://www.messika.com/en/cart"><svg viewBox="0 0 24 24"><use href="#icon-bag"></use></svg></a>
+    <a class data-astro-prefetch="viewport" href="https://www.messika.com/en/" aria-label="Home"><svg class="h-7" aria-hidden="true" viewBox="0 0 464.88 105.82667"><use href="#messika-logo-2025"></use></svg></a>`;
+
+  it("resolves a <use> to its symbol and returns a standalone SVG", () => {
+    const url = inlineSvgLogo(messika);
+    expect(url).toMatch(/^data:image\/svg\+xml/);
+    const svg = decodeURIComponent(url!.split(",").slice(1).join(","));
+    expect(svg).toContain('viewBox="0 0 464.88 105.82667"');
+    expect(svg).toContain('<path d="M0 0h464v78H0z"/>');
+    expect(svg).not.toContain("<use");
+  });
+
+  it("does not take an icon for the logo", () => {
+    expect(inlineSvgLogo(`<a href="/cart"><svg viewBox="0 0 24 24"><path d="M1 1h22v22H1z"/></svg></a>`)).toBeUndefined();
+    // Square and linked home, but nothing calls it a logo: still an icon.
+    expect(inlineSvgLogo(`<a href="/" aria-label="Home"><svg viewBox="0 0 32 32"><path d="M0 0"/></svg></a>`)).toBeUndefined();
+  });
+
+  it("takes a wide inline wordmark in the link home", () => {
+    expect(inlineSvgLogo(`<a href="/"><svg viewBox="0 0 300 40"><path d="M0 0h300v40H0z"/></svg></a>`)).toBeDefined();
   });
 });
