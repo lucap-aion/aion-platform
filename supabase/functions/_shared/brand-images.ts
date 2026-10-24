@@ -14,6 +14,8 @@
 // a hash of the bytes, so re-running the branding stage on unchanged imagery produces the
 // same url and therefore no write. That matters because this runs on every pass.
 
+import { splitPngLogo, splitSvgLogo } from "./logo-split.ts";
+
 export type ImageSlot =
   | "logo_big" | "logo_small"
   | "auth_background_image" | "top_banner_image"
@@ -96,7 +98,7 @@ async function shortHash(bytes: Uint8Array): Promise<string> {
 }
 
 export type MirrorOutcome =
-  | { slot: ImageSlot; status: "mirrored"; url: string; bytes: number }
+  | { slot: ImageSlot; status: "mirrored"; url: string; bytes: number; crest_url?: string; split?: boolean }
   | { slot: ImageSlot; status: "already_ours" }
   | { slot: ImageSlot; status: "skipped"; reason: string };
 
@@ -232,6 +234,36 @@ async function keep(
     };
   }
 
+  // A name logo that is a lockup — a crest over the name, or a tagline under it — is cut to
+  // the name, with the crest kept for the monogram (logo-split.ts). The lockup itself is kept
+  // beside it, so nothing the house published is lost.
+  let crestUrl: string | undefined;
+  let split = false;
+  if (slot === "logo_big" && (contentType === "image/png" || contentType === "image/svg+xml")) {
+    const cut = contentType === "image/png"
+      ? await splitPngLogo(bytes)
+      : (() => {
+        const r = splitSvgLogo(new TextDecoder().decode(bytes));
+        return r && { name: new TextEncoder().encode(r.name), crest: r.crest ? new TextEncoder().encode(r.crest) : undefined };
+      })();
+    if (cut) {
+      const ext0 = EXTENSION[contentType];
+      const up = (name: string, b: Uint8Array) => admin.storage.from(where.bucket)
+        .upload(`brands/${brandId}-${name}.${ext0}`, b, { contentType, upsert: true, cacheControl: "31536000" });
+      const lockup = await up("lockup", bytes);
+      if (!lockup.error) {
+        if (cut.crest) {
+          const crest = await up("crest", cut.crest);
+          if (!crest.error) {
+            crestUrl = `${admin.storage.from(where.bucket).getPublicUrl(`brands/${brandId}-crest.${ext0}`).data.publicUrl}?v=${await shortHash(cut.crest)}`;
+          }
+        }
+        bytes = cut.name;
+        split = true;
+      }
+    }
+  }
+
   const ext = EXTENSION[contentType];
   const path = `brands/${brandId}-${where.name}.${ext}`;
   const { error } = await admin.storage.from(where.bucket).upload(path, bytes, {
@@ -247,6 +279,8 @@ async function keep(
     status: "mirrored",
     url: `${data.publicUrl}?v=${await shortHash(bytes)}`,
     bytes: bytes.length,
+    ...(split ? { split: true } : {}),
+    ...(crestUrl ? { crest_url: crestUrl } : {}),
   };
 }
 
@@ -266,19 +300,32 @@ export async function mirrorBrandImages(
   const failures: string[] = [];
   let mirrored = 0;
 
+  const splitNotes: string[] = [];
   for (const slot of IMAGE_SLOTS) {
     const source = values[slot];
+    // The crest cut from the name logo beats a favicon — or nothing — for the monogram. A
+    // real icon the house declared (a square mark of its own) is still preferred.
+    if (slot === "logo_small" && urls.logo_small && (!source || /fav-?icon|favico|\.ico(?:[?#]|$)|apple-touch|site-?icon|cropped-/i.test(String(source)))) {
+      continue;
+    }
     if (!source) continue;
     const outcome = await mirrorImage(admin, brandId, slot, String(source), referer);
     if (outcome.status === "mirrored") {
       urls[slot] = outcome.url;
       mirrored += 1;
+      if (outcome.split) {
+        splitNotes.push("the logo the site uses is a lockup — cut to the house's name for the portal, the full lockup kept as -lockup in storage");
+      }
+      if (outcome.crest_url) {
+        urls.logo_small = outcome.crest_url; // provisional: a declared icon below may replace it
+        splitNotes.push("its crest became the monogram for the collapsed sidebar");
+      }
     } else if (outcome.status === "skipped") {
       failures.push(`${slot}: ${outcome.reason}`);
     }
   }
 
-  const notes: string[] = [];
+  const notes: string[] = [...splitNotes];
   if (mirrored) {
     notes.push(`${mirrored} ${mirrored === 1 ? "image is" : "images are"} now held in AION storage rather than hotlinked from the brand's site`);
   }
