@@ -287,6 +287,16 @@ Deno.serve(async (req: Request) => {
     }
     const { error } = await admin.rpc("queue_onboarding_stages", { p_brand_id: brandId, p_stages: runnable });
     if (error) return json({ error: error.message }, 500);
+    // The options travel WITH the queued row. The tick that runs it sends only the stage, so
+    // a typical ticket typed into the panel ("these pages carry no prices — give us one") was
+    // dropped on the way, the stage asked for it again, and a house like Oris could never get
+    // a demo book. The row's detail is where run_queued looks for them.
+    if (Object.keys(options).length) {
+      for (const s of runnable) {
+        await admin.from("brand_onboarding").update({ detail: { queued_options: options } })
+          .eq("brand_id", brandId).eq("stage", s);
+      }
+    }
     return json({ ok: true, queued: runnable, skipped, status: await status(admin, brandId) });
   }
 
@@ -302,6 +312,11 @@ Deno.serve(async (req: Request) => {
   if (action === "run_queued") {
     const stage = String(body.stage ?? "") as Stage;
     if (!(ALL_STAGES as readonly string[]).includes(stage)) return json({ error: "unknown stage" }, 400);
+    // Read before "running" overwrites the row: the options queued with the stage (see start).
+    const { data: queuedRow } = await admin.from("brand_onboarding").select("detail")
+      .eq("brand_id", brandId).eq("stage", stage).maybeSingle();
+    const queuedOptions = ((queuedRow?.detail ?? {}) as { queued_options?: typeof options }).queued_options ?? {};
+    Object.assign(options, { ...queuedOptions, ...options });
     await setStage(admin, brandId, stage, "running");
     const work = (async () => {
       try {
@@ -312,7 +327,8 @@ Deno.serve(async (req: Request) => {
         if (more) {
           // Still work to do: back in the queue, at the end, so another brand's
           // stages are not starved while this catalogue finishes.
-          await setStage(admin, brandId, stage, "pending", out);
+          await setStage(admin, brandId, stage, "pending",
+            Object.keys(queuedOptions).length ? { ...(out as object), queued_options: queuedOptions } : out);
           await admin.from("brand_onboarding")
             .update({ queued_at: new Date().toISOString() })
             .eq("brand_id", brandId).eq("stage", stage);
