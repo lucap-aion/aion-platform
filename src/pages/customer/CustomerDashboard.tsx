@@ -225,7 +225,17 @@ const CustomerDashboard = () => {
         transition={{ delay: 0.1 }}
         className="relative rounded-xl overflow-hidden"
       >
-        <img src={imgHero} alt="" className="w-full h-56 md:h-72 object-cover object-[50%_70%]" />
+        <img
+          src={imgHero}
+          alt=""
+          className="w-full h-56 md:h-72 object-cover object-[50%_70%]"
+          // The brand's banner failing to load falls back to ours, once.
+          onError={(e) => {
+            if (e.currentTarget.src === new URL(sectionHowItWorks, window.location.href).href) return;
+            e.currentTarget.dataset.fellBack = imgHero; // read by scripts/demo-video.mjs
+            e.currentTarget.src = sectionHowItWorks;
+          }}
+        />
         <div className="absolute inset-0 bg-black/75" />
         <div className="absolute inset-0 flex flex-col justify-center p-8 md:p-12">
           <h2 className="font-serif text-2xl md:text-4xl font-bold text-white mb-3">

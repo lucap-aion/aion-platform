@@ -21,6 +21,7 @@
 // I/O is injected, so the ranking and the reading are unit tested against real markup.
 
 import { imageSize, sniffFormat } from "./image-bytes.ts";
+import { widestFromSrcset } from "./brand-appearance.ts";
 
 export type PhotoRole = "store" | "ambassador" | "lifestyle";
 
@@ -191,16 +192,10 @@ function attrValue(tag: string, name: string): string | undefined {
   return value || undefined;
 }
 
-/** "a.jpg 400w, b.jpg 1600w" -> "b.jpg". The first entry is the phone's. */
+/** "a.jpg 400w, b.jpg 1600w" -> "b.jpg". The first entry is the phone's. Never split on
+ *  commas — a Cloudinary URL has one in it (see srcsetCandidates). */
 function largestInSrcset(srcset: string): string | undefined {
-  let best: { url: string; w: number } | null = null;
-  for (const part of srcset.split(",")) {
-    const [url, size] = part.trim().split(/\s+/);
-    if (!url) continue;
-    const w = Number(/(\d+)w/.exec(size ?? "")?.[1] ?? 0);
-    if (!best || w > best.w) best = { url, w };
-  }
-  return best?.url;
+  return widestFromSrcset(srcset) ?? undefined;
 }
 
 function absolute(raw: string, pageUrl: string): string | null {
