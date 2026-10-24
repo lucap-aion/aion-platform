@@ -1,5 +1,6 @@
 import { jsonLdNodes } from "./product-extract.ts";
 import { fetchSite } from "./fetch-site.ts";
+import { pngIsLight } from "./image-bytes.ts";
 import { customerServiceEmail } from "./brand-defaults.ts";
 import {
   imageCandidates, assignPortalImages, namedColours, dominantUsableColour,
@@ -223,7 +224,7 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
     if (isPlatformPlaceholderLogo(declaredLogo, body)) {
       out.notes.push(`the logo the site declares (${declaredLogo}) is its shop platform's placeholder, not the house's — took the one in the page header instead`);
       declaredLogo = undefined;
-    } else if (svgIsLight(body)) {
+    } else if (await isLightLogo(declaredLogo, body)) {
       lightLogo = declaredLogo;
       declaredLogo = undefined;
     } else if (await isSiteIcon(declaredLogo, body)) {
@@ -241,7 +242,7 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
     for (const tag of logoImgCandidates(html).slice(0, 4)) {
       const url = abs(getAttr(tag, "src") ?? getAttr(tag, "data-src"));
       if (!url) continue;
-      if (/\.svg(?:[?#]|$)/i.test(url) && svgIsLight((await fetchText(url)) ?? "")) {
+      if (await isLightLogo(url)) {
         lightLogo ??= url;
         continue;
       }
@@ -249,7 +250,12 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
       break;
     }
   }
-  let inlineLogo = declaredLogo || markupLogo ? undefined : inlineSvgLogo(html);
+  let inlineLogo: string | undefined;
+  if (!declaredLogo && !markupLogo) {
+    const sprites = (await Promise.all(logoSpriteFiles(html).map((f) => abs(f)).filter(Boolean)
+      .map((u) => fetchText(u!)))).filter(Boolean).join("\n");
+    inlineLogo = inlineSvgLogo(html, sprites);
+  }
   if (inlineLogo && svgIsLight(decodeURIComponent(inlineLogo.slice(inlineLogo.indexOf(",") + 1)))) {
     lightLogo ??= inlineLogo;
     inlineLogo = undefined;
@@ -518,6 +524,20 @@ export function logoImgCandidates(html: string): string[] {
   return [...tags.filter((t) => !light(t)), ...tags.filter(light)];
 }
 
+/** A white logo, by format: an SVG by the colours it declares, a PNG by its pixels. Anything
+ *  else (a JPEG has no transparency to be white on) is not. `text` saves a refetch. */
+async function isLightLogo(url: string, text?: string): Promise<boolean> {
+  if (/\.svg(?:[?#]|$)/i.test(url)) return svgIsLight(text ?? (await fetchText(url)) ?? "");
+  if (/\.png(?:[?#]|$)/i.test(url)) {
+    try {
+      const got = await fetchSite(url, { timeoutMs: 10_000, accept: "image/*,*/*" });
+      if (!got.response?.ok) return false;
+      return await pngIsLight(new Uint8Array(await got.response.arrayBuffer()));
+    } catch { return false; }
+  }
+  return false;
+}
+
 /** A site icon passed off as the logo: named as one, or measured (from an SVG's viewBox, or a
  *  raster's header bytes) to be roughly square. Unmeasurable → false: no claim either way. */
 async function isSiteIcon(url: string, body: string): Promise<boolean> {
@@ -570,6 +590,20 @@ function parseColour(v: string): [number, number, number] | null {
 }
 
 /**
+ * The sprite FILES an inline <svg> draws from — `<use href="/_nuxt/…/sprite-default.svg#logo-with-byline">`
+ * on oris.ch — for the caller to fetch and hand to inlineSvgLogo. Only those referenced by an
+ * <svg> that the markup calls a logo, so a page's icon sprite is not downloaded for nothing.
+ */
+export function logoSpriteFiles(html: string): string[] {
+  const files = new Set<string>();
+  for (const m of html.matchAll(/<svg\b([^>]*)>([\s\S]*?)<\/svg>/gi)) {
+    const file = /<use\b[^>]*(?:xlink:)?href=["']([^"'#]+\.svg)#([^"']+)["']/i.exec(m[2]);
+    if (file && /logo|brand-?mark|wordmark/i.test(`${m[1]} ${file[2]}`)) files.add(file[1]);
+  }
+  return [...files].slice(0, 2);
+}
+
+/**
  * The header logo when it is drawn inline rather than linked: an `<svg>` in the page, often
  * just `<use href="#messika-logo-2025">` pointing at a `<symbol>` elsewhere in the document.
  * Most modern storefronts do this, and none of it is an <img>, so the markup search found
@@ -582,9 +616,9 @@ function parseColour(v: string): [number, number, number] | null {
  * the link around it), or the first one inside a link home that is clearly a wordmark — wider
  * than twice its height. Icons are square and are never it.
  */
-export function inlineSvgLogo(html: string): string | undefined {
+export function inlineSvgLogo(html: string, sprites = ""): string | undefined {
   const symbols = new Map<string, { viewBox?: string; body: string }>();
-  for (const m of html.matchAll(/<symbol\b([^>]*)>([\s\S]*?)<\/symbol>/gi)) {
+  for (const m of `${html}\n${sprites}`.matchAll(/<symbol\b([^>]*)>([\s\S]*?)<\/symbol>/gi)) {
     const id = getAttr(m[1], "id");
     if (id) symbols.set(id, { viewBox: getAttr(m[1], "viewBox"), body: m[2] });
   }
@@ -597,7 +631,8 @@ export function inlineSvgLogo(html: string): string | undefined {
   const found: Found[] = [];
   for (const m of html.matchAll(/<svg\b([^>]*)>([\s\S]*?)<\/svg>/gi)) {
     const [, attrs, inner] = m;
-    const ref = /<use\b[^>]*(?:xlink:)?href=["']#([^"']+)["']/i.exec(inner)?.[1];
+    // "#id" in this page, or "sprite.svg#id" in a sprite file the caller fetched (oris.ch).
+    const ref = /<use\b[^>]*(?:xlink:)?href=["'][^"'#]*#([^"']+)["']/i.exec(inner)?.[1];
     const symbol = ref ? symbols.get(ref) : undefined;
     if (ref && !symbol) continue;
     const viewBox = getAttr(attrs, "viewBox") ?? symbol?.viewBox;

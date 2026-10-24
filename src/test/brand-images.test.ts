@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
-  mirrorImage, mirrorBrandImages, servedByAion, IMAGE_SLOTS,
+  mirrorImage, mirrorBrandImages, servedByAion, IMAGE_SLOTS, pngFromIco,
 } from "../../supabase/functions/_shared/brand-images.ts";
 
 // A brand's logo used to be a link to the brand's own CDN. These are the cases that decide
@@ -220,5 +220,28 @@ describe("what the onboarding run is told", () => {
     const out = await mirrorBrandImages(admin, 22, { logo_big: null, logo_small: undefined });
     expect(out).toMatchObject({ mirrored: 0, failed: 0, notes: [] });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("a favicon.ico", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("is kept as its largest PNG frame, not skipped", async () => {
+    // oris.ch's, verbatim: five frames, the 256px one an embedded PNG. It was skipped as "not
+    // an image the portal can render", and the record kept a hotlink to the .ico.
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const ico = new Uint8Array(readFileSync(join(__dirname, "fixtures/oris-favicon.ico")));
+    const png = pngFromIco(ico);
+    expect(png && [...png.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    vi.stubGlobal("fetch", serve(ico, "image/x-icon"));
+    const { admin, uploads } = fakeAdmin();
+    const out = await mirrorImage(admin, 18, "logo_small", "https://www.oris.ch/favicon.ico");
+    expect(out.status).toBe("mirrored");
+    expect(uploads[0]).toMatchObject({ path: "brands/18-icon.png", contentType: "image/png" });
+  });
+
+  it("leaves anything that is not an .ico alone", () => {
+    expect(pngFromIco(PNG)).toBeNull();
   });
 });

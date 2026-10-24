@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { jsonLdNodes } from "../../supabase/functions/_shared/product-extract";
-import { harvestBrandIdentity, inlineSvgLogo, isPlatformPlaceholderLogo, pickLogoImg, svgIsLight } from "../../supabase/functions/_shared/brand-identity";
+import { harvestBrandIdentity, inlineSvgLogo, isPlatformPlaceholderLogo, logoSpriteFiles, pickLogoImg, svgIsLight } from "../../supabase/functions/_shared/brand-identity";
 
 const html = readFileSync(join(__dirname, "fixtures/ferragamo-home.html"), "utf8");
 
@@ -158,5 +158,43 @@ describe("a declared logo that is the site icon", () => {
     const id = await harvestBrandIdentity("https://www.wp.example/");
     expect(id.logo_big).toBe("https://www.wp.example/uploads/logo.svg");
     expect(id.logo_small).toBe("https://www.wp.example/uploads/cropped-favico-eb.png");
+  });
+});
+
+describe("a logo drawn from a sprite file", () => {
+  // oris.ch: the header logo is <use href="/_nuxt/…/sprite-default.svg#logo-with-byline">.
+  const page = `<a href="/en-IT" title="Go to homepage"><svg xmlns="http://www.w3.org/2000/svg" data-symbol="logo-with-byline" class="oris-logo h-40 w-[100px]"><use href="/_nuxt/nuxt-svg-icon-sprite/sprite-default.abc.svg#logo-with-byline"></use></svg></a>
+    <a href="/en-IT/product/watch" title="Watch Finder"><svg data-symbol="search"><use href="/_nuxt/nuxt-svg-icon-sprite/sprite-default.abc.svg#search"></use></svg></a>`;
+  const sprite = `<svg><symbol id="search" viewBox="0 0 24 24"><path d="M1 1"/></symbol><symbol id="logo-with-byline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 283.46 112.62"><path d="M0 0h283v112H0z"/></symbol></svg>`;
+
+  it("names only the sprite the logo uses", () => {
+    expect(logoSpriteFiles(page)).toEqual(["/_nuxt/nuxt-svg-icon-sprite/sprite-default.abc.svg"]);
+  });
+
+  it("resolves the logo from the fetched sprite", () => {
+    expect(inlineSvgLogo(page)).toBeUndefined(); // nothing to draw without the file
+    const svg = decodeURIComponent(inlineSvgLogo(page, sprite)!.split(",").slice(1).join(","));
+    expect(svg).toContain('viewBox="0 0 283.46 112.62"');
+    expect(svg).toContain("M0 0h283v112H0z");
+  });
+});
+
+describe("a white PNG logo", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("is passed over for the coloured one, as an SVG would be", async () => {
+    const fx = (f: string) => readFileSync(join(__dirname, "fixtures", f));
+    const page = `<html><body>
+      <img class="header-logo" src="https://www.pb.example/logo_test_light.png">
+      <img class="footer-logo" src="https://www.pb.example/logo_test.png"></body></html>`;
+    vi.stubGlobal("fetch", vi.fn((input: string | URL) => {
+      const u = String(input);
+      if (u === "https://www.pb.example/") return Promise.resolve(new Response(page));
+      if (u.endsWith("/logo_test_light.png")) return Promise.resolve(new Response(fx("logo-white.png")));
+      if (u.endsWith("/logo_test.png")) return Promise.resolve(new Response(fx("logo-red.png")));
+      return Promise.resolve(new Response("", { status: 404 }));
+    }));
+    const id = await harvestBrandIdentity("https://www.pb.example/");
+    expect(id.logo_big).toBe("https://www.pb.example/logo_test.png");
   });
 });
