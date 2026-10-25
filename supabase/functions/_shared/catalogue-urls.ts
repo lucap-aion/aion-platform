@@ -139,6 +139,10 @@ const EUROZONE = new Set([
  * "en-us"), two adjacent two-letter segments ("/shop/us/en/"), and a bare country or
  * language segment ("/it/"). Looks only at the first few segments, so an item code made of
  * two-letter tokens cannot be mistaken for a locale.
+ *
+ * The one-segment shape may carry a script or region in the middle: oris.ch writes
+ * "/pt-pt-PT/" and "/zh-hant-TW/". Those read as no locale at all, so the only market left
+ * was /en-US/ and the house was read in dollars when 99 of its product pages are in euros.
  */
 export function localeOf(url: string): string | null {
   let segments: string[];
@@ -149,7 +153,7 @@ export function localeOf(url: string): string | null {
   }
   const head = segments.slice(0, 3);
   for (let i = 0; i < head.length; i++) {
-    if (/^[a-z]{2}[_-][a-z]{2}$/.test(head[i])) return head[i];
+    if (/^[a-z]{2}(?:[_-][a-z]{2,4})?[_-][a-z]{2}$/.test(head[i])) return head[i];
     if (/^[a-z]{2}$/.test(head[i])) {
       return /^[a-z]{2}$/.test(head[i + 1] ?? "") ? `${head[i]}/${head[i + 1]}` : head[i];
     }

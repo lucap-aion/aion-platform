@@ -173,21 +173,33 @@ function fromOpenGraph(html: string, base: string): ExtractedProduct | null {
   const type = (meta("og:type") ?? "").toLowerCase();
   const name = meta("og:title");
   const image = meta("og:image");
-  const price = usablePrice(toPrice(meta("product:price:amount") ?? meta("og:price:amount")));
+  const itemId = meta("product:retailer_item_id");
+  const ogPrice = usablePrice(toPrice(meta("product:price:amount") ?? meta("og:price:amount")));
   if (!name || !image) return null;
   // A title and a picture is what EVERY page has, error pages included. Pomellato's /404
   // publishes its default share image and "Pomellato Online-Boutique | Schmuck — Ringe,
   // Ohrringe, Armbänder, Halsketten", and that arrived in the catalogue as a product with
   // that name. So the page has to claim to be a product, or carry a price.
-  if (!type.includes("product") && price == null) return null;
+  // oris.ch claims it with product:retailer_item_id and no og:type at all.
+  const claimsProduct = type.includes("product") || !!itemId;
+  if (!claimsProduct && ogPrice == null) return null;
+
+  // Oris puts the price in microdata beside the title, not in a product: tag. Only on a page
+  // that claims to be one product: the first itemprop price on a listing is just its first
+  // tile, and the related pieces further down a product page come after its own.
+  const micro = (prop: string) =>
+    html.match(new RegExp(`<meta[^>]+itemprop=["']${prop}["'][^>]+content=["']([^"']+)["']`, "i"))?.[1];
+  const price = ogPrice ?? (claimsProduct ? usablePrice(toPrice(micro("price"))) : null);
+  const currency = meta("product:price:currency") ?? meta("og:price:currency") ??
+    (ogPrice == null && price != null ? micro("priceCurrency") : undefined);
 
   return {
     name: decodeEntities(name).trim().slice(0, 300),
     product_url: absolute(decodeEntities(meta("og:url") ?? base), base),
     image_url: absolute(decodeEntities(image), base),
     price,
-    price_currency: (meta("product:price:currency") ?? meta("og:price:currency") ?? "").toUpperCase().slice(0, 3) || null,
-    sku: null,
+    price_currency: (currency ?? "").toUpperCase().slice(0, 3) || null,
+    sku: itemId ? decodeEntities(itemId).trim().slice(0, 120) : null,
     available: null,
     category: null,
   };

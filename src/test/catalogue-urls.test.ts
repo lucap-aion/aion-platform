@@ -142,6 +142,19 @@ describe("choosing the locale to read a catalogue from", () => {
     expect(localeOf("https://brand.com/products/a-bag")).toBe(null);
   });
 
+  it("reads a locale with a script or region in the middle, and picks the euro one", () => {
+    // oris.ch: /en-US/ 125 product pages, /pt-pt-PT/ 99. The second read as no locale, so the
+    // house was read in dollars.
+    expect(localeOf("https://www.oris.ch/pt-pt-PT/product/watch/aquis/aquis-date/01-733")).toBe("pt-pt-pt");
+    expect(localeOf("https://www.oris.ch/zh-hant-TW/product/watch/aquis/aquis-date/01-733")).toBe("zh-hant-tw");
+    const urls = [
+      ...Array.from({ length: 125 }, (_, i) => `https://www.oris.ch/en-US/product/watch/aquis/aquis-date/01-733-${7000 + i}-Set`),
+      ...Array.from({ length: 99 }, (_, i) => `https://www.oris.ch/pt-pt-PT/product/watch/aquis/aquis-date/01-733-${7000 + i}-Set`),
+      ...Array.from({ length: 99 }, (_, i) => `https://www.oris.ch/zh-hant-TW/product/watch/aquis/aquis-date/01-733-${7000 + i}-Set`),
+    ];
+    expect(preferredLocale(urls)).toBe("pt-pt-pt");
+  });
+
   it("prefers a eurozone market, because every quote and business case is in euros", () => {
     const urls = [
       "https://www.pomellato.com/ae_en/nudo-ring-pab9040-o6bkr-zaltl",
