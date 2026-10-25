@@ -137,6 +137,29 @@ describe("the OpenGraph fallback", () => {
     expect(found[0].price).toBe(5000);
     expect(found[0].price_currency).toBe("EUR");
   });
+
+  it("takes a retailer item id as the claim, and the microdata price beside the title", () => {
+    // oris.ch: no og:type, no product:price, no JSON-LD. The page's own price comes first;
+    // the related watches further down carry theirs too.
+    const html = og({
+      "product:retailer_item_id": "01 400 7769 4125-07 8 22 09PEB",
+      "og:title": "Aquis Date Calibre 400",
+      "og:image": "https://image.oris.ch/data/36880_0140077694125.png",
+    }).replace("</head>", `</head><body><h1>Aquis Date Calibre 400</h1>
+      <meta itemprop="priceCurrency" content="EUR"><meta itemprop="price" content="4000.00">
+      <meta itemprop="priceCurrency" content="EUR"><meta itemprop="price" content="2600.00">`);
+    const found = extractProducts(html, "https://www.oris.ch/pt-pt-PT/product/watch/aquis/x/01-400");
+    expect(found).toHaveLength(1);
+    expect(found[0].price).toBe(4000);
+    expect(found[0].price_currency).toBe("EUR");
+    expect(found[0].sku).toBe("01 400 7769 4125-07 8 22 09PEB");
+  });
+
+  it("does not price a page off microdata unless the page claims to be a product", () => {
+    const html = og({ "og:title": "Aquis", "og:image": "https://image.oris.ch/aquis.png" })
+      .replace("</head>", `</head><meta itemprop="price" content="4000.00">`);
+    expect(extractProducts(html, "https://www.oris.ch/pt-pt-PT/watches/aquis")).toEqual([]);
+  });
 });
 
 // ── What a page says vs what it means ────────────────────────────────────────────────────
