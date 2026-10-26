@@ -102,7 +102,7 @@ Deno.serve(async (req: Request) => {
     // result. See demoLogin.
     if (kind === "demo_login") return json(await demoLogin(admin, brand));
     if (kind === "upload_demo_video") return json(await uploadDemoVideo(admin, brand, body));
-    if (kind === "record_demo_video") return json(await recordDemoVideo(brand, body));
+    if (kind === "record_demo_video") return json(await recordDemoVideo(admin, brand, body));
     return json({ error: "kind must be list | data_request | read_data_request | business_case | operations | upload_template | demo_login | upload_demo_video | record_demo_video" }, 400);
   } catch (e) {
     console.error("[build-collateral]", e);
@@ -790,7 +790,26 @@ async function demoLogin(admin: ReturnType<typeof createClient>, brand: Record<s
     // the prospect will see.
     client: accounts?.customer?.email ? { email: accounts.customer.email, password: accounts.customer.password } : null,
     assistant_only: brand.demo_assistant_only === true,
+    // What the film can show. The recorder skips the client questions without a book, and
+    // refuses a platform tour, which is nothing but the book.
+    book: await bookSize(admin, Number(brand.id)),
   };
+}
+
+/** The demo book as a film sees it: clients, covers, and the catalogue they were bought from. */
+async function bookSize(admin: ReturnType<typeof createClient>, brandId: number) {
+  const count = async (table: string, extra?: (q: any) => any) => {
+    let q = admin.from(table).select("id", { count: "exact", head: true }).eq("brand_id", brandId);
+    if (extra) q = extra(q);
+    const { count: n } = await q;
+    return n ?? 0;
+  };
+  const [clients, covers, products] = await Promise.all([
+    count("profiles", (q) => q.eq("role", "customer")),
+    count("policies"),
+    count("storefront_products"),
+  ]);
+  return { clients, covers, products };
 }
 
 /**
@@ -855,7 +874,9 @@ const GITHUB_REPO = Deno.env.get("GITHUB_REPO") ?? "";
 const GITHUB_REF = Deno.env.get("GITHUB_REF_NAME") ?? (isProduction() ? "main" : "dev");
 const WORKFLOW_FILE = "demo-video.yml";
 
-async function recordDemoVideo(brand: Record<string, unknown>, body: Record<string, unknown>) {
+async function recordDemoVideo(
+  admin: ReturnType<typeof createClient>, brand: Record<string, unknown>, body: Record<string, unknown>,
+) {
   if (!GITHUB_TOKEN || !GITHUB_REPO) {
     return {
       ok: false,
@@ -866,6 +887,17 @@ async function recordDemoVideo(brand: Record<string, unknown>, body: Record<stri
     };
   }
   if (!brand.slug) return { ok: false, reason: "this brand has no slug, so it has no portal to film" };
+
+  // Said here, before a runner is spent on it; the recorder checks again for the runs that do
+  // not come through this button.
+  const book = await bookSize(admin, Number(brand.id));
+  const noBook = !(book.clients > 0 && book.covers > 0);
+  if (noBook && brand.demo_assistant_only !== true) {
+    return {
+      ok: false,
+      reason: "this brand has no client book yet, and the platform tour is a tour of it — build the demo book first",
+    };
+  }
 
   const res = await fetch(
     `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
@@ -915,6 +947,9 @@ async function recordDemoVideo(brand: Record<string, unknown>, body: Record<stri
         : "The film takes a few minutes: a tour of the whole platform, brand side then client side — " +
           "clients, covers, claims, boutiques, insights. It appears in this brand's files when it is done.",
       "It records the live demo brand, so it shows whatever that brand's data says right now.",
+      ...(noBook
+        ? ["There is no client book yet, so the film skips the client questions. Record it again once the demo book is built — that is the one to send."]
+        : []),
     ],
   };
 }
