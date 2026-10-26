@@ -86,6 +86,14 @@ export default function DemoPanel({
 
   const filmedAt = film?.generated_at ? Date.parse(film.generated_at) : null;
   const waiting = waitingSince !== null && !(filmedAt && filmedAt > waitingSince);
+  // A film shows the book it was recorded on. Ferragamo's went out asking for "our top ten
+  // clients" because it was recorded seven hours before its book existed. A new book now
+  // re-records an existing film by itself (onboard-brand's refilmAfterNewBook); this is what
+  // the screen says until the new one lands, or when the re-record could not be started.
+  const bookAt = stages?.demo_data?.status === "done" && stages.demo_data.finished_at
+    ? Date.parse(stages.demo_data.finished_at) : null;
+  const filmStale = !!(filmedAt && bookAt && filmedAt < bookAt);
+  const refilm = (stages?.demo_data?.detail as { film?: { requeued?: boolean; reason?: string } } | undefined)?.film;
 
   // The runner takes a few minutes and posts the film back through an edge function, so
   // nothing in this tab knows it arrived. The parent polls the overview only while a stage
@@ -348,6 +356,24 @@ export default function DemoPanel({
           * back into the brand's artefact list and nothing on this panel said so, and the
           * artefact list only offers a download: an mp4 saved to Downloads is not a demo you
           * can put in front of somebody in the next thirty seconds. It plays here. */}
+        {filmStale && !waiting && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              This film was recorded before the current demo book was built
+              ({new Date(bookAt!).toLocaleString()}), so it shows the old one — or none.{" "}
+              {refilm?.requeued
+                ? "A new one was started when the book was built and replaces it when it lands."
+                : `Record it again before sending it${refilm?.reason ? ` (the automatic re-record did not start: ${refilm.reason})` : ""}.`}
+            </span>
+          </div>
+        )}
+        {!bookNeeded && ready && (c.customers ?? 0) === 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            No clients yet, so the film skips the client questions. Build the demo book and it is re-recorded with them.
+          </p>
+        )}
+
         {film?.download_url && (
           <div className="mt-3 space-y-2">
             <video

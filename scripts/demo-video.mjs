@@ -158,6 +158,12 @@ const FALLBACK_QUESTIONS = [
   "Devo scrivere una newsletter: a chi scriveresti e perché proprio a loro?",
   "Mi daresti la policy di reso per un cliente che vive in Polonia e ha acquistato in Brasile?",
 ];
+// The same, for a brand with no client book: questions the site alone can answer.
+const FALLBACK_NO_BOOK = [
+  "Parlami del nostro pezzo iconico — materiali, lavorazione e cura.",
+  "Mi daresti la policy di reso per un cliente che vive in Polonia e ha acquistato in Brasile?",
+  "Raccontami la storia del brand, i valori e il tone of voice.",
+];
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -226,6 +232,8 @@ async function callCollateral(payload) {
 }
 
 const canCallBack = Boolean(functionsBase && batchSecret && brandId);
+/** The demo book's size, from demo_login: { clients, covers, products }. Null when not known. */
+let book = null;
 
 if ((!email || !password) && canCallBack) {
   const login = await callCollateral({ brand_id: Number(brandId), kind: "demo_login" });
@@ -238,8 +246,13 @@ if ((!email || !password) && canCallBack) {
     clientPassword = login.client.password;
   }
   if (!mode && typeof login.assistant_only === "boolean") mode = login.assistant_only ? "assistant" : "portal";
+  if (login.book) book = login.book;
   console.log(`using the demo login for ${login.brand}`);
 }
+// No clients or no covers: the brand's demo book has not been built (or was purged). Unknown —
+// a login given by hand, an older build-collateral — is not taken as empty.
+const noBook = book ? !(book.clients > 0 && book.covers > 0) : false;
+if (book) console.log(`book: ${book.clients} clients, ${book.covers} covers, ${book.products} products`);
 
 if (!slug || !email || !password) {
   console.error(
@@ -357,6 +370,15 @@ try {
   // ── Which film ───────────────────────────────────────────────────────────
   if (!mode) mode = await modeFromPortal(page);
   console.log(`mode: ${mode}${mode === "portal" ? (clientEmail ? " (brand side + client side)" : " (brand side only — no client login given)") : ""}`);
+
+  // The tour IS the book — clients, covers, claims — so without one it films empty tables.
+  // Refused rather than recorded: a film like that gets sent.
+  if (mode === "portal" && noBook) {
+    throw new Error(
+      "this brand has no client book yet, and the platform tour is a tour of it. " +
+      "Build the demo book (Demo book of business), then record.",
+    );
+  }
 
   if (mode === "assistant") {
     await filmAssistant(page, { count });
@@ -507,17 +529,32 @@ async function filmAssistant(page, { count, arrive = "url" }) {
 
   // The brand's own opening prompts, before anything is typed — they disappear with the first
   // answer. Anything long enough to be a question; the screen also carries short UI labels.
+  // A prompt only the client book can answer says so (data-needs="clients"), and with no book
+  // it is left out: the alternative is filming "no client data is connected" — Ferragamo's
+  // first film, recorded seven hours before its book was built.
   const onScreen = asked.length ? [] : await page
     .locator("main button, [role='main'] button")
-    .allInnerTexts()
-    .then((all) => all.map((t) => t.replace(/\s+/g, " ").trim()).filter((t) => t.length > 40))
+    .evaluateAll((els) => els.map((el) => ({
+      text: (el.innerText ?? "").replace(/\s+/g, " ").trim(),
+      needs: el.getAttribute("data-needs"),
+    })))
+    .then((all) => all
+      .filter((b) => b.text.length > 40)
+      .filter((b) => !(b.needs === "clients" && noBook))
+      .map((b) => b.text))
     .catch(() => []);
+  if (noBook && !asked.length) {
+    console.warn(
+      "WARNING: this brand has no client book yet, so the film skips the client questions. " +
+      "Build the demo book (Demo book of business) and record it again — that is the film to send.",
+    );
+  }
 
   // Spread across the list, not the first three off the top. The opening prompts are grouped
   // by kind — the product ones first, then the client and planning ones — so taking the top
   // three films two variations on the same handbag. Evenly spaced gives the range the
   // assistant actually has, which is the thing being demonstrated.
-  const pool = asked.length ? asked : onScreen.length ? onScreen : FALLBACK_QUESTIONS;
+  const pool = asked.length ? asked : onScreen.length ? onScreen : noBook ? FALLBACK_NO_BOOK : FALLBACK_QUESTIONS;
   const questions = asked.length ? pool.slice(0, count) : spread(pool, count);
   console.log(`asking ${questions.length}: ${questions.map((q) => q.slice(0, 48) + "…").join(" / ")}`);
 

@@ -1448,7 +1448,10 @@ function handleEvent(
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
-type Suggestion = { icon: React.ComponentType<{ className?: string }>; text: string };
+// `needs: "clients"` marks a prompt only the client book can answer. The demo film reads it
+// (data-needs) so a brand filmed before its book exists is not asked them: Ferragamo's first
+// film asked for its top ten clients with no clients on file, and filmed the empty answer.
+type Suggestion = { icon: React.ComponentType<{ className?: string }>; text: string; needs?: "clients" };
 
 // Starter prompts grounded in the brand's real data (a real product/collection,
 // a real client who has purchased, the brand name). Falls back to generic
@@ -1476,12 +1479,14 @@ function buildSuggestions(
     // thing being demonstrated and the thing a single-source question never shows.
     {
       icon: Users,
+      needs: "clients",
       text: tt(locale,
         "Who are our top 10 clients of the last quarter, and what would you suggest each of them buys next?",
         "Chi sono i 10 top client dell'ultimo trimestre e cosa consiglieresti di comprare a ciascuno?"),
     },
     {
       icon: Send,
+      needs: "clients",
       text: tt(locale,
         "I need to send a newsletter — who would you write to, and why them?",
         "Devo scrivere una newsletter: a chi scriveresti e perché proprio a loro?"),
@@ -1494,6 +1499,7 @@ function buildSuggestions(
     },
     {
       icon: CalendarDays,
+      needs: "clients",
       text: tt(locale,
         "Draft the structure for a trunk show in London — who to invite, what to bring, how to run it.",
         "Mi creeresti la struttura per un trunk show a Londra — chi invitare, cosa portare, come gestirlo?"),
@@ -1527,10 +1533,11 @@ const EmptyState = ({ locale, prompts, onPick }: { locale: string; prompts: Sugg
         "Chiedi di prodotti e clienti, completa un look, scrivi un messaggio — o allega una foto o un Excel.")}
     </p>
     <div className="mt-8 grid w-full grid-cols-1 gap-2 text-left sm:grid-cols-2">
-      {prompts.map(({ icon: Icon, text }, i) => (
+      {prompts.map(({ icon: Icon, text, needs }, i) => (
         <button
           key={i}
           type="button"
+          data-needs={needs}
           onClick={() => onPick(text)}
           className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
         >

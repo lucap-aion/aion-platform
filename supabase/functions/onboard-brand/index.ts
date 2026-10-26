@@ -1131,6 +1131,7 @@ async function runStage(
       visits_seeded: (seeded as { visits?: number } | null)?.visits ?? 0,
       crm_depth: depth,
       cleared_first: (cleared as { cleared?: Record<string, number> } | null)?.cleared ?? null,
+      film: await refilmAfterNewBook(admin, brandId),
     };
   }
 
@@ -1793,6 +1794,32 @@ async function status(admin: ReturnType<typeof createClient>, brandId: number) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+/**
+ * A demo film shows the book it was recorded on. Ferragamo's prod film was recorded at 11:47 on
+ * 25 October, its book was built at 18:48, and the film that went out still asked for "our top
+ * ten clients" and answered that there were none. Nothing said the film was now out of date,
+ * and nobody was going to think of it.
+ *
+ * So a new book re-records a film that already exists. Only one that exists: the first film is
+ * somebody's decision, and a runner per rebuild for a brand nobody has filmed is a cost with
+ * nothing asked of it. Never fails the stage — the book is the stage's work, the film is a
+ * consequence of it, and the panel says when a film is older than its book.
+ */
+async function refilmAfterNewBook(admin: ReturnType<typeof createClient>, brandId: number) {
+  const { data: film } = await admin.from("brand_deck_outputs")
+    .select("generated_at").eq("brand_id", brandId).eq("template_key", "demo_video").maybeSingle();
+  if (!film) return { requeued: false, reason: "no film to replace" };
+  try {
+    const out = await callFn("build-collateral", { brand_id: brandId, kind: "record_demo_video" }) as
+      { ok?: boolean; reason?: string };
+    return out.ok === false
+      ? { requeued: false, reason: out.reason ?? "build-collateral refused", previous: film.generated_at }
+      : { requeued: true, previous: film.generated_at };
+  } catch (e) {
+    return { requeued: false, reason: e instanceof Error ? e.message : String(e), previous: film.generated_at };
+  }
+}
+
 async function callFn(name: string, payload: Record<string, unknown>) {
   const res = await fetch(`${FUNCTIONS_BASE}/${name}`, {
     method: "POST",
