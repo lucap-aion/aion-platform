@@ -907,6 +907,22 @@ async function tourPortal(page) {
   // client starts.
   await page.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ } });
   await logIn(page, clientEmail, clientPassword);
+  // The client side is their covers. A demo login that owns none — a book rebuilt after
+  // the login was made, so the client it had adopted is gone — would be filmed as "No
+  // covers found", which undoes the demo. Checked first; the film ends on the brand side
+  // instead, and the log says why.
+  const first = CLIENT_TOUR.find((s) => s.open?.rows);
+  if (first) {
+    await viaSidebar(page, first.path, first.label, first.open.rows).catch(() => false);
+    const owns = await page.locator(first.open.rows).count().catch(() => 0);
+    if (!owns) {
+      console.warn(
+        "WARNING: the demo client login owns no covers, so the client side was not filmed. " +
+        "Run the Demo logins stage again (it re-attaches the login to a client with a book), then record again.",
+      );
+      return;
+    }
+  }
   for (const scene of CLIENT_TOUR) await playScene(page, scene);
 }
 
