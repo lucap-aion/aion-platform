@@ -445,7 +445,7 @@ try {
   // and odd for the prospect who signs in with the same login afterwards. Cleared here,
   // after the login and before the camera reaches the chat, so the film's own chats are the
   // only ones there.
-  await clearDemoChats(page);
+  if (!chatsCleared) await clearDemoChats(page);
 
   if (mode === "assistant") {
     await filmAssistant(page, { count });
@@ -646,6 +646,9 @@ async function logIn(page, who, secret) {
     const shown = Date.now() - heldIntro;
     if (shown < film(2600)) await page.waitForTimeout(film(2600) - shown);
     heldIntro = 0;
+    // The previous chats are cleared now, under the held frame: clearing reloads the
+    // assistant page, and a reload after the card has gone was a white flash on film.
+    await clearDemoChats(page);
     if (!(await hasIntro(page))) {
       await holdCard(page, { lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo });
       await page.waitForTimeout(80);
@@ -667,7 +670,9 @@ async function logIn(page, who, secret) {
  * user's own token is accepted there too. Anything that goes wrong is said and skipped:
  * a film with a crowded sidebar beats no film.
  */
+let chatsCleared = false;
 async function clearDemoChats(page) {
+  chatsCleared = true;
   const session = await page.evaluate(() => {
     for (const key of Object.keys(localStorage)) {
       const m = key.match(/^sb-([a-z0-9]+)-auth-token$/);
