@@ -492,7 +492,7 @@ export async function playChapter(page, { film, lang = "en", index, kind = "" })
       <div class="hair"></div>
     </section>`;
   const ID = "demo-chapter", CSS_ = CANVAS_CSS(ID) + CHAPTER_CSS;
-  const t = { hold: film(1500), fade: film(500) };
+  const t = { hold: film(1300), fade: film(450) };
   await page.evaluate(mountInPage, { id: ID, css: CSS_, html });
   await page.evaluate(async ({ id, t }) => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -557,7 +557,7 @@ export async function playEnding(page, { film, lang = "en", brand = "", logoUrl 
       </div>
     </div>`;
   const ID = "demo-ending", CSS_ = CANVAS_CSS(ID) + ENDING_CSS;
-  const t = { lineIn: film(900), lineHold: film(2000), creamOpen: film(1100), houseHold: film(3200) };
+  const t = { lineIn: film(900), lineHold: film(1700), creamOpen: film(1100), houseHold: film(2600) };
   await page.evaluate(mountInPage, { id: ID, css: CSS_, html });
   await page.evaluate(async ({ id, t }) => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
