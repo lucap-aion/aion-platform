@@ -206,6 +206,11 @@ const asked = (arg("ask", "") || "").split("|").map((q) => q.trim()).filter(Bool
 // 1.5×, not 2×. Fast enough not to be a wait, slow enough to read an answer as it arrives —
 // at 2× the streaming text was a blur, which defeats the point of filming it.
 const speed = Number(arg("speed", 1.5));
+// The film's longest. The titles, the typing and the reading of each answer keep their pace;
+// what gives is the wait while an answer streams, which is sped up as much as it takes to
+// fit — and no more. "Make them max 2 minutes" (Giulio, 2026-10-30): three answers at a flat
+// 1.5× ran to four. 0 turns the cap off.
+const maxSeconds = Number(arg("max-seconds", 120));
 /** On-film milliseconds → real ones. Every hold and pan below is written as the viewer sees it. */
 const film = (ms) => ms * speed;
 // The opening titles (scripts/demo-intro.mjs): the data wall, the eleven agents, the house.
@@ -271,7 +276,7 @@ if (!slug || !email || !password) {
     "       --functions-base/--batch-secret, or AION_FUNCTIONS_BASE/AION_BATCH_SECRET)\n" +
     "       [--mode portal|assistant] [--client-email … --client-password …] [--cameo]\n" +
     "       [--base url] [--ask \"q1|q2\"] [--questions 3] [--speed 1.5] [--out file.mp4] [--upload]\n" +
-    "       [--intro | --no-intro] [--lang en|it]",
+    "       [--intro | --no-intro] [--lang en|it] [--max-seconds 120]",
   );
   process.exit(2);
 }
@@ -351,6 +356,10 @@ let written = 0;
  *  loading spinner, and a film should not open on one. */
 let rolling = false;
 const roll = () => { if (!rolling) { rolling = true; startedAt = Date.now(); } };
+/** Where the waits are, in seconds of recording: each entry opens or closes a stretch of
+ *  waiting for an answer. The cut speeds those stretches up on their own (see maxSeconds). */
+const waits = [];
+const mark = (waiting) => { if (rolling) waits.push({ at: (Date.now() - startedAt) / 1000, waiting }); };
 /** Frames owed by the wall clock, not by the timer: setInterval runs late under load, and a
  *  film counted in ticks would come out shorter than what happened. */
 const tick = () => {
@@ -418,6 +427,7 @@ try {
 }
 
 tick();
+const stoppedAt = Date.now();
 clearInterval(clock);
 await cdp.send("Page.stopScreencast").catch(() => {});
 capture.stdin.end();
@@ -441,9 +451,47 @@ console.log("encoding…");
 // 1920 wide: the 2× capture scaled down is sharper text than 1440 ever was, and still plays
 // on any laptop or phone. CRF 18 because the picture is mostly flat colour and small type,
 // which is exactly what a higher CRF smears.
+//
+// TWO SPEEDS, NOT ONE. Everything plays at `speed` except the stretches where the film is
+// waiting for an answer to stream, which play at whatever speed brings the whole film inside
+// `maxSeconds` — between `speed` (no cap needed) and 8× (past which the stream is a smear
+// and the saving is pennies). The answer is still read through at a person's pace
+// afterwards, so nothing the viewer is meant to read goes by fast. If the cap cannot be met
+// even so, the film is cut at 8× for the waits and the log says by how much it misses.
+const recorded = (stoppedAt - startedAt) / 1000;
+const segments = [];
+{
+  let at = 0, waiting = false;
+  for (const w of waits) {
+    if (w.at > at + 0.05) segments.push({ from: at, to: w.at, waiting });
+    at = Math.max(at, w.at); waiting = w.waiting;
+  }
+  if (recorded > at + 0.05) segments.push({ from: at, to: recorded, waiting });
+}
+const waitSec = segments.filter((s) => s.waiting).reduce((n, s) => n + (s.to - s.from), 0);
+const restSec = segments.filter((s) => !s.waiting).reduce((n, s) => n + (s.to - s.from), 0);
+let waitSpeed = speed;
+if (maxSeconds > 0 && waitSec > 0) {
+  // Aimed a little under the cap, so the rounded length is under it too.
+  const room = (maxSeconds - 2) - restSec / speed;
+  waitSpeed = room > 0 ? Math.min(8, Math.max(speed, waitSec / room)) : 8;
+  const length = restSec / speed + waitSec / waitSpeed;
+  if (length > maxSeconds + 1) {
+    console.warn(`WARNING: the film runs ${Math.round(length)}s against a cap of ${maxSeconds}s even with the waits at 8× — fewer questions (--questions) is the lever left.`);
+  } else if (waitSpeed > speed) {
+    console.log(`the waits for answers (${Math.round(waitSec)}s recorded) play at ${waitSpeed.toFixed(1)}× to fit ${maxSeconds}s; everything else at ${speed}×`);
+  }
+}
+const filter = segments.length > 1 || waitSpeed !== speed
+  ? segments.map((s, i) =>
+    `[0:v]trim=start=${s.from.toFixed(3)}:end=${s.to.toFixed(3)},setpts=(PTS-STARTPTS)/${(s.waiting ? waitSpeed : speed).toFixed(4)}[v${i}]`,
+  ).join(";") + `;${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0,fps=30[out]`
+  : null;
 execFileSync("ffmpeg", [
   "-y", "-hide_banner", "-loglevel", "error", "-i", raw,
-  "-filter:v", `setpts=${(1 / speed).toFixed(4)}*PTS,fps=30`,
+  ...(filter
+    ? ["-filter_complex", filter, "-map", "[out]"]
+    : ["-filter:v", `setpts=${(1 / speed).toFixed(4)}*PTS,fps=30`]),
   "-an",
   "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p",
   "-movflags", "+faststart",
@@ -697,7 +745,9 @@ async function filmAssistant(page, { count, arrive = "url" }) {
     // Wait for the answer to finish rather than for a fixed time: these vary from eight
     // seconds to the better part of a minute, and a fixed wait either cuts an answer in half
     // or films a still frame.
+    mark(true);
     await settled(page);
+    mark(false);
     // Then read it, which is what a person does with an answer and what the film is for.
     photos.push(await presentAnswer(page, i));
   }
