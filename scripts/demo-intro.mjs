@@ -487,6 +487,41 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
   }, { id: ID, t: { ...t, holdCream } });
 }
 
+/** Whether the intro's card is still in the document. */
+export async function hasIntro(page) {
+  return page.evaluate(() => Boolean(document.getElementById("demo-intro"))).catch(() => false);
+}
+
+/**
+ * The house's card again, already open and still, for a document the sign-in replaced.
+ * The recorder's camera held the previous card's last frame across the change, so putting
+ * the same card back before the camera resumes makes the two one.
+ */
+export async function holdCard(page, { lang = "en", brand = "", logoUrl = "", photoUrl = "" }) {
+  const copy = introCopy(lang);
+  const html = `
+    <div class="cream open" style="transition:none">
+      ${photoUrl ? `<div class="side" style="background-image:url('${esc(photoUrl)}');transition:none;transform:scale(1.09)"></div>` : ""}
+      <div class="main">
+        <div class="house" style="transition:none">
+          ${logoUrl ? `<img src="${esc(logoUrl)}" alt="${esc(brand)}">` : `<span class="aion" style="letter-spacing:.02em;padding:0">${esc(brand)}</span>`}
+          <span class="x">×</span><span class="aion">AION</span>
+        </div>
+        <div class="hair" style="transition:none"></div>
+        <p class="go" style="transition:none">${esc(copy.go)}</p>
+      </div>
+    </div>`;
+  await page.evaluate(mountInPage, { id: "demo-intro", css: CANVAS_CSS("demo-intro"), html }).catch(() => {});
+  // The logo is an <img>: give it a moment to be there before the camera looks again.
+  await page.evaluate(() => new Promise((r) => {
+    const img = document.querySelector("#demo-intro img");
+    if (!img || img.complete) return r(true);
+    img.addEventListener("load", () => r(true), { once: true });
+    img.addEventListener("error", () => r(false), { once: true });
+    setTimeout(() => r(false), 1500);
+  })).catch(() => {});
+}
+
 /** Dissolve a held intro card (see playIntro's holdCream). Nothing to do if it is gone. */
 export async function dropIntro(page, { film }) {
   await page.evaluate(async (ms) => {
