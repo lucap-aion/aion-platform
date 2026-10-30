@@ -8,8 +8,8 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  ArrowUp, WandSparkles, Check, ChevronDown, ChevronRight, Download, FileSpreadsheet,
-  Loader2, MessageSquarePlus, Search, Sparkles, Trash2,
+  ArrowUp, WandSparkles, Check, ChevronDown, ChevronRight, ChevronUp, Download, FileSpreadsheet,
+  Lightbulb, Loader2, MessageSquarePlus, Search, Sparkles, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -393,6 +393,15 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
   const [chatLoading, setChatLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // The field is rows={1} with a cap and nothing resized it, so a second line was
+  // clipped out of sight. Grow it to fit, up to the cap it declares.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [input]);
 
   // Keep a ref so the stream callback can persist the latest messages without
   // closure staleness.
@@ -796,8 +805,10 @@ const AdminAIQuery = ({ mode = "admin" }: AIQueryProps = {}) => {
               placeholder={t("aiQuery.placeholder")}
               rows={1}
               disabled={loading}
-              className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
-              style={{ maxHeight: 160 }}
+              // 56px at rest and base type, grown to fit up to 200px (see the effect on
+              // `input`): the one-line 44px field was the "filo piccolino" of 2026-10-30.
+              className="min-h-14 flex-1 resize-none rounded-xl border border-border bg-background px-5 py-4 text-[15px] leading-6 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+              style={{ maxHeight: 200 }}
             />
             <button
               type="button"
@@ -934,28 +945,46 @@ const EmptyState = ({
   suggestionKeys?: string[];
 }) => {
   const { t } = useLanguage();
+  // Quiet on arrival, like the sales assistant's: a greeting and one button, with the
+  // playbooks, suggestions and reports behind it. Lucrezia (2026-10-30): a screen full of
+  // questions is chaotic; whoever uses GPT knows what to do. The same prompts, one click away.
+  const [open, setOpen] = useState(false);
   return (
-    <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-        <Sparkles className="h-6 w-6 text-primary" />
+    <div className={`mx-auto flex max-w-2xl flex-col items-center text-center ${open ? "pt-10 pb-8" : "h-full justify-center pb-8"}`}>
+      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+        <Sparkles className="h-7 w-7 text-primary" />
       </div>
-      <h2 className="text-xl font-semibold text-foreground">{t("aiQuery.empty.title")}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{t("aiQuery.empty.subtitle")}</p>
+      <h2 className="font-serif text-3xl font-medium tracking-tight text-foreground">{t("aiQuery.empty.title")}</h2>
+      <p className="mt-2 max-w-md text-sm text-muted-foreground">{t("aiQuery.empty.subtitle")}</p>
+      <button
+        type="button"
+        data-assistant-examples
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="mt-7 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+      >
+        {open ? <ChevronUp className="h-4 w-4" /> : <Lightbulb className="h-4 w-4 text-primary" />}
+        {open ? t("aiQuery.empty.hide") : t("aiQuery.empty.show")}
+      </button>
 
-      <PlaybookPicker onPick={onPick} />
+      {open && (
+        <div className="w-full animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <PlaybookPicker onPick={onPick} />
 
-      <EmptySection
-        title={t("aiQuery.section.suggestions")}
-        items={suggestionKeys.map((key) => ({ key, label: t(key), icon: Sparkles }))}
-        onPick={onPick}
-      />
+          <EmptySection
+            title={t("aiQuery.section.suggestions")}
+            items={suggestionKeys.map((key) => ({ key, label: t(key), icon: Sparkles }))}
+            onPick={onPick}
+          />
 
-      {showReports && (
-        <EmptySection
-          title={t("aiQuery.section.reports")}
-          items={REPORT_KEYS.map((key) => ({ key, label: t(key), icon: FileSpreadsheet }))}
-          onPick={onPick}
-        />
+          {showReports && (
+            <EmptySection
+              title={t("aiQuery.section.reports")}
+              items={REPORT_KEYS.map((key) => ({ key, label: t(key), icon: FileSpreadsheet }))}
+              onPick={onPick}
+            />
+          )}
+        </div>
       )}
     </div>
   );

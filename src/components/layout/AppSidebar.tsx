@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import SignedImage from "@/components/SignedImage";
-import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, MessageSquare, Library, Sparkles } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, Library, Sparkles } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { knowledgeComingSoon } from "@/lib/environment";
@@ -68,8 +68,10 @@ const brandPaths = [
   { path: "/dashboard", icon: Home, labelKey: "nav.home", exact: true },
   { path: "/insights", icon: LineChart, labelKey: "nav.insights" },
   // "Ask the data" (/ai-query) retired for brand users — the merged Assistant
-  // now handles data questions too, scoped to the brand. One entry only.
-  { path: "/assistant", icon: MessageSquare, labelKey: "nav.assistant" },
+  // now handles data questions too, scoped to the brand. One entry only, and the
+  // same sparkles the admin app uses for it: one name and one icon for the AI
+  // everywhere (Giulio, 2026-10-30).
+  { path: "/assistant", icon: Sparkles, labelKey: "nav.assistant" },
   { path: "/knowledge", icon: Library, labelKey: "nav.knowledge" },
   { path: "/customers", icon: Users, labelKey: "nav.customers" },
   { path: "/covers", icon: Shield, labelKey: "nav.covers" },
@@ -126,11 +128,13 @@ const AppSidebar = () => {
   // recent claims, so keeping it would put the product we are not demonstrating on the first
   // screen the prospect sees. Still one section, still this order; the flag only removes.
   const assistantOnlyPaths = new Set(["/assistant", "/knowledge"]);
-  // Assistant off: the navigation the brand had before the assistant existed — "Ask the
-  // data" where the Assistant would be, no Knowledge, and Dashboard not Home.
+  // Assistant off: the navigation the brand had before the assistant existed — the data
+  // chat where the Assistant would be, no Knowledge, and Dashboard not Home. The entry is
+  // still called AI Assistant, with the same icon: which chat answers behind it is not
+  // something the brand should have to learn a second name for.
   const classicBrandPaths = brandPaths
     .filter((p) => p.path !== "/knowledge" || knowledgeComingSoon())
-    .map((p) => p.path === "/assistant" ? { path: "/ai-query", icon: Sparkles, labelKey: "nav.aiQuery" }
+    .map((p) => p.path === "/assistant" ? { path: "/ai-query", icon: Sparkles, labelKey: "nav.assistant" }
       : p.path === "/dashboard" ? { ...p, icon: BarChart3, labelKey: "nav.dashboard" }
       : p);
   const paths = mode === "customer"
