@@ -54,7 +54,7 @@
  */
 
 import { chromium } from "playwright-core";
-import { playIntro } from "./demo-intro.mjs";
+import { playIntro, playChapter, showReading, hideReading, playEnding } from "./demo-intro.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -157,15 +157,15 @@ const SIDEBAR_LINK = (path) => `[data-sidebar="sidebar"] a[href="/${slug}${path}
  * `--ask "one|two"` overrides, for a film that has to make a particular point.
  */
 const FALLBACK_QUESTIONS = [
-  "Chi sono i 10 top client dell'ultimo trimestre e cosa consiglieresti di comprare a ciascuno?",
-  "Devo scrivere una newsletter: a chi scriveresti e perché proprio a loro?",
-  "Mi daresti la policy di reso per un cliente che vive in Polonia e ha acquistato in Brasile?",
+  { text: "Chi sono i 10 top client dell'ultimo trimestre e cosa consiglieresti di comprare a ciascuno?", kind: "users" },
+  { text: "Devo scrivere una newsletter: a chi scriveresti e perché proprio a loro?", kind: "send" },
+  { text: "Mi daresti la policy di reso per un cliente che vive in Polonia e ha acquistato in Brasile?", kind: "scroll-text" },
 ];
 // The same, for a brand with no client book: questions the site alone can answer.
 const FALLBACK_NO_BOOK = [
-  "Parlami del nostro pezzo iconico — materiali, lavorazione e cura.",
-  "Mi daresti la policy di reso per un cliente che vive in Polonia e ha acquistato in Brasile?",
-  "Raccontami la storia del brand, i valori e il tone of voice.",
+  { text: "Parlami del nostro pezzo iconico — materiali, lavorazione e cura.", kind: "shopping-bag" },
+  { text: "Mi daresti la policy di reso per un cliente che vive in Polonia e ha acquistato in Brasile?", kind: "scroll-text" },
+  { text: "Raccontami la storia del brand, i valori e il tone of voice.", kind: "book-open" },
 ];
 
 const arg = (name, fallback) => {
@@ -226,6 +226,10 @@ const introFlag = process.argv.includes("--no-intro") ? false : process.argv.inc
 // The titles' language. Empty means the login page's own — the portal's toggle, not the
 // browser's locale, decides which the prospect will see.
 const langArg = (arg("lang", process.env.AION_DEMO_LANG ?? "") || "").toLowerCase();
+/** The house as its login page shows it — name, logo, photograph — and the titles' language.
+ *  Read once at the brand's sign-in; the chapters and the ending use it after. */
+let house = { name: "", logo: "", photo: "", lang: "en" };
+let lang = "en";
 
 function normaliseMode(v) {
   const m = String(v ?? "").trim().toLowerCase();
@@ -574,22 +578,24 @@ async function logIn(page, who, secret) {
   // The titles, over the login and before anything is typed — the film opens on them and
   // dissolves into the house's own sign-in. Only the brand's login, only an assistant film.
   if (who !== clientEmail) {
+    house = await page.evaluate(() => {
+      // The form's logo (SmartLogo, alt = the house's name); the hero photograph on the
+      // left has the same alt but is the house's own picture, object-cover across half the
+      // screen — unless it failed to load and AION's stood in (data-fell-back).
+      const img = document.querySelector(".max-w-md img") ?? document.querySelector('img[alt]:not([src*="unsplash"])');
+      const hero = [...document.querySelectorAll("img")].find((i) => /object-cover/.test(i.className) && !i.dataset.fellBack && i.naturalWidth > 400);
+      const accedi = [...document.querySelectorAll("button")].some((b) => /accedi/i.test(b.textContent ?? ""));
+      const src = img?.currentSrc || img?.src || "";
+      // A house with no logo of its own signs in under AION's, and "AION × AION" is not a
+      // title card. Its name is set in type instead.
+      const own = src && !/aion[_-]?(dark|light)?[_-]?(logo|icon)|\/aion\.(png|svg)/i.test(src);
+      return { name: img?.alt ?? document.title ?? "", logo: own ? src : "", photo: hero?.currentSrc || hero?.src || "", lang: accedi ? "it" : "en" };
+    });
+    lang = langArg === "it" || langArg === "en" ? langArg : house.lang;
     const wanted = introFlag ?? (mode === "assistant");
     if (wanted) {
-      const house = await page.evaluate(() => {
-        // The form's logo (SmartLogo, alt = the house's name); the hero photo has the same
-        // alt but is a photograph.
-        const img = document.querySelector(".max-w-md img") ?? document.querySelector('img[alt]:not([src*="unsplash"])');
-        const accedi = [...document.querySelectorAll("button")].some((b) => /accedi/i.test(b.textContent ?? ""));
-        const src = img?.currentSrc || img?.src || "";
-        // A house with no logo of its own signs in under AION's, and "AION × AION" is not a
-        // title card. Its name is set in type instead.
-        const own = src && !/aion[_-]?(dark|light)?[_-]?(logo|icon)|\/aion\.(png|svg)/i.test(src);
-        return { name: img?.alt ?? document.title ?? "", logo: own ? src : "", lang: accedi ? "it" : "en" };
-      });
-      const lang = langArg === "it" || langArg === "en" ? langArg : house.lang;
-      console.log(`intro: ${lang}${house.name ? ` for ${house.name}` : ""}`);
-      await playIntro(page, { film, lang, brand: house.name, logoUrl: house.logo });
+      console.log(`intro: ${lang}${house.name ? ` for ${house.name}` : ""}${house.photo ? ", with the house's photograph" : ""}`);
+      await playIntro(page, { film, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo });
     } else if (introFlag === null && !mode) {
       console.log("intro: skipped — the film's mode is not known before the login; pass --mode assistant or --intro to open on the titles");
     }
@@ -717,12 +723,15 @@ async function filmAssistant(page, { count, arrive = "url" }) {
       text: (el.innerText ?? "").replace(/\s+/g, " ").trim(),
       needs: el.getAttribute("data-needs"),
       prompt: el.hasAttribute("data-assistant-prompt"),
+      // The prompt's icon names its kind (lucide-shopping-bag, lucide-users…), which is what
+      // the chapter card before it is titled from.
+      kind: ((el.querySelector("svg")?.getAttribute("class") ?? "").match(/lucide-([a-z-]+)/) ?? [])[1] ?? "",
     })))
     .then((all) => {
       const marked = all.filter((b) => b.prompt);
       return (marked.length ? marked : all.filter((b) => b.text.length > 40))
         .filter((b) => !(b.needs === "clients" && noBook))
-        .map((b) => b.text);
+        .map((b) => ({ text: b.text, kind: b.kind }));
     })
     .catch(() => []);
   if (noBook && !asked.length) {
@@ -736,11 +745,16 @@ async function filmAssistant(page, { count, arrive = "url" }) {
   // by kind — the product ones first, then the client and planning ones — so taking the top
   // three films two variations on the same handbag. Evenly spaced gives the range the
   // assistant actually has, which is the thing being demonstrated.
-  const pool = asked.length ? asked : onScreen.length ? onScreen : noBook ? FALLBACK_NO_BOOK : FALLBACK_QUESTIONS;
+  const pool = asked.length ? asked.map((text) => ({ text, kind: "" })) : onScreen.length ? onScreen : noBook ? FALLBACK_NO_BOOK : FALLBACK_QUESTIONS;
   const questions = asked.length ? pool.slice(0, count) : spread(pool, count);
-  console.log(`asking ${questions.length}: ${questions.map((q) => q.slice(0, 48) + "…").join(" / ")}`);
+  console.log(`asking ${questions.length}: ${questions.map((q) => q.text.slice(0, 48) + "…").join(" / ")}`);
+  // Chapters and an ending belong to the assistant film; a cameo inside the platform tour
+  // is one question in passing.
+  const titled = arrive !== "sidebar";
 
-  for (const [i, question] of questions.entries()) {
+  for (const [i, { text: question, kind }] of questions.entries()) {
+    // A card first — "01 · The piece" — so the question arrives as a chapter, not a line.
+    if (titled) await playChapter(page, { film, lang, index: i + 1, kind });
     // Never type over an answer that is still arriving. Before typing as well as after,
     // because the first question can arrive while the page is still settling.
     await waitComposerReady(page);
@@ -748,8 +762,13 @@ async function filmAssistant(page, { count, arrive = "url" }) {
     // Anything left in the box from a refused send would be prefixed to this question, and
     // two questions run together is not a question. Nothing normally is; this is the belt.
     await composer.fill("");
-    // Typed, not pasted. The film is about a person using this.
-    await composer.type(question, { delay: 18 });
+    // Typed, not pasted, and not metronomically: a person's keys come in bursts, with a
+    // breath at the commas. The film is about a person using this.
+    for (const ch of question) {
+      await page.keyboard.type(ch);
+      const pause = /[,;:—–]/.test(ch) ? 160 : ch === " " ? 55 : 24;
+      await page.waitForTimeout(film(pause + Math.random() * 28));
+    }
     await page.waitForTimeout(400);
     await composer.press("Enter");
 
@@ -768,11 +787,23 @@ async function filmAssistant(page, { count, arrive = "url" }) {
     // Wait for the answer to finish rather than for a fixed time: these vary from eight
     // seconds to the better part of a minute, and a fixed wait either cuts an answer in half
     // or films a still frame.
+    // The wait is the one stretch the cut speeds up, so a small card by the composer says
+    // what is being read while the text races: the client book's size, from demo_login.
     mark(true);
+    await showReading(page, { lang, book });
     await settled(page);
+    await hideReading(page, { film });
     mark(false);
     // Then read it, which is what a person does with an answer and what the film is for.
     photos.push(await presentAnswer(page, i));
+  }
+
+  // The close: a line, then the house's mark and where its demo is waiting. A film that
+  // stops on its last answer has no end.
+  if (titled) {
+    let where = "";
+    try { where = `${new URL(base).host}/${slug}`; } catch { /* no address, no line */ }
+    await playEnding(page, { film, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo, where });
   }
 }
 
@@ -1224,15 +1255,26 @@ async function presentAnswer(page, index) {
     if (Math.abs(el.scrollTop - start) > 2) {
       await glide(start, Math.min(timing.findMax, Math.abs(el.scrollTop - start) * timing.findPerPx), find);
     }
-    await hold(timing.openingHold);
+    // The camera leans in a touch while the answer is read — a transform on the app's root,
+    // which the compositor does for nothing — and settles back as the reading ends.
+    const app = document.getElementById("root");
+    const lean = (scale, ms) => {
+      if (!app) return;
+      app.style.transformOrigin = "50% 42%";
+      app.style.transition = `transform ${ms}ms cubic-bezier(.4,0,.2,1)`;
+      app.style.transform = `scale(${scale})`;
+    };
     const run = bottom - start;
+    const panMs = run > 2 ? Math.max(timing.panMin, Math.min(timing.panMax, run * timing.panPerPx)) : 0;
+    lean(1.035, timing.openingHold + panMs + 400);
+    await hold(timing.openingHold);
     if (run > 2) {
       // A reading pace, not a fixed time: a three-line answer should not crawl and a
       // product grid should not fly. Bounded both ways so one long answer does not eat the
       // film and a short scroll is still a movement rather than a twitch.
-      const ms = Math.max(timing.panMin, Math.min(timing.panMax, run * timing.panPerPx));
-      await glide(bottom, ms, read);
+      await glide(bottom, panMs, read);
     }
+    lean(1, timing.endHold);
     await hold(timing.endHold);
   }, {
     scroller: SCROLLER,

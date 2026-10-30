@@ -1,31 +1,34 @@
 /**
- * The opening of the assistant film — four beats before the product appears.
+ * The film's title work — everything drawn over the product rather than by it.
  *
- *   0. AION, alone on a dark canvas, a light passing over the letters.
- *   1. "All your company data, in one place."  The places a house's data lives (CRM,
- *      e-commerce, spreadsheets, social, mail, documents, the website) arrive on two orbits
- *      around an empty centre, each one tethered to it by a hairline; then the orbits draw
- *      in and the centre lights.
- *   2. "11 specialised agents."  The number counts up; eleven cards rise one after another,
- *      and a light sweeps across them.
- *   3. A cream wipe opens from the centre with the house's own logo × AION, then dissolves
- *      into the brand's login page, and the film continues as before.
+ *   playIntro    four beats before the product appears: AION over the house's own
+ *                photograph; "All your company data, in one place" with twelve sources on
+ *                one ring drawing into a centre; "11 specialised agents" counting in; a cream
+ *                wipe with the house's logo × AION.
+ *   playChapter  a card before each question — "01 · The piece" — so three answers read as
+ *                a story with room to breathe, not a chat log.
+ *   showReading  a small card in the corner while an answer streams: what is being read
+ *                (clients, covers, pieces), since that stretch of the film is sped up and the
+ *                viewer should know why the text is racing.
+ *   playEnding   the close: "Every answer came from your own data", then the house's mark and
+ *                where its demo is waiting. A film that stops on its last answer has no end.
  *
- * WHY AN OVERLAY ON THE REAL PAGE and not a title card spliced in afterwards: the film is
- * one screencast, cut once; a spliced card would need a second encode, a matching
- * resolution and a seam. Drawn in the page it inherits the house's typeface variables and
- * primary colour from TenantContext, so Prada's intro is Prada-accented and Oris's is
- * Oris's without anyone choosing, and the hand-over to the login is a fade of one element.
+ * WHY AN OVERLAY ON THE REAL PAGE and not cards spliced in afterwards: the film is one
+ * screencast, cut once; a spliced card would need a second encode, a matching resolution and
+ * a seam. Drawn in the page it inherits the house's typeface variables and primary colour
+ * from TenantContext, so Prada's titles are Prada-accented and Oris's are Oris's without
+ * anyone choosing, and every hand-over is a fade of one element.
  *
  * WHY DARK, when the product is light. A title sequence for a luxury house is a cinema
- * convention, not a dashboard one: ink, cream type, one accent, a hairline. The last beat
- * goes to cream precisely so the house's logo — nearly always drawn dark — is shown on the
- * ground it was designed for, and so the cut into the light login is a dissolve, not a
- * flash.
+ * convention, not a dashboard one: ink, cream type, one accent, a hairline. The cream beats
+ * exist so the house's logo — nearly always drawn dark — is shown on the ground it was
+ * designed for, and so the cut into the light product is a dissolve, not a flash.
  *
- * Giulio, 2026-10-30: "una specie di introduzione un po' dinamica… all your company data in
- * one place, e ti fa vedere un po' di loghi… poi 11 agenti… e poi parte con la dimostrazione";
- * then "make demo cool with also animations/graphics — it will be shown to luxury brands".
+ * WHAT IT MUST NOT COST. The runner's Chrome paints about twenty-four frames a second and
+ * the film is cut at that rate, so nothing here may make a frame expensive: transforms and
+ * opacity only, no blur filters, no blend modes, nothing that animates of its own accord in
+ * the background. A still photograph moving by a transform is fine; a drifting gradient
+ * was not (2026-10-30, measured).
  *
  * Every duration is ON-FILM milliseconds; `film()` stretches them for the recording so the
  * pacing holds whatever --speed the cut uses.
@@ -33,23 +36,18 @@
 
 import * as si from "simple-icons";
 
-// ── What is on the orbits ────────────────────────────────────────────────────
+// ── What is on the ring ──────────────────────────────────────────────────────
 //
-// The places a luxury house's data actually lives. A simple-icons slug where the project
-// carries the mark; a lettermark in the brand's own colour where it does not (simple-icons
-// dropped Salesforce, LinkedIn and Excel at the owners' request). The label is what the
-// viewer reads either way — nobody identifies Salesforce by a cloud at 40px.
+// Twelve, on one ring, in the order a house would list them: CRM, ERP, e-commerce,
+// spreadsheets, channels, documents, the site. A simple-icons slug where the project carries
+// the mark; a lettermark in the brand's own colour where it does not (simple-icons dropped
+// Salesforce, LinkedIn and Excel at the owners' request).
 //
 // HONESTY NOTE for whoever edits this list. The platform reads Shopify, spreadsheets, PDF /
 // Word / PowerPoint uploads, the house's website and news today; a CRM arrives as an export
 // (Excel / CSV), and the social and mail channels are where the assistant's drafts go, not
 // feeds it reads. The screen says "in one place", which is what the knowledge base is; it
 // does not say "live sync". Keep it that way.
-//
-// Twelve, on one ring, in the order a house would list them: CRM, ERP, e-commerce,
-// spreadsheets, channels, documents, the site. It was eighteen on two rings with a wire
-// from each to the centre, and read as scattered (Giulio, 2026-10-30) — a title card is
-// one clear shape, not a diagram.
 export const INTRO_SOURCES = [
   { label: "Salesforce", mark: "sf", hex: "00A1E0" },
   { slug: "siHubspot", label: "HubSpot" },
@@ -87,6 +85,22 @@ export const INTRO_AGENTS = [
   { icon: "life-buoy", en: ["Ask AION", "Anything it cannot answer reaches a person."], it: ["Ask AION", "Ciò che non sa risolvere arriva a una persona."] },
 ];
 
+// ── The chapters ─────────────────────────────────────────────────────────────
+//
+// A title for each kind of opening prompt, keyed on the lucide icon the prompt carries in
+// the product (the recorder reads it off the button's class), so no second list has to be
+// kept in step with buildSuggestions. An unknown kind is "Question N".
+export const CHAPTERS = {
+  "shopping-bag": { en: "The piece", it: "Il pezzo" },
+  "sparkles": { en: "The look", it: "Il look" },
+  "users": { en: "The clients", it: "I clienti" },
+  "send": { en: "The newsletter", it: "La newsletter" },
+  "scroll-text": { en: "The policy", it: "La policy" },
+  "calendar-days": { en: "The trunk show", it: "Il trunk show" },
+  "message-square-plus": { en: "The message", it: "Il messaggio" },
+  "book-open": { en: "The house", it: "La maison" },
+};
+
 export const introCopy = (lang) => (lang === "it"
   ? {
     kicker0: "L'assistente di vendita in negozio",
@@ -97,6 +111,12 @@ export const introCopy = (lang) => (lang === "it"
     agents: "agenti specializzati.",
     agentsSub: "Ognuno addestrato su un lavoro preciso in negozio.",
     go: "Vediamolo in negozio.",
+    question: (n) => `Domanda ${n}`,
+    reading: "Sta leggendo i vostri dati",
+    readingOf: ({ clients, covers, products }) => [clients && `${fmt(clients)} clienti`, covers && `${fmt(covers)} coperture`, products && `${fmt(products)} pezzi`].filter(Boolean).join(" · "),
+    readingNoBook: "la knowledge base e il portafoglio clienti della maison",
+    endLine: "Ogni risposta viene dai vostri dati.",
+    endReady: "La vostra demo è pronta",
   }
   : {
     kicker0: "The in-store sales assistant",
@@ -107,7 +127,15 @@ export const introCopy = (lang) => (lang === "it"
     agents: "specialised agents.",
     agentsSub: "Each one trained on one job on the floor.",
     go: "Let's see it on the floor.",
+    question: (n) => `Question ${n}`,
+    reading: "Reading your data",
+    readingOf: ({ clients, covers, products }) => [clients && `${fmt(clients)} clients`, covers && `${fmt(covers)} covers`, products && `${fmt(products)} pieces`].filter(Boolean).join(" · "),
+    readingNoBook: "the house's knowledge base and client book",
+    endLine: "Every answer came from your own data.",
+    endReady: "Your demo is ready",
   });
+
+const fmt = (n) => Number(n).toLocaleString("en-GB");
 
 // Lucide (ISC) outlines, inlined so the overlay needs nothing from the page's bundle.
 const LUCIDE = {
@@ -134,7 +162,7 @@ const lucide = (name, size = 22) =>
 /** A heading split into words, each in its own mask, so it can rise a word at a time. */
 const words = (text) => text.split(" ").map((w) => `<span class="w"><span>${esc(w)}</span></span>`).join(" ");
 
-/** One node on an orbit: a tile with the mark, and the name beside it. */
+/** One node on the ring: a tile with the mark, and the name beside it. */
 function node(source, lang, i) {
   const label = typeof source.label === "string" ? source.label : source.label[lang] ?? source.label.en;
   let tile;
@@ -160,46 +188,66 @@ const GRAIN = "data:image/svg+xml;utf8," + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .06 0"/></filter><rect width="220" height="220" filter="url(#n)"/></svg>',
 );
 
-const CSS = `
-#demo-intro{position:fixed;inset:0;z-index:2147483646;pointer-events:none;overflow:hidden;
+/** The canvas every overlay shares: ink, cream type, the house's accent, a hairline. */
+const CANVAS_CSS = (id) => `
+#${id}{position:fixed;inset:0;z-index:2147483646;pointer-events:none;overflow:hidden;
   background:#0d0b0a;color:#f3eee6;font-family:var(--body-font,"DM Sans",ui-sans-serif,system-ui,sans-serif);
   --cream:#f3eee6;--mute:rgba(243,238,230,.58);--hair:rgba(243,238,230,.12);--accent:var(--demo-accent,#CB9D4D);
   --serif:var(--heading-font,"Playfair Display",Georgia,serif)}
-#demo-intro *{box-sizing:border-box;margin:0}
-/* A still canvas: one warm glow in the house's accent, a fine static grain, a vignette.
-   Nothing on it moves of its own — a drifting background and floating motes made every
-   frame busy and the whole thing restless. */
-#demo-intro .bg{position:absolute;inset:0;background:
+#${id} *{box-sizing:border-box;margin:0}
+#${id} .bg{position:absolute;inset:0;background:
   radial-gradient(60% 50% at 50% 42%,color-mix(in srgb,var(--accent) 20%,transparent) 0%,transparent 70%),
   linear-gradient(180deg,#141110 0%,#0d0b0a 100%)}
-#demo-intro .grain{position:absolute;inset:0;background:url("${GRAIN}") repeat;opacity:.35}
-#demo-intro .vignette{position:absolute;inset:0;background:radial-gradient(90% 90% at 50% 50%,transparent 55%,rgba(0,0,0,.55) 100%)}
-#demo-intro .beat{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+#${id} .photo{position:absolute;inset:0;background-size:cover;background-position:center;opacity:0;
+  transform:scale(1.02);transition:opacity 1.4s ease,transform 9s linear}
+#${id} .photo.on{opacity:.38;transform:scale(1.09)}
+#${id} .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(13,11,10,.55),rgba(13,11,10,.78) 60%,#0d0b0a)}
+#${id} .grain{position:absolute;inset:0;background:url("${GRAIN}") repeat;opacity:.35}
+#${id} .vignette{position:absolute;inset:0;background:radial-gradient(90% 90% at 50% 50%,transparent 55%,rgba(0,0,0,.55) 100%)}
+#${id} .beat{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
   padding:56px 80px;opacity:0;transition:opacity .6s ease;will-change:opacity}
-#demo-intro .beat.on{opacity:1}
-#demo-intro .kicker{font-size:12px;letter-spacing:.34em;text-transform:uppercase;color:var(--accent);opacity:0;transform:translateY(8px);
+#${id} .beat.on{opacity:1}
+#${id} .kicker{font-size:12px;letter-spacing:.34em;text-transform:uppercase;color:var(--accent);opacity:0;transform:translateY(8px);
   transition:opacity .8s ease,transform .8s ease}
-#demo-intro .in .kicker{opacity:1;transform:none}
-#demo-intro h1{font-family:var(--serif);font-weight:400;font-size:58px;line-height:1.08;letter-spacing:-.005em;text-align:center;color:var(--cream);margin-top:18px}
-#demo-intro h1 .w{display:inline-block;overflow:hidden;vertical-align:bottom;padding:0 .02em .06em}
-#demo-intro h1 .w>span{display:inline-block;transform:translateY(110%);transition:transform .9s cubic-bezier(.2,.75,.2,1)}
-#demo-intro .in h1 .w>span{transform:none}
-#demo-intro .sub{margin-top:18px;font-size:18px;font-weight:300;color:var(--mute);text-align:center;max-width:960px;line-height:1.5;
+#${id} .in .kicker{opacity:1;transform:none}
+#${id} h1{font-family:var(--serif);font-weight:400;font-size:58px;line-height:1.08;letter-spacing:-.005em;text-align:center;color:var(--cream);margin-top:18px}
+#${id} h1 .w{display:inline-block;overflow:hidden;vertical-align:bottom;padding:0 .02em .06em}
+#${id} h1 .w>span{display:inline-block;transform:translateY(110%);transition:transform .9s cubic-bezier(.2,.75,.2,1)}
+#${id} .in h1 .w>span{transform:none}
+#${id} .sub{margin-top:18px;font-size:18px;font-weight:300;color:var(--mute);text-align:center;max-width:960px;line-height:1.5;
   opacity:0;transform:translateY(10px);transition:opacity .9s ease .35s,transform .9s ease .35s}
-#demo-intro .in .sub{opacity:1;transform:none}
-#demo-intro .hair{height:1px;width:0;background:linear-gradient(90deg,transparent,var(--accent),transparent);transition:width 1.1s cubic-bezier(.2,.7,.2,1) .2s}
-#demo-intro .in .hair{width:220px}
-
-/* beat 0: the mark */
-#demo-intro .mark0{font-family:var(--serif);font-size:96px;letter-spacing:.32em;padding-left:.32em;color:var(--cream);position:relative;
+#${id} .in .sub{opacity:1;transform:none}
+#${id} .hair{height:1px;width:0;background:linear-gradient(90deg,transparent,var(--accent),transparent);transition:width 1.1s cubic-bezier(.2,.7,.2,1) .2s}
+#${id} .in .hair{width:220px}
+#${id} .mark0{font-family:var(--serif);font-size:96px;letter-spacing:.32em;padding-left:.32em;color:var(--cream);position:relative;
   opacity:0;transform:translateY(10px) scale(.985);transition:opacity 1.1s ease,transform 1.3s cubic-bezier(.2,.7,.2,1)}
-#demo-intro .in .mark0{opacity:1;transform:none}
-#demo-intro .mark0 .sheen{position:absolute;inset:0;background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.95) 50%,transparent 65%);
-  -webkit-background-clip:text;background-clip:text;color:transparent;background-size:260% 100%;background-position:120% 0;mix-blend-mode:screen}
-#demo-intro .sweep .mark0 .sheen{animation:sheen 1.5s cubic-bezier(.4,0,.2,1) forwards}
-@keyframes sheen{from{background-position:120% 0}to{background-position:-40% 0}}
-#demo-intro .mark0 .sheen span{letter-spacing:inherit}
+#${id} .in .mark0{opacity:1;transform:none}
+#${id} .mark0 .sheen{position:absolute;inset:0;background:linear-gradient(100deg,transparent 35%,rgba(255,255,255,.95) 50%,transparent 65%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;background-size:260% 100%;background-position:120% 0}
+#${id} .sweep .mark0 .sheen{animation:${id}-sheen 1.5s cubic-bezier(.4,0,.2,1) forwards}
+@keyframes ${id}-sheen{from{background-position:120% 0}to{background-position:-40% 0}}
+/* cream, and the house */
+#${id} .cream{position:absolute;inset:0;background:#f7f4ee;color:#1c1917;display:flex;align-items:stretch;
+  clip-path:circle(0% at 50% 50%);transition:clip-path 1.2s cubic-bezier(.65,0,.35,1)}
+#${id} .cream.open{clip-path:circle(120% at 50% 50%)}
+#${id} .cream .side{flex:0 0 44%;background-size:cover;background-position:center;opacity:0;transition:opacity 1.2s ease .4s}
+#${id} .cream.open .side{opacity:1}
+#${id} .cream .main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px}
+#${id} .house{display:flex;align-items:center;gap:30px;opacity:0;transform:translateY(10px);transition:opacity .9s ease .5s,transform .9s ease .5s}
+#${id} .cream.open .house{opacity:1;transform:none}
+#${id} .house img{max-height:84px;max-width:300px;object-fit:contain}
+#${id} .house .x{font-family:var(--serif);font-size:30px;color:rgba(28,25,23,.45)}
+#${id} .house .aion{font-family:var(--serif);font-size:44px;letter-spacing:.26em;padding-left:.26em;color:#1c1917}
+#${id} .cream .hair{margin-top:30px;transition-delay:.9s}
+#${id} .cream.open .hair{width:200px}
+#${id} .cream .go{margin-top:26px;font-size:20px;font-weight:300;color:rgba(28,25,23,.6);letter-spacing:.02em;text-align:center;
+  opacity:0;transform:translateY(8px);transition:opacity .9s ease 1.1s,transform .9s ease 1.1s}
+#${id} .cream.open .go{opacity:1;transform:none}
+#${id} .cream .where{margin-top:10px;font-size:14px;letter-spacing:.08em;color:rgba(28,25,23,.5);opacity:0;transition:opacity .9s ease 1.4s}
+#${id} .cream.open .where{opacity:1}
+`;
 
+const INTRO_CSS = `
 /* beat 1: the ring */
 #demo-intro .sky{position:relative;width:1180px;height:540px;margin-top:6px}
 #demo-intro .sky svg.wires{position:absolute;inset:0;overflow:visible}
@@ -221,9 +269,8 @@ const CSS = `
 #demo-intro .core.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
 #demo-intro .core svg{width:46px;height:46px}
 #demo-intro .core::after{content:"";position:absolute;inset:-1px;border-radius:50%;border:1px solid var(--accent);opacity:0}
-#demo-intro .core.pulse::after{animation:pulse 1.6s ease-out 2}
-@keyframes pulse{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.6);opacity:0}}
-
+#demo-intro .core.pulse::after{animation:demo-intro-pulse 1.6s ease-out 2}
+@keyframes demo-intro-pulse{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.6);opacity:0}}
 /* beat 2: the eleven */
 #demo-intro h1 .count{display:inline-block;min-width:1.25em;text-align:right;color:var(--accent);font-variant-numeric:tabular-nums}
 #demo-intro .grid{position:relative;margin-top:40px;display:flex;flex-wrap:wrap;justify-content:center;gap:12px;max-width:1260px;overflow:hidden;padding:4px}
@@ -238,24 +285,63 @@ const CSS = `
 #demo-intro .card .num{position:absolute;right:14px;top:12px;font-size:10.5px;letter-spacing:.2em;color:var(--mute)}
 #demo-intro .grid .light{position:absolute;top:-20%;bottom:-20%;left:0;width:34%;transform:translateX(-140%) skewX(-18deg);
   background:linear-gradient(90deg,transparent,rgba(255,255,255,.085),transparent);pointer-events:none}
-#demo-intro .grid.sweep .light{animation:light 1.4s cubic-bezier(.4,0,.2,1) forwards}
-@keyframes light{to{transform:translateX(420%) skewX(-18deg)}}
-
-/* beat 3: cream, and the house */
-#demo-intro .cream{position:absolute;inset:0;background:#f7f4ee;color:#1c1917;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  clip-path:circle(0% at 50% 50%);transition:clip-path 1.2s cubic-bezier(.65,0,.35,1)}
-#demo-intro .cream.open{clip-path:circle(120% at 50% 50%)}
-#demo-intro .house{display:flex;align-items:center;gap:30px;opacity:0;transform:translateY(10px);transition:opacity .9s ease .5s,transform .9s ease .5s}
-#demo-intro .cream.open .house{opacity:1;transform:none}
-#demo-intro .house img{max-height:84px;max-width:300px;object-fit:contain}
-#demo-intro .house .x{font-family:var(--serif);font-size:30px;color:rgba(28,25,23,.45)}
-#demo-intro .house .aion{font-family:var(--serif);font-size:44px;letter-spacing:.26em;padding-left:.26em;color:#1c1917}
-#demo-intro .cream .hair{margin-top:30px;transition-delay:.9s}
-#demo-intro .cream.open .hair{width:200px}
-#demo-intro .cream .go{margin-top:26px;font-size:20px;font-weight:300;color:rgba(28,25,23,.6);letter-spacing:.02em;
-  opacity:0;transform:translateY(8px);transition:opacity .9s ease 1.1s,transform .9s ease 1.1s}
-#demo-intro .cream.open .go{opacity:1;transform:none}
+#demo-intro .grid.sweep .light{animation:demo-intro-light 1.4s cubic-bezier(.4,0,.2,1) forwards}
+@keyframes demo-intro-light{to{transform:translateX(420%) skewX(-18deg)}}
 `;
+
+const CHAPTER_CSS = `
+#demo-chapter .num{font-family:var(--serif);font-size:150px;line-height:1;color:var(--accent);font-variant-numeric:tabular-nums;letter-spacing:-.02em;
+  opacity:0;transform:translateY(14px);transition:opacity .7s ease,transform .9s cubic-bezier(.2,.75,.2,1)}
+#demo-chapter .in .num{opacity:1;transform:none}
+#demo-chapter h1{margin-top:6px;font-size:54px}
+#demo-chapter .hair{margin-top:26px}
+`;
+
+const READING_CSS = `
+#demo-reading{position:fixed;right:28px;bottom:112px;z-index:2147483645;pointer-events:none;
+  font-family:var(--body-font,"DM Sans",ui-sans-serif,system-ui,sans-serif);
+  --accent:var(--demo-accent,#CB9D4D);
+  background:#141110;color:#f3eee6;border:1px solid rgba(243,238,230,.12);border-radius:14px;padding:14px 18px 16px;min-width:300px;
+  box-shadow:0 18px 50px rgba(0,0,0,.28);opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}
+#demo-reading.on{opacity:1;transform:none}
+#demo-reading *{margin:0}
+#demo-reading .k{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--accent)}
+#demo-reading .of{margin-top:6px;font-size:15px;color:rgba(243,238,230,.85)}
+#demo-reading .bar{position:relative;margin-top:12px;height:1px;background:rgba(243,238,230,.12);overflow:hidden}
+#demo-reading .bar i{position:absolute;top:0;bottom:0;left:0;width:36%;background:var(--accent);animation:demo-reading-slide 2.4s ease-in-out infinite}
+@keyframes demo-reading-slide{0%{transform:translateX(-110%)}100%{transform:translateX(300%)}}
+`;
+
+const ENDING_CSS = `
+#demo-ending h1{font-size:54px}
+`;
+
+const canvas = (photo) => `<div class="bg"></div>${photo ? `<div class="photo" style="background-image:url('${esc(photo)}')"></div><div class="shade"></div>` : ""}<div class="grain"></div><div class="vignette"></div>`;
+
+/**
+ * In-page: mount an overlay root with the house's accent read off the page (TenantContext's
+ * --primary, lifted so it reads on ink), its styles and markup, and the fonts waited for so
+ * the first title is not drawn in a fallback face and swapped on camera. Passed to
+ * page.evaluate as a function — Playwright serialises it — so nothing is evaluated from a
+ * string, which a Content-Security-Policy would be right to refuse.
+ */
+async function mountInPage({ id, css, html }) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  document.getElementById(id)?.remove();
+  const root = document.createElement("div");
+  root.id = id;
+  const primary = getComputedStyle(document.documentElement).getPropertyValue("--primary").trim();
+  if (primary) {
+    const m = primary.match(/^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)%\s+(\d+(?:\.\d+)?)%$/);
+    root.style.setProperty("--demo-accent", m
+      ? `hsl(${m[1]} ${Math.max(Number(m[2]), 28)}% ${Math.max(Number(m[3]), 58)}%)`
+      : primary.includes("(") ? primary : `hsl(${primary})`);
+  }
+  root.innerHTML = `<style>${css}</style>${html}`;
+  document.body.appendChild(root);
+  try { await Promise.race([document.fonts.ready, sleep(1500)]); } catch { /* fine */ }
+  await sleep(60);
+}
 
 /**
  * Play the intro over whatever page is showing. Resolves when the overlay has dissolved.
@@ -265,12 +351,12 @@ const CSS = `
  * @param lang  "en" | "it".
  * @param brand the house's name, for the last beat.
  * @param logoUrl the house's logo as the login shows it; the name is set in type if none.
+ * @param photoUrl the house's photograph (the login's own), behind the mark and beside the logo.
  */
-export async function playIntro(page, { film, lang = "en", brand = "", logoUrl = "" }) {
+export async function playIntro(page, { film, lang = "en", brand = "", logoUrl = "", photoUrl = "" }) {
   const copy = introCopy(lang);
   const html = `
-    <style>${CSS}</style>
-    <div class="bg"></div><div class="grain"></div><div class="vignette"></div>
+    ${canvas(photoUrl)}
     <section class="beat" data-beat="0">
       <div class="mark0">AION<span class="sheen" aria-hidden="true">AION</span></div>
       <div class="hair" style="margin-top:28px"></div>
@@ -295,15 +381,18 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
       <div class="grid"><span class="light"></span>${INTRO_AGENTS.map((a, i) => card(a, lang, i + 1)).join("")}</div>
     </section>
     <div class="cream">
-      <div class="house">
-        ${logoUrl ? `<img src="${esc(logoUrl)}" alt="${esc(brand)}">` : `<span class="aion" style="letter-spacing:.02em;padding:0">${esc(brand)}</span>`}
-        <span class="x">×</span><span class="aion">AION</span>
+      ${photoUrl ? `<div class="side" style="background-image:url('${esc(photoUrl)}')"></div>` : ""}
+      <div class="main">
+        <div class="house">
+          ${logoUrl ? `<img src="${esc(logoUrl)}" alt="${esc(brand)}">` : `<span class="aion" style="letter-spacing:.02em;padding:0">${esc(brand)}</span>`}
+          <span class="x">×</span><span class="aion">AION</span>
+        </div>
+        <div class="hair"></div>
+        <p class="go">${esc(copy.go)}</p>
       </div>
-      <div class="hair"></div>
-      <p class="go">${esc(copy.go)}</p>
     </div>`;
 
-  // All on-film; `film()` is applied here so the page just sleeps.
+  const ID = "demo-intro", CSS_ = CANVAS_CSS(ID) + INTRO_CSS;
   // About sixteen seconds on film in all: titles that run longer than that are a wait before
   // the product, and the product is the point.
   const t = {
@@ -316,51 +405,28 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
     fade: film(650), gap: film(350),
   };
 
-  await page.evaluate(async ({ html, t }) => {
+  await page.evaluate(mountInPage, { id: ID, css: CSS_, html });
+  await page.evaluate(async ({ id, t }) => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    document.getElementById("demo-intro")?.remove();
-    const root = document.createElement("div");
-    root.id = "demo-intro";
-    // The house's primary, as TenantContext sets it, so the accent is theirs. HSL triplet
-    // or nothing — the fallback in the CSS is AION's gold. A primary too dark to read on ink
-    // (a navy house) is lifted rather than replaced: the hue stays the house's.
-    const primary = getComputedStyle(document.documentElement).getPropertyValue("--primary").trim();
-    if (primary) {
-      const m = primary.match(/^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)%\s+(\d+(?:\.\d+)?)%$/);
-      root.style.setProperty("--demo-accent", m
-        ? `hsl(${m[1]} ${Math.max(Number(m[2]), 28)}% ${Math.max(Number(m[3]), 58)}%)`
-        : primary.includes("(") ? primary : `hsl(${primary})`);
-    }
-    root.innerHTML = html;
-    document.body.appendChild(root);
-    // Fonts the page has already loaded render immediately; any still arriving are waited
-    // for so the first heading is not drawn in a fallback face and then swapped on camera.
-    try { await Promise.race([document.fonts.ready, sleep(1500)]); } catch { /* fine */ }
-    await sleep(60);
-
+    const root = document.getElementById(id);
     const beats = [...root.querySelectorAll(".beat")];
-    const show = async (i, ms) => {
-      beats[i].classList.add("on");
-      await sleep(90);
-      beats[i].classList.add("in");
-      await sleep(ms);
-    };
+    const photo = root.querySelector(".photo");
+    const show = async (i, ms) => { beats[i].classList.add("on"); await sleep(90); beats[i].classList.add("in"); await sleep(ms); };
     const hide = async (i) => { beats[i].classList.remove("on"); await sleep(t.gap); };
 
-    // ── 0. the mark ──
+    // ── 0. the mark, over the house's photograph ──
+    if (photo) photo.classList.add("on");
     await show(0, t.markIn * 0.5);
     beats[0].classList.add("sweep");
     await sleep(t.markIn * 0.5 + t.markHold);
+    if (photo) photo.classList.remove("on");
     await hide(0);
 
-    // ── 1. the orbits ──
+    // ── 1. the ring ──
     await show(1, t.headIn);
     const sky = beats[1].querySelector(".sky");
     const nodes = [...sky.querySelectorAll(".node")];
-    const W = 1180, H = 540, cx = W / 2, cy = H / 2;
-    const RX = 500, RY = 215;
-    // One ring, evenly spaced, starting at the top and going clockwise — the order the list
-    // is written in, so CRM sits next to ERP and the channels sit together.
+    const W = 1180, H = 540, cx = W / 2, cy = H / 2, RX = 500, RY = 215;
     const placed = nodes.map((n, k) => {
       const a = (k / nodes.length) * Math.PI * 2 - Math.PI / 2;
       const x = cx + RX * Math.cos(a), y = cy + RY * Math.sin(a);
@@ -369,13 +435,8 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
     });
     sky.classList.add("rings");
     await sleep(t.ringsIn);
-    // Arrival, clockwise, one after the other.
-    for (const p of placed) {
-      p.n.classList.add("on");
-      await sleep(t.nodeEvery);
-    }
+    for (const p of placed) { p.n.classList.add("on"); await sleep(t.nodeEvery); }
     await sleep(t.skyHold);
-    // Then the whole ring draws into the centre at once, as one movement.
     for (const p of placed) {
       p.n.classList.add("go");
       p.n.style.transform = `translate(calc(-50% + ${cx - p.x}px), calc(-50% + ${cy - p.y}px)) scale(.25)`;
@@ -407,12 +468,104 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
     await sleep(t.sweepHold);
 
     // ── 3. cream, the house, and the product ──
-    const cream = root.querySelector(".cream");
-    cream.classList.add("open");
+    root.querySelector(".cream").classList.add("open");
     await sleep(t.creamOpen + t.houseHold);
     root.style.transition = `opacity ${t.fade}ms ease`;
     root.style.opacity = "0";
     await sleep(t.fade + 80);
     root.remove();
-  }, { html, t });
+  }, { id: ID, t });
+}
+
+/**
+ * A chapter card before a question: a large numeral in the accent, the title, a hairline.
+ * Returns once it has dissolved; the product underneath is untouched.
+ */
+export async function playChapter(page, { film, lang = "en", index, kind = "" }) {
+  const copy = introCopy(lang);
+  const title = CHAPTERS[kind]?.[lang] ?? CHAPTERS[kind]?.en ?? copy.question(index);
+  const html = `
+    ${canvas("")}
+    <section class="beat">
+      <div class="num">${String(index).padStart(2, "0")}</div>
+      <h1>${words(title)}</h1>
+      <div class="hair"></div>
+    </section>`;
+  const ID = "demo-chapter", CSS_ = CANVAS_CSS(ID) + CHAPTER_CSS;
+  const t = { hold: film(1500), fade: film(500) };
+  await page.evaluate(mountInPage, { id: ID, css: CSS_, html });
+  await page.evaluate(async ({ id, t }) => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const root = document.getElementById(id);
+    const beat = root.querySelector(".beat");
+    root.style.transition = `opacity ${t.fade}ms ease`;
+    beat.classList.add("on"); await sleep(90); beat.classList.add("in");
+    await sleep(t.hold);
+    root.style.opacity = "0";
+    await sleep(t.fade + 60);
+    root.remove();
+  }, { id: ID, t });
+}
+
+/**
+ * The small card that sits beside the composer while an answer streams. `book` is
+ * demo_login's { clients, covers, products }, or null when the recorder was not told.
+ */
+export async function showReading(page, { lang = "en", book = null }) {
+  const copy = introCopy(lang);
+  const of = book && (book.clients || book.covers || book.products) ? copy.readingOf(book) : copy.readingNoBook;
+  const html = `<p class="k">${esc(copy.reading)}</p><p class="of">${esc(of)}</p><div class="bar"><i></i></div>`;
+  await page.evaluate(mountInPage, { id: "demo-reading", css: READING_CSS, html }).catch(() => {});
+  await page.evaluate(() => {
+    const root = document.getElementById("demo-reading");
+    requestAnimationFrame(() => root?.classList.add("on"));
+  }).catch(() => {});
+}
+
+export async function hideReading(page, { film }) {
+  await page.evaluate(async (ms) => {
+    const el = document.getElementById("demo-reading");
+    if (!el) return;
+    el.classList.remove("on");
+    await new Promise((r) => setTimeout(r, ms));
+    el.remove();
+  }, film(450)).catch(() => {});
+}
+
+/**
+ * The close. One line on ink, then cream with the house's photograph and mark, and where
+ * its demo is waiting. The film ends on this; nothing dissolves back to the product.
+ */
+export async function playEnding(page, { film, lang = "en", brand = "", logoUrl = "", photoUrl = "", where = "" }) {
+  const copy = introCopy(lang);
+  const html = `
+    ${canvas("")}
+    <section class="beat">
+      <h1>${words(copy.endLine)}</h1>
+      <div class="hair" style="margin-top:28px"></div>
+    </section>
+    <div class="cream">
+      ${photoUrl ? `<div class="side" style="background-image:url('${esc(photoUrl)}')"></div>` : ""}
+      <div class="main">
+        <div class="house">
+          ${logoUrl ? `<img src="${esc(logoUrl)}" alt="${esc(brand)}">` : `<span class="aion" style="letter-spacing:.02em;padding:0">${esc(brand)}</span>`}
+          <span class="x">×</span><span class="aion">AION</span>
+        </div>
+        <div class="hair"></div>
+        <p class="go">${esc(copy.endReady)}</p>
+        ${where ? `<p class="where">${esc(where)}</p>` : ""}
+      </div>
+    </div>`;
+  const ID = "demo-ending", CSS_ = CANVAS_CSS(ID) + ENDING_CSS;
+  const t = { lineIn: film(900), lineHold: film(2000), creamOpen: film(1100), houseHold: film(3200) };
+  await page.evaluate(mountInPage, { id: ID, css: CSS_, html });
+  await page.evaluate(async ({ id, t }) => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const root = document.getElementById(id);
+    const beat = root.querySelector(".beat");
+    beat.classList.add("on"); await sleep(90); beat.classList.add("in");
+    await sleep(t.lineIn + t.lineHold);
+    root.querySelector(".cream").classList.add("open");
+    await sleep(t.creamOpen + t.houseHold);
+  }, { id: ID, t });
 }
