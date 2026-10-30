@@ -198,7 +198,7 @@ const CANVAS_CSS = (id) => `
 #${id} .bg{position:absolute;inset:0;background:
   radial-gradient(60% 50% at 50% 42%,color-mix(in srgb,var(--accent) 20%,transparent) 0%,transparent 70%),
   linear-gradient(180deg,#141110 0%,#0d0b0a 100%)}
-#${id} .photo{position:absolute;inset:0;background-size:cover;background-position:center;opacity:0;
+#${id} .photo{position:absolute;inset:0;background-size:cover;background-position:center;opacity:0;will-change:transform;
   transform:scale(1.02);transition:opacity 1.4s ease,transform 9s linear}
 #${id} .photo.on{opacity:.38;transform:scale(1.09)}
 #${id} .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(13,11,10,.55),rgba(13,11,10,.78) 60%,#0d0b0a)}
