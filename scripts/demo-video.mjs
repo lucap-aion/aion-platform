@@ -396,6 +396,13 @@ try {
     );
   }
 
+  // A clean slate. Every recording leaves its three chats on the demo login, and by the
+  // fourth film the sidebar was nine copies of "Tell me about Gilet OPERA…" — odd on camera,
+  // and odd for the prospect who signs in with the same login afterwards. Cleared here,
+  // after the login and before the camera reaches the chat, so the film's own chats are the
+  // only ones there.
+  await clearDemoChats(page);
+
   if (mode === "assistant") {
     await filmAssistant(page, { count });
   } else {
@@ -531,6 +538,53 @@ async function logIn(page, who, secret) {
   ]);
   await screenReady(page, "landing");
   await curtainUp(page);
+}
+
+/**
+ * Delete the demo login's previous chats, as the user it is signed in as.
+ *
+ * Through PostgREST with the session the portal just opened (the Supabase auth token the
+ * SPA keeps in localStorage), under the table's own owner-delete policy — so it can only
+ * ever remove this login's chats, the same ones the trash icon in the sidebar removes one
+ * at a time. The anon key is the gateway's apikey when the caller has it; failing that the
+ * user's own token is accepted there too. Anything that goes wrong is said and skipped:
+ * a film with a crowded sidebar beats no film.
+ */
+async function clearDemoChats(page) {
+  const session = await page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      const m = key.match(/^sb-([a-z0-9]+)-auth-token$/);
+      if (!m) continue;
+      try {
+        const v = JSON.parse(localStorage.getItem(key) ?? "null");
+        const token = v?.access_token ?? v?.currentSession?.access_token ?? null;
+        if (token) return { ref: m[1], token };
+      } catch { /* not ours */ }
+    }
+    return null;
+  }).catch(() => null);
+  if (!session) { console.warn("WARNING: no session found to clear the demo login's previous chats; the sidebar will show them"); return; }
+  try {
+    const res = await fetch(`https://${session.ref}.supabase.co/rest/v1/ai_chats_brand?id=not.is.null`, {
+      method: "DELETE",
+      headers: {
+        apikey: anonKey || session.token,
+        Authorization: `Bearer ${session.token}`,
+        Prefer: "count=exact",
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+    const removed = (res.headers.get("content-range") ?? "").split("/")[1] ?? "?";
+    console.log(`cleared ${removed} previous chat(s) from the demo login`);
+    // The sidebar read its list on mount; the page is loaded again below in every path that
+    // films it, except an assistant-only demo that is already there — so refresh that one.
+    if (new URL(page.url()).pathname === `/${slug}/assistant`) {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.waitForSelector(COMPOSER, { timeout: 45_000 });
+    }
+  } catch (e) {
+    console.warn(`WARNING: could not clear the demo login's previous chats (${e instanceof Error ? e.message : e}); the sidebar will show them`);
+  }
 }
 
 /**
