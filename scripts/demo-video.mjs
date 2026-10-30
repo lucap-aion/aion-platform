@@ -233,6 +233,8 @@ let lang = "en";
 /** When the intro's cream card opened, while it is still up over the sign-in; 0 otherwise.
  *  Dropped once the product is ready, and not before the card has had its hold. */
 let heldIntro = 0;
+/** Whether the demo login's previous chats have been cleared this run (see clearDemoChats). */
+let chatsCleared = false;
 
 function normaliseMode(v) {
   const m = String(v ?? "").trim().toLowerCase();
@@ -670,7 +672,6 @@ async function logIn(page, who, secret) {
  * user's own token is accepted there too. Anything that goes wrong is said and skipped:
  * a film with a crowded sidebar beats no film.
  */
-let chatsCleared = false;
 async function clearDemoChats(page) {
   chatsCleared = true;
   const session = await page.evaluate(() => {
