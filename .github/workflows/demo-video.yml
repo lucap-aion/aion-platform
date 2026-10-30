@@ -42,6 +42,11 @@ on:
         required: false
         default: "3"
         type: string
+      fps:
+        description: "Frames per second of the film. 60 on the Mac runner; the old Linux runner could only paint 24"
+        required: false
+        default: "60"
+        type: string
       speed:
         description: "Playback speed of what moves on screen (the waits for answers are sped up on their own to fit two minutes). 1 is smooth on the runner; above it the film stutters"
         required: false
@@ -71,7 +76,12 @@ concurrency:
 
 jobs:
   record:
-    runs-on: ubuntu-latest
+    # A Mac, not Ubuntu. Headless Chrome on the Linux runner painted about twenty-four frames
+    # a second and the film could only ever be that; on Apple Silicon it paints sixty, and a
+    # pan at sixty is the difference between smooth and "a bit scattery". Chrome is on the
+    # image already, at the path the recorder looks in first; macOS runners are free on a
+    # public repository.
+    runs-on: macos-15
     # prod's AION_* secrets live on the "prod" environment and override the repo-level (dev) ones.
     environment: ${{ inputs.target == 'prod' && 'prod' || 'dev' }}
     # A slow answer is normal; a hung one should not hold a runner all day.
@@ -94,7 +104,9 @@ jobs:
       # on 2026-10-23, when the Ubuntu mirror was crawling.
       - name: Install Chromium (only when the image has no Chrome)
         run: |
-          if [ -x /usr/bin/google-chrome ]; then
+          if [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
+          elif [ -x /usr/bin/google-chrome ]; then
             /usr/bin/google-chrome --version
           else
             npx playwright install --with-deps chromium
@@ -110,8 +122,14 @@ jobs:
       # job's 25 minutes, twice, and Brunello Cucinelli's film was never recorded. The
       # download is one request to the same network the runner is on.
       - name: Install ffmpeg
-        timeout-minutes: 8
+        timeout-minutes: 10
         run: |
+          if [ "$(uname)" = "Darwin" ]; then
+            # Homebrew's bottle; the macOS image has brew and no ffmpeg.
+            brew install --quiet ffmpeg
+            ffmpeg -version | head -1; ffprobe -version | head -1
+            exit 0
+          fi
           if curl -fsSL --max-time 120 -o /tmp/ffmpeg.tar.xz \
                https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz \
              && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp; then
@@ -138,6 +156,7 @@ jobs:
             --base "${{ secrets.AION_PORTAL_BASE }}" \
             --questions "${{ inputs.questions }}" \
             --speed "${{ inputs.speed }}" \
+            --fps "${{ inputs.fps }}" \
             ${{ inputs.ask != '' && format('--ask "{0}"', inputs.ask) || '' }} \
             ${{ inputs.mode != '' && format('--mode "{0}"', inputs.mode) || '' }} \
             ${{ inputs.upload && '--upload' || '' }}
