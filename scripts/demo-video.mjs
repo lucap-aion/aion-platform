@@ -753,6 +753,28 @@ async function filmAssistant(page, { count, arrive = "url" }) {
   const titled = arrive !== "sidebar";
 
   for (const [i, { text: question, kind }] of questions.entries()) {
+    // A question is asked only if the film can still hold it. The cap (maxSeconds) is met by
+    // speeding up the waits, and past about 5× a streaming answer is a smear even with the
+    // reading card beside it — Oris's third answer pushed its waits to 7.8×. So before each
+    // question after the first: what has been spent on screen, what the waits have cost so
+    // far, and what one more of each would add; if that needs the waits faster than 5×, the
+    // film ends here, with two answers that can be watched rather than three that cannot.
+    if (i > 0 && maxSeconds > 0 && rolling) {
+      const now = (Date.now() - startedAt) / 1000;
+      let waited = 0, open = null;
+      for (const w of waits) { if (w.waiting) open = w.at; else if (open !== null) { waited += w.at - open; open = null; } }
+      const spent = now - waited;
+      const perQuestion = waited / i;
+      // On screen, one more question costs: a chapter, the typing, the reading pan, and the
+      // ending that follows the last answer — about 26 s at the pans' longest.
+      const more = 26;
+      const room = (maxSeconds - 2) - (spent + more) / speed;
+      const need = room > 0 ? (waited + perQuestion) / room : Infinity;
+      if (need > 5) {
+        console.log(`stopping at ${i} question(s): a ${i + 1}${["st", "nd", "rd"][i] ?? "th"} would need the waits at ${need === Infinity ? "∞" : need.toFixed(1)}× to fit ${maxSeconds}s`);
+        break;
+      }
+    }
     // A card first — "01 · The piece" — so the question arrives as a chapter, not a line.
     if (titled) await playChapter(page, { film, lang, index: i + 1, kind });
     // Never type over an answer that is still arriving. Before typing as well as after,
@@ -1284,8 +1306,8 @@ async function presentAnswer(page, index) {
       findPerPx: film(0.6), findMax: film(700),
       openingHold: film(1200),
       // ~110px a second on film: the speed you scroll a page you are reading.
-      panPerPx: film(9), panMin: film(1500), panMax: film(8000),
-      endHold: film(2200),
+      panPerPx: film(9), panMin: film(1500), panMax: film(6500),
+      endHold: film(1800),
     },
   });
   return report;
