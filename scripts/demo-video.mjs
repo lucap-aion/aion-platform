@@ -230,8 +230,9 @@ const langArg = (arg("lang", process.env.AION_DEMO_LANG ?? "") || "").toLowerCas
  *  Read once at the brand's sign-in; the chapters and the ending use it after. */
 let house = { name: "", logo: "", photo: "", lang: "en" };
 let lang = "en";
-/** The intro's cream card is still up over the sign-in; dropped once the product is ready. */
-let heldIntro = false;
+/** When the intro's cream card opened, while it is still up over the sign-in; 0 otherwise.
+ *  Dropped once the product is ready, and not before the card has had its hold. */
+let heldIntro = 0;
 
 function normaliseMode(v) {
   const m = String(v ?? "").trim().toLowerCase();
@@ -597,8 +598,12 @@ async function logIn(page, who, secret) {
     const wanted = introFlag ?? (mode === "assistant");
     if (wanted) {
       console.log(`intro: ${lang}${house.name ? ` for ${house.name}` : ""}${house.photo ? ", with the house's photograph" : ""}`);
+      // The credentials go in under the titles, where nobody sees them typed, so the
+      // sign-in can be fired the moment the house's card opens and load behind it.
+      await page.fill('input[type="email"]', who);
+      await page.fill('input[type="password"]', secret);
       await playIntro(page, { film, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo, holdCream: true });
-      heldIntro = true;
+      heldIntro = Date.now();
     } else if (introFlag === null && !mode) {
       console.log("intro: skipped — the film's mode is not known before the login; pass --mode assistant or --intro to open on the titles");
     }
@@ -627,8 +632,10 @@ async function logIn(page, who, secret) {
     if (new URL(page.url()).pathname === `/${slug}/assistant`) {
       await page.waitForSelector(COMPOSER, { timeout: 45_000 }).catch(() => {});
     }
-    await page.waitForTimeout(film(300));
-    heldIntro = false;
+    // The card keeps its hold even when the product is ready sooner.
+    const shown = Date.now() - heldIntro;
+    if (shown < film(2600)) await page.waitForTimeout(film(2600) - shown);
+    heldIntro = 0;
     const dropped = await dropIntro(page, { film });
     if (!dropped) console.warn("WARNING: the intro card did not survive the sign-in; the film shows the landing cut");
   } else {

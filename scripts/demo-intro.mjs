@@ -230,8 +230,9 @@ const CANVAS_CSS = (id) => `
 #${id} .cream{position:absolute;inset:0;background:#f7f4ee;color:#1c1917;display:flex;align-items:stretch;
   clip-path:circle(0% at 50% 50%);transition:clip-path 1.2s cubic-bezier(.65,0,.35,1)}
 #${id} .cream.open{clip-path:circle(120% at 50% 50%)}
-#${id} .cream .side{flex:0 0 44%;background-size:cover;background-position:center;opacity:0;transition:opacity 1.2s ease .4s}
-#${id} .cream.open .side{opacity:1}
+#${id} .cream .side{flex:0 0 44%;background-size:cover;background-position:center;opacity:0;will-change:transform;
+  transform:scale(1.02);transition:opacity 1.2s ease .4s,transform 16s linear}
+#${id} .cream.open .side{opacity:1;transform:scale(1.09)}
 #${id} .cream .main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px}
 #${id} .house{display:flex;align-items:center;gap:30px;opacity:0;transform:translateY(10px);transition:opacity .9s ease .5s,transform .9s ease .5s}
 #${id} .cream.open .house{opacity:1;transform:none}
@@ -475,8 +476,10 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
 
     // ── 3. cream, the house, and the product ──
     root.querySelector(".cream").classList.add("open");
+    // Held: back to the recorder as soon as the card is open, so the sign-in it fires runs
+    // while the card is on screen; the recorder keeps the card up for the hold itself.
+    if (t.holdCream) { await sleep(t.creamOpen); return; }
     await sleep(t.creamOpen + t.houseHold);
-    if (t.holdCream) return;
     root.style.transition = `opacity ${t.fade}ms ease`;
     root.style.opacity = "0";
     await sleep(t.fade + 80);
