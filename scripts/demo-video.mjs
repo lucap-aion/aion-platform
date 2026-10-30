@@ -54,7 +54,7 @@
  */
 
 import { chromium } from "playwright-core";
-import { playIntro, playChapter, showReading, hideReading, playEnding } from "./demo-intro.mjs";
+import { playIntro, dropIntro, playChapter, chapterTitle, showReading, hideReading, playEnding } from "./demo-intro.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -230,6 +230,8 @@ const langArg = (arg("lang", process.env.AION_DEMO_LANG ?? "") || "").toLowerCas
  *  Read once at the brand's sign-in; the chapters and the ending use it after. */
 let house = { name: "", logo: "", photo: "", lang: "en" };
 let lang = "en";
+/** The intro's cream card is still up over the sign-in; dropped once the product is ready. */
+let heldIntro = false;
 
 function normaliseMode(v) {
   const m = String(v ?? "").trim().toLowerCase();
@@ -595,7 +597,8 @@ async function logIn(page, who, secret) {
     const wanted = introFlag ?? (mode === "assistant");
     if (wanted) {
       console.log(`intro: ${lang}${house.name ? ` for ${house.name}` : ""}${house.photo ? ", with the house's photograph" : ""}`);
-      await playIntro(page, { film, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo });
+      await playIntro(page, { film, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo, holdCream: true });
+      heldIntro = true;
     } else if (introFlag === null && !mode) {
       console.log("intro: skipped — the film's mode is not known before the login; pass --mode assistant or --intro to open on the titles");
     }
@@ -608,13 +611,29 @@ async function logIn(page, who, secret) {
   // toggle is independent of the browser locale.
   const button = page.getByRole("button", { name: /log\s?in|accedi/i }).first();
   await button.waitFor({ state: "visible", timeout: 30_000 });
-  await curtainDown(page);
+  // Behind the intro's cream card when there is one; otherwise behind a curtain of the
+  // login itself, so the SPA's route change is a dissolve and not a flash.
+  if (!heldIntro) await curtainDown(page);
   await Promise.all([
     page.waitForURL((u) => !u.toString().includes("/login"), { timeout: 60_000 }),
     button.click(),
   ]);
   await screenReady(page, "landing");
-  await curtainUp(page);
+  if (heldIntro) {
+    // An assistant demo lands on the assistant: wait for its composer so the dissolve
+    // arrives on the quiet "How can I help?" screen and not on a loader. A full-portal
+    // brand with the titles forced on lands on its dashboard, which has no composer —
+    // waiting for one there ran to the timeout and cost the film forty seconds.
+    if (new URL(page.url()).pathname === `/${slug}/assistant`) {
+      await page.waitForSelector(COMPOSER, { timeout: 45_000 }).catch(() => {});
+    }
+    await page.waitForTimeout(film(300));
+    heldIntro = false;
+    const dropped = await dropIntro(page, { film });
+    if (!dropped) console.warn("WARNING: the intro card did not survive the sign-in; the film shows the landing cut");
+  } else {
+    await curtainUp(page);
+  }
 }
 
 /**
@@ -751,6 +770,8 @@ async function filmAssistant(page, { count, arrive = "url" }) {
   // Chapters and an ending belong to the assistant film; a cameo inside the platform tour
   // is one question in passing.
   const titled = arrive !== "sidebar";
+  /** The kinds actually asked, for the ending's line of chapters. */
+  const askedKinds = [];
 
   for (const [i, { text: question, kind }] of questions.entries()) {
     // A question is asked only if the film can still hold it. The cap (maxSeconds) is met by
@@ -777,6 +798,7 @@ async function filmAssistant(page, { count, arrive = "url" }) {
     }
     // A card first — "01 · The piece" — so the question arrives as a chapter, not a line.
     if (titled) await playChapter(page, { film, lang, index: i + 1, kind });
+    askedKinds.push(kind);
     // Never type over an answer that is still arriving. Before typing as well as after,
     // because the first question can arrive while the page is still settling.
     await waitComposerReady(page);
@@ -825,7 +847,10 @@ async function filmAssistant(page, { count, arrive = "url" }) {
   if (titled) {
     let where = "";
     try { where = `${new URL(base).host}/${slug}`; } catch { /* no address, no line */ }
-    await playEnding(page, { film, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo, where });
+    await playEnding(page, {
+      film, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo, where,
+      chapters: askedKinds.map((k, i) => chapterTitle(lang, i + 1, k)),
+    });
   }
 }
 
@@ -1282,14 +1307,18 @@ async function presentAnswer(page, index) {
     // main thread, the very thread this pan's requestAnimationFrame scroll runs on, and the
     // content advanced in jumps while the zoom glided — measured at 78% stalled frames
     // (2026-10-30). Whatever moves here must be the scroll alone.
+    // One reading speed, always. A long answer is read as far as the time allows and left
+    // there, rather than skimmed to its end: at the pan's cap a two-screen answer went by at
+    // four times reading pace, which is not reading.
     const run = bottom - start;
-    const panMs = run > 2 ? Math.max(timing.panMin, Math.min(timing.panMax, run * timing.panPerPx)) : 0;
+    const reach = Math.min(run, timing.panMax / timing.panPerPx);
+    const panMs = reach > 2 ? Math.max(timing.panMin, reach * timing.panPerPx) : 0;
     await hold(timing.openingHold);
     if (run > 2) {
       // A reading pace, not a fixed time: a three-line answer should not crawl and a
       // product grid should not fly. Bounded both ways so one long answer does not eat the
       // film and a short scroll is still a movement rather than a twitch.
-      await glide(bottom, panMs, read);
+      await glide(start + reach, panMs, read);
     }
     await hold(timing.endHold);
   }, {

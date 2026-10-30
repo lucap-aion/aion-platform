@@ -353,7 +353,13 @@ async function mountInPage({ id, css, html }) {
  * @param logoUrl the house's logo as the login shows it; the name is set in type if none.
  * @param photoUrl the house's photograph (the login's own), behind the mark and beside the logo.
  */
-export async function playIntro(page, { film, lang = "en", brand = "", logoUrl = "", photoUrl = "" }) {
+/**
+ * `holdCream`: leave the cream card up when done, instead of dissolving to the page. The
+ * recorder signs in behind it and dissolves it (dropIntro) once the product is ready, so the
+ * film goes from the house's mark straight to the assistant — the typing of an e-mail and a
+ * password was five seconds nobody needed to watch.
+ */
+export async function playIntro(page, { film, lang = "en", brand = "", logoUrl = "", photoUrl = "", holdCream = false }) {
   const copy = introCopy(lang);
   const html = `
     ${canvas(photoUrl)}
@@ -470,20 +476,35 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
     // ── 3. cream, the house, and the product ──
     root.querySelector(".cream").classList.add("open");
     await sleep(t.creamOpen + t.houseHold);
+    if (t.holdCream) return;
     root.style.transition = `opacity ${t.fade}ms ease`;
     root.style.opacity = "0";
     await sleep(t.fade + 80);
     root.remove();
-  }, { id: ID, t });
+  }, { id: ID, t: { ...t, holdCream } });
+}
+
+/** Dissolve a held intro card (see playIntro's holdCream). Nothing to do if it is gone. */
+export async function dropIntro(page, { film }) {
+  await page.evaluate(async (ms) => {
+    const root = document.getElementById("demo-intro");
+    if (!root) return false;
+    root.style.transition = `opacity ${ms}ms ease`;
+    root.style.opacity = "0";
+    await new Promise((r) => setTimeout(r, ms + 80));
+    root.remove();
+    return true;
+  }, film(700)).catch(() => false);
 }
 
 /**
  * A chapter card before a question: a large numeral in the accent, the title, a hairline.
  * Returns once it has dissolved; the product underneath is untouched.
  */
+export const chapterTitle = (lang, index, kind) => CHAPTERS[kind]?.[lang] ?? CHAPTERS[kind]?.en ?? introCopy(lang).question(index);
+
 export async function playChapter(page, { film, lang = "en", index, kind = "" }) {
-  const copy = introCopy(lang);
-  const title = CHAPTERS[kind]?.[lang] ?? CHAPTERS[kind]?.en ?? copy.question(index);
+  const title = chapterTitle(lang, index, kind);
   const html = `
     ${canvas("")}
     <section class="beat">
@@ -536,13 +557,14 @@ export async function hideReading(page, { film }) {
  * The close. One line on ink, then cream with the house's photograph and mark, and where
  * its demo is waiting. The film ends on this; nothing dissolves back to the product.
  */
-export async function playEnding(page, { film, lang = "en", brand = "", logoUrl = "", photoUrl = "", where = "" }) {
+export async function playEnding(page, { film, lang = "en", brand = "", logoUrl = "", photoUrl = "", where = "", chapters = [] }) {
   const copy = introCopy(lang);
   const html = `
     ${canvas("")}
     <section class="beat">
       <h1>${words(copy.endLine)}</h1>
       <div class="hair" style="margin-top:28px"></div>
+      ${chapters.length ? `<p class="sub" style="letter-spacing:.18em;text-transform:uppercase;font-size:13px;margin-top:26px">${chapters.map((c) => esc(c)).join('<span style="margin:0 14px;opacity:.5">·</span>')}</p>` : ""}
     </section>
     <div class="cream">
       ${photoUrl ? `<div class="side" style="background-image:url('${esc(photoUrl)}')"></div>` : ""}

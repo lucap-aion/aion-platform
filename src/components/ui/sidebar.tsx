@@ -231,11 +231,15 @@ const Sidebar = React.forwardRef<
         </div>
         {/* Collapse toggle pinned to the sidebar's top-right corner — the same
             for every sidebar (admin / brand / customer). Hidden on the bare icon
-            rail; the rail peeks open on hover and the toggle appears here. */}
+            rail; the rail peeks open on hover and the toggle appears here.
+            Its centre sits at 36px: every header below is an 8px-padded row of
+            56px, so the toggle is level with the logo whatever the logo's own
+            height — a one-line wordmark or a stacked crest (Giulio, 2026-10-30:
+            "not aligned, logo vs sidebar collapse button"). */}
         {collapsible === "icon" && (
           <SidebarTrigger
             className={cn(
-              "absolute right-2 top-3.5 z-10 hidden h-7 w-7 text-muted-foreground transition-opacity hover:text-foreground md:inline-flex",
+              "absolute right-2 top-[22px] z-10 hidden h-7 w-7 text-muted-foreground transition-opacity hover:text-foreground md:inline-flex",
               state === "collapsed" ? "pointer-events-none opacity-0" : "opacity-100",
             )}
           />

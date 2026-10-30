@@ -204,8 +204,10 @@ const AppSidebar = () => {
   return (
     <>
     <Sidebar collapsible="icon" className="border-r border-border bg-card">
-      <SidebarHeader className={collapsed ? "p-2" : "py-4 px-2"}>
-        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-start"}`}>
+      {/* Expanded: a 56px row, 8px above and below, with room on the right for the collapse
+          toggle that Sidebar pins at the row's centre line. The logo centres in the row. */}
+      <SidebarHeader className={collapsed ? "p-2" : "py-2 pl-2 pr-10"}>
+        <div className={`flex items-center ${collapsed ? "justify-center" : "h-14 justify-start"}`}>
           {collapsed ? (
             tenant.logoIconUrl
               ? <SmartLogo src={tenant.logoIconUrl} alt={tenant.name} className="h-8 w-8 object-contain object-left" />
