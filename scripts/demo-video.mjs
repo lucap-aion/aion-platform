@@ -294,7 +294,12 @@ console.log(`recording ${slug}${mode ? ` (${mode})` : ""}`);
 // The forced scale factor is what makes the screencast 2×. The context's deviceScaleFactor
 // renders the page at 2× but the screencast still hands back 1440-wide frames; with the
 // flag they are 2880×1800. Measured, both ways.
-const launchArgs = ["--force-device-scale-factor=2"];
+// 1.5, not 2. The page is rasterised on the CPU on a two-core runner, and at 2× (2880×1800
+// per frame) it managed about twenty frames a second — one repeated frame in three, which
+// is a stutter on anything that glides. At 1.5× (2160×1350) it is 56% of the pixels, still
+// above the film's own 1920, so the text stays sharp and the frames arrive on time.
+const SCALE = Number(arg("scale", 1.5));
+const launchArgs = [`--force-device-scale-factor=${SCALE}`];
 const browser = await chromium.launch(chromePath
   ? { executablePath: chromePath, headless: true, args: launchArgs }
   : { headless: true, args: launchArgs })
@@ -322,7 +327,7 @@ const userAgent = await (async () => {
 const context = await browser.newContext({
   viewport: SIZE,
   userAgent,
-  deviceScaleFactor: 2,
+  deviceScaleFactor: SCALE,
   locale: "it-IT",
 });
 const page = await context.newPage();
