@@ -18,7 +18,7 @@ import {
   ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
   Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown, LifeBuoy, Check,
   Mic, Square, CalendarDays, History,
-  Info,
+  Info, Lightbulb, ChevronUp,
 } from "lucide-react";
 import { startRecording, isRecordingSupported, extensionFor, type Recorder } from "@/lib/speech";
 import VisitCard, { type Visit } from "@/components/visits/VisitCard";
@@ -379,7 +379,7 @@ export default function BrandAssistant() {
     const el = taRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [input]);
 
   const [image, setImage] = useState<string | null>(null);
@@ -1239,8 +1239,11 @@ export default function BrandAssistant() {
                 // the box — a film with one answer in it and nobody the wiser.
                 // A state nobody has to infer cannot rot that way.
                 data-assistant-state={loading ? "thinking" : "idle"}
-                className="min-w-0 flex-1 resize-none rounded-3xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
-                style={{ maxHeight: 160 }}
+                // Taller than a one-line field: 56px at rest, base type, room for
+                // three lines before it scrolls. "Lo spazio dove mettere il testo è
+                // un filo piccolino" (Lucrezia, 2026-10-30) — it was 44px and 14px type.
+                className="min-h-14 min-w-0 flex-1 resize-none rounded-3xl border border-border bg-background px-5 py-4 text-[15px] leading-6 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+                style={{ maxHeight: 200 }}
               />
               )}
               {/* One button, three jobs — the arrangement every messaging app
@@ -1519,35 +1522,60 @@ function buildSuggestions(
   ];
 }
 
-const EmptyState = ({ locale, prompts, onPick }: { locale: string; prompts: Suggestion[]; onPick: (q: string) => void }) => (
-  <div className="mx-auto flex max-w-2xl flex-col items-center pt-16 text-center">
-    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-      <Sparkles className="h-6 w-6 text-primary" />
+// A quiet first screen: a greeting, one line, and the examples behind a single button.
+//
+// It used to open on all nine prompts at once. Lucrezia (2026-10-30): "vedere tutte quelle
+// domande quando entri è un po' caotico — chi usa GPT sa cosa deve fare"; a whiter screen
+// with "how can I help", and the questions there to open, not already in your face. The
+// prompts are still the same per-brand ones, and the demo film still finds them — it presses
+// this button first (data-assistant-examples) and reads the prompts (data-assistant-prompt).
+const EmptyState = ({ locale, prompts, onPick }: { locale: string; prompts: Suggestion[]; onPick: (q: string) => void }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center pb-8 text-center">
+      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+        <Sparkles className="h-7 w-7 text-primary" />
+      </div>
+      <h2 className="font-serif text-3xl font-medium tracking-tight text-foreground">
+        {tt(locale, "How can I help?", "Come posso aiutarti?")}
+      </h2>
+      <p className="mt-2 max-w-md text-sm text-muted-foreground">
+        {tt(locale,
+          "Products, clients, a look, a message — or attach a photo or a file.",
+          "Prodotti, clienti, un look, un messaggio — o allega una foto o un file.")}
+      </p>
+      <button
+        type="button"
+        data-assistant-examples
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="mt-7 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+      >
+        {open ? <ChevronUp className="h-4 w-4" /> : <Lightbulb className="h-4 w-4 text-primary" />}
+        {open
+          ? tt(locale, "Hide the examples", "Nascondi gli esempi")
+          : tt(locale, "See what you can ask", "Vedi cosa puoi chiedere")}
+      </button>
+      {open && (
+        <div className="mt-6 grid w-full grid-cols-1 gap-2 text-left animate-in fade-in slide-in-from-bottom-2 duration-300 sm:grid-cols-2">
+          {prompts.map(({ icon: Icon, text, needs }, i) => (
+            <button
+              key={i}
+              type="button"
+              data-assistant-prompt
+              data-needs={needs}
+              onClick={() => onPick(text)}
+              className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-4 py-3 text-left text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
+            >
+              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span className="flex-1">{text}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
-    <h2 className="text-xl font-semibold text-foreground">
-      {tt(locale, "How can I help on the floor?", "Come posso aiutarti in negozio?")}
-    </h2>
-    <p className="mt-1 text-sm text-muted-foreground">
-      {tt(locale,
-        "Ask about products and clients, build a look, write a message — or attach a photo or an Excel.",
-        "Chiedi di prodotti e clienti, completa un look, scrivi un messaggio — o allega una foto o un Excel.")}
-    </p>
-    <div className="mt-8 grid w-full grid-cols-1 gap-2 text-left sm:grid-cols-2">
-      {prompts.map(({ icon: Icon, text, needs }, i) => (
-        <button
-          key={i}
-          type="button"
-          data-needs={needs}
-          onClick={() => onPick(text)}
-          className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted"
-        >
-          <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-          <span className="flex-1">{text}</span>
-        </button>
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 

@@ -19,7 +19,9 @@
  *    the brand side.
  *  - assistant ("Assistant + knowledge only"): the assistant answering three of the
  *    brand's own opening questions. In that mode the other screens are not reachable, so a
- *    tour of them would film redirects.
+ *    tour of them would film redirects. It opens on titles (scripts/demo-intro.mjs): the
+ *    places a house's data lives drawing into one, the eleven agents, the house's mark —
+ *    then dissolves into the login. `--no-intro` leaves them out.
  *
  * The mode is decided, in order, by `--mode` / AION_DEMO_MODE, by build-collateral's
  * demo_login if it says, and otherwise by the portal itself: after logging in, the sidebar
@@ -52,6 +54,7 @@
  */
 
 import { chromium } from "playwright-core";
+import { playIntro } from "./demo-intro.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -205,6 +208,14 @@ const asked = (arg("ask", "") || "").split("|").map((q) => q.trim()).filter(Bool
 const speed = Number(arg("speed", 1.5));
 /** On-film milliseconds → real ones. Every hold and pan below is written as the viewer sees it. */
 const film = (ms) => ms * speed;
+// The opening titles (scripts/demo-intro.mjs): the data wall, the eleven agents, the house.
+// On for an assistant film unless --no-intro; --intro forces it on a film whose mode the
+// recorder could not know before the login (see logIn), where it would otherwise be left out
+// rather than risk opening a platform tour with the assistant's titles.
+const introFlag = process.argv.includes("--no-intro") ? false : process.argv.includes("--intro") ? true : null;
+// The titles' language. Empty means the login page's own — the portal's toggle, not the
+// browser's locale, decides which the prospect will see.
+const langArg = (arg("lang", process.env.AION_DEMO_LANG ?? "") || "").toLowerCase();
 
 function normaliseMode(v) {
   const m = String(v ?? "").trim().toLowerCase();
@@ -259,7 +270,8 @@ if (!slug || !email || !password) {
     "usage: demo-video.mjs --slug <brand> (--email … --password … | --brand-id N with\n" +
     "       --functions-base/--batch-secret, or AION_FUNCTIONS_BASE/AION_BATCH_SECRET)\n" +
     "       [--mode portal|assistant] [--client-email … --client-password …] [--cameo]\n" +
-    "       [--base url] [--ask \"q1|q2\"] [--questions 3] [--speed 1.5] [--out file.mp4] [--upload]",
+    "       [--base url] [--ask \"q1|q2\"] [--questions 3] [--speed 1.5] [--out file.mp4] [--upload]\n" +
+    "       [--intro | --no-intro] [--lang en|it]",
   );
   process.exit(2);
 }
@@ -477,6 +489,29 @@ async function logIn(page, who, secret) {
   // alt text over a grey half-screen without the log saying a word.
   await photosDrawn(page, who === clientEmail ? "client login" : "login");
   roll();
+  // The titles, over the login and before anything is typed — the film opens on them and
+  // dissolves into the house's own sign-in. Only the brand's login, only an assistant film.
+  if (who !== clientEmail) {
+    const wanted = introFlag ?? (mode === "assistant");
+    if (wanted) {
+      const house = await page.evaluate(() => {
+        // The form's logo (SmartLogo, alt = the house's name); the hero photo has the same
+        // alt but is a photograph.
+        const img = document.querySelector(".max-w-md img") ?? document.querySelector('img[alt]:not([src*="unsplash"])');
+        const accedi = [...document.querySelectorAll("button")].some((b) => /accedi/i.test(b.textContent ?? ""));
+        const src = img?.currentSrc || img?.src || "";
+        // A house with no logo of its own signs in under AION's, and "AION × AION" is not a
+        // title card. Its name is set in type instead.
+        const own = src && !/aion[_-]?(dark|light)?[_-]?(logo|icon)|\/aion\.(png|svg)/i.test(src);
+        return { name: img?.alt ?? document.title ?? "", logo: own ? src : "", lang: accedi ? "it" : "en" };
+      });
+      const lang = langArg === "it" || langArg === "en" ? langArg : house.lang;
+      console.log(`intro: ${lang}${house.name ? ` for ${house.name}` : ""}`);
+      await playIntro(page, { film, lang, brand: house.name, logoUrl: house.logo });
+    } else if (introFlag === null && !mode) {
+      console.log("intro: skipped — the film's mode is not known before the login; pass --mode assistant or --intro to open on the titles");
+    }
+  }
   await page.fill('input[type="email"]', who);
   await page.fill('input[type="password"]', secret);
   // BY ITS NAME, not by button[type="submit"]. The login page has three submit buttons and
@@ -523,12 +558,27 @@ async function filmAssistant(page, { count, arrive = "url" }) {
   } else {
     await gotoAndSettle(`${base}/${slug}/assistant`, COMPOSER);
   }
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(film(1500));
 
   const composer = page.locator(COMPOSER).first();
 
+  // The opening screen is quiet now — a greeting and the composer — and the brand's prompts
+  // sit behind one button ("See what you can ask", data-assistant-examples). Opened here the
+  // way a person would, and on camera: the viewer sees the empty screen, then the examples,
+  // then the first one typed. An older bundle without the button shows the prompts outright,
+  // and is read as before.
+  const reveal = page.locator("[data-assistant-examples]").first();
+  if (!asked.length && await reveal.count().catch(() => 0)) {
+    await reveal.hover().catch(() => {});
+    await page.waitForTimeout(film(600));
+    await reveal.click().catch(() => {});
+    await page.waitForSelector("main button[data-assistant-prompt]", { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(film(1100));
+  }
+
   // The brand's own opening prompts, before anything is typed — they disappear with the first
-  // answer. Anything long enough to be a question; the screen also carries short UI labels.
+  // answer. Marked as such (data-assistant-prompt); failing that, anything long enough to be a
+  // question, since the screen also carries short UI labels.
   // A prompt only the client book can answer says so (data-needs="clients"), and with no book
   // it is left out: the alternative is filming "no client data is connected" — Ferragamo's
   // first film, recorded seven hours before its book was built.
@@ -537,11 +587,14 @@ async function filmAssistant(page, { count, arrive = "url" }) {
     .evaluateAll((els) => els.map((el) => ({
       text: (el.innerText ?? "").replace(/\s+/g, " ").trim(),
       needs: el.getAttribute("data-needs"),
+      prompt: el.hasAttribute("data-assistant-prompt"),
     })))
-    .then((all) => all
-      .filter((b) => b.text.length > 40)
-      .filter((b) => !(b.needs === "clients" && noBook))
-      .map((b) => b.text))
+    .then((all) => {
+      const marked = all.filter((b) => b.prompt);
+      return (marked.length ? marked : all.filter((b) => b.text.length > 40))
+        .filter((b) => !(b.needs === "clients" && noBook))
+        .map((b) => b.text);
+    })
     .catch(() => []);
   if (noBook && !asked.length) {
     console.warn(
