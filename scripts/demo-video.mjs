@@ -1277,18 +1277,13 @@ async function presentAnswer(page, index) {
     if (Math.abs(el.scrollTop - start) > 2) {
       await glide(start, Math.min(timing.findMax, Math.abs(el.scrollTop - start) * timing.findPerPx), find);
     }
-    // The camera leans in a touch while the answer is read — a transform on the app's root,
-    // which the compositor does for nothing — and settles back as the reading ends.
-    const app = document.getElementById("root");
-    const lean = (scale, ms) => {
-      if (!app) return;
-      app.style.transformOrigin = "50% 42%";
-      app.style.transition = `transform ${ms}ms cubic-bezier(.4,0,.2,1)`;
-      app.style.transform = `scale(${scale})`;
-    };
+    // NO CAMERA LEAN. A slow scale on the app's root looked like a free compositor
+    // transform and was not: Chrome re-rasterises the whole page at each new scale on the
+    // main thread, the very thread this pan's requestAnimationFrame scroll runs on, and the
+    // content advanced in jumps while the zoom glided — measured at 78% stalled frames
+    // (2026-10-30). Whatever moves here must be the scroll alone.
     const run = bottom - start;
     const panMs = run > 2 ? Math.max(timing.panMin, Math.min(timing.panMax, run * timing.panPerPx)) : 0;
-    lean(1.035, timing.openingHold + panMs + 400);
     await hold(timing.openingHold);
     if (run > 2) {
       // A reading pace, not a fixed time: a three-line answer should not crawl and a
@@ -1296,7 +1291,6 @@ async function presentAnswer(page, index) {
       // film and a short scroll is still a movement rather than a twitch.
       await glide(bottom, panMs, read);
     }
-    lean(1, timing.endHold);
     await hold(timing.endHold);
   }, {
     scroller: SCROLLER,
