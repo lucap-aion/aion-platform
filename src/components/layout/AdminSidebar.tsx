@@ -60,8 +60,10 @@ const AdminSidebar = () => {
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border bg-card">
-      <SidebarHeader className={collapsed ? "p-2" : "py-4 px-2"}>
-        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-start"}`}>
+      {/* The same 56px row as the brand sidebar, so the collapse toggle Sidebar pins at its
+          centre line is level with the logo here too. */}
+      <SidebarHeader className={collapsed ? "p-2" : "py-2 pl-2 pr-10"}>
+        <div className={`flex items-center ${collapsed ? "justify-center" : "h-14 justify-start"}`}>
           {collapsed ? (
             <img src="/aion_dark_icon.png" alt="AION" className="h-7 w-7 object-contain object-left dark:brightness-0 dark:invert" />
           ) : (
