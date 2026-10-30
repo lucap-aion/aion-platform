@@ -262,8 +262,12 @@ async function callCollateral(payload) {
 }
 
 const canCallBack = Boolean(functionsBase && batchSecret && brandId);
-/** The demo book's size, from demo_login: { clients, covers, products }. Null when not known. */
-let book = null;
+/** The demo book's size, from demo_login: { clients, covers, products }. Null when not known.
+ *  `--book clients,covers,products` states it for a run that signs in by hand. */
+let book = (() => {
+  const v = (arg("book", "") || "").split(",").map((n) => Number(n.trim()));
+  return v.length === 3 && v.every((n) => Number.isFinite(n)) ? { clients: v[0], covers: v[1], products: v[2] } : null;
+})();
 
 if ((!email || !password) && canCallBack) {
   const login = await callCollateral({ brand_id: Number(brandId), kind: "demo_login" });
@@ -290,7 +294,7 @@ if (!slug || !email || !password) {
     "       --functions-base/--batch-secret, or AION_FUNCTIONS_BASE/AION_BATCH_SECRET)\n" +
     "       [--mode portal|assistant] [--client-email … --client-password …] [--cameo]\n" +
     "       [--base url] [--ask \"q1|q2\"] [--questions 3] [--speed 1.5] [--out file.mp4] [--upload]\n" +
-    "       [--intro | --no-intro] [--lang en|it] [--max-seconds 120]",
+    "       [--intro | --no-intro] [--lang en|it] [--max-seconds 120] [--fps 24] [--book clients,covers,products]",
   );
   process.exit(2);
 }
@@ -361,7 +365,9 @@ const page = await context.newPage();
 // 24 a second, the cinema rate: it is what a two-core runner's Chrome actually paints
 // (measured at 22–24 even at 1.5× render and real time), so every frame in the film is a
 // new one. At 30 the shortfall came out as one repeated frame in four — the stutter.
-const FPS = 24;
+// --fps raises it on a machine that paints faster: a Mac paints 60, and a film at 60 is the
+// difference between smooth and "a bit scattery" on a slow pan (Giulio, 2026-10-30).
+const FPS = Number(arg("fps", 24));
 const RATE = Math.round(FPS * speed);
 const raw = join(work, "raw.mp4");
 const capture = spawn("ffmpeg", [
