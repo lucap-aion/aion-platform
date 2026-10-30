@@ -203,9 +203,14 @@ const outArg = arg("out", "");
 // two minutes. Four would be longer than a demo video earns.
 const count = Number(arg("questions", 3));
 const asked = (arg("ask", "") || "").split("|").map((q) => q.trim()).filter(Boolean);
-// 1.5×, not 2×. Fast enough not to be a wait, slow enough to read an answer as it arrives —
-// at 2× the streaming text was a blur, which defeats the point of filming it.
-const speed = Number(arg("speed", 1.5));
+// 1×: what moves on screen — the titles, the typing, the reading pans — plays at the speed
+// it happened. It was 1.5×, from when the whole film was sped up uniformly to keep it short;
+// now the length comes from the waits alone (maxSeconds, below), and the speed-up had a
+// cost: the CI runner's Chrome paints about thirty frames a second, a 1.5× cut needs
+// forty-five, and the difference was one repeated frame in three — the stutter Giulio saw
+// in the titles (2026-10-30, measured: steps of "5 5 0 8 0 11 9 0" in a pan that should
+// glide). A smaller number here is the fix; the flag stays for a film that wants otherwise.
+const speed = Number(arg("speed", 1));
 // The film's longest. The titles, the typing and the reading of each answer keep their pace;
 // what gives is the wait while an answer streams, which is sped up as much as it takes to
 // fit — and no more. "Make them max 2 minutes" (Giulio, 2026-10-30): three answers at a flat
@@ -376,8 +381,12 @@ cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
   if (metadata.deviceWidth !== SIZE.width || metadata.deviceHeight !== SIZE.height) return;
   latest = Buffer.from(data, "base64");
 });
+// Handed over at 1920 wide, not 2880: the page is still rendered at 2× (the flag above),
+// Chrome scales each frame down before encoding it, and the film is 1920 wide at the end in
+// any case. Encoding 2.25× fewer pixels per frame is what lets a two-core runner keep up
+// with its own compositor; at 2880 it painted unevenly and the film stuttered.
 await cdp.send("Page.startScreencast", {
-  format: "jpeg", quality: 92, maxWidth: SIZE.width * 2, maxHeight: SIZE.height * 2, everyNthFrame: 1,
+  format: "jpeg", quality: 92, maxWidth: 1920, maxHeight: Math.round((1920 * SIZE.height) / SIZE.width), everyNthFrame: 1,
 });
 const clock = setInterval(tick, 1000 / RATE);
 /** Per answer, or per screen of the tour: how many photos it had and how many actually drew. */

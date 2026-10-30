@@ -43,9 +43,9 @@ on:
         default: "3"
         type: string
       speed:
-        description: "Playback speed. 1.5 reads well; 2 is a blur"
+        description: "Playback speed of what moves on screen (the waits for answers are sped up on their own to fit two minutes). 1 is smooth on the runner; above it the film stutters"
         required: false
-        default: "1.5"
+        default: "1"
         type: string
       ask:
         description: 'Override the questions, pipe separated. Empty = the brand''s own opening prompts'

@@ -915,7 +915,9 @@ async function recordDemoVideo(
           slug: String(brand.slug),
           brand_id: String(brand.id),
           questions: String(body.questions ?? 3),
-          speed: String(body.speed ?? 1.5),
+          // 1: above it the runner's Chrome cannot paint enough frames and the film stutters
+          // (scripts/demo-video.mjs); the two-minute length comes from the waits, not from this.
+          speed: String(body.speed ?? 1),
           ask: String(body.ask ?? ""),
           // Which GitHub Environment's secrets the run uses: the project this function is in.
           target: isProduction() ? "prod" : "dev",
