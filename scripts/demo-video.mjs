@@ -328,7 +328,11 @@ const page = await context.newPage();
 // minutes, which filled the Mac it ran on. So a clock at 30 fps hands the latest frame to an
 // ffmpeg that is already running, and what lands on disk is one near-lossless 1920-wide
 // file, mostly a static screen and so small. The speed-up and the real encode come after.
-const RATE = 30;
+// 30 fps TIMES THE SPEED, so that after the cut's setpts the film is exactly 30 fps with no
+// frame thrown away. At a flat 30 the 1.5× cut had to drop every third frame — two steps and
+// a skip, two steps and a skip — which was invisible on a chat that mostly sits still and
+// was the "scattery" look of the titles, where everything moves (Giulio, 2026-10-30).
+const RATE = Math.round(30 * speed);
 const raw = join(work, "raw.mp4");
 const capture = spawn("ffmpeg", [
   "-y", "-hide_banner", "-loglevel", "error",

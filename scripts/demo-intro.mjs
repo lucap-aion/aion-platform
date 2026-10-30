@@ -46,26 +46,23 @@ import * as si from "simple-icons";
 // feeds it reads. The screen says "in one place", which is what the knowledge base is; it
 // does not say "live sync". Keep it that way.
 //
-// `ring`: 0 = inner orbit (6), 1 = outer orbit (12).
+// Twelve, on one ring, in the order a house would list them: CRM, ERP, e-commerce,
+// spreadsheets, channels, documents, the site. It was eighteen on two rings with a wire
+// from each to the centre, and read as scattered (Giulio, 2026-10-30) — a title card is
+// one clear shape, not a diagram.
 export const INTRO_SOURCES = [
-  { slug: "siHubspot", label: "HubSpot", ring: 0 },
-  { label: "Salesforce", mark: "sf", hex: "00A1E0", ring: 0 },
-  { slug: "siShopify", label: "Shopify", ring: 0 },
-  { label: "Excel", mark: "X", hex: "217346", ring: 0 },
-  { slug: "siInstagram", label: "Instagram", ring: 0 },
-  { slug: "siWhatsapp", label: "WhatsApp", ring: 0 },
-  { slug: "siSap", label: "SAP", ring: 1 },
-  { slug: "siWoocommerce", label: "WooCommerce", ring: 1 },
-  { slug: "siStripe", label: "Stripe", ring: 1 },
-  { slug: "siGooglesheets", label: "Google Sheets", ring: 1 },
-  { slug: "siGoogledrive", label: "Google Drive", ring: 1 },
-  { slug: "siFacebook", label: "Facebook", ring: 1 },
-  { label: "LinkedIn", mark: "in", hex: "0A66C2", ring: 1 },
-  { slug: "siGmail", label: "Gmail", ring: 1 },
-  { slug: "siMailchimp", label: "Mailchimp", ring: 1 },
-  { slug: "siZendesk", label: "Zendesk", ring: 1 },
-  { icon: "file-text", label: { en: "PDF · Word · PowerPoint", it: "PDF · Word · PowerPoint" }, ring: 1 },
-  { icon: "globe", label: { en: "Your website & news", it: "Sito e news" }, ring: 1 },
+  { label: "Salesforce", mark: "sf", hex: "00A1E0" },
+  { slug: "siHubspot", label: "HubSpot" },
+  { slug: "siSap", label: "SAP" },
+  { slug: "siShopify", label: "Shopify" },
+  { label: "Excel", mark: "X", hex: "217346" },
+  { slug: "siGooglesheets", label: "Google Sheets" },
+  { slug: "siInstagram", label: "Instagram" },
+  { slug: "siWhatsapp", label: "WhatsApp" },
+  { label: "LinkedIn", mark: "in", hex: "0A66C2" },
+  { slug: "siGmail", label: "Gmail" },
+  { icon: "file-text", label: { en: "PDF · Word · PowerPoint", it: "PDF · Word · PowerPoint" } },
+  { icon: "globe", label: { en: "Your website & news", it: "Sito e news" } },
 ];
 
 // ── The eleven ───────────────────────────────────────────────────────────────
@@ -149,7 +146,7 @@ function node(source, lang, i) {
   } else {
     tile = `<span class="tile line">${lucide(source.icon, 18)}</span>`;
   }
-  return `<div class="node" data-ring="${source.ring}" data-i="${i}">${tile}<span class="name">${esc(label)}</span></div>`;
+  return `<div class="node" data-i="${i}">${tile}<span class="name">${esc(label)}</span></div>`;
 }
 
 function card(agent, lang, n) {
@@ -169,16 +166,14 @@ const CSS = `
   --cream:#f3eee6;--mute:rgba(243,238,230,.58);--hair:rgba(243,238,230,.12);--accent:var(--demo-accent,#CB9D4D);
   --serif:var(--heading-font,"Playfair Display",Georgia,serif)}
 #demo-intro *{box-sizing:border-box;margin:0}
-#demo-intro .bg{position:absolute;inset:-10%;background:
-  radial-gradient(60% 50% at 50% 42%,color-mix(in srgb,var(--accent) 22%,transparent) 0%,transparent 70%),
-  radial-gradient(80% 80% at 80% 100%,rgba(255,255,255,.035) 0%,transparent 60%),
-  linear-gradient(180deg,#141110 0%,#0d0b0a 100%);animation:drift 24s ease-in-out infinite alternate}
-#demo-intro .grain{position:absolute;inset:0;background:url("${GRAIN}") repeat;opacity:.5;mix-blend-mode:overlay}
+/* A still canvas: one warm glow in the house's accent, a fine static grain, a vignette.
+   Nothing on it moves of its own — a drifting background and floating motes made every
+   frame busy and the whole thing restless. */
+#demo-intro .bg{position:absolute;inset:0;background:
+  radial-gradient(60% 50% at 50% 42%,color-mix(in srgb,var(--accent) 20%,transparent) 0%,transparent 70%),
+  linear-gradient(180deg,#141110 0%,#0d0b0a 100%)}
+#demo-intro .grain{position:absolute;inset:0;background:url("${GRAIN}") repeat;opacity:.35}
 #demo-intro .vignette{position:absolute;inset:0;background:radial-gradient(90% 90% at 50% 50%,transparent 55%,rgba(0,0,0,.55) 100%)}
-@keyframes drift{from{transform:translate3d(-1.5%,-1%,0) scale(1.02)}to{transform:translate3d(1.5%,1%,0) scale(1.06)}}
-#demo-intro .mote{position:absolute;width:3px;height:3px;border-radius:50%;background:var(--accent);opacity:0;filter:blur(.4px);
-  animation:mote var(--d) linear var(--delay) infinite}
-@keyframes mote{0%{transform:translateY(0);opacity:0}15%{opacity:.55}85%{opacity:.35}100%{transform:translateY(-220px);opacity:0}}
 #demo-intro .beat{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
   padding:56px 80px;opacity:0;transition:opacity .6s ease;will-change:opacity}
 #demo-intro .beat.on{opacity:1}
@@ -205,15 +200,14 @@ const CSS = `
 @keyframes sheen{from{background-position:120% 0}to{background-position:-40% 0}}
 #demo-intro .mark0 .sheen span{letter-spacing:inherit}
 
-/* beat 1: the orbits */
-#demo-intro .sky{position:relative;width:1180px;height:560px;margin-top:10px}
+/* beat 1: the ring */
+#demo-intro .sky{position:relative;width:1180px;height:540px;margin-top:6px}
 #demo-intro .sky svg.wires{position:absolute;inset:0;overflow:visible}
-#demo-intro .sky .wire{fill:none;stroke:var(--accent);stroke-opacity:.45;stroke-width:1}
-#demo-intro .sky .orbit{fill:none;stroke:var(--hair);stroke-width:1;stroke-dasharray:2 6;opacity:0;transition:opacity 1.2s ease}
+#demo-intro .sky .orbit{fill:none;stroke:var(--hair);stroke-width:1;opacity:0;transition:opacity 1.2s ease}
 #demo-intro .sky.rings .orbit{opacity:1}
-#demo-intro .node{position:absolute;display:flex;align-items:center;gap:10px;height:50px;padding:0 14px 0 6px;border-radius:999px;
-  border:1px solid var(--hair);background:rgba(255,255,255,.045);backdrop-filter:blur(6px);
-  opacity:0;transform:translate(-50%,-50%) scale(.7);transition:opacity .6s ease,transform .7s cubic-bezier(.2,.7,.2,1);will-change:transform,opacity}
+#demo-intro .node{position:absolute;display:flex;align-items:center;gap:10px;height:50px;padding:0 16px 0 6px;border-radius:999px;
+  border:1px solid var(--hair);background:#1a1614;
+  opacity:0;transform:translate(-50%,-50%) scale(.85);transition:opacity .6s ease,transform .7s cubic-bezier(.2,.7,.2,1);will-change:transform,opacity}
 #demo-intro .node.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
 #demo-intro .node.go{transition:opacity .7s ease,transform .9s cubic-bezier(.65,0,.35,1)}
 #demo-intro .tile{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:50%;background:#f7f3ec;flex:none}
@@ -274,13 +268,9 @@ const CSS = `
  */
 export async function playIntro(page, { film, lang = "en", brand = "", logoUrl = "" }) {
   const copy = introCopy(lang);
-  const motes = Array.from({ length: 26 }, (_, i) => {
-    const x = (i * 37 + 11) % 100, y = 30 + ((i * 53 + 7) % 70);
-    return `<i class="mote" style="left:${x}%;top:${y}%;--d:${9 + (i % 7)}s;--delay:-${(i * 1.7) % 12}s"></i>`;
-  }).join("");
   const html = `
     <style>${CSS}</style>
-    <div class="bg"></div><div class="grain"></div>${motes}<div class="vignette"></div>
+    <div class="bg"></div><div class="grain"></div><div class="vignette"></div>
     <section class="beat" data-beat="0">
       <div class="mark0">AION<span class="sheen" aria-hidden="true">AION</span></div>
       <div class="hair" style="margin-top:28px"></div>
@@ -291,10 +281,8 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
       <h1>${words(copy.one)}</h1>
       <p class="sub">${esc(copy.oneSub)}</p>
       <div class="sky">
-        <svg class="wires" viewBox="0 0 1180 560" width="1180" height="560">
-          <ellipse class="orbit" cx="590" cy="280" rx="300" ry="135"/>
-          <ellipse class="orbit" cx="590" cy="280" rx="545" ry="250"/>
-          <g class="lines"></g>
+        <svg class="wires" viewBox="0 0 1180 540" width="1180" height="540">
+          <ellipse class="orbit" cx="590" cy="270" rx="500" ry="215"/>
         </svg>
         ${INTRO_SOURCES.map((s, i) => node(s, lang, i)).join("")}
         <div class="core">${lucide("sparkles", 46)}</div>
@@ -321,7 +309,7 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
   const t = {
     markIn: film(1200), markHold: film(900),
     headIn: film(900),
-    ringsIn: film(450), nodeEvery: film(80), skyHold: film(1000),
+    ringsIn: film(450), nodeEvery: film(110), skyHold: film(1100),
     converge: film(850), coreHold: film(1100),
     countUp: film(900), cardEvery: film(80), gridHold: film(1300), sweepHold: film(1000),
     creamOpen: film(1100), houseHold: film(2000),
@@ -368,46 +356,30 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
     // ── 1. the orbits ──
     await show(1, t.headIn);
     const sky = beats[1].querySelector(".sky");
-    const lines = sky.querySelector(".lines");
     const nodes = [...sky.querySelectorAll(".node")];
-    const W = 1180, H = 560, cx = W / 2, cy = H / 2;
-    const R = [{ rx: 300, ry: 135 }, { rx: 545, ry: 250 }];
-    // Place each node on its orbit, evenly, the inner ring offset so no node sits straight
-    // above another. Wires are drawn from the centre to each node and revealed with it.
-    const byRing = [nodes.filter((n) => n.dataset.ring === "0"), nodes.filter((n) => n.dataset.ring === "1")];
-    const placed = [];
-    byRing.forEach((ring, r) => ring.forEach((n, k) => {
-      const a = (k / ring.length) * Math.PI * 2 - Math.PI / 2 + (r === 0 ? Math.PI / ring.length : 0);
-      const x = cx + R[r].rx * Math.cos(a), y = cy + R[r].ry * Math.sin(a);
+    const W = 1180, H = 540, cx = W / 2, cy = H / 2;
+    const RX = 500, RY = 215;
+    // One ring, evenly spaced, starting at the top and going clockwise — the order the list
+    // is written in, so CRM sits next to ERP and the channels sit together.
+    const placed = nodes.map((n, k) => {
+      const a = (k / nodes.length) * Math.PI * 2 - Math.PI / 2;
+      const x = cx + RX * Math.cos(a), y = cy + RY * Math.sin(a);
       n.style.left = `${x}px`; n.style.top = `${y}px`;
-      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("class", "wire");
-      line.setAttribute("x1", cx); line.setAttribute("y1", cy); line.setAttribute("x2", x); line.setAttribute("y2", y);
-      const len = Math.hypot(x - cx, y - cy);
-      line.style.strokeDasharray = `${len}`;
-      line.style.strokeDashoffset = `${len}`;
-      line.style.transition = `stroke-dashoffset ${Math.round(t.nodeEvery * 6)}ms cubic-bezier(.2,.7,.2,1), stroke-opacity .5s ease`;
-      lines.appendChild(line);
-      placed.push({ n, line, x, y, r, a });
-    }));
+      return { n, x, y };
+    });
     sky.classList.add("rings");
     await sleep(t.ringsIn);
-    // Arrival: inner ring first, then outer, each node a beat after the last, its wire
-    // reaching it as it lands.
+    // Arrival, clockwise, one after the other.
     for (const p of placed) {
-      p.line.style.strokeDashoffset = "0";
       p.n.classList.add("on");
       await sleep(t.nodeEvery);
     }
     await sleep(t.skyHold);
-    // Draw in. Outer ring first, so the two rings arrive at the centre together.
+    // Then the whole ring draws into the centre at once, as one movement.
     for (const p of placed) {
       p.n.classList.add("go");
-      p.n.style.transitionDelay = `${p.r === 1 ? 0 : Math.round(t.converge * 0.25)}ms`;
       p.n.style.transform = `translate(calc(-50% + ${cx - p.x}px), calc(-50% + ${cy - p.y}px)) scale(.25)`;
       p.n.style.opacity = "0";
-      p.line.style.transition = `stroke-dashoffset ${Math.round(t.converge)}ms cubic-bezier(.65,0,.35,1), stroke-opacity .4s ease`;
-      p.line.style.strokeDashoffset = `${-Math.hypot(p.x - cx, p.y - cy)}`;
     }
     await sleep(t.converge * 0.85);
     const core = sky.querySelector(".core");
