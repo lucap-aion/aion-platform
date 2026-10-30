@@ -38,29 +38,27 @@ import * as si from "simple-icons";
 
 // ── What is on the ring ──────────────────────────────────────────────────────
 //
-// Twelve, on one ring, in the order a house would list them: CRM, ERP, e-commerce,
-// spreadsheets, channels, documents, the site. A simple-icons slug where the project carries
-// the mark; a lettermark in the brand's own colour where it does not (simple-icons dropped
-// Salesforce, LinkedIn and Excel at the owners' request).
-//
-// HONESTY NOTE for whoever edits this list. The platform reads Shopify, spreadsheets, PDF /
-// Word / PowerPoint uploads, the house's website and news today; a CRM arrives as an export
-// (Excel / CSV), and the social and mail channels are where the assistant's drafts go, not
-// feeds it reads. The screen says "in one place", which is what the knowledge base is; it
-// does not say "live sync". Keep it that way.
+// Twelve, on one ring: what the assistant actually reads. The connected shop (Shopify),
+// the CRM as it arrives (an export), spreadsheets and documents as uploaded, the house's
+// website and its news as crawled — and what AION already holds for the house: the client
+// book, covers and claims, the catalogue and its photographs, visit notes, events and
+// trunk shows. It was eighteen third-party logos, Salesforce to LinkedIn, most of them
+// places a draft goes rather than feeds the assistant reads; a prospect who asked would
+// have been told so, and the screen says "in one place", which should be true as drawn
+// (Giulio, 2026-10-30: fix it).
 export const INTRO_SOURCES = [
-  { label: "Salesforce", mark: "sf", hex: "00A1E0" },
-  { slug: "siHubspot", label: "HubSpot" },
-  { slug: "siSap", label: "SAP" },
   { slug: "siShopify", label: "Shopify" },
-  { label: "Excel", mark: "X", hex: "217346" },
-  { slug: "siGooglesheets", label: "Google Sheets" },
-  { slug: "siInstagram", label: "Instagram" },
-  { slug: "siWhatsapp", label: "WhatsApp" },
-  { label: "LinkedIn", mark: "in", hex: "0A66C2" },
-  { slug: "siGmail", label: "Gmail" },
+  { icon: "database", label: { en: "Your CRM export", it: "L'export del CRM" } },
+  { label: "Excel · CSV", mark: "X", hex: "217346" },
   { icon: "file-text", label: { en: "PDF · Word · PowerPoint", it: "PDF · Word · PowerPoint" } },
-  { icon: "globe", label: { en: "Your website & news", it: "Sito e news" } },
+  { icon: "globe", label: { en: "Your website", it: "Il vostro sito" } },
+  { icon: "scroll-text", label: { en: "News & press", it: "News e stampa" } },
+  { icon: "users", label: { en: "Client book", it: "Portafoglio clienti" } },
+  { icon: "shield-check", label: { en: "Covers & claims", it: "Coperture e sinistri" } },
+  { icon: "gem", label: { en: "Catalogue", it: "Catalogo" } },
+  { icon: "image", label: { en: "Product photos", it: "Foto prodotto" } },
+  { icon: "mic", label: { en: "Visit notes", it: "Note di visita" } },
+  { icon: "calendar-days", label: { en: "Events & trunk shows", it: "Eventi e trunk show" } },
 ];
 
 // ── The eleven ───────────────────────────────────────────────────────────────
@@ -106,7 +104,7 @@ export const introCopy = (lang) => (lang === "it"
     kicker0: "L'assistente di vendita in negozio",
     kicker1: "01 — I vostri dati",
     one: "Tutti i dati della maison, in un unico posto.",
-    oneSub: "CRM, e-commerce, fogli di calcolo, canali, documenti, sito — l'assistente li legge tutti.",
+    oneSub: "Shopify, l'export del CRM, fogli di calcolo, documenti, sito e news — e tutto ciò che è già in AION.",
     kicker2: "02 — Gli agenti",
     agents: "agenti specializzati.",
     agentsSub: "Ognuno addestrato su un lavoro preciso in negozio.",
@@ -122,7 +120,7 @@ export const introCopy = (lang) => (lang === "it"
     kicker0: "The in-store sales assistant",
     kicker1: "01 — Your data",
     one: "All your company data, in one place.",
-    oneSub: "CRM, e-commerce, spreadsheets, channels, documents, website — the assistant reads them all.",
+    oneSub: "Shopify, your CRM export, spreadsheets, documents, your website and news — and everything already in AION.",
     kicker2: "02 — The agents",
     agents: "specialised agents.",
     agentsSub: "Each one trained on one job on the floor.",
@@ -152,6 +150,8 @@ const LUCIDE = {
   "sparkles": '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
   "pen-line": '<path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/>',
   "globe": '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  "database": '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>',
+  "shield-check": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
 };
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

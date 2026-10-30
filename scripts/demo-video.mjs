@@ -1069,7 +1069,18 @@ async function curtainUp(page) {
  * changing, every photo drawn. Bounded throughout — a screen that never settles is filmed as
  * it is and said so, rather than holding the run until the job times out.
  */
+/**
+ * Waiting for a screen counts as a wait: the two-speed cut (maxSeconds) compresses it like
+ * an answer's streaming, so the platform tour fits two minutes without a single hold being
+ * shortened. The waiting happens behind the curtain anyway — a still of the last screen —
+ * so speeding it up changes nothing the viewer sees except how long they see it.
+ */
 async function screenReady(page, label, expect) {
+  mark(true);
+  try { return await screenReadyInner(page, label, expect); } finally { mark(false); }
+}
+
+async function screenReadyInner(page, label, expect) {
   const t0 = Date.now();
   const took = {};
   if (expect) {
