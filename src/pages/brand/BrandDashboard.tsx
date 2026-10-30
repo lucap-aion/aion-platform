@@ -316,7 +316,7 @@ const BrandDashboard = () => {
 
       <div className="mt-6 flex flex-wrap gap-3">
         <Link to={`${slugPrefix}/${assistantEnabled ? "assistant" : "ai-query"}`} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
-          {assistantEnabled ? "Ask the assistant" : "Ask the data"} <ArrowRight className="h-4 w-4" />
+          Ask the assistant <ArrowRight className="h-4 w-4" />
         </Link>
         <Link to={`${slugPrefix}/insights`} className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm">
           See insights

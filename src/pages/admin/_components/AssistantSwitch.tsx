@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { MessageSquare } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { untyped } from "@/integrations/supabase/untyped";
 
-// Whether this brand's own users see the AI Assistant and the knowledge base
-// (brands.assistant_enabled). Off, the brand keeps the navigation it had before
-// either existed: "Ask the data", no Knowledge. Admins see both regardless.
+// Whether this brand's own users get the sales-floor Assistant and the knowledge base
+// (brands.assistant_enabled). Off, the "AI Assistant" entry in their sidebar opens the
+// read-only data chat instead, and there is no Knowledge. Admins see both regardless.
 export default function AssistantSwitch({ brandId, brandName }: { brandId: number; brandName: string }) {
   // Undefined until read. A toggle that renders "off" before it knows is a toggle somebody
   // flips twice.
@@ -46,7 +46,7 @@ export default function AssistantSwitch({ brandId, brandName }: { brandId: numbe
       title="Whether this brand's own users see the AI Assistant and the knowledge base"
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:opacity-60 ${
         on ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted"}`}>
-      <MessageSquare className="h-3.5 w-3.5" />
+      <Sparkles className="h-3.5 w-3.5" />
       {on === null ? "Assistant…" : on ? "Assistant on for brand users" : "Assistant off for brand users"}
     </button>
   );

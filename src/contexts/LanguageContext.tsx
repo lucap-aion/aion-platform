@@ -382,6 +382,8 @@ const translations: Translations = {
   "aiQuery.placeholder": { en: "Ask anything about the data…", it: "Chiedi qualsiasi cosa sui dati…" },
   "aiQuery.disclaimer": { en: "Results are capped at 1000 rows. The assistant can occasionally get SQL wrong — verify before acting.", it: "I risultati sono limitati a 1000 righe. L'assistente può sbagliare la query — verifica prima di agire." },
   "aiQuery.empty.title": { en: "Ask anything", it: "Chiedi qualsiasi cosa" },
+  "aiQuery.empty.show": { en: "See what you can ask", it: "Vedi cosa puoi chiedere" },
+  "aiQuery.empty.hide": { en: "Hide the examples", it: "Nascondi gli esempi" },
   "aiQuery.empty.subtitle": { en: "The assistant understands and answers with a summary, table and chart.", it: "L'assistente capisce e risponde con un riepilogo, una tabella e un grafico." },
   "aiQuery.loadingChat": { en: "Loading chat…", it: "Caricamento chat…" },
   "aiQuery.thinking": { en: "Getting started…", it: "Sto iniziando…" },
