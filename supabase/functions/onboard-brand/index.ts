@@ -1131,6 +1131,9 @@ async function runStage(
       visits_seeded: (seeded as { visits?: number } | null)?.visits ?? 0,
       crm_depth: depth,
       cleared_first: (cleared as { cleared?: Record<string, number> } | null)?.cleared ?? null,
+      // Logins made before this book pointed at clients that are gone with it; re-run the
+      // stage so the client login adopts a client of the new book before any film is made.
+      logins_reattached: await reattachDemoLogins(admin, brand),
       film: await refilmAfterNewBook(admin, brandId),
     };
   }
@@ -1290,6 +1293,22 @@ async function recoverCatalogueImages(
 // ── Demo logins ──────────────────────────────────────────────────────────────
 // A profile row keyed by email first, then the auth user: the existing
 // sync_user_metadata_to_profile trigger links user_id by matching the email.
+/** After a new book: if the demo logins exist, run their stage again so the client login
+ *  owns a client of this book. createDemoUsers is idempotent, so this is safe to repeat. */
+async function reattachDemoLogins(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>) {
+  const brandId = Number(brand.id);
+  const { data: row } = await admin.from("brand_onboarding")
+    .select("status").eq("brand_id", brandId).eq("stage", "demo_users").maybeSingle();
+  if ((row as { status?: string } | null)?.status !== "done") return false;
+  try {
+    await createDemoUsers(admin, brand);
+    return true;
+  } catch (e) {
+    console.warn(`demo logins not re-attached after the new book: ${e instanceof Error ? e.message : e}`);
+    return false;
+  }
+}
+
 async function createDemoUsers(admin: ReturnType<typeof createClient>, brand: Record<string, unknown>) {
   const brandId = Number(brand.id);
   const slug = String(brand.slug ?? brand.name ?? `brand${brandId}`)
@@ -1323,6 +1342,25 @@ async function createDemoUsers(admin: ReturnType<typeof createClient>, brand: Re
 
     const { data: existing } = await admin.from("profiles").select("id, user_id").eq("email", p.email).maybeSingle();
     let profileId = existing?.id as string | undefined;
+
+    // A client login that already exists but owns nothing — the book was rebuilt after it
+    // was made, and the client it had adopted went with the old book — is re-attached to
+    // the fullest client of the new book. Otherwise it stayed empty for good: Eberhard's
+    // portal film ended on "No covers found" (2026-10-30). The empty profile is retired
+    // under another address so the login's e-mail can move.
+    if (existing && p.key === "customer" && clientProfileId && clientProfileId !== existing.id) {
+      const { count: owned } = await admin.from("policies")
+        .select("id", { count: "exact", head: true }).eq("customer_id", existing.id);
+      if (!owned) {
+        await admin.from("profiles")
+          .update({ email: `${slug}-client-retired-${Date.now()}@demo.aioncover.com`, user_id: null })
+          .eq("id", existing.id);
+        const { error } = await admin.from("profiles")
+          .update({ email: p.email, first_name: p.first, last_name: p.last })
+          .eq("id", clientProfileId);
+        if (!error) profileId = clientProfileId;
+      }
+    }
 
     // For the client: adopt the generated customer with the fullest history
     // instead of creating an empty one.
