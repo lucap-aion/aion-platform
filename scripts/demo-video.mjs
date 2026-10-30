@@ -347,13 +347,20 @@ const page = await context.newPage();
 // frame thrown away. At a flat 30 the 1.5× cut had to drop every third frame — two steps and
 // a skip, two steps and a skip — which was invisible on a chat that mostly sits still and
 // was the "scattery" look of the titles, where everything moves (Giulio, 2026-10-30).
-const RATE = Math.round(30 * speed);
+// 24 a second, the cinema rate: it is what a two-core runner's Chrome actually paints
+// (measured at 22–24 even at 1.5× render and real time), so every frame in the film is a
+// new one. At 30 the shortfall came out as one repeated frame in four — the stutter.
+const FPS = 24;
+const RATE = Math.round(FPS * speed);
 const raw = join(work, "raw.mp4");
 const capture = spawn("ffmpeg", [
   "-y", "-hide_banner", "-loglevel", "error",
   "-f", "image2pipe", "-framerate", String(RATE), "-c:v", "mjpeg", "-i", "-",
   "-vf", `scale=1920:${Math.round((1920 * SIZE.height) / SIZE.width / 2) * 2}:flags=lanczos`,
-  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "10", "-pix_fmt", "yuv420p", raw,
+  // One encoder thread: x264 would otherwise take every core it can see, and the cores are
+  // Chrome's — it is the one that has to paint on time. Ultrafast on one thread still keeps
+  // up with 24 frames a second at 1920 wide.
+  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "10", "-threads", "1", "-pix_fmt", "yuv420p", raw,
 ], { stdio: ["pipe", "ignore", "inherit"] });
 const captureDone = new Promise((res, rej) => {
   capture.on("error", rej);
@@ -391,7 +398,7 @@ cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
 // any case. Encoding 2.25× fewer pixels per frame is what lets a two-core runner keep up
 // with its own compositor; at 2880 it painted unevenly and the film stuttered.
 await cdp.send("Page.startScreencast", {
-  format: "jpeg", quality: 92, maxWidth: 1920, maxHeight: Math.round((1920 * SIZE.height) / SIZE.width), everyNthFrame: 1,
+  format: "jpeg", quality: 88, maxWidth: 1920, maxHeight: Math.round((1920 * SIZE.height) / SIZE.width), everyNthFrame: 1,
 });
 const clock = setInterval(tick, 1000 / RATE);
 /** Per answer, or per screen of the tour: how many photos it had and how many actually drew. */
@@ -499,13 +506,13 @@ if (maxSeconds > 0 && waitSec > 0) {
 const filter = segments.length > 1 || waitSpeed !== speed
   ? segments.map((s, i) =>
     `[0:v]trim=start=${s.from.toFixed(3)}:end=${s.to.toFixed(3)},setpts=(PTS-STARTPTS)/${(s.waiting ? waitSpeed : speed).toFixed(4)}[v${i}]`,
-  ).join(";") + `;${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0,fps=30[out]`
+  ).join(";") + `;${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0,fps=${FPS}[out]`
   : null;
 execFileSync("ffmpeg", [
   "-y", "-hide_banner", "-loglevel", "error", "-i", raw,
   ...(filter
     ? ["-filter_complex", filter, "-map", "[out]"]
-    : ["-filter:v", `setpts=${(1 / speed).toFixed(4)}*PTS,fps=30`]),
+    : ["-filter:v", `setpts=${(1 / speed).toFixed(4)}*PTS,fps=${FPS}`]),
   "-an",
   "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p",
   "-movflags", "+faststart",
