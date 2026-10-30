@@ -54,7 +54,7 @@
  */
 
 import { chromium } from "playwright-core";
-import { playIntro, dropIntro, playChapter, chapterTitle, showReading, hideReading, playEnding } from "./demo-intro.mjs";
+import { playIntro, dropIntro, hasIntro, holdCard, playChapter, chapterTitle, showReading, hideReading, playEnding } from "./demo-intro.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -378,6 +378,10 @@ const captureDone = new Promise((res, rej) => {
 let latest = null;
 let startedAt = 0;
 let written = 0;
+/** Hold the last frame: new frames are ignored while this is set. Used across the sign-in,
+ *  whose route change can replace the document — and with it any card drawn over it — so the
+ *  film keeps showing the house's card until the product is ready and the card is back. */
+let frozen = false;
 /** Off until the first login page has drawn (see logIn): the frames before it are the SPA's
  *  loading spinner, and a film should not open on one. */
 let rolling = false;
@@ -400,6 +404,7 @@ cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
   // the pipe takes its size from the first frame it gets, so one of those squashed the whole
   // film by a tenth. Only full-viewport frames go in.
   if (metadata.deviceWidth !== SIZE.width || metadata.deviceHeight !== SIZE.height) return;
+  if (frozen) return;
   latest = Buffer.from(data, "base64");
 });
 // Handed over at 1920 wide, not 2880: the page is still rendered at 2× (the flag above),
@@ -619,6 +624,9 @@ async function logIn(page, who, secret) {
   // Behind the intro's cream card when there is one; otherwise behind a curtain of the
   // login itself, so the SPA's route change is a dissolve and not a flash.
   if (!heldIntro) await curtainDown(page);
+  // The camera holds the card through the route change. On an assistant-only brand the
+  // sign-in replaces the document (and the card with it): the film must not see that.
+  if (heldIntro) frozen = true;
   await Promise.all([
     page.waitForURL((u) => !u.toString().includes("/login"), { timeout: 60_000 }),
     button.click(),
@@ -632,12 +640,18 @@ async function logIn(page, who, secret) {
     if (new URL(page.url()).pathname === `/${slug}/assistant`) {
       await page.waitForSelector(COMPOSER, { timeout: 45_000 }).catch(() => {});
     }
-    // The card keeps its hold even when the product is ready sooner.
+    // The card keeps its hold even when the product is ready sooner. If the sign-in took
+    // the card with it, it is put back — the camera was holding its last frame meanwhile,
+    // so nothing between shows — and then dissolved like any other.
     const shown = Date.now() - heldIntro;
     if (shown < film(2600)) await page.waitForTimeout(film(2600) - shown);
     heldIntro = 0;
-    const dropped = await dropIntro(page, { film });
-    if (!dropped) console.warn("WARNING: the intro card did not survive the sign-in; the film shows the landing cut");
+    if (!(await hasIntro(page))) {
+      await holdCard(page, { lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo });
+      await page.waitForTimeout(80);
+    }
+    frozen = false;
+    await dropIntro(page, { film });
   } else {
     await curtainUp(page);
   }
