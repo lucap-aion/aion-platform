@@ -299,7 +299,9 @@ console.log(`recording ${slug}${mode ? ` (${mode})` : ""}`);
 // is a stutter on anything that glides. At 1.5× (2160×1350) it is 56% of the pixels, still
 // above the film's own 1920, so the text stays sharp and the frames arrive on time.
 const SCALE = Number(arg("scale", 1.5));
-const launchArgs = [`--force-device-scale-factor=${SCALE}`];
+// Four raster threads: the public-repo runner has four cores and headless Chrome does not
+// take them all for painting by default; the page is rasterised on the CPU here.
+const launchArgs = [`--force-device-scale-factor=${SCALE}`, "--num-raster-threads=4"];
 const browser = await chromium.launch(chromePath
   ? { executablePath: chromePath, headless: true, args: launchArgs }
   : { headless: true, args: launchArgs })
@@ -398,7 +400,7 @@ cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
 // any case. Encoding 2.25× fewer pixels per frame is what lets a two-core runner keep up
 // with its own compositor; at 2880 it painted unevenly and the film stuttered.
 await cdp.send("Page.startScreencast", {
-  format: "jpeg", quality: 88, maxWidth: 1920, maxHeight: Math.round((1920 * SIZE.height) / SIZE.width), everyNthFrame: 1,
+  format: "jpeg", quality: 85, maxWidth: 1920, maxHeight: Math.round((1920 * SIZE.height) / SIZE.width), everyNthFrame: 1,
 });
 const clock = setInterval(tick, 1000 / RATE);
 /** Per answer, or per screen of the tour: how many photos it had and how many actually drew. */
