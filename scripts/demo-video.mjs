@@ -223,8 +223,27 @@ const maxSeconds = Number(arg("max-seconds", 150));
 // that would need them faster than this is not asked. Past 5× a streaming answer is a smear
 // (it was 8 for a week, to fit three questions in two minutes; Giulio saw the smear).
 const MAX_WAIT_SPEED = 5;
-/** On-film milliseconds → real ones. Every hold and pan below is written as the viewer sees it. */
-const film = (ms) => ms * speed;
+// SLOW MOTION, for a machine that cannot paint in real time. A GitHub runner's Chrome paints
+// about fifteen frames a second with no GPU, so a reading pan recorded there sits still for
+// three or four frames and jumps ("0 0 0 7 1 0 0 4" px per frame against a Mac's "1 1 1 1",
+// 2026-11-02): whatever the screencast delivers, there are only fifteen new pictures a
+// second to deliver. So on CI the page is run SLOWLY instead — every hold and pan `slow`
+// times longer, every CSS transition and animation at 1/slow (Animation.setPlaybackRate) —
+// and the cut speeds it back up. A film second then spans `slow` real seconds and gets
+// fifteen × slow fresh paints: at 6, ninety, three for every frame of a 30 fps film, each
+// one a step of about a sixth of a pixel. Only what is choreographed is slowed; the answer
+// streams at its own pace and the cut speeds those stretches up as it always did.
+const slow = Math.max(1, Number(arg("slow", process.env.GITHUB_ACTIONS ? 8 : 1)));
+/** How much faster than recorded the choreographed stretches play: the cut's rate for them. */
+const play = speed * slow;
+/** On-film milliseconds → real ones, for a wait on THIS side. Every hold and pan below is
+ *  written as the viewer sees it. */
+const film = (ms) => ms * play;
+/** On-film milliseconds → the PAGE's milliseconds, for a duration handed into the page: its
+ *  clock already runs 1/slow (timers by the init script below, CSS and animation frames by
+ *  the playback rate), so it takes `slow` real seconds over one of these on its own. */
+const screen = (ms) => ms * speed;
+if (slow > 1) console.log(`slow motion: the choreography runs ${slow}× slower than the film and is sped back up in the cut`);
 // The opening titles (scripts/demo-intro.mjs): the data wall, the eleven agents, the house.
 // On for an assistant film unless --no-intro; --intro forces it on a film whose mode the
 // recorder could not know before the login (see logIn), where it would otherwise be left out
@@ -352,6 +371,16 @@ const context = await browser.newContext({
   deviceScaleFactor: SCALE,
   locale: "it-IT",
 });
+// The page's own time at 1/slow: setTimeout and setInterval stretched here, animation
+// frames and CSS by Animation.setPlaybackRate (below). What is handed into the page is
+// then written in film milliseconds (`screen`), the same as on a Mac.
+if (slow > 1) {
+  await context.addInitScript((factor) => {
+    const st = window.setTimeout.bind(window), si = window.setInterval.bind(window);
+    window.setTimeout = ((fn, ms, ...a) => st(fn, (Number(ms) || 0) * factor, ...a));
+    window.setInterval = ((fn, ms, ...a) => si(fn, (Number(ms) || 0) * factor, ...a));
+  }, slow);
+}
 const page = await context.newPage();
 
 // THE PICTURE. Not Playwright's recordVideo: that takes its frames at the CSS size, 1440×900,
@@ -413,6 +442,15 @@ const tick = () => {
   for (; written < due; written++) capture.stdin.write(latest);
 };
 const cdp = await context.newCDPSession(page);
+/** CSS transitions and animations at 1/slow — the product's own and the titles'. The rate is
+ *  per document, so it is set again after every navigation and reload. */
+const slowAnimations = async () => {
+  if (slow === 1) return;
+  await cdp.send("Animation.enable").catch(() => {});
+  await cdp.send("Animation.setPlaybackRate", { playbackRate: 1 / slow }).catch(() => {});
+};
+page.on("framenavigated", (f) => { if (f === page.mainFrame()) void slowAnimations(); });
+await slowAnimations();
 cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
   cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
   // The first frames are painted before the viewport is applied — 1440×813, not ×900 — and
@@ -517,8 +555,8 @@ mkdirSync(dirname(out) || ".", { recursive: true });
 // the same) and however many distinct frames the screencast hands over. A Mac records the
 // same pan at one pixel every frame. The film from here is for checking content; the one a
 // prospect sees is recorded locally (see the project memory for the recipe).
-if (process.env.GITHUB_ACTIONS) {
-  console.warn("WARNING: recorded on a GitHub runner — its Chrome paints ~15 fps, so pans and transitions will judder. For a film a prospect will watch, record it from a Mac.");
+if (process.env.GITHUB_ACTIONS && slow === 1) {
+  console.warn("WARNING: recorded on a GitHub runner at real speed — its Chrome paints ~15 fps, so pans and transitions will judder. Pass --slow 6.");
 }
 console.log("encoding…");
 // 1920 wide: the 2× capture scaled down is sharper text than 1440 ever was, and still plays
@@ -546,25 +584,25 @@ const restSec = segments.filter((s) => !s.waiting).reduce((n, s) => n + (s.to - 
 let waitSpeed = speed;
 if (maxSeconds > 0 && waitSec > 0) {
   // Aimed a little under the cap, so the rounded length is under it too.
-  const room = (maxSeconds - 2) - restSec / speed;
+  const room = (maxSeconds - 2) - restSec / play;
   waitSpeed = room > 0 ? Math.min(MAX_WAIT_SPEED, Math.max(speed, waitSec / room)) : MAX_WAIT_SPEED;
-  const length = restSec / speed + waitSec / waitSpeed;
+  const length = restSec / play + waitSec / waitSpeed;
   if (length > maxSeconds + 1) {
     console.warn(`WARNING: the film runs ${Math.round(length)}s against a cap of ${maxSeconds}s even with the waits at ${MAX_WAIT_SPEED}× — fewer questions (--questions) is the lever left.`);
   } else if (waitSpeed > speed) {
-    console.log(`the waits for answers (${Math.round(waitSec)}s recorded) play at ${waitSpeed.toFixed(1)}× to fit ${maxSeconds}s; everything else at ${speed}×`);
+    console.log(`the waits for answers (${Math.round(waitSec)}s recorded) play at ${waitSpeed.toFixed(1)}× to fit ${maxSeconds}s; everything else at ${play}×${slow > 1 ? ` (recorded ${slow}× slow)` : ""}`);
   }
 }
-const filter = segments.length > 1 || waitSpeed !== speed
+const filter = segments.length > 1 || waitSpeed !== play
   ? segments.map((s, i) =>
-    `[0:v]trim=start=${s.from.toFixed(3)}:end=${s.to.toFixed(3)},setpts=(PTS-STARTPTS)/${(s.waiting ? waitSpeed : speed).toFixed(4)}[v${i}]`,
+    `[0:v]trim=start=${s.from.toFixed(3)}:end=${s.to.toFixed(3)},setpts=(PTS-STARTPTS)/${(s.waiting ? waitSpeed : play).toFixed(4)}[v${i}]`,
   ).join(";") + `;${segments.map((_, i) => `[v${i}]`).join("")}concat=n=${segments.length}:v=1:a=0,fps=${FPS}[out]`
   : null;
 execFileSync("ffmpeg", [
   "-y", "-hide_banner", "-loglevel", "error", "-i", raw,
   ...(filter
     ? ["-filter_complex", filter, "-map", "[out]"]
-    : ["-filter:v", `setpts=${(1 / speed).toFixed(4)}*PTS,fps=${FPS}`]),
+    : ["-filter:v", `setpts=${(1 / play).toFixed(4)}*PTS,fps=${FPS}`]),
   "-an",
   "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p",
   "-movflags", "+faststart",
@@ -645,7 +683,7 @@ async function logIn(page, who, secret) {
       // sign-in can be fired the moment the house's card opens and load behind it.
       await page.fill('input[type="email"]', who);
       await page.fill('input[type="password"]', secret);
-      await playIntro(page, { film, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo, holdCream: true });
+      await playIntro(page, { film: screen, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo, holdCream: true });
       heldIntro = Date.now();
     } else if (introFlag === null && !mode) {
       console.log("intro: skipped — the film's mode is not known before the login; pass --mode assistant or --intro to open on the titles");
@@ -692,7 +730,7 @@ async function logIn(page, who, secret) {
       await page.waitForTimeout(80);
     }
     frozen = false;
-    await dropIntro(page, { film });
+    await dropIntro(page, { film: screen });
   } else {
     await curtainUp(page);
   }
@@ -852,9 +890,10 @@ async function filmAssistant(page, { count, arrive = "url" }) {
       const spent = now - waited;
       const perQuestion = waited / i;
       // On screen, one more question costs: a chapter, the typing, the reading pan, and the
-      // ending that follows the last answer — about 31 s at the pans' longest.
-      const more = 31;
-      const room = (maxSeconds - 2) - (spent + more) / speed;
+      // ending that follows the last answer — about 31 s at the pans' longest (recorded
+      // `slow` times longer, like everything choreographed).
+      const more = 31 * slow;
+      const room = (maxSeconds - 2) - (spent + more) / play;
       const need = room > 0 ? (waited + perQuestion) / room : Infinity;
       if (need > MAX_WAIT_SPEED) {
         console.log(`stopping at ${i} question(s): a ${i + 1}${["st", "nd", "rd"][i] ?? "th"} would need the waits at ${need === Infinity ? "∞" : need.toFixed(1)}× to fit ${maxSeconds}s`);
@@ -862,7 +901,7 @@ async function filmAssistant(page, { count, arrive = "url" }) {
       }
     }
     // A card first — "01 · The piece" — so the question arrives as a chapter, not a line.
-    if (titled) await playChapter(page, { film, lang, index: i + 1, kind });
+    if (titled) await playChapter(page, { film: screen, lang, index: i + 1, kind });
     askedKinds.push(kind);
     // Never type over an answer that is still arriving. Before typing as well as after,
     // because the first question can arrive while the page is still settling.
@@ -901,7 +940,7 @@ async function filmAssistant(page, { count, arrive = "url" }) {
     mark(true);
     await showReading(page, { lang, book, kind });
     await settled(page);
-    await hideReading(page, { film });
+    await hideReading(page, { film: screen });
     mark(false);
     // Then read it, which is what a person does with an answer and what the film is for.
     photos.push(await presentAnswer(page, i));
@@ -913,7 +952,7 @@ async function filmAssistant(page, { count, arrive = "url" }) {
     let where = "";
     try { where = `${new URL(base).host}/${slug}`; } catch { /* no address, no line */ }
     await playEnding(page, {
-      film, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo, where,
+      film: screen, lang, brand: house.name, logoUrl: house.logo, photoUrl: house.photo, where,
       chapters: askedKinds.map((k, i) => chapterTitle(lang, i + 1, k)),
     });
   }
@@ -1093,7 +1132,7 @@ async function curtainUp(page) {
     requestAnimationFrame(() => { c.style.opacity = "0"; });
     await new Promise((r) => setTimeout(r, ms + 60));
     c.remove();
-  }, film(380)).catch(() => {});
+  }, screen(380)).catch(() => {});
 }
 
 /**
@@ -1219,15 +1258,16 @@ async function look(page, { hold = 1500, run = 0 }) {
       if (to - from < 24) return; // a page that fits is looked at, not twitched
       const ms = Math.max(minMs, Math.min(maxMs, (to - from) * perPx));
       await new Promise((resolve) => {
-        const t0 = performance.now();
+        let t0 = null;
         const step = (now) => {
+          t0 ??= now; // the frame's clock throughout, not performance.now(): they differ in slow motion
           const t = Math.min(1, (now - t0) / ms);
           el.scrollTop = from + (to - from) * read(t);
           if (t < 1) requestAnimationFrame(step); else resolve();
         };
         requestAnimationFrame(step);
       });
-    }, { max: run, perPx: film(9), minMs: film(1500), maxMs: film(8000) });
+    }, { max: run, perPx: screen(9), minMs: screen(1500), maxMs: screen(8000) });
     await page.waitForTimeout(film(1200));
   }
 }
@@ -1372,8 +1412,9 @@ async function presentAnswer(page, index) {
     const glide = (to, ms, ease) => new Promise((resolve) => {
       const from = el.scrollTop;
       if (Math.abs(to - from) < 2 || ms <= 0) { el.scrollTop = to; resolve(); return; }
-      const t0 = performance.now();
+      let t0 = null;
       const step = (now) => {
+        t0 ??= now;
         const t = Math.min(1, (now - t0) / ms);
         el.scrollTop = from + (to - from) * ease(t);
         if (t < 1) requestAnimationFrame(step); else resolve();
@@ -1420,11 +1461,11 @@ async function presentAnswer(page, index) {
     question: QUESTION,
     // All as the viewer sees them; `film()` stretches each for the recording.
     timing: {
-      findPerPx: film(0.6), findMax: film(700),
-      openingHold: film(1600),
+      findPerPx: screen(0.6), findMax: screen(700),
+      openingHold: screen(1600),
       // ~110px a second on film: the speed you scroll a page you are reading.
-      panPerPx: film(9), panMin: film(1500), panMax: film(11000),
-      endHold: film(3000),
+      panPerPx: screen(9), panMin: screen(1500), panMax: screen(11000),
+      endHold: screen(3000),
     },
   });
   return report;

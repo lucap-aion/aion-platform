@@ -71,7 +71,7 @@ describe("how the film reads an answer", () => {
   });
 
   it("paces the reading on film, so --speed compresses the waiting and not the reading", () => {
-    expect(recorder).toContain("const film = (ms) => ms * speed;");
+    expect(recorder).toContain("const film = (ms) => ms * play;");
   });
 
   it("waits for the photos to draw before panning, and says when they did not", () => {
@@ -216,7 +216,9 @@ describe("the platform tour", () => {
   });
 
   it("paces the screens on film, like the answers", () => {
-    expect(recorder).toMatch(/async function look\(page[\s\S]*?film\(hold\)[\s\S]*?perPx: film\(9\)/);
+    // The hold is a wait on the Node side (film); the pan's pace is handed into the page
+    // (screen), whose clock runs slow on CI — see `slow` in the recorder.
+    expect(recorder).toMatch(/async function look\(page[\s\S]*?film\(hold\)[\s\S]*?perPx: screen\(9\)/);
   });
 });
 
