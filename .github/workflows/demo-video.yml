@@ -52,6 +52,11 @@ on:
         required: false
         default: "1"
         type: string
+      scale:
+        description: "Render scale of the page (CSS 1440×900 × this). 1.5 is the default; 1.333 rasterises exactly 1920 wide, fewer pixels for the runner's software compositor to paint per frame"
+        required: false
+        default: "1.5"
+        type: string
       ask:
         description: 'Override the questions, pipe separated. Empty = the brand''s own opening prompts'
         required: false
@@ -157,6 +162,7 @@ jobs:
             --questions "${{ inputs.questions }}" \
             --speed "${{ inputs.speed }}" \
             --fps "${{ inputs.fps }}" \
+            --scale "${{ inputs.scale }}" \
             ${{ inputs.ask != '' && format('--ask "{0}"', inputs.ask) || '' }} \
             ${{ inputs.mode != '' && format('--mode "{0}"', inputs.mode) || '' }} \
             ${{ inputs.upload && '--upload' || '' }}
