@@ -58,6 +58,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 // Cheap, fast, and the whole job is picking one or two labels off a summary.
 const FOCUS_MODEL = Deno.env.get("FOCUS_MODEL") ?? "claude-sonnet-4-6";
+// The model that looks at the sign-in photograph (findFocalPoint). Any model with vision.
+const VISION_MODEL = Deno.env.get("VISION_MODEL") ?? FOCUS_MODEL;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KNOWLEDGE_BATCH_SECRET = Deno.env.get("KNOWLEDGE_BATCH_SECRET") ?? "";
@@ -738,11 +740,38 @@ async function runStage(
       }
     }
     if (Object.keys(effectiveImages).length) {
-      const held = await mirrorBrandImages(admin, brandId, effectiveImages, website);
+      // The other logos the site offers are fallbacks only for a logo THIS pass found: one an
+      // admin set and that will not copy in stays theirs, hotlinked, rather than being
+      // replaced by something scraped.
+      const held = await mirrorBrandImages(admin, brandId, effectiveImages, website,
+        { logo_candidates: patch.logo_big != null ? id.logo_candidates : undefined });
       for (const [slot, url] of Object.entries(held.urls)) {
         if (url && url !== (brand as Record<string, unknown>)[slot]) patch[slot] = url;
       }
       id.notes.push(...held.notes);
+    }
+
+    // ── Where the sign-in photograph is cropped to ───────────────────────────────────────
+    // The login panel is a tall half-screen and the picture is cover-cropped to its centre.
+    // A landscape campaign shot with the product at one edge — My Style Bags' couple with
+    // their trolleys on the right of a 1.65:1 airport photograph — loses the product there,
+    // and no rule about shapes can know where the subject is. The model can, in one look.
+    // Stored as CSS object-position on the record; the panel reads it. Looked at again when
+    // the picture changes, never when an admin has set it by hand.
+    const authImage = String(patch.auth_background_image ?? (brand as Record<string, unknown>).auth_background_image ?? "").trim();
+    const themeNow = {
+      ...(((brand as Record<string, unknown>).theme_settings as Record<string, unknown> | null) ?? {}),
+      ...((patch.theme_settings as Record<string, unknown> | undefined) ?? {}),
+    };
+    if (authImage && (patch.auth_background_image != null || !themeNow.auth_focus)) {
+      const focus = await findFocalPoint(authImage).catch((e) => {
+        console.error("[onboard-brand] focal point:", (e as Error).message);
+        return null;
+      });
+      if (focus) {
+        patch.theme_settings = { ...themeNow, auth_focus: focus };
+        id.notes.push(`the sign-in photograph is cropped around its subject (${focus})`);
+      }
     }
 
     if (Object.keys(patch).length) {
@@ -1935,6 +1964,54 @@ async function askForFocus(prompt: string): Promise<string> {
     messages: [{ role: "user", content: prompt }],
   }, { timeout: 25_000 });
   return res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+}
+
+/**
+ * Where the subject of a photograph is, as CSS object-position ("62% 50%"), or null.
+ *
+ * One look by the model at the picture the sign-in panel will show. The panel is 4:5 and
+ * cover-crops to this point, so the answer is the centre of what the crop must keep: the
+ * product when one is in the picture, the person otherwise. Any failure — no key, a picture
+ * the API will not take, an answer that is not a point — is a null and the panel keeps the
+ * centre, which is what it always did.
+ */
+async function findFocalPoint(url: string): Promise<string | null> {
+  if (!ANTHROPIC_API_KEY) return null;
+  const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) return null;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  // The API takes 5 MB per image; a bigger one keeps its centre rather than failing here.
+  if (!bytes.length || bytes.length > 4_500_000) return null;
+  const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (!/^image\/(jpeg|png|webp|gif)$/.test(type)) return null;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+  const out = await anthropic.messages.create({
+    model: VISION_MODEL,
+    max_tokens: 60,
+    system: "You locate the subject of a photograph. You answer with JSON and nothing else.",
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: type as "image/jpeg", data: btoa(binary) } },
+        {
+          type: "text",
+          text: "This photograph will be shown in a tall frame, 4 wide by 5 high, behind a sign-in form, " +
+            "cropped to fit. Find the subject the crop must keep: the product (bag, jewel, watch, " +
+            "shoes, eyewear) if one is shown, otherwise the person. Answer only with JSON " +
+            '{"x": <percent from the left edge>, "y": <percent from the top edge>} for the centre of that subject.',
+        },
+      ],
+    }],
+  }, { timeout: 25_000 });
+  const text = out.content.map((c) => (c.type === "text" ? c.text : "")).join("");
+  const m = /\{[^}]*\}/.exec(text);
+  if (!m) return null;
+  const parsed = JSON.parse(m[0]) as { x?: unknown; y?: unknown };
+  const pct = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : null);
+  const x = pct(parsed.x), y = pct(parsed.y);
+  return x == null || y == null ? null : `${x}% ${y}%`;
 }
 
 /** A catalogue row, as the product focus reads it. */

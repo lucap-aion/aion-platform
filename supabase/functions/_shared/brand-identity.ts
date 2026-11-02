@@ -22,6 +22,10 @@ export type BrandIdentity = {
   email?: string;
   logo_big?: string;
   logo_small?: string;
+  /** Every logo the site offers, best first. The branding stage copies the first one that
+   *  actually downloads AS a logo — a declared file that answers 404, a photograph named
+   *  "…-logo-…jpg", each of those was once the only candidate and went on the record. */
+  logo_candidates?: string[];
   top_banner_image?: string;
   auth_background_image?: string;
   // The four claim/FAQ/feedback slots. Never attempted before, so every onboarded brand
@@ -219,40 +223,60 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
   // header's logo, and is kept as the monogram if the site declared no bigger one.
   let lightLogo: string | undefined;
   let siteIcon: string | undefined;
+  // A declared logo that does not download. mystylebags.it declares cdn/shop/t/2/assets/
+  // logo.png, which answers 404 — the theme's setting outlived the file — and it went on the
+  // record as the logo, where nothing could show it and the deck carried no mark. It is kept
+  // as the LAST resort (the copy-in tries it once more with a browser's headers) and the page
+  // header is read instead. A file named as an icon is still the icon, downloaded or not.
+  let unreachableLogo: string | undefined;
   if (declaredLogo) {
-    const body = (await fetchText(declaredLogo)) ?? "";
-    if (isPlatformPlaceholderLogo(declaredLogo, body)) {
+    const body = await fetchText(declaredLogo);
+    if (body == null && !/fav-?icon|favico|site-?icon|apple-touch|touch-icon/i.test(declaredLogo)) {
+      out.notes.push(`the logo the site declares (${declaredLogo}) did not download — took the one in the page header instead`);
+      unreachableLogo = declaredLogo;
+      declaredLogo = undefined;
+    } else if (isPlatformPlaceholderLogo(declaredLogo, body ?? "")) {
       out.notes.push(`the logo the site declares (${declaredLogo}) is its shop platform's placeholder, not the house's — took the one in the page header instead`);
       declaredLogo = undefined;
-    } else if (await isLightLogo(declaredLogo, body)) {
+    } else if (await isLightLogo(declaredLogo, body ?? "")) {
       lightLogo = declaredLogo;
       declaredLogo = undefined;
-    } else if (await isSiteIcon(declaredLogo, body)) {
+    } else if (await isSiteIcon(declaredLogo, body ?? "")) {
       siteIcon = declaredLogo;
       declaredLogo = undefined;
       if (!out.logo_small) out.logo_small = siteIcon;
     }
   }
 
-  // Failing that, an <img> whose class, id, alt or filename says logo — and failing that,
-  // the logo the header draws inline as SVG.
-  let markupLogo: string | undefined;
+  // Failing that, an <img> the markup calls a logo — in two strengths. STRONG: its own class,
+  // id, alt or title says so (the header's <img class="logo">). WEAK: only the file's name
+  // says so, which is also how a press photograph "with logo" is named (lgrworld.com's
+  // carousel: 9x16-Maxton-Hall-logo-…jpg, which went on the record and onto twelve slides)
+  // and how a partner's badge is (logo_forbes.png). A weak one is taken only after the logo
+  // the header draws inline as SVG — which is how most storefronts draw it, and which the
+  // weak <img> used to outrank.
+  const strongLogos: string[] = [];
+  const weakLogos: string[] = [];
+  const weakLight: string[] = [];
   if (!declaredLogo) {
-    // A few, not all: each SVG candidate costs a fetch, and the header's are first.
-    for (const tag of logoImgCandidates(html).slice(0, 4)) {
+    // A few, not all: each SVG/PNG candidate costs a fetch, and the header's are first.
+    for (const tag of logoImgCandidates(html).slice(0, 6)) {
       const url = abs(getAttr(tag, "src") ?? getAttr(tag, "data-src"));
-      if (!url) continue;
+      if (!url || strongLogos.includes(url) || weakLogos.includes(url) || weakLight.includes(url)) continue;
+      const strong = logoImgStrength(tag) === "strong";
+      // The dark one of a pair before the white one, whatever their strength:
+      // eberhard-co-watches.ch's header draws logo-2.svg (white) and its footer logo.svg.
       if (await isLightLogo(url)) {
-        lightLogo ??= url;
+        if (strong) lightLogo ??= url; else weakLight.push(url);
         continue;
       }
-      markupLogo = url;
-      break;
+      (strong ? strongLogos : weakLogos).push(url);
     }
   }
+  const markupLogo: string | undefined = strongLogos[0];
   let inlineLogo: string | undefined;
-  if (!declaredLogo && !markupLogo) {
-    const sprites = (await Promise.all(logoSpriteFiles(html).map((f) => abs(f)).filter(Boolean)
+  if (!declaredLogo) {
+    const sprites = markupLogo ? "" : (await Promise.all(logoSpriteFiles(html).map((f) => abs(f)).filter(Boolean)
       .map((u) => fetchText(u!)))).filter(Boolean).join("\n");
     inlineLogo = inlineSvgLogo(html, sprites);
   }
@@ -260,12 +284,22 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
     lightLogo ??= inlineLogo;
     inlineLogo = undefined;
   }
-  const logo = declaredLogo ?? markupLogo ?? inlineLogo ?? siteIcon ?? lightLogo;
+  // A WHITE logo from a real source (declared, the header's <img>, the header's inline SVG)
+  // still outranks an <img> whose only claim is its file name: lgrworld.com's header draws
+  // the wordmark inline in white over a dark bar, and below it are four partners' badges
+  // named logo-*.png. The copy-in repaints a white logo dark (brand-images), so white is no
+  // longer the reason to pass one over — only a dark one from the same kind of source is.
+  const ordered = [declaredLogo, markupLogo, inlineLogo, lightLogo, ...weakLogos, ...weakLight, siteIcon, unreachableLogo]
+    .filter((u, i, all): u is string => !!u && all.indexOf(u) === i);
+  const logo = ordered[0];
   if (logo) {
     out.logo_big = logo;
+    out.logo_candidates = ordered;
     out.found.push(
       declaredLogo ? "logo (declared)" : markupLogo ? "logo (markup)" : inlineLogo ? "logo (inline SVG)"
-        : logo === siteIcon ? "logo (site icon)" : "logo (white)",
+        : logo === lightLogo || weakLight.includes(logo) ? "logo (white — repainted dark)"
+        : weakLogos.includes(logo) ? "logo (markup, by file name)"
+        : logo === siteIcon ? "logo (site icon)" : "logo (declared, did not download)",
     );
     if (siteIcon && logo !== siteIcon) {
       out.notes.push(`the logo the site declares (${siteIcon}) is its square site icon — took the one in the page header for the name, kept the icon as the monogram`);
@@ -273,8 +307,8 @@ export async function harvestBrandIdentity(website: string, jinaKey = ""): Promi
     if (logo === siteIcon) {
       out.notes.push("the only logo the site offers is its square icon — the open sidebar needs the house's name; set a wordmark by hand");
     }
-    if (logo === lightLogo) {
-      out.notes.push("the only logo the site offers is a white one — it will not show on the portal's white header; set a dark version by hand");
+    if (logo === lightLogo || weakLight.includes(logo)) {
+      out.notes.push("the logo the site offers is a white one, drawn for a dark header — it is repainted dark for the portal and the decks; check it reads well");
     }
   }
   else { out.notes.push("no logo found — the deck will carry only AION's mark until one is set on the record"); }
@@ -510,8 +544,9 @@ export function pickLogoImg(html: string): string | undefined {
   return logoImgCandidates(html)[0];
 }
 
-/** Every <img> that is plausibly the logo, best first: a dark-by-name one before one whose
- *  name says white, document order otherwise. */
+/** Every <img> that is plausibly the logo, best first: one that says so in its own attributes
+ *  before one that says so only in its file name, a dark-by-name one before one whose name
+ *  says white, document order otherwise. */
 export function logoImgCandidates(html: string): string[] {
   const tags = [...html.matchAll(/<img\b[^>]*>/gi)]
     .map((m) => m[0])
@@ -519,9 +554,34 @@ export function logoImgCandidates(html: string): string[] {
     // messika.com's hero is "…Key Visual - 169 - No Logo - 150 DPI…jpg" — and it went on
     // the record as the house's logo. A tag that says logo only to say there is none is not one.
     .filter((tag) => /logo|brand-?mark|wordmark/i.test(tag.replace(/no(?:[\s_-]|%20)*logo/gi, "")))
-    .filter((tag) => !/sprite|placeholder|payment|card/i.test(tag));
+    .filter((tag) => !/sprite|placeholder|payment|card/i.test(tag))
+    // A file named like a photograph is one, whatever else its name says: lgrworld.com's
+    // "9x16-Maxton-Hall-logo-Damian-Hardung-1-lowres-scaled-418x768.jpg" is a still from a
+    // series, with the house's logo on the sunglasses.
+    .filter((tag) => !PHOTO_FILE_NAME.test(fileNameOf(tag)));
   const light = (tag: string) => /white|inverse|negative|reverse/i.test(tag);
-  return [...tags.filter((t) => !light(t)), ...tags.filter(light)];
+  const rank = (tag: string) => (logoImgStrength(tag) === "strong" ? 0 : 2) + (light(tag) ? 1 : 0);
+  return tags.map((tag, i) => ({ tag, i, rank: rank(tag) }))
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .map((t) => t.tag);
+}
+
+/** How an <img> says it is the logo: in its own attributes (class, id, alt, title, aria-label)
+ *  or only in its file's name. */
+export function logoImgStrength(tag: string): "strong" | "weak" {
+  const own = tag
+    .replace(/\s(?:src|srcset|data-src|data-srcset|data-lazy-src|data-original)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    // WordPress writes the file's name into alt and title ("logo_forbes-1102.png"), which
+    // is the file name saying it twice, not the page saying it once.
+    .replace(/\s(?:alt|title|aria-label)\s*=\s*(["'])([^"']*\.(?:png|jpe?g|gif|webp|svg|avif)|[^"']*[-_]\d{2,5}(?:x\d{2,5})?)\1/gi, "");
+  return /logo|brand-?mark|wordmark/i.test(own.replace(/no(?:[\s_-]|%20)*logo/gi, "")) ? "strong" : "weak";
+}
+
+const PHOTO_FILE_NAME = /(?:^|[-_.\s])(?:9x16|16x9|4x5|3x4|1x1|lowres|low-res|scaled|campaign|hero|key-?visual|img|dsc|dscf|pxl)(?=[-_.\s\d]|$)/i;
+
+function fileNameOf(tag: string): string {
+  const src = getAttr(tag, "src") ?? getAttr(tag, "data-src") ?? "";
+  try { return decodeURIComponent(src.split(/[?#]/)[0].split("/").pop() ?? ""); } catch { return src; }
 }
 
 /** A white logo, by format: an SVG by the colours it declares, a PNG by its pixels. Anything
@@ -575,6 +635,24 @@ export function svgIsLight(body: string): boolean {
     lum.push(0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]);
   }
   return lum.length > 0 && lum.every((l) => l > 0.85 * 255);
+}
+
+/**
+ * A white SVG logo, repainted dark: every light fill, stroke and gradient stop — as an
+ * attribute or in CSS — becomes near-black, alpha and shape untouched. The portal's header
+ * and the deck's slides are light; a white logo is invisible on both, and SVG is the one
+ * format where the colour is just a word to change.
+ */
+export function repaintSvgDark(body: string, ink = "#111111"): string {
+  const light = (v: string) => {
+    const t = v.trim().toLowerCase();
+    if (/^(none|transparent|currentcolor|inherit)$/.test(t) || t.startsWith("url(")) return false;
+    const rgb = parseColour(t);
+    return !!rgb && 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] > 0.85 * 255;
+  };
+  return body
+    .replace(/\b(fill|stroke|stop-color)(\s*=\s*)(["'])([^"']+)\3/gi, (m, k, eq, q, v) => (light(v) ? `${k}${eq}${q}${ink}${q}` : m))
+    .replace(/\b(fill|stroke|stop-color)(\s*:\s*)([^;"'}]+)/gi, (m, k, colon, v) => (light(v) ? `${k}${colon}${ink}` : m));
 }
 
 function parseColour(v: string): [number, number, number] | null {
@@ -639,11 +717,16 @@ export function inlineSvgLogo(html: string, sprites = ""): string | undefined {
     const body = symbol ? symbol.body : inner;
     if (!/<(path|polygon|rect|circle|ellipse|text|g)\b/i.test(body)) continue;
 
-    // The 300 characters before the <svg> hold the link (or wrapper) it sits in.
+    // The 300 characters before the <svg> hold the link it sits in and that link's wrapper:
+    // lgrworld.com draws it as <div class="header__logo"><a href="/en/" title="L.G.R"><svg>,
+    // and the word "logo" is two tags up. Two tags, not the whole 300 characters: a sibling
+    // further back that happens to be the logo must not vouch for the cart icon after it.
     const before = html.slice(Math.max(0, (m.index ?? 0) - 300), m.index);
-    const wrapper = before.slice(before.lastIndexOf("<")) ?? "";
+    const tags = [...before.matchAll(/<[a-zA-Z][^>]*>/g)].map((t) => t[0]);
+    const wrapper = tags.slice(-2).join(" ");
     const saysLogo = /logo|brand-?mark|wordmark/i.test(`${attrs} ${ref ?? ""} ${/<title>([^<]*)/i.exec(inner)?.[1] ?? ""} ${wrapper}`);
-    const linksHome = /<a\b[^>]*(aria-label=["'](home|homepage)["']|href=["'](\/|https?:\/\/[^"'/]+\/?(?:[a-z]{2}(?:[-_][a-z]{2})?\/?)?)["'])/i.test(wrapper);
+    // A link home: "/", the site's origin, or a locale root — "/en/", "/it-it/".
+    const linksHome = /<a\b[^>]*(aria-label=["'](home|homepage)["']|href=["'](\/|https?:\/\/[^"'/]+\/?|(?:https?:\/\/[^"'/]+)?\/[a-z]{2}(?:[-_][a-z]{2})?\/?)["'])/i.test(wrapper);
     const wide = ratio(viewBox) >= 2;
     if (!(saysLogo || (linksHome && wide))) continue;
     if (!wide && ratio(viewBox) > 0 && ratio(viewBox) < 0.9) continue; // a tall glyph is an icon

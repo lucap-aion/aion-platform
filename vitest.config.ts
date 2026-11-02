@@ -11,6 +11,11 @@ export default defineConfig({
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
   },
   resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+      // The edge functions import npm packages by Deno's specifier; the tests run them on
+      // Node, where the same package is in node_modules.
+      "npm:@resvg/resvg-wasm@2.6.2": "@resvg/resvg-wasm",
+    },
   },
 });
