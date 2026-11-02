@@ -400,14 +400,17 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
     </div>`;
 
   const ID = "demo-intro", CSS_ = CANVAS_CSS(ID) + INTRO_CSS;
-  // About sixteen seconds on film in all: titles that run longer than that are a wait before
-  // the product, and the product is the point.
+  // About twenty-five seconds on film in all. The two title beats hold for a good five
+  // seconds once everything on them is drawn: at a shorter hold the ring and the eleven
+  // were converging before a viewer had finished the line above them (Giulio, 2026-11-02:
+  // "difficile leggerla — darei 4-5 secondi in più"). Longer than this is a wait before the
+  // product, and the product is the point.
   const t = {
     markIn: film(1200), markHold: film(900),
     headIn: film(900),
-    ringsIn: film(450), nodeEvery: film(110), skyHold: film(1100),
+    ringsIn: film(450), nodeEvery: film(110), skyHold: film(5600),
     converge: film(850), coreHold: film(1100),
-    countUp: film(900), cardEvery: film(80), gridHold: film(1300), sweepHold: film(1000),
+    countUp: film(900), cardEvery: film(80), gridHold: film(5800), sweepHold: film(1000),
     creamOpen: film(1100), houseHold: film(2000),
     fade: film(650), gap: film(350),
   };
