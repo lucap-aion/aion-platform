@@ -13,6 +13,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminRoute from "@/components/AdminRoute";
 import Clarity from "@/components/Clarity";
 import LandingPage from "./pages/LandingPage";
+import WatchDemo from "./pages/WatchDemo";
 import Login from "./pages/auth/Login";
 import Signup from "./pages/auth/Signup";
 import ForgotPassword from "./pages/auth/ForgotPassword";
@@ -237,6 +238,9 @@ const App = () => (
 
             {/* Landing page bypass — view brand selector without auto-redirect to /rc */}
             <Route path="/all" element={<LandingPage />} />
+
+            {/* The demo film for one named recipient — public, the token is the credential */}
+            <Route path="/watch/:token" element={<WatchDemo />} />
 
             {/* Admin login */}
             <Route path="/admin/login" element={<AuthRoute><AdminLogin /></AuthRoute>} />

@@ -5,6 +5,7 @@ import { AlertCircle, Copy, ExternalLink, Loader2, Trash2, Video } from "lucide-
 import { untyped } from "@/integrations/supabase/untyped";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { StageState } from "@/lib/commercialCycle";
+import WatchLinks from "./WatchLinks";
 
 // The demo itself: is there anything to show, the logins to hand over, and the way to take
 // it all out again at hand-over.
@@ -402,6 +403,7 @@ export default function DemoPanel({
               </a>
               <span>Re-recording replaces this one.</span>
             </div>
+            <WatchLinks brandId={brandId} />
           </div>
         )}
       </div>
