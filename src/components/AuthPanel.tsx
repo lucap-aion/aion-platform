@@ -39,6 +39,8 @@ interface AuthPanelProps {
   logoUrl: string;
   bgUrl: string;
   name: string;
+  /** CSS object-position for the photograph, from the brand record; centre when unset. */
+  focus?: string | null;
 }
 
 /**
@@ -47,7 +49,7 @@ interface AuthPanelProps {
  *   - Dark logo  → light/white overlay (logo stays dark, readable on pale bg)
  *   - Light logo → dark overlay (logo stays light, readable on dark bg)
  */
-const AuthPanel = ({ logoUrl, bgUrl, name }: AuthPanelProps) => {
+const AuthPanel = ({ logoUrl, bgUrl, name, focus }: AuthPanelProps) => {
   const [contrast, setContrast] = useState<Contrast>("unknown");
   const cachedSrc = useRef<string | null>(null);
 
@@ -71,6 +73,9 @@ const AuthPanel = ({ logoUrl, bgUrl, name }: AuthPanelProps) => {
         src={bgUrl}
         alt={name}
         className="h-full w-full object-cover"
+        // The panel is a tall half-screen; a landscape campaign shot shows only its middle
+        // here, and the product is not always in the middle. The record says where it is.
+        style={{ objectPosition: focus ?? "50% 50%" }}
         onError={(e) => {
           if (e.currentTarget.src === new URL(heroBg, window.location.href).href) return;
           e.currentTarget.dataset.fellBack = bgUrl; // read by scripts/demo-video.mjs

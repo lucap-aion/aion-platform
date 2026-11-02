@@ -14,7 +14,10 @@
 // a hash of the bytes, so re-running the branding stage on unchanged imagery produces the
 // same url and therefore no write. That matters because this runs on every pass.
 
-import { splitPngLogo, splitSvgLogo } from "./logo-split.ts";
+import { splitPngLogo, splitSvgLogo, initialFromPng, initialFromSvg, repaintPngDark } from "./logo-split.ts";
+import { svgIsLight, repaintSvgDark } from "./brand-identity.ts";
+import { rasteriseSvg, unavailable as rasterUnavailable } from "./svg-raster.ts";
+import { dimensionsFromHeader } from "./brand-appearance.ts";
 
 export type ImageSlot =
   | "logo_big" | "logo_small"
@@ -98,7 +101,12 @@ async function shortHash(bytes: Uint8Array): Promise<string> {
 }
 
 export type MirrorOutcome =
-  | { slot: ImageSlot; status: "mirrored"; url: string; bytes: number; crest_url?: string; split?: boolean }
+  | {
+    slot: ImageSlot; status: "mirrored"; url: string; bytes: number; crest_url?: string; split?: boolean; repainted?: boolean; note?: string;
+    /** The bytes as stored (a logo's NAME, after a lockup is cut) and what they are — for the
+     *  monogram that is cut out of them when the site offers none. */
+    data?: Uint8Array; format?: string;
+  }
   | { slot: ImageSlot; status: "already_ours" }
   | { slot: ImageSlot; status: "skipped"; reason: string };
 
@@ -225,7 +233,7 @@ async function keep(
   origin: string,
 ): Promise<MirrorOutcome> {
   bytes = pngFromIco(bytes) ?? bytes;
-  const contentType = sniff(bytes);
+  let contentType = sniff(bytes);
   if (!contentType) {
     return {
       slot,
@@ -234,11 +242,41 @@ async function keep(
     };
   }
 
-  // A name logo that is a lockup — a crest over the name, or a tagline under it — is cut to
-  // the name, with the crest kept for the monogram (logo-split.ts). The lockup itself is kept
-  // beside it, so nothing the house published is lost.
+  // What the bytes ARE, not only that they are an image. Two logos that were "images" and
+  // went on the record all the same: mystylebags.it's 32px favicon as the monogram, a smudge
+  // in the collapsed sidebar and unusable on a slide; and a 418×768 JPEG still from a series,
+  // "…-logo-…" in its name, as lgrworld.com's wordmark. A monogram under 96px is a browser-tab
+  // icon, and the collapsed sidebar shows the house's initial instead; a JPEG that is not
+  // clearly wider than tall is a photograph — a wordmark is wide, and a JPEG has no
+  // transparency for a crest to sit on.
+  const dims = dimensionsFromHeader(bytes);
+  if (slot === "logo_small" && dims && Math.max(dims.width, dims.height) < 96) {
+    return { slot, status: "skipped", reason: `it is only ${dims.width}×${dims.height} — a browser-tab icon, not a monogram` };
+  }
+  if (slot === "logo_big" && contentType === "image/jpeg" && dims && dims.width < dims.height * 1.4 && Math.min(dims.width, dims.height) >= 200) {
+    return { slot, status: "skipped", reason: `it is a ${dims.width}×${dims.height} photograph, not a wordmark` };
+  }
+
+  // A WHITE logo — drawn for a transparent header over the hero picture — is invisible on
+  // the portal's white header and the deck's cream slides. An SVG is repainted by its colour
+  // words, a PNG cut-out pixel by pixel; the shape is the house's, only the ink changes.
+  let repainted = false;
+  if (slot === "logo_big" && contentType === "image/svg+xml") {
+    const svg = new TextDecoder().decode(bytes);
+    if (svgIsLight(svg)) { bytes = new TextEncoder().encode(repaintSvgDark(svg)); repainted = true; }
+  } else if (slot === "logo_big" && contentType === "image/png") {
+    const dark = await repaintPngDark(bytes).catch(() => null);
+    if (dark) { bytes = dark; repainted = true; }
+  }
+
   let crestUrl: string | undefined;
   let split = false;
+  let rasterNote: string | undefined;
+  const up = (name: string, b: Uint8Array, type: string) => admin.storage.from(where.bucket)
+    .upload(`brands/${brandId}-${name}.${EXTENSION[type]}`, b, { contentType: type, upsert: true, cacheControl: "31536000" });
+  const publicUrl = async (name: string, b: Uint8Array, type: string) =>
+    `${admin.storage.from(where.bucket).getPublicUrl(`brands/${brandId}-${name}.${EXTENSION[type]}`).data.publicUrl}?v=${await shortHash(b)}`;
+
   if (slot === "logo_big" && (contentType === "image/png" || contentType === "image/svg+xml")) {
     const cut = contentType === "image/png"
       ? await splitPngLogo(bytes)
@@ -246,26 +284,40 @@ async function keep(
         const r = splitSvgLogo(new TextDecoder().decode(bytes));
         return r && { name: new TextEncoder().encode(r.name), crest: r.crest ? new TextEncoder().encode(r.crest) : undefined };
       })();
+    let crest: Uint8Array | undefined;
+    let crestType = contentType;
     if (cut) {
-      const ext0 = EXTENSION[contentType];
-      const up = (name: string, b: Uint8Array) => admin.storage.from(where.bucket)
-        .upload(`brands/${brandId}-${name}.${ext0}`, b, { contentType, upsert: true, cacheControl: "31536000" });
-      const lockup = await up("lockup", bytes);
+      const lockup = await up("lockup", bytes, contentType);
       if (!lockup.error) {
-        if (cut.crest) {
-          const crest = await up("crest", cut.crest);
-          if (!crest.error) {
-            crestUrl = `${admin.storage.from(where.bucket).getPublicUrl(`brands/${brandId}-crest.${ext0}`).data.publicUrl}?v=${await shortHash(cut.crest)}`;
-          }
-        }
+        crest = cut.crest;
         bytes = cut.name;
         split = true;
       }
     }
+    // An SVG becomes a PNG as well. PowerPoint will not embed an SVG, so the deck fell back to
+    // the favicon and said "NO BRAND LOGO"; and the monogram below is cut by pixels. The SVG
+    // is kept beside it (-full.svg) for anything that can draw it.
+    if (contentType === "image/svg+xml") {
+      const svg = new TextDecoder().decode(bytes);
+      const png = await rasteriseSvg(svg, 1600);
+      if (!png) rasterNote = `the logo is an SVG and could not be rendered to a PNG for the decks (${rasterUnavailable() ?? "it has no frame"}) — kept as SVG`;
+      if (png) {
+        await up("full", bytes, "image/svg+xml");
+        bytes = png;
+        contentType = "image/png";
+        if (crest) {
+          const crestPng = await rasteriseSvg(new TextDecoder().decode(crest), 512);
+          if (crestPng) { crest = crestPng; crestType = "image/png"; }
+        }
+      }
+    }
+    if (crest) {
+      const stored = await up("crest", crest, crestType);
+      if (!stored.error) crestUrl = await publicUrl("crest", crest, crestType);
+    }
   }
 
-  const ext = EXTENSION[contentType];
-  const path = `brands/${brandId}-${where.name}.${ext}`;
+  const path = `brands/${brandId}-${where.name}.${EXTENSION[contentType]}`;
   const { error } = await admin.storage.from(where.bucket).upload(path, bytes, {
     contentType,
     upsert: true,
@@ -279,9 +331,31 @@ async function keep(
     status: "mirrored",
     url: `${data.publicUrl}?v=${await shortHash(bytes)}`,
     bytes: bytes.length,
+    data: bytes,
+    format: contentType,
     ...(split ? { split: true } : {}),
+    ...(repainted ? { repainted: true } : {}),
+    ...(rasterNote ? { note: rasterNote } : {}),
     ...(crestUrl ? { crest_url: crestUrl } : {}),
   };
+}
+
+/** The monogram cut out of the name: the first glyph, as a square PNG. Null when the name
+ *  has no clean first glyph (a connected script, a two-line name with no first) or the
+ *  renderer an SVG needs is unavailable. */
+export async function monogramFrom(data: Uint8Array, format: string): Promise<{ bytes: Uint8Array; type: string } | null> {
+  if (format === "image/png") {
+    const png = await initialFromPng(data);
+    return png ? { bytes: png, type: "image/png" } : null;
+  }
+  if (format === "image/svg+xml") {
+    const initial = initialFromSvg(new TextDecoder().decode(data));
+    if (!initial) return null;
+    // Rendered when the renderer is there; the SVG itself otherwise — the sidebar draws it.
+    const png = await rasteriseSvg(initial, 512);
+    return png ? { bytes: png, type: "image/png" } : { bytes: new TextEncoder().encode(initial), type: "image/svg+xml" };
+  }
+  return null;
 }
 
 /**
@@ -289,39 +363,78 @@ async function keep(
  *
  * Sequential rather than parallel: eight simultaneous downloads from one storefront is what
  * gets an onboarding IP rate-limited, and the whole set is a few seconds either way.
+ *
+ * `logo_candidates` are the other logos the harvest found, best first (brand-identity's
+ * logo_candidates). The logo slot takes the first that copies in AS a logo: the one the site
+ * declares can answer 404, the one its markup names can be a photograph, and each of those
+ * used to be the end of it.
  */
 export async function mirrorBrandImages(
   admin: AdminClient,
   brandId: number | string,
   values: Partial<Record<ImageSlot, string | null | undefined>>,
   referer?: string | null,
+  options: { logo_candidates?: string[] } = {},
 ): Promise<{ urls: Partial<Record<ImageSlot, string>>; notes: string[]; mirrored: number; failed: number }> {
   const urls: Partial<Record<ImageSlot, string>> = {};
   const failures: string[] = [];
   let mirrored = 0;
+  let logo: { data: Uint8Array; format: string } | null = null;
 
   const splitNotes: string[] = [];
   for (const slot of IMAGE_SLOTS) {
     const source = values[slot];
-    // The crest cut from the name logo beats a favicon — or nothing — for the monogram. A
-    // real icon the house declared (a square mark of its own) is still preferred.
     if (slot === "logo_small" && urls.logo_small && (!source || /fav-?icon|favico|\.ico(?:[?#]|$)|apple-touch|site-?icon|cropped-/i.test(String(source)))) {
       continue;
     }
-    if (!source) continue;
-    const outcome = await mirrorImage(admin, brandId, slot, String(source), referer);
+    const sources = slot === "logo_big"
+      ? [source, ...(options.logo_candidates ?? [])].filter((u, i, all): u is string => !!u && all.indexOf(u) === i)
+      : source ? [String(source)] : [];
+    if (!sources.length) continue;
+    const refused: string[] = [];
+    let outcome: MirrorOutcome | null = null;
+    for (const candidate of sources) {
+      outcome = await mirrorImage(admin, brandId, slot, candidate, referer);
+      if (outcome.status !== "skipped") break;
+      refused.push(outcome.reason);
+    }
+    if (!outcome) continue;
     if (outcome.status === "mirrored") {
       urls[slot] = outcome.url;
       mirrored += 1;
+      if (slot === "logo_big" && outcome.data && outcome.format) logo = { data: outcome.data, format: outcome.format };
+      if (refused.length) {
+        splitNotes.push(`the logo the site offered first was not one (${refused[0]}) — took the next it offers`);
+      }
       if (outcome.split) {
         splitNotes.push("the logo the site uses is a lockup — cut to the house's name for the portal, the full lockup kept as -lockup in storage");
       }
+      if (outcome.repainted) {
+        splitNotes.push("the site's logo is white, for its dark header — repainted dark for the portal and the decks");
+      }
+      if (outcome.note) splitNotes.push(outcome.note);
       if (outcome.crest_url) {
         urls.logo_small = outcome.crest_url; // provisional: a declared icon below may replace it
         splitNotes.push("its crest became the monogram for the collapsed sidebar");
       }
     } else if (outcome.status === "skipped") {
       failures.push(`${slot}: ${outcome.reason}`);
+    }
+  }
+
+  // No monogram worth the name — none offered, or a favicon refused above — and a name to
+  // cut one from: its initial, in the house's own letterform.
+  if (!urls.logo_small && logo) {
+    const initial = await monogramFrom(logo.data, logo.format).catch(() => null);
+    if (initial) {
+      const where = SLOT_STORAGE.logo_small;
+      const path = `brands/${brandId}-${where.name}.${EXTENSION[initial.type]}`;
+      const { error } = await admin.storage.from(where.bucket).upload(path, initial.bytes, { contentType: initial.type, upsert: true, cacheControl: "31536000" });
+      if (!error) {
+        urls.logo_small = `${admin.storage.from(where.bucket).getPublicUrl(path).data.publicUrl}?v=${await shortHash(initial.bytes)}`;
+        mirrored += 1;
+        splitNotes.push("the site offers no monogram, so the wordmark's own initial is the monogram for the collapsed sidebar");
+      }
     }
   }
 

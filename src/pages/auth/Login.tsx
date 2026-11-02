@@ -85,7 +85,7 @@ const Login = () => {
 
   return (
     <div className="h-screen overflow-hidden bg-background flex">
-      <AuthPanel logoUrl={tenant.logoUrl} bgUrl={tenant.authBackgroundUrl} name={tenant.name} />
+      <AuthPanel logoUrl={tenant.logoUrl} bgUrl={tenant.authBackgroundUrl} name={tenant.name} focus={tenant.authFocus} />
 
       {/* Right - Form */}
       <div className="flex-1 flex flex-col">

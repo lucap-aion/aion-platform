@@ -203,6 +203,12 @@ export interface TenantConfig {
   logoIconUrl: string;
   logoInitial: string;
   authBackgroundUrl: string;
+  /**
+   * Where the sign-in photograph is cropped to, as CSS object-position ("62% 50%"), or null
+   * for the centre. The panel is a tall half-screen and a landscape campaign shot loses its
+   * edges there; onboarding looks at the picture once and stores where the subject is.
+   */
+  authFocus: string | null;
   topBannerImage: string | null;
   primaryHsl: string;
   /** Full resolved theme colours (DB values merged over defaults) */
@@ -249,6 +255,7 @@ const DEFAULT_TENANT: TenantConfig = {
   logoIconUrl: "/aion_dark_icon.png",
   logoInitial: "A",
   authBackgroundUrl: heroBg,
+  authFocus: null,
   topBannerImage: null,
   primaryHsl: "38 55% 55%",
   themeColors: EMPTY_THEME,
@@ -282,6 +289,12 @@ const parseThemeSettings = (raw: Database["public"]["Tables"]["brands"]["Row"]["
   return { colors, fonts };
 };
 
+/** theme_settings.auth_focus, kept only when it is a CSS object-position in percentages. */
+const authFocusOf = (raw: Database["public"]["Tables"]["brands"]["Row"]["theme_settings"] | undefined): string | null => {
+  const v = raw && typeof raw === "object" ? (raw as Record<string, unknown>).auth_focus : null;
+  return typeof v === "string" && /^\d{1,3}% \d{1,3}%$/.test(v) ? v : null;
+};
+
 type BrandRow = Database["public"]["Tables"]["brands"]["Row"];
 
 // Presentation only. This runs for anonymous visitors — the tenant is resolved
@@ -306,9 +319,12 @@ const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
     tagline: brand.description || DEFAULT_TENANT.tagline,
     website: brand.website ?? null,
     logoUrl: brand.logo_big || brand.logo_small || DEFAULT_TENANT.logoUrl,
-    logoIconUrl: brand.logo_small || brand.logo_big || DEFAULT_TENANT.logoIconUrl,
+    // No monogram → the collapsed sidebar shows the house's initial in type. The wordmark
+    // squeezed into 32 pixels, which is what it fell back to, was unreadable.
+    logoIconUrl: brand.logo_small || (brand.logo_big ? "" : DEFAULT_TENANT.logoIconUrl),
     logoInitial: (brand.name?.[0] ?? "A").toUpperCase(),
     authBackgroundUrl: brand.auth_background_image || DEFAULT_TENANT.authBackgroundUrl,
+    authFocus: authFocusOf(brand.theme_settings),
     topBannerImage: brand.top_banner_image ?? null,
     primaryHsl: themeColors.primary_hsl || DEFAULT_TENANT.primaryHsl,
     themeColors,
