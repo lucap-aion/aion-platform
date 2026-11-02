@@ -511,6 +511,15 @@ await captureDone;
 const out = outArg || `AION-${slug}-${mode === "assistant" ? "assistant" : "platform"}.mp4`;
 mkdirSync(dirname(out) || ".", { recursive: true });
 
+// Measured, not assumed (2026-11-02): the GitHub macOS runner's Chrome paints a scrolling
+// page at about fifteen frames a second — no GPU in the VM — so a reading pan sits still for
+// three or four frames and jumps 4–7 px, whatever the render scale (1.5 and 1.333 came out
+// the same) and however many distinct frames the screencast hands over. A Mac records the
+// same pan at one pixel every frame. The film from here is for checking content; the one a
+// prospect sees is recorded locally (see the project memory for the recipe).
+if (process.env.GITHUB_ACTIONS) {
+  console.warn("WARNING: recorded on a GitHub runner — its Chrome paints ~15 fps, so pans and transitions will judder. For a film a prospect will watch, record it from a Mac.");
+}
 console.log("encoding…");
 // 1920 wide: the 2× capture scaled down is sharper text than 1440 ever was, and still plays
 // on any laptop or phone. CRF 18 because the picture is mostly flat colour and small type,
