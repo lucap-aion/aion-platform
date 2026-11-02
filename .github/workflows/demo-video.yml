@@ -62,6 +62,11 @@ on:
         required: false
         default: ""
         type: string
+      slow:
+        description: "Slow-motion factor. The runner's Chrome paints ~15 fps, so the page runs this many times slower than the film and the cut speeds it back up: at 6, three fresh paints per film frame. 1 = real time (a Mac)"
+        required: false
+        type: string
+        default: "6"
       target:
         description: "dev or prod — which project's portal to film and file the film in. Each is a GitHub Environment holding that project's four AION_* secrets (repo-level ones are dev's)"
         required: false
@@ -90,7 +95,7 @@ jobs:
     # prod's AION_* secrets live on the "prod" environment and override the repo-level (dev) ones.
     environment: ${{ inputs.target == 'prod' && 'prod' || 'dev' }}
     # A slow answer is normal; a hung one should not hold a runner all day.
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -163,6 +168,7 @@ jobs:
             --speed "${{ inputs.speed }}" \
             --fps "${{ inputs.fps }}" \
             --scale "${{ inputs.scale }}" \
+            --slow "${{ inputs.slow }}" \
             ${{ inputs.ask != '' && format('--ask "{0}"', inputs.ask) || '' }} \
             ${{ inputs.mode != '' && format('--mode "{0}"', inputs.mode) || '' }} \
             ${{ inputs.upload && '--upload' || '' }}

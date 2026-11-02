@@ -498,9 +498,10 @@ export async function playIntro(page, { film, lang = "en", brand = "", logoUrl =
     // ── 2. the eleven ──
     await show(2, t.headIn * 0.6);
     const count = beats[2].querySelector(".count");
-    const n0 = performance.now();
+    let n0 = null;
     await new Promise((done) => {
       const step = (now) => {
+        n0 ??= now; // the frame's clock, which slow motion (demo-video.mjs) runs at 1/slow
         const k = Math.min(1, (now - n0) / t.countUp);
         count.textContent = String(Math.round((1 - Math.pow(1 - k, 3)) * 11));
         if (k < 1) requestAnimationFrame(step); else done();
