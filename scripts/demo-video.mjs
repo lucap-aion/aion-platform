@@ -418,10 +418,18 @@ cdp.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
   // The first frames are painted before the viewport is applied — 1440×813, not ×900 — and
   // the pipe takes its size from the first frame it gets, so one of those squashed the whole
   // film by a tenth. Only full-viewport frames go in.
-  if (metadata.deviceWidth !== SIZE.width || metadata.deviceHeight !== SIZE.height) return;
+  // Within two pixels, not exact: at a fractional scale factor (--scale 1.3333) Chrome
+  // reports the viewport a pixel off, and an exact match let every frame through to
+  // nowhere — the recording ran to its end and ffmpeg closed on an empty stream (2026-11-02).
+  if (Math.abs(metadata.deviceWidth - SIZE.width) > 2 || Math.abs(metadata.deviceHeight - SIZE.height) > 2) {
+    seenSizes.add(`${metadata.deviceWidth}×${metadata.deviceHeight}`);
+    return;
+  }
   if (frozen) return;
   latest = Buffer.from(data, "base64");
 });
+/** Frame sizes the filter above turned away, for the error when nothing got through. */
+const seenSizes = new Set();
 // Handed over at 1920 wide, not 2880: the page is still rendered at 2× (the flag above),
 // Chrome scales each frame down before encoding it, and the film is 1920 wide at the end in
 // any case. Encoding 2.25× fewer pixels per frame is what lets a two-core runner keep up
@@ -480,6 +488,12 @@ tick();
 const stoppedAt = Date.now();
 clearInterval(clock);
 await cdp.send("Page.stopScreencast").catch(() => {});
+if (written === 0) {
+  throw new Error(
+    `no frame reached the film: every screencast frame was turned away as the wrong size ` +
+    `(wanted ${SIZE.width}×${SIZE.height}, saw ${[...seenSizes].join(", ") || "none"}).`,
+  );
+}
 capture.stdin.end();
 await context.close();
 await browser.close();
