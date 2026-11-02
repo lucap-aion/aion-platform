@@ -2,7 +2,7 @@
  * The film's title work — everything drawn over the product rather than by it.
  *
  *   playIntro    four beats before the product appears: AION over the house's own
- *                photograph; "All your company data, in one place" with twelve sources on
+ *                photograph; "All your company data, in one place" with fourteen sources on
  *                one ring drawing into a centre; "11 specialised agents" counting in; a cream
  *                wipe with the house's logo × AION.
  *   playChapter  a card before each question — "01 · The piece" — so three answers read as
@@ -46,17 +46,26 @@ import * as si from "simple-icons";
 // places a draft goes rather than feeds the assistant reads; a prospect who asked would
 // have been told so, and the screen says "in one place", which should be true as drawn
 // (Giulio, 2026-10-30: fix it).
+// Fourteen, the systems first: "qualche icona in più dei sistemi più usati — per ora c'è
+// solo quella di Shopify" (Giulio, 2026-11-02). The marks are the ones a house actually
+// exports from — Shopify, Salesforce, SAP, Excel, Google Sheets and Drive — and each is
+// still a source the assistant reads as a file, not an integration it claims. Salesforce
+// and Excel are lettermarks: simple-icons carries neither (trademark takedowns).
+// Product photos folded into the catalogue to make room; the ring holds fourteen names
+// before the top and bottom neighbours touch.
 export const INTRO_SOURCES = [
   { slug: "siShopify", label: "Shopify" },
-  { icon: "database", label: { en: "Your CRM export", it: "L'export del CRM" } },
+  { label: { en: "Salesforce · CRM", it: "Salesforce · CRM" }, mark: "SF", hex: "00A1E0" },
+  { slug: "siSap", label: { en: "SAP · ERP", it: "SAP · ERP" } },
   { label: "Excel · CSV", mark: "X", hex: "217346" },
+  { slug: "siGooglesheets", label: "Google Sheets" },
+  { slug: "siGoogledrive", label: "Google Drive" },
   { icon: "file-text", label: { en: "PDF · Word · PowerPoint", it: "PDF · Word · PowerPoint" } },
   { icon: "globe", label: { en: "Your website", it: "Il vostro sito" } },
   { icon: "scroll-text", label: { en: "News & press", it: "News e stampa" } },
   { icon: "users", label: { en: "Client book", it: "Portafoglio clienti" } },
   { icon: "shield-check", label: { en: "Covers & claims", it: "Coperture e sinistri" } },
-  { icon: "gem", label: { en: "Catalogue", it: "Catalogo" } },
-  { icon: "image", label: { en: "Product photos", it: "Foto prodotto" } },
+  { icon: "gem", label: { en: "Catalogue & photos", it: "Catalogo e foto" } },
   { icon: "mic", label: { en: "Visit notes", it: "Note di visita" } },
   { icon: "calendar-days", label: { en: "Events & trunk shows", it: "Eventi e trunk show" } },
 ];
@@ -198,9 +207,8 @@ const CANVAS_CSS = (id) => `
 #${id} .bg{position:absolute;inset:0;background:
   radial-gradient(60% 50% at 50% 42%,color-mix(in srgb,var(--accent) 20%,transparent) 0%,transparent 70%),
   linear-gradient(180deg,#141110 0%,#0d0b0a 100%)}
-#${id} .photo{position:absolute;inset:0;background-size:cover;background-position:center;opacity:0;will-change:transform;
-  transform:scale(1.02);transition:opacity 1.4s ease,transform 9s linear}
-#${id} .photo.on{opacity:.38;transform:scale(1.09)}
+#${id} .photo{position:absolute;inset:0;background-size:cover;background-position:center;opacity:0;transition:opacity 1.4s ease}
+#${id} .photo.on{opacity:.38}
 #${id} .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(13,11,10,.55),rgba(13,11,10,.78) 60%,#0d0b0a)}
 #${id} .grain{position:absolute;inset:0;background:url("${GRAIN}") repeat;opacity:.35}
 #${id} .vignette{position:absolute;inset:0;background:radial-gradient(90% 90% at 50% 50%,transparent 55%,rgba(0,0,0,.55) 100%)}
@@ -226,13 +234,17 @@ const CANVAS_CSS = (id) => `
   -webkit-background-clip:text;background-clip:text;color:transparent;background-size:260% 100%;background-position:120% 0}
 #${id} .sweep .mark0 .sheen{animation:${id}-sheen 1.5s cubic-bezier(.4,0,.2,1) forwards}
 @keyframes ${id}-sheen{from{background-position:120% 0}to{background-position:-40% 0}}
+/* No slow zoom on either photograph (it was scale 1.02→1.09 over 9 s and 16 s): resampling a
+   full-screen 2880-wide layer every frame is the one thing in these titles that a runner's
+   software compositor could not paint sixty times a second, and the dissolves around the
+   photos came out at half rate — "la demo è diventata scattosa nella parte iniziale"
+   (Giulio, 2026-11-02). A still photograph fades; nothing else moves on it. */
 /* cream, and the house */
 #${id} .cream{position:absolute;inset:0;background:#f7f4ee;color:#1c1917;display:flex;align-items:stretch;
   clip-path:circle(0% at 50% 50%);transition:clip-path 1.2s cubic-bezier(.65,0,.35,1)}
 #${id} .cream.open{clip-path:circle(120% at 50% 50%)}
-#${id} .cream .side{flex:0 0 44%;background-size:cover;background-position:center;opacity:0;will-change:transform;
-  transform:scale(1.02);transition:opacity 1.2s ease .4s,transform 16s linear}
-#${id} .cream.open .side{opacity:1;transform:scale(1.09)}
+#${id} .cream .side{flex:0 0 44%;background-size:cover;background-position:center;opacity:0;transition:opacity 1.2s ease .4s}
+#${id} .cream.open .side{opacity:1}
 #${id} .cream .main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px}
 #${id} .house{display:flex;align-items:center;gap:30px;opacity:0;transform:translateY(10px);transition:opacity .9s ease .5s,transform .9s ease .5s}
 #${id} .cream.open .house{opacity:1;transform:none}
@@ -504,7 +516,7 @@ export async function holdCard(page, { lang = "en", brand = "", logoUrl = "", ph
   const copy = introCopy(lang);
   const html = `
     <div class="cream open" style="transition:none">
-      ${photoUrl ? `<div class="side" style="background-image:url('${esc(photoUrl)}');transition:none;transform:scale(1.09)"></div>` : ""}
+      ${photoUrl ? `<div class="side" style="background-image:url('${esc(photoUrl)}');transition:none"></div>` : ""}
       <div class="main">
         <div class="house" style="transition:none">
           ${logoUrl ? `<img src="${esc(logoUrl)}" alt="${esc(brand)}">` : `<span class="aion" style="letter-spacing:.02em;padding:0">${esc(brand)}</span>`}
