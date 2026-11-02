@@ -899,7 +899,7 @@ async function filmAssistant(page, { count, arrive = "url" }) {
     // The wait is the one stretch the cut speeds up, so a small card by the composer says
     // what is being read while the text races: the client book's size, from demo_login.
     mark(true);
-    await showReading(page, { lang, book });
+    await showReading(page, { lang, book, kind });
     await settled(page);
     await hideReading(page, { film });
     mark(false);

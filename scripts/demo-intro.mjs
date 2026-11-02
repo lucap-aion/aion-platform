@@ -8,7 +8,7 @@
  *   playChapter  a card before each question — "01 · The piece" — so three answers read as
  *                a story with room to breathe, not a chat log.
  *   showReading  a small card in the corner while an answer streams: what is being read
- *                (clients, covers, pieces), since that stretch of the film is sped up and the
+ *                for that chapter (pieces, clients, the knowledge base…), since that stretch of the film is sped up and the
  *                viewer should know why the text is racing.
  *   playEnding   the close: "Every answer came from your own data", then the house's mark and
  *                where its demo is waiting. A film that stops on its last answer has no end.
@@ -120,7 +120,7 @@ export const introCopy = (lang) => (lang === "it"
     go: "Vediamolo in negozio.",
     question: (n) => `Domanda ${n}`,
     reading: "Sta leggendo i vostri dati",
-    readingOf: ({ clients, covers, products }) => [clients && `${fmt(clients)} clienti`, covers && `${fmt(covers)} coperture`, products && `${fmt(products)} pezzi`].filter(Boolean).join(" · "),
+    readingOf: (book, kind) => readingParts(book, kind, { clients: "clienti", covers: "coperture", products: "pezzi", knowledge: "la knowledge base" }),
     readingNoBook: "la knowledge base e il portafoglio clienti della maison",
     endLine: "Ogni risposta viene dai vostri dati.",
     endReady: "La vostra demo è pronta",
@@ -136,13 +136,36 @@ export const introCopy = (lang) => (lang === "it"
     go: "Let's see it on the floor.",
     question: (n) => `Question ${n}`,
     reading: "Reading your data",
-    readingOf: ({ clients, covers, products }) => [clients && `${fmt(clients)} clients`, covers && `${fmt(covers)} covers`, products && `${fmt(products)} pieces`].filter(Boolean).join(" · "),
+    readingOf: (book, kind) => readingParts(book, kind, { clients: "clients", covers: "covers", products: "pieces", knowledge: "the knowledge base" }),
     readingNoBook: "the house's knowledge base and client book",
     endLine: "Every answer came from your own data.",
     endReady: "Your demo is ready",
   });
 
 const fmt = (n) => Number(n).toLocaleString("en-GB");
+
+// What the reading card lists depends on the chapter: a product question reads the catalogue
+// and the knowledge base, a client question reads the client book and the catalogue, and only
+// the policy chapter reads the covers. Listing the whole book under every question put "485
+// covers" under a question about a trolley's materials — Giulio, 2026-11-02: "menziona covers
+// che non c'entrano niente".
+const READS = {
+  "shopping-bag": ["products", "knowledge"],
+  "sparkles": ["products", "knowledge"],
+  "book-open": ["knowledge", "products"],
+  "scroll-text": ["covers", "knowledge"],
+  "users": ["clients", "products"],
+  "send": ["clients", "products"],
+  "message-square-plus": ["clients", "products"],
+  "calendar-days": ["clients", "products"],
+};
+const readingParts = (book, kind, words) => {
+  const parts = READS[kind] ?? ["clients", "products"];
+  return parts
+    .map((k) => (k === "knowledge" ? words.knowledge : book[k] ? `${fmt(book[k])} ${words[k]}` : null))
+    .filter(Boolean)
+    .join(" · ");
+};
 
 // Lucide (ISC) outlines, inlined so the overlay needs nothing from the page's bundle.
 const LUCIDE = {
@@ -585,9 +608,9 @@ export async function playChapter(page, { film, lang = "en", index, kind = "" })
  * The small card that sits beside the composer while an answer streams. `book` is
  * demo_login's { clients, covers, products }, or null when the recorder was not told.
  */
-export async function showReading(page, { lang = "en", book = null }) {
+export async function showReading(page, { lang = "en", book = null, kind = null }) {
   const copy = introCopy(lang);
-  const of = book && (book.clients || book.covers || book.products) ? copy.readingOf(book) : copy.readingNoBook;
+  const of = book && (book.clients || book.covers || book.products) ? copy.readingOf(book, kind) : copy.readingNoBook;
   const html = `<p class="k">${esc(copy.reading)}</p><p class="of">${esc(of)}</p><div class="bar"><i></i></div>`;
   await page.evaluate(mountInPage, { id: "demo-reading", css: READING_CSS, html }).catch(() => {});
   await page.evaluate(() => {

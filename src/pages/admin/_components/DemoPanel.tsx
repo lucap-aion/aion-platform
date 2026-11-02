@@ -377,12 +377,16 @@ export default function DemoPanel({
 
         {film?.download_url && (
           <div className="mt-3 space-y-2">
+            {/* The box is the film's own shape (1920×1200) and the frame is fitted inside it,
+              * never cropped: a preview that trims the top of the frame cuts the house's
+              * wordmark out of its own sidebar, which is what Giulio read as a bug in the film
+              * (2026-11-02). The file itself was whole. */}
             <video
               src={film.watch_url ?? film.download_url}
               controls
               playsInline
               preload="metadata"
-              className="w-full rounded-lg border border-border bg-black"
+              className="aspect-[16/10] w-full rounded-lg border border-border bg-black object-contain"
             />
             <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
               <span>Recorded {new Date(film.generated_at).toLocaleString()}</span>
