@@ -1531,8 +1531,18 @@ function buildSuggestions(
 // this button first (data-assistant-examples) and reads the prompts (data-assistant-prompt).
 const EmptyState = ({ locale, prompts, onPick }: { locale: string; prompts: Suggestion[]; onPick: (q: string) => void }) => {
   const [open, setOpen] = useState(false);
+  const examplesRef = useRef<HTMLDivElement>(null);
+  // Opened on a phone, the list is taller than the screen: bring its first rows into view
+  // rather than leave them under the composer.
+  useEffect(() => {
+    if (open) examplesRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [open]);
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center pb-8 text-center">
+    // min-h-full, not h-full: a centred column that is FIXED to the viewport's height
+    // overflows equally above and below when the examples open, and the part above the top
+    // can never be scrolled to — on a phone the list simply did not move ("non scrolla",
+    // Giulio, 2026-11-02). Let the column grow and the conversation pane scrolls it.
+    <div className="mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center pb-8 text-center">
       <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
         <Sparkles className="h-7 w-7 text-primary" />
       </div>
@@ -1557,7 +1567,7 @@ const EmptyState = ({ locale, prompts, onPick }: { locale: string; prompts: Sugg
           : tt(locale, "See what you can ask", "Vedi cosa puoi chiedere")}
       </button>
       {open && (
-        <div className="mt-6 grid w-full grid-cols-1 gap-2 text-left animate-in fade-in slide-in-from-bottom-2 duration-300 sm:grid-cols-2">
+        <div ref={examplesRef} className="mt-6 grid w-full grid-cols-1 gap-2 text-left animate-in fade-in slide-in-from-bottom-2 duration-300 sm:grid-cols-2">
           {prompts.map(({ icon: Icon, text, needs }, i) => (
             <button
               key={i}
