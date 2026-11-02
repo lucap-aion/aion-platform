@@ -138,6 +138,23 @@ export default function GoLiveChecklist(
 
   const markVerified = async () => {
     setVerifySaving(true);
+    // A prospect cannot be verified. Verified is the PUBLISH switch — the brand picker, the
+    // dashboards, the covers and customers lists — and a prospect's account holds a demo
+    // book: My Style Bags was verified while still a prospect and its 485 invented covers
+    // sat in the admin Covers list beside Roberto Coin's (2026-11-02). The admin views also
+    // skip prospects now whatever their status, but the status should not lie either: set
+    // the house to Client on the Record tab (which is what going live means) and verify then.
+    const { data: row } = await untyped.from("brands").select("is_prospect").eq("id", brandId).maybeSingle();
+    if ((row as { is_prospect?: boolean } | null)?.is_prospect) {
+      setVerifySaving(false);
+      setVerifying(false);
+      toast({
+        title: "Still a prospect",
+        description: "Set the house to Client on the Record tab first. A prospect's demo data must not reach the brand picker or the dashboards.",
+        variant: "destructive",
+      });
+      return;
+    }
     const { error } = await untyped.from("brands").update({ status: "verified" } as never).eq("id", brandId);
     setVerifySaving(false);
     setVerifying(false);
