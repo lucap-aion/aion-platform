@@ -48,7 +48,7 @@ on:
         default: "60"
         type: string
       speed:
-        description: "Playback speed of what moves on screen (the waits for answers are sped up on their own to fit two minutes). 1 is smooth on the runner; above it the film stutters"
+        description: "Playback speed of what moves on screen (the waits for answers are sped up on their own to fit two and a half minutes). 1 is smooth on the runner; above it the film stutters"
         required: false
         default: "1"
         type: string

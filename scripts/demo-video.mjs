@@ -214,11 +214,15 @@ const speed = Number(arg("speed", 1));
 // The film's longest. The titles, the typing and the reading of each answer keep their pace;
 // what gives is the wait while an answer streams, which is sped up as much as it takes to
 // fit — and no more. "Make them max 2 minutes" (Giulio, 2026-10-30): three answers at a flat
-// 1.5× ran to four. 0 turns the cap off.
-const maxSeconds = Number(arg("max-seconds", 120));
+// 1.5× ran to four. Then, with the titles nine seconds longer and the answers read in 6.5 s,
+// the prod films ran their waits at 6–7× and he found them "truncated, the questions part
+// too fast — add a few seconds" (2026-11-02): two and a half minutes, so the waits stay
+// under 5× and each answer is read for longer. 0 turns the cap off.
+const maxSeconds = Number(arg("max-seconds", 150));
 // The fastest the cut may run the waits for answers. Also the stop rule's limit: a question
-// that would need them faster than this is not asked.
-const MAX_WAIT_SPEED = 8;
+// that would need them faster than this is not asked. Past 5× a streaming answer is a smear
+// (it was 8 for a week, to fit three questions in two minutes; Giulio saw the smear).
+const MAX_WAIT_SPEED = 5;
 /** On-film milliseconds → real ones. Every hold and pan below is written as the viewer sees it. */
 const film = (ms) => ms * speed;
 // The opening titles (scripts/demo-intro.mjs): the data wall, the eleven agents, the house.
@@ -297,7 +301,7 @@ if (!slug || !email || !password) {
     "       --functions-base/--batch-secret, or AION_FUNCTIONS_BASE/AION_BATCH_SECRET)\n" +
     "       [--mode portal|assistant] [--client-email … --client-password …] [--cameo]\n" +
     "       [--base url] [--ask \"q1|q2\"] [--questions 3] [--speed 1.5] [--out file.mp4] [--upload]\n" +
-    "       [--intro | --no-intro] [--lang en|it] [--max-seconds 120] [--fps 24] [--book clients,covers,products]",
+    "       [--intro | --no-intro] [--lang en|it] [--max-seconds 150] [--fps 24] [--book clients,covers,products]",
   );
   process.exit(2);
 }
@@ -500,10 +504,10 @@ console.log("encoding…");
 //
 // TWO SPEEDS, NOT ONE. Everything plays at `speed` except the stretches where the film is
 // waiting for an answer to stream, which play at whatever speed brings the whole film inside
-// `maxSeconds` — between `speed` (no cap needed) and 8× (past which the stream is a smear
-// and the saving is pennies). The answer is still read through at a person's pace
+// `maxSeconds` — between `speed` (no cap needed) and MAX_WAIT_SPEED (past which the stream
+// is a smear and the saving is pennies). The answer is still read through at a person's pace
 // afterwards, so nothing the viewer is meant to read goes by fast. If the cap cannot be met
-// even so, the film is cut at 8× for the waits and the log says by how much it misses.
+// even so, the film is cut at that ceiling for the waits and the log says by how much it misses.
 const recorded = (stoppedAt - startedAt) / 1000;
 const segments = [];
 {
@@ -523,7 +527,7 @@ if (maxSeconds > 0 && waitSec > 0) {
   waitSpeed = room > 0 ? Math.min(MAX_WAIT_SPEED, Math.max(speed, waitSec / room)) : MAX_WAIT_SPEED;
   const length = restSec / speed + waitSec / waitSpeed;
   if (length > maxSeconds + 1) {
-    console.warn(`WARNING: the film runs ${Math.round(length)}s against a cap of ${maxSeconds}s even with the waits at 8× — fewer questions (--questions) is the lever left.`);
+    console.warn(`WARNING: the film runs ${Math.round(length)}s against a cap of ${maxSeconds}s even with the waits at ${MAX_WAIT_SPEED}× — fewer questions (--questions) is the lever left.`);
   } else if (waitSpeed > speed) {
     console.log(`the waits for answers (${Math.round(waitSec)}s recorded) play at ${waitSpeed.toFixed(1)}× to fit ${maxSeconds}s; everything else at ${speed}×`);
   }
@@ -814,11 +818,10 @@ async function filmAssistant(page, { count, arrive = "url" }) {
     // speeding up the waits. So before each question after the first: what has been spent on
     // screen, what the waits have cost so far, and what one more of each would add; if that
     // needs the waits faster than the cut can run them (MAX_WAIT_SPEED), the film ends here,
-    // with two answers rather than a film that overruns. The limit was 5× — "past that a
-    // streaming answer is a smear" — until the titles grew by nine seconds (2026-11-02) and
-    // every prod film dropped to two questions; Giulio wants three, inside two minutes, and
-    // the wait is spent behind the reading card, so it is the answer's reading pan, at real
-    // time, that has to be watchable, not the stream.
+    // with two answers rather than a film that overruns. The limit is 5× — "past that a
+    // streaming answer is a smear": it was raised to 8× for a week to fit three questions in
+    // two minutes under the longer titles, and Giulio found the result too fast (2026-11-02).
+    // Three questions now fit because the cap is 150 s, not because the waits race.
     if (i > 0 && maxSeconds > 0 && rolling) {
       const now = (Date.now() - startedAt) / 1000;
       let waited = 0, open = null;
@@ -826,8 +829,8 @@ async function filmAssistant(page, { count, arrive = "url" }) {
       const spent = now - waited;
       const perQuestion = waited / i;
       // On screen, one more question costs: a chapter, the typing, the reading pan, and the
-      // ending that follows the last answer — about 26 s at the pans' longest.
-      const more = 26;
+      // ending that follows the last answer — about 31 s at the pans' longest.
+      const more = 31;
       const room = (maxSeconds - 2) - (spent + more) / speed;
       const need = room > 0 ? (waited + perQuestion) / room : Infinity;
       if (need > MAX_WAIT_SPEED) {
@@ -1375,7 +1378,9 @@ async function presentAnswer(page, index) {
     // (2026-10-30). Whatever moves here must be the scroll alone.
     // One reading speed, always. A long answer is read as far as the time allows and left
     // there, rather than skimmed to its end: at the pan's cap a two-screen answer went by at
-    // four times reading pace, which is not reading.
+    // four times reading pace, which is not reading. The cap was 6.5 s (about 720 px), which
+    // left the top-10 table and the trunk-show plan cut off mid-way — "truncated" (Giulio,
+    // 2026-11-02); it is 11 s now, near two screens, and the answer is held longer at the end.
     const run = bottom - start;
     const reach = Math.min(run, timing.panMax / timing.panPerPx);
     const panMs = reach > 2 ? Math.max(timing.panMin, reach * timing.panPerPx) : 0;
@@ -1393,10 +1398,10 @@ async function presentAnswer(page, index) {
     // All as the viewer sees them; `film()` stretches each for the recording.
     timing: {
       findPerPx: film(0.6), findMax: film(700),
-      openingHold: film(1200),
+      openingHold: film(1600),
       // ~110px a second on film: the speed you scroll a page you are reading.
-      panPerPx: film(9), panMin: film(1500), panMax: film(6500),
-      endHold: film(1800),
+      panPerPx: film(9), panMin: film(1500), panMax: film(11000),
+      endHold: film(3000),
     },
   });
   return report;
