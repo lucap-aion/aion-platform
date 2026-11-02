@@ -156,3 +156,29 @@ describe("fitting the picture on a slide", () => {
     expect(why).toMatch(/no picture/);
   });
 });
+
+describe("a crop taken around the subject", () => {
+  it("keeps a subject at the right edge of a wide picture in a square frame", async () => {
+    const { fitPicture } = await import("../../supabase/functions/_shared/picture-fit.ts");
+    const frame = { x: 0, y: 0, cx: 1000, cy: 1000 };
+    const wide = { w: 2000, h: 1000 }; // half the width has to go
+    const centred = fitPicture(frame, wide, { maxCrop: 0.6, anchor: "centre" });
+    expect(centred.mode).toBe("crop");
+    expect(centred.srcRect).toEqual({ l: 25000, t: 0, r: 25000, b: 0 });
+    // The couple with the trolleys at 80% from the left: the kept half runs 55–100%, not
+    // 25–75%, so the trolleys stay and the empty road goes.
+    const around = fitPicture(frame, wide, { maxCrop: 0.6, anchor: "centre" }, { x: 0.8, y: 0.5 });
+    expect(around.srcRect).toEqual({ l: 50000, t: 0, r: 0, b: 0 });
+    // A subject slightly right of centre moves the crop by just that much.
+    const nudged = fitPicture(frame, wide, { maxCrop: 0.6, anchor: "centre" }, { x: 0.6, y: 0.5 });
+    expect(nudged.srcRect).toEqual({ l: 35000, t: 0, r: 15000, b: 0 });
+  });
+
+  it("keeps a face near the top of a tall picture in a wide frame", async () => {
+    const { fitPicture } = await import("../../supabase/functions/_shared/picture-fit.ts");
+    const frame = { x: 0, y: 0, cx: 2000, cy: 1000 };
+    const tall = { w: 1000, h: 1000 }; // half the height has to go
+    const around = fitPicture(frame, tall, { maxCrop: 0.6, anchor: "top" }, { x: 0.5, y: 0.15 });
+    expect(around.srcRect).toEqual({ l: 0, t: 0, r: 0, b: 50000 });
+  });
+});

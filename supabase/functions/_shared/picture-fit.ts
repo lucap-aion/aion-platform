@@ -45,6 +45,8 @@
 
 /** A picture's frame on the slide, in EMU. */
 export type Box = { x: number; y: number; cx: number; cy: number };
+/** Where the subject is, as fractions of the picture's width and height (focal-point.ts). */
+export type Focus = { x: number; y: number };
 
 /** srcRect edges, in thousandths of a percent — the units <a:srcRect> is written in. */
 export type SrcRect = { l: number; t: number; r: number; b: number };
@@ -69,7 +71,7 @@ export const PHOTOGRAPH: FitRule = { maxCrop: 0.5, anchor: "top" };
  * whatever crop the template was carrying.
  */
 export function fitPicture(
-  frame: Box, img: { w: number; h: number }, rule: FitRule = PACKSHOT,
+  frame: Box, img: { w: number; h: number }, rule: FitRule = PACKSHOT, focus: Focus | null = null,
 ): Fit {
   const { maxCrop, anchor } = rule;
   if (!(frame.cx > 0 && frame.cy > 0 && img.w > 0 && img.h > 0)) {
@@ -100,13 +102,18 @@ export function fitPicture(
     };
   }
 
-  // Crop the long axis. 100000 = the whole edge.
+  // Crop the long axis. 100000 = the whole edge. With a focus — where the subject is, as a
+  // fraction of the edge — the kept part is centred on it, as far as the edge allows; with
+  // none, the rule's anchor decides.
   const gone = Math.round(cropped * 100000);
+  // The kept part (`ratio` of the edge) starts at the subject less half of itself, held
+  // inside the edge — so a subject near the edge keeps the edge, not empty space beyond it.
+  const around = (at: number) => Math.round(Math.max(0, Math.min(1 - ratio, at - ratio / 2)) * 100000);
   if (imgA > frameA) {
-    const off = Math.round(gone / 2);
+    const off = focus ? Math.min(gone, around(focus.x)) : Math.round(gone / 2);
     return { mode: "crop", box: null, srcRect: { l: off, t: 0, r: gone - off, b: 0 }, cropped };
   }
-  const top = anchor === "top" ? Math.round(gone / 3) : Math.round(gone / 2);
+  const top = focus ? Math.min(gone, around(focus.y)) : anchor === "top" ? Math.round(gone / 3) : Math.round(gone / 2);
   return { mode: "crop", box: null, srcRect: { l: 0, t: top, r: 0, b: gone - top }, cropped };
 }
 
@@ -166,7 +173,7 @@ export function applyFit(pic: string, fit: Fit): string {
  * why, when there is nothing safe to do.
  */
 export function fitPictureInSlide(
-  xml: string, relId: string, img: { w: number; h: number } | null, rule: FitRule = PACKSHOT,
+  xml: string, relId: string, img: { w: number; h: number } | null, rule: FitRule = PACKSHOT, focus: Focus | null = null,
 ): { xml: string; fit: Fit | null; why?: string } {
   const pic = (xml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) ?? [])
     .find((p) => new RegExp(`r:embed="${relId}"`).test(p));
@@ -186,6 +193,6 @@ export function fitPictureInSlide(
   const frame = frameOf(pic);
   if (!frame) return { xml, fit: null, why: "the picture has no frame of its own to fit to" };
 
-  const fit = fitPicture(frame, img, rule);
+  const fit = fitPicture(frame, img, rule, focus);
   return { xml: xml.replace(pic, applyFit(pic, fit)), fit };
 }
