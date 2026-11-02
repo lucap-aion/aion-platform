@@ -65,7 +65,9 @@ describe("how the film reads an answer", () => {
 
   it("reads every answer through after it finishes, not just waits on it", () => {
     expect(recorder).toContain("async function presentAnswer(page, index)");
-    expect(recorder).toMatch(/await settled\(page\);\s*\n(\s*\/\/.*\n)*\s*photos\.push\(await presentAnswer\(page, i\)\);/);
+    // Between the two: the reading card is taken down and the wait's mark closed — nothing
+    // that asks another question or moves on.
+    expect(recorder).toMatch(/await settled\(page\);\s*\n(\s*(\/\/.*|await hideReading\(.*|mark\(false\);)\n)*\s*photos\.push\(await presentAnswer\(page, i\)\);/);
   });
 
   it("paces the reading on film, so --speed compresses the waiting and not the reading", () => {
@@ -196,10 +198,17 @@ describe("the platform tour", () => {
     expect(read("src/components/ui/skeleton.tsx")).toContain("animate-pulse");
     expect(recorder).toContain(`document.querySelectorAll(".animate-pulse, .animate-spin")`);
     // And the curtain is down for the whole of each move, lifted only after the wait.
-    for (const fn of ["viaSidebar", "openOne", "logIn"]) {
+    for (const fn of ["viaSidebar", "openOne"]) {
       const start = recorder.indexOf(`async function ${fn}(`);
       const body = recorder.slice(start, recorder.indexOf("\n}\n", start));
       expect(body, fn).toMatch(/await curtainDown\(page\);[\s\S]*?\.click\([\s\S]*?await screenReady\(page, [^)]+\);\s*\n\s*await curtainUp\(page\);/);
+    }
+    // The sign-in is covered either by the titles' held card or, without titles, by the
+    // curtain — and whichever it was is lifted only once the landing screen is ready.
+    {
+      const start = recorder.indexOf("async function logIn(");
+      const body = recorder.slice(start, recorder.indexOf("\n}\n", start));
+      expect(body).toMatch(/if \(!heldIntro\) await curtainDown\(page\);[\s\S]*?\.click\([\s\S]*?await screenReady\(page, [^)]+\);[\s\S]*?await dropIntro\(page[\s\S]*?\} else \{\s*\n\s*await curtainUp\(page\);/);
     }
     // It must let the click through to the row beneath it, and lift on the new screen's top.
     expect(recorder).toContain("pointer-events:none");

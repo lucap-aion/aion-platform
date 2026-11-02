@@ -216,6 +216,9 @@ const speed = Number(arg("speed", 1));
 // fit — and no more. "Make them max 2 minutes" (Giulio, 2026-10-30): three answers at a flat
 // 1.5× ran to four. 0 turns the cap off.
 const maxSeconds = Number(arg("max-seconds", 120));
+// The fastest the cut may run the waits for answers. Also the stop rule's limit: a question
+// that would need them faster than this is not asked.
+const MAX_WAIT_SPEED = 8;
 /** On-film milliseconds → real ones. Every hold and pan below is written as the viewer sees it. */
 const film = (ms) => ms * speed;
 // The opening titles (scripts/demo-intro.mjs): the data wall, the eleven agents, the house.
@@ -517,7 +520,7 @@ let waitSpeed = speed;
 if (maxSeconds > 0 && waitSec > 0) {
   // Aimed a little under the cap, so the rounded length is under it too.
   const room = (maxSeconds - 2) - restSec / speed;
-  waitSpeed = room > 0 ? Math.min(8, Math.max(speed, waitSec / room)) : 8;
+  waitSpeed = room > 0 ? Math.min(MAX_WAIT_SPEED, Math.max(speed, waitSec / room)) : MAX_WAIT_SPEED;
   const length = restSec / speed + waitSec / waitSpeed;
   if (length > maxSeconds + 1) {
     console.warn(`WARNING: the film runs ${Math.round(length)}s against a cap of ${maxSeconds}s even with the waits at 8× — fewer questions (--questions) is the lever left.`);
@@ -808,11 +811,14 @@ async function filmAssistant(page, { count, arrive = "url" }) {
 
   for (const [i, { text: question, kind }] of questions.entries()) {
     // A question is asked only if the film can still hold it. The cap (maxSeconds) is met by
-    // speeding up the waits, and past about 5× a streaming answer is a smear even with the
-    // reading card beside it — Oris's third answer pushed its waits to 7.8×. So before each
-    // question after the first: what has been spent on screen, what the waits have cost so
-    // far, and what one more of each would add; if that needs the waits faster than 5×, the
-    // film ends here, with two answers that can be watched rather than three that cannot.
+    // speeding up the waits. So before each question after the first: what has been spent on
+    // screen, what the waits have cost so far, and what one more of each would add; if that
+    // needs the waits faster than the cut can run them (MAX_WAIT_SPEED), the film ends here,
+    // with two answers rather than a film that overruns. The limit was 5× — "past that a
+    // streaming answer is a smear" — until the titles grew by nine seconds (2026-11-02) and
+    // every prod film dropped to two questions; Giulio wants three, inside two minutes, and
+    // the wait is spent behind the reading card, so it is the answer's reading pan, at real
+    // time, that has to be watchable, not the stream.
     if (i > 0 && maxSeconds > 0 && rolling) {
       const now = (Date.now() - startedAt) / 1000;
       let waited = 0, open = null;
@@ -824,7 +830,7 @@ async function filmAssistant(page, { count, arrive = "url" }) {
       const more = 26;
       const room = (maxSeconds - 2) - (spent + more) / speed;
       const need = room > 0 ? (waited + perQuestion) / room : Infinity;
-      if (need > 5) {
+      if (need > MAX_WAIT_SPEED) {
         console.log(`stopping at ${i} question(s): a ${i + 1}${["st", "nd", "rd"][i] ?? "th"} would need the waits at ${need === Infinity ? "∞" : need.toFixed(1)}× to fit ${maxSeconds}s`);
         break;
       }
