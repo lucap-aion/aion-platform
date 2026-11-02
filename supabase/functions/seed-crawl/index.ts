@@ -18,7 +18,7 @@ import { rankCatalogueUrls } from "../_shared/catalogue-urls.ts";
 // What the house asked for. Read once, here, and carried on the source so the worker does
 // not refetch robots.txt on every tick.
 import { parseRobots, robotsAllows, rulesToConfig, AGENT_TOKEN, NO_RULES } from "../_shared/robots.ts";
-import { fetchSite } from "../_shared/fetch-site.ts";
+import { fetchSite, BROWSER_UA } from "../_shared/fetch-site.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -180,19 +180,11 @@ Deno.serve(async (req: Request) => {
     const thr = Math.max(2, Math.ceil(sampled * 0.4));
     const boilerplate = [...lineFreq.entries()].filter(([, n]) => n >= thr).map(([l]) => l).slice(0, 500);
 
-    // News via Google News RSS.
-    const newsItems: { url: string; title: string }[] = [];
-    if (newsPref && brandName) {
-      try {
-        const rss = await (await fetch(`https://news.google.com/rss/search?q=${encodeURIComponent(`"${brandName}"`)}&hl=en-US&gl=US&ceid=US:en`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(10000) })).text();
-        for (const m of rss.matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
-          const link = m[1].match(/<link>([\s\S]*?)<\/link>/i)?.[1]?.trim();
-          const title = decodeEntities(m[1].match(/<title>([\s\S]*?)<\/title>/i)?.[1]?.trim() ?? "");
-          if (link) newsItems.push({ url: link, title });
-          if (newsItems.length >= NEWS_MAX) break;
-        }
-      } catch { /* news optional */ }
-    }
+    // News. Google News RSS first, then Bing's: from this runtime Google answers a bot's
+    // request with a 503 "Sorry..." page more often than not (found 2026-11-02 — the feed had
+    // been silently empty since June), and Bing answers the same query every time.
+    const news = newsPref && brandName ? await fetchNews(brandName) : { items: [], source: null as string | null, error: null as string | null };
+    const newsItems = news.items;
 
     // Persist source config.
     await admin.from("knowledge_sources").upsert({
@@ -228,7 +220,7 @@ Deno.serve(async (req: Request) => {
       // little on it and a site that asked us to stay out of most of it.
       refused_by_robots: refusedByRobots,
       crawl_delay_seconds: robots.crawlDelaySeconds,
-      news_items: newsItems.length, boilerplate_lines: boilerplate.length, enqueued,
+      news_items: newsItems.length, news_source: news.source, news_error: news.error, boilerplate_lines: boilerplate.length, enqueued,
     });
   } catch (e) {
     console.error("[seed-crawl]", e);
@@ -238,3 +230,49 @@ Deno.serve(async (req: Request) => {
 
 function jsonOk(b: unknown) { return new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json", ...CORS } }); }
 function jsonError(m: string, s: number) { return new Response(JSON.stringify({ error: m }), { status: s, headers: { "Content-Type": "application/json", ...CORS } }); }
+
+// ── News feeds ──────────────────────────────────────────────────────────────
+// Three tries, the first that returns a usable feed wins. An HTML "Sorry..." page is a 503
+// and an empty body is a feed with no items: both move on to the next source, and what
+// happened is said in the response rather than swallowed.
+const NEWS_ACCEPT = "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8";
+async function fetchNews(brandName: string): Promise<{ items: { url: string; title: string }[]; source: string | null; error: string | null }> {
+  const q = encodeURIComponent(`"${brandName}"`);
+  const tries: { source: string; url: string; ua: string }[] = [
+    { source: "google", url: `https://news.google.com/rss/search?q=${q}&hl=en-US&gl=US&ceid=US:en`, ua: UA },
+    { source: "google-as-browser", url: `https://news.google.com/rss/search?q=${q}&hl=en-US&gl=US&ceid=US:en`, ua: BROWSER_UA },
+    { source: "bing", url: `https://www.bing.com/news/search?q=${q}&format=rss`, ua: UA },
+  ];
+  const notes: string[] = [];
+  for (const t of tries) {
+    try {
+      const res = await fetch(t.url, { headers: { "User-Agent": t.ua, "Accept": NEWS_ACCEPT }, signal: AbortSignal.timeout(10000) });
+      const body = await res.text();
+      if (!res.ok) { notes.push(`${t.source}: HTTP ${res.status}`); continue; }
+      const items = parseFeed(body);
+      if (!items.length) { notes.push(`${t.source}: no items`); continue; }
+      return { items: items.slice(0, NEWS_MAX), source: t.source, error: notes.length ? notes.join("; ") : null };
+    } catch (e) {
+      notes.push(`${t.source}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return { items: [], source: null, error: notes.join("; ") || "no feed answered" };
+}
+
+/** RSS items → {url, title}. A Bing item links to a Bing redirect with the article in `url=`; the article is kept. */
+function parseFeed(xml: string): { url: string; title: string }[] {
+  const out: { url: string; title: string }[] = [];
+  for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
+    let link = decodeEntities(m[1].match(/<link>([\s\S]*?)<\/link>/i)?.[1]?.trim() ?? "");
+    link = link.replace(/^<!\[CDATA\[|\]\]>$/g, "").trim();
+    const title = decodeEntities(m[1].match(/<title>([\s\S]*?)<\/title>/i)?.[1]?.trim() ?? "").replace(/^<!\[CDATA\[|\]\]>$/g, "").trim();
+    if (!link) continue;
+    try {
+      const u = new URL(link);
+      if (/(^|\.)bing\.com$/i.test(u.hostname) && u.searchParams.get("url")) link = u.searchParams.get("url")!;
+    } catch { continue; }
+    if (!/^https?:\/\//i.test(link)) continue;
+    out.push({ url: link, title });
+  }
+  return out;
+}
