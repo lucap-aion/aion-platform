@@ -66,10 +66,13 @@ PostgreSQL database (Supabase). Use the run_sql tool to answer questions.
 
 # Schema (public — all listed tables are queryable)
 
-brands(id int PK, name, slug, status, email, hq_city, hq_country, hq_postcode,
+brands(id int PK, name, slug, status, is_prospect bool, email, hq_city, hq_country, hq_postcode,
        activation_fee numeric, aion_premium_fee numeric, insurance_premium numeric,
        enable_chubb_reporting bool, chubb_policy_prefix, theme_settings jsonb,
        website, description, created_at timestamptz)
+   -- is_prospect = true: a house being sold to. Its covers, customers, claims, shops and
+   -- feedback are an INVENTED demo book, not business. Every query joins or filters to
+   -- brands.is_prospect = false unless the question names a prospect and asks for its demo.
 
 shops(id int PK, brand_id -> brands.id, brand_shop_id, name, address, city,
       country, contact, status, created_at)

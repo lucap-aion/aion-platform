@@ -48,6 +48,7 @@ const AdminReports = () => {
       .from("reports")
       .select("*, brands!inner(*), created_by_profile:profiles!reports_created_by_fkey(*), uploaded_by_profile:profiles!reports_uploaded_to_chubb_by_fkey(*)", { count: "exact" })
       .eq("brands.status", "verified")
+      .eq("brands.is_prospect", false)
       .order(order.column, { ascending: sortDir === "asc", foreignTable: order.foreignTable })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (search) query = query.or(`name.ilike.%${search}%,type.ilike.%${search}%,source.ilike.%${search}%,direction.ilike.%${search}%,created_by.ilike.%${search}%`);

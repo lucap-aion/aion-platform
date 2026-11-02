@@ -177,7 +177,7 @@ const AdminCovers = () => {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("brands").select("id, name, max_covered_value").eq("status", "verified").order("name"),
+      supabase.from("brands").select("id, name, max_covered_value").eq("status", "verified").eq("is_prospect", false).order("name"),
       supabase.from("profiles").select("id, email, first_name, last_name, brand_id").eq("role", "customer").order("email").limit(500),
       supabase.from("catalogues").select("id, name, brand_id, category").order("name"),
       supabase.from("manufacturing_costs").select("category, cost_pct, brand_id"),

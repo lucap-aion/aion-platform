@@ -229,7 +229,7 @@ const AdminCustomers = () => {
   useEffect(() => { fetchData(); }, [page, search, filterValues, sortKey, sortDir, brands]);
 
   useEffect(() => {
-    supabase.from("brands").select("id, name").eq("status", "verified").order("name").then(({ data }) => setBrands((data as BrandOption[]) ?? []));
+    supabase.from("brands").select("id, name").eq("status", "verified").eq("is_prospect", false).order("name").then(({ data }) => setBrands((data as BrandOption[]) ?? []));
   }, []);
 
   const openAdd = () => { setEditing(empty()); setMode("add"); setDrawerOpen(true); };

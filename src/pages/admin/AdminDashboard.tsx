@@ -305,7 +305,7 @@ export default function AdminDashboard() {
           { data: claimsRows },
           { data: psData = [] },
         ] = await Promise.all([
-          supabase.from("brands").select("id", { count: "exact", head: true }).eq("status", "verified"),
+          supabase.from("brands").select("id", { count: "exact", head: true }).eq("status", "verified").eq("is_prospect", false),
           shopFilterIds
             ? supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds).in("id", shopFilterIds)
             : supabase.from("shops").select("id", { count: "exact", head: true }).in("brand_id", safeBrandIds),
@@ -386,7 +386,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (allBrands.length > 0) return;
-    supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee, max_covered_value").eq("status", "verified").order("name")
+    supabase.from("brands").select("id, name, slug, activation_fee, insurance_premium, aion_premium_fee, max_covered_value").eq("status", "verified").eq("is_prospect", false).order("name")
       .then(({ data }) => setAllBrands((data as Brand[]) ?? []));
   }, []);
 

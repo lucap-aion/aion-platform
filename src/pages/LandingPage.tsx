@@ -106,6 +106,7 @@ const LandingPage = () => {
           .not("slug", "is", null)
           .neq("slug", "")
           .eq("status", "verified")
+          .eq("is_prospect", false)
           .order("name");
         setBrands(data ?? []);
       } catch {

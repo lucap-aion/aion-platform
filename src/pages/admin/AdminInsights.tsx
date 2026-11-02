@@ -762,7 +762,7 @@ export default function AdminInsights({ lockedBrandId, lockedBrandName }: AdminI
       setBrands([{ id: lockedBrandId as number, name: lockedBrandName ?? "" }]);
       return;
     }
-    supabase.from("brands").select("id, name").eq("status", "verified").order("name")
+    supabase.from("brands").select("id, name").eq("status", "verified").eq("is_prospect", false).order("name")
       .then(({ data }) => setBrands((data as Brand[]) ?? []));
   }, [isLocked, lockedBrandId, lockedBrandName]);
 
