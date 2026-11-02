@@ -40,6 +40,10 @@ import { focusMatcher } from "../_shared/brand-defaults.ts";
 import { sniffFormat, imageSize, EMBEDDABLE, MEDIA_TYPES } from "../_shared/image-bytes.ts";
 import { findBrandPhotos, pickForFrame, type FoundPhoto, type PhotoRole } from "../_shared/brand-photos.ts";
 import { fitPictureInSlide, frameOf, PACKSHOT, PHOTOGRAPH } from "../_shared/picture-fit.ts";
+import { findFocalPoint } from "../_shared/focal-point.ts";
+
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const VISION_MODEL = Deno.env.get("VISION_MODEL") ?? Deno.env.get("FOCUS_MODEL") ?? "claude-sonnet-4-6";
 import { fetchSite } from "../_shared/fetch-site.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -335,11 +339,23 @@ Deno.serve(async (req: Request) => {
         unfitted.push(`slide ${s.slide} (${!relId ? "its media part is in no relationship" : "the slide is unreadable"})`);
       } else {
         // A packshot and a campaign photograph want different crops — see picture-fit.ts.
-        const fitted = fitPictureInSlide(slideXml, relId, imageSize(img.bytes),
-          s.role === "ambassador" || s.role === "lifestyle" || s.role === "store" ? PHOTOGRAPH : PACKSHOT);
+        const rule = s.role === "ambassador" || s.role === "lifestyle" || s.role === "store" ? PHOTOGRAPH : PACKSHOT;
+        const size = imageSize(img.bytes);
+        let fitted = fitPictureInSlide(slideXml, relId, size, rule);
+        // A crop worth the name is taken around the SUBJECT, not the centre: the model is
+        // asked once where it is (focal-point.ts). A slide that keeps nine tenths of the
+        // picture is not worth the look.
+        let aroundSubject = false;
+        if (fitted.fit?.mode === "crop" && fitted.fit.cropped >= 0.08 && size) {
+          const frame = frameOf((slideXml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) ?? []).find((p) => p.includes(`r:embed="${relId}"`)) ?? "");
+          const shape = frame ? (frame.cx > frame.cy * 1.2 ? "in a wide frame" : frame.cy > frame.cx * 1.2 ? "in a tall frame" : "in a square frame") : "in a frame of a different shape";
+          const focus = await findFocalPoint(img.bytes, MEDIA_TYPES[ext] ?? `image/${ext}`, { apiKey: ANTHROPIC_API_KEY, model: VISION_MODEL, frame: `${shape} on a slide` })
+            .catch((e) => { console.error("[brand-deck] focal point:", (e as Error).message); return null; });
+          if (focus) { fitted = fitPictureInSlide(slideXml, relId, size, rule, focus); aroundSubject = true; }
+        }
         zip.file(slidePath, fitted.xml);
         fitMode = fitted.fit?.mode ?? "unfitted";
-        if (fitted.fit?.mode === "crop") cropped.push(`slide ${s.slide} (${Math.round(fitted.fit.cropped * 100)}%)`);
+        if (fitted.fit?.mode === "crop") cropped.push(`slide ${s.slide} (${Math.round(fitted.fit.cropped * 100)}%${aroundSubject ? ", around its subject" : ""})`);
         else if (fitted.fit?.mode === "shrink") shrunk.push(`slide ${s.slide}`);
         else if (!fitted.fit) unfitted.push(`slide ${s.slide} (${fitted.why ?? "unknown"})`);
       }
@@ -499,7 +515,7 @@ Deno.serve(async (req: Request) => {
         : []),
       // What replaced the old blanket warning that crops "differ from the originals" — they
       // no longer differ by accident, so the note says what was actually done to each one.
-      ...(cropped.length ? [`Centre-cropped to the frame: ${cropped.join(", ")} — the percentage is how much of the long edge went.`] : []),
+      ...(cropped.length ? [`Cropped to the frame: ${cropped.join(", ")} — the percentage is how much of the long edge went; "around its subject" means the model was asked where the subject is and the crop keeps it.`] : []),
       ...(shrunk.length
         ? [`Too far off the frame's shape to crop, so the frame was shrunk to the picture and centred on ${shrunk.join(", ")}. Nothing is distorted and nothing is cut, but there is slide background where the old picture reached — look at those slides.`]
         : []),

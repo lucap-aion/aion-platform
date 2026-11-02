@@ -53,6 +53,7 @@ import { policyPrefix, productFocus, focusBreakdown, renderFaqs, customerService
 import { catalogueDigest, decideFocus } from "../_shared/focus-ai.ts";
 // A brand's imagery, held by us rather than hotlinked from a site that will be redesigned.
 import { mirrorBrandImages, servedByAion, IMAGE_SLOTS, type ImageSlot } from "../_shared/brand-images.ts";
+import { findFocalPoint as locateSubject, focusAsPosition } from "../_shared/focal-point.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
@@ -1967,51 +1968,18 @@ async function askForFocus(prompt: string): Promise<string> {
 }
 
 /**
- * Where the subject of a photograph is, as CSS object-position ("62% 50%"), or null.
- *
- * One look by the model at the picture the sign-in panel will show. The panel is 4:5 and
- * cover-crops to this point, so the answer is the centre of what the crop must keep: the
- * product when one is in the picture, the person otherwise. Any failure — no key, a picture
- * the API will not take, an answer that is not a point — is a null and the panel keeps the
- * centre, which is what it always did.
+ * Where the subject of the sign-in photograph is, as CSS object-position ("62% 55%"), or
+ * null. The panel is 4:5 and cover-crops to this point — see _shared/focal-point.ts.
  */
 async function findFocalPoint(url: string): Promise<string | null> {
   if (!ANTHROPIC_API_KEY) return null;
   const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   if (!res.ok) return null;
   const bytes = new Uint8Array(await res.arrayBuffer());
-  // The API takes 5 MB per image; a bigger one keeps its centre rather than failing here.
-  if (!bytes.length || bytes.length > 4_500_000) return null;
-  const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-  if (!/^image\/(jpeg|png|webp|gif)$/.test(type)) return null;
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-  const out = await anthropic.messages.create({
-    model: VISION_MODEL,
-    max_tokens: 60,
-    system: "You locate the subject of a photograph. You answer with JSON and nothing else.",
-    messages: [{
-      role: "user",
-      content: [
-        { type: "image", source: { type: "base64", media_type: type as "image/jpeg", data: btoa(binary) } },
-        {
-          type: "text",
-          text: "This photograph will be shown in a tall frame, 4 wide by 5 high, behind a sign-in form, " +
-            "cropped to fit. Find the subject the crop must keep: the product (bag, jewel, watch, " +
-            "shoes, eyewear) if one is shown, otherwise the person. Answer only with JSON " +
-            '{"x": <percent from the left edge>, "y": <percent from the top edge>} for the centre of that subject.',
-        },
-      ],
-    }],
-  }, { timeout: 25_000 });
-  const text = out.content.map((c) => (c.type === "text" ? c.text : "")).join("");
-  const m = /\{[^}]*\}/.exec(text);
-  if (!m) return null;
-  const parsed = JSON.parse(m[0]) as { x?: unknown; y?: unknown };
-  const pct = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : null);
-  const x = pct(parsed.x), y = pct(parsed.y);
-  return x == null || y == null ? null : `${x}% ${y}%`;
+  const focus = await locateSubject(bytes, res.headers.get("content-type") ?? "", {
+    apiKey: ANTHROPIC_API_KEY, model: VISION_MODEL, frame: "in a tall frame, 4 wide by 5 high, behind a sign-in form",
+  });
+  return focus ? focusAsPosition(focus) : null;
 }
 
 /** A catalogue row, as the product focus reads it. */
