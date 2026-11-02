@@ -31,3 +31,8 @@ verify_jwt = false
 
 [functions.sync-catalogue-prices]
 verify_jwt = false
+
+# The demo film's public watch page: nobody is signed in there, the per-recipient token is
+# the credential (see watch-demo/index.ts).
+[functions.watch-demo]
+verify_jwt = false

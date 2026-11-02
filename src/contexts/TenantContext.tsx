@@ -331,6 +331,7 @@ const TENANT_SLUG_KEY = "aion_tenant_slug";
 const KNOWN_ROUTES = new Set([
   "login", "signup", "forgot-password", "reset-password",
   "home", "covers", "claims", "profile", "brand", "settings", "admin",
+  "watch", "all",
 ]);
 
 function getSlugFromPath(pathname: string): string {

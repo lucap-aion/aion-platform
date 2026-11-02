@@ -7,8 +7,9 @@ export const isProductionProject = (): boolean =>
   String(import.meta.env.VITE_SUPABASE_URL ?? "").includes(PROD_PROJECT_REF);
 
 /**
- * The knowledge base is shown as "Soon" on prod and cannot be opened there: crawling a
- * house's site and embedding it needs the Voyage and Jina keys, which prod does not have yet.
- * Flip this when they are set.
+ * The knowledge base was shown as "Soon" on prod while prod had no Voyage and Jina keys.
+ * They were set on 2026-10-19 and the first live house's site was crawled there on
+ * 2026-11-02, so it opens everywhere now. Kept as a function: the callers are the switch,
+ * and the next "not yet" will want the same one.
  */
-export const knowledgeComingSoon = (): boolean => isProductionProject();
+export const knowledgeComingSoon = (): boolean => false;
