@@ -20,6 +20,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { originAllowed, originRefused } from "../_shared/origin.ts";
 import { mapOrder, nextPageInfo, missingScopes, type AdminOrder } from "../_shared/shopify-orders.ts";
+import { normaliseShopDomain } from "../_shared/shopify-oauth.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -48,17 +49,6 @@ function jwtRole(token: string): string | null {
     if (!payload) return null;
     return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")))?.role ?? null;
   } catch { return null; }
-}
-
-// "house.myshopify.com" — accept a pasted URL or a bare handle and normalise.
-// Anything else is refused rather than guessed at: a typo here is a request to
-// somebody else's shop.
-function normaliseShopDomain(input: string): string | null {
-  const raw = (input ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  if (!raw) return null;
-  if (/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(raw)) return raw;
-  if (/^[a-z0-9][a-z0-9-]*$/.test(raw)) return `${raw}.myshopify.com`;
-  return null;
 }
 
 type Conn = {

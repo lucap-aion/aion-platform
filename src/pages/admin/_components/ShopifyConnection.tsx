@@ -17,6 +17,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 // Admin-only by design. A brand user must never be able to point this at a
 // different shop, so the table has no insert policy and this panel lives on the
 // AION side of the app.
+//
+// Since 2026-01-01 a shop can no longer create the custom app whose token is
+// pasted below (existing ones still work). New houses connect over OAuth: AION
+// makes a custom-distribution app for the shop in the Shopify Dev Dashboard,
+// its credentials go in "Shopify app" here, and a master user at the house
+// clicks Connect Shopify on their Knowledge page. One install serves orders and
+// knowledge alike.
+
+const OAUTH_URL = `${import.meta.env.VITE_SUPABASE_URL as string}/functions/v1/shopify-oauth`;
 
 type Conn = {
   brand_id: number;
@@ -32,6 +41,7 @@ type Conn = {
   last_sync_at: string | null;
   next_cursor: string | null;
   orders_synced: number;
+  client_id: string | null;
 };
 
 type SyncResult = {
@@ -56,7 +66,9 @@ export default function ShopifyConnection({ brandId }: { brandId: number }) {
   const [shopDomain, setShopDomain] = useState("");
   const [token, setToken] = useState("");
   const [ordersSince, setOrdersSince] = useState("");
-  const [busy, setBusy] = useState<null | "test" | "preview" | "sync" | "disconnect">(null);
+  const [busy, setBusy] = useState<null | "test" | "preview" | "sync" | "disconnect" | "app">(null);
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
   const [result, setResult] = useState<SyncResult | null>(null);
   const [orderCount, setOrderCount] = useState<number | null>(null);
 
@@ -69,6 +81,7 @@ export default function ShopifyConnection({ brandId }: { brandId: number }) {
     const r = (data ?? null) as Conn | null;
     setRow(r);
     setShopDomain(r?.shop_domain ?? "");
+    setClientId(r?.client_id ?? "");
     setOrdersSince(r?.orders_since ?? "");
     setOrderCount(count ?? 0);
     setLoading(false);
@@ -147,6 +160,26 @@ export default function ShopifyConnection({ brandId }: { brandId: number }) {
     await load();
   };
 
+  const saveApp = async () => {
+    if (!shopDomain.trim() || !clientId.trim()) {
+      toast({ title: "Shop domain and client ID first", variant: "destructive" });
+      return;
+    }
+    setBusy("app");
+    try {
+      const { data, error } = await supabase.functions.invoke("shopify-oauth", {
+        body: { action: "set_app", brand_id: brandId, shop: shopDomain.trim(), client_id: clientId.trim(), client_secret: clientSecret.trim() || undefined },
+      });
+      if (error || (data as { error?: string })?.error) throw new Error((data as { error?: string })?.error ?? error?.message);
+      // Like the token: stored in Vault, never read back.
+      setClientSecret("");
+      toast({ title: "App saved", description: "The house can now click Connect Shopify on its Knowledge page." });
+      await load();
+    } catch (e) {
+      toast({ title: "Could not save the app", description: e instanceof Error ? e.message : "unknown error", variant: "destructive" });
+    } finally { setBusy(null); }
+  };
+
   const disconnect = async () => {
     setBusy("disconnect");
     try {
@@ -188,10 +221,40 @@ export default function ShopifyConnection({ brandId }: { brandId: number }) {
 
       <p className="text-xs text-muted-foreground">
         The catalogue comes from the public storefront feed and needs nothing from the house.
-        Orders and customers need a token: in the shop's admin, Settings → Apps → Develop apps →
-        create an app with <strong>read_orders</strong> and <strong>read_customers</strong>, then paste its
-        Admin API access token here. It is stored encrypted and never shown again.
+        Orders, customers and the shop's pages and policies need an install. New shops: create a
+        custom-distribution app for this shop in the Shopify Dev Dashboard, set its App URL and
+        allowed redirect URL to <code className="rounded bg-muted px-1">{OAUTH_URL}</code>, save its
+        credentials below, and send the house its install link (or let a master user click Connect
+        Shopify on their Knowledge page). A shop with a pre-2026 custom app can still paste its
+        Admin API token. Both are stored encrypted and never shown again.
       </p>
+
+      <div className="flex flex-wrap items-end gap-2 rounded-lg bg-muted/30 p-3">
+        <p className="w-full text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          Shopify app {row?.client_id && <span className="normal-case text-emerald-600">· saved</span>}
+        </p>
+        <label className="flex min-w-40 flex-1 flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+          Client ID
+          <input
+            value={clientId} onChange={(e) => setClientId(e.target.value)} autoComplete="off"
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+          />
+        </label>
+        <label className="flex min-w-40 flex-1 flex-col gap-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+          Client secret {row?.client_id && <span className="normal-case">(stored — paste only to replace)</span>}
+          <input
+            type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} autoComplete="off"
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+          />
+        </label>
+        <button
+          type="button" onClick={() => void saveApp()} disabled={busy !== null}
+          className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+        >
+          {busy === "app" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Save app
+        </button>
+      </div>
 
       {row?.last_error && (
         <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-2.5 text-xs">
