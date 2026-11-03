@@ -359,19 +359,35 @@ export function markdownToEmailHtml(md: string): string {
   return out.join("\n");
 }
 
-function teamMessageHtml(m: {
-  sender_name: string; brand: BrandData | null; question: string; note: string | null; answer: string;
-}, s: ReturnType<typeof makeStyles>): string {
+type TeamNotifyCopy = {
+  it: boolean; brand: BrandData | null; kind: "mention" | "reply"; actor: string; title: string;
+  body: string; context: { question?: string; answer?: string } | null; url: string;
+};
+
+function teamNotifyHtml(c: TeamNotifyCopy, s: ReturnType<typeof makeStyles>): string {
+  const head = c.kind === "mention"
+    ? (c.it ? `${esc(c.actor)} ti ha menzionato` : `${esc(c.actor)} mentioned you`)
+    : (c.it ? `${esc(c.actor)} ha risposto` : `${esc(c.actor)} replied`);
+  const why = c.kind === "mention"
+    ? (c.it ? "Ricevi questa email perché sei stato menzionato in una discussione del team."
+            : "You are receiving this because you were mentioned in a team discussion.")
+    : (c.it ? "Ricevi questa email perché segui questa discussione. Puoi silenziarla dalla discussione stessa."
+            : "You are receiving this because you follow this discussion. You can mute it from the discussion itself.");
   return wrap(`
-    ${dualLogo(m.brand?.name ?? "", m.brand?.logo ?? null)}
-    <h1 style="${s.title}">${esc(m.sender_name)} shared an answer from the assistant</h1>
-    ${m.note ? `<p style="${s.text}">${esc(m.note).replace(/\n/g, "<br>")}</p>` : ""}
+    ${dualLogo(c.brand?.name ?? "", c.brand?.logo ?? null)}
+    <h1 style="${s.title}">${head}</h1>
+    <p style="${s.label}">${c.it ? "Discussione" : "Discussion"}</p>
+    <p style="${s.value}">${esc(c.title)}</p>
+    <div style="border-left:3px solid #e5e5e5;padding:4px 0 4px 14px;margin:0 0 20px">
+      <p style="margin:0;font-size:15px;line-height:1.7;color:#333333">${esc(c.body).replace(/\n/g, "<br>")}</p>
+    </div>
+    ${c.context?.answer ? `
     <hr style="${s.rule}">
-    ${m.question ? `<p style="${s.label}">Question</p><p style="${s.value}">${esc(m.question)}</p>` : ""}
-    <p style="${s.label}">Answer</p>
-    ${markdownToEmailHtml(m.answer)}
-    <hr style="${s.rule}">
-    <p style="${s.small}">Sent from the ${esc(m.brand?.name ?? "")} assistant on AION. Reply to this email to answer ${esc(m.sender_name)} directly.</p>`, s);
+    ${c.context.question ? `<p style="${s.label}">${c.it ? "Domanda all'assistente" : "Question to the assistant"}</p><p style="${s.value}">${esc(c.context.question)}</p>` : ""}
+    <p style="${s.label}">${c.it ? "Risposta" : "Answer"}</p>
+    ${markdownToEmailHtml(c.context.answer.slice(0, 12000))}` : ""}
+    <div style="${s.btnWrap}"><a href="${c.url}" target="_blank" style="${s.btn}">${c.it ? "Apri la discussione" : "Open the discussion"}</a></div>
+    <p style="${s.small}">${why} ${c.it ? "Rispondi dalla piattaforma: le risposte a questa email non arrivano al team." : "Reply in the platform: replies to this email do not reach the team."}</p>`, s);
 }
 
 function supportConfirmationHtml(user: any, brand: any, s: ReturnType<typeof makeStyles>): string {
@@ -488,7 +504,7 @@ const POLICY: Record<string, { kinds: CallerKind[]; recipients: Recipients }> = 
   transfer_request:         { kinds: ["service", "admin", "customer"],                     recipients: "arbitrary" },
   feedback_submitted:       { kinds: ["service", "admin", "brand", "customer"],            recipients: "internal" },
   assistant_escalation:     { kinds: ["service", "admin", "brand"],                        recipients: "internal" },
-  team_message:             { kinds: ["admin", "brand"],                                   recipients: "team" },
+  team_notify:              { kinds: ["admin", "brand"],                                   recipients: "team" },
 };
 
 function jwtRole(token: string): string | null {
@@ -603,38 +619,61 @@ async function ownsCover(req: Request, caller: Caller, data: any): Promise<boole
   return Boolean(row);
 }
 
-// A team message may only go to STAFF of the sender's own house — never to a
-// client of that house (profiles hold both) and never to another house. The
-// brand is the caller's own, not one the payload names; an AION admin, who has
-// no brand, names it and is then held to that brand's staff.
-const STAFF_ROLES = ["brand", "brand_admin", "brand_user"];
-const MAX_TEAM_RECIPIENTS = 10;
+// A team notification email is never addressed by the caller. It names a
+// message; the recipients are the notifications the database trigger wrote for
+// it (mentioned colleagues and followers — staff of that house only, checked
+// there), not yet emailed. And only the message's own author, or AION, can ask:
+// otherwise anyone could re-send any colleague's mail.
+const MAX_TEAM_RECIPIENTS = 25;
 type TeamCheck =
-  | { brandId: number; to: string[]; senderName: string; senderEmail: string | null }
+  | {
+      message: { id: string; thread_id: string; brand_id: number; body: string; author_profile_id: string | null };
+      thread: { id: string; title: string; context: { question?: string; answer?: string } | null; first_message_id: string | null };
+      recipients: { notification_id: string; kind: "mention" | "reply"; email: string }[];
+      actor: string;
+    }
   | { error: string; status: number };
 
 async function checkTeam(caller: Caller, data: any): Promise<TeamCheck> {
-  const brandId = caller.kind === "brand" ? caller.brandId : Number(data?.brand_id) || null;
-  if (!brandId) return { error: "no brand to write within", status: 403 };
-  const to = [...new Set((Array.isArray(data?.to) ? data.to : []).map(norm).filter(Boolean))] as string[];
-  if (!to.length) return { error: "choose at least one colleague", status: 400 };
-  if (to.length > MAX_TEAM_RECIPIENTS) return { error: `at most ${MAX_TEAM_RECIPIENTS} colleagues at once`, status: 400 };
-  if (String(data?.answer ?? "").length > 20000) return { error: "that answer is too long to send", status: 400 };
+  const messageId = String(data?.message_id ?? "");
+  if (!/^[0-9a-f-]{36}$/i.test(messageId)) return { error: "message_id required", status: 400 };
+  const { data: msg } = await supabaseAdmin
+    .from("team_messages").select("id, thread_id, brand_id, body, author_profile_id").eq("id", messageId).maybeSingle();
+  if (!msg) return { error: "no such message", status: 404 };
 
-  const { data: staff } = await supabaseAdmin
-    .from("profiles").select("email").eq("brand_id", brandId).in("role", STAFF_ROLES);
-  const allowed = new Set((staff ?? []).map((r: any) => norm(r.email)));
-  if (to.some((e) => !allowed.has(e))) return { error: "that recipient is not one you can write to", status: 403 };
-
-  // Who it is from comes from the session, never from the payload.
-  let senderName = caller.email ?? "A colleague";
-  if (caller.email) {
+  if (caller.kind !== "admin") {
+    if (caller.brandId !== msg.brand_id || !caller.email) return { error: "not your message", status: 403 };
     const { data: me } = await supabaseAdmin
-      .from("profiles").select("first_name, last_name").ilike("email", caller.email).limit(1).maybeSingle();
-    const full = [me?.first_name, me?.last_name].filter(Boolean).join(" ").trim();
-    if (full) senderName = full;
+      .from("profiles").select("id").eq("brand_id", msg.brand_id).ilike("email", caller.email).limit(1).maybeSingle();
+    if (!me || me.id !== msg.author_profile_id) return { error: "not your message", status: 403 };
   }
-  return { brandId, to, senderName, senderEmail: caller.email };
+
+  const [{ data: thread }, { data: first }, { data: notes }, { data: author }] = await Promise.all([
+    supabaseAdmin.from("team_threads").select("id, title, context").eq("id", msg.thread_id).maybeSingle(),
+    supabaseAdmin.from("team_messages").select("id").eq("thread_id", msg.thread_id)
+      .order("created_at", { ascending: true }).limit(1).maybeSingle(),
+    supabaseAdmin.from("team_notifications")
+      .select("id, kind, profiles!team_notifications_profile_id_fkey(email, role, brand_id)")
+      .eq("message_id", msg.id).is("emailed_at", null).limit(MAX_TEAM_RECIPIENTS),
+    msg.author_profile_id
+      ? supabaseAdmin.from("profiles").select("first_name, last_name, email").eq("id", msg.author_profile_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  if (!thread) return { error: "no such thread", status: 404 };
+
+  const recipients = ((notes ?? []) as any[])
+    .map((n) => ({ notification_id: n.id as string, kind: n.kind as "mention" | "reply", p: Array.isArray(n.profiles) ? n.profiles[0] : n.profiles }))
+    // Belt and braces: the trigger already restricts this to the house's staff.
+    .filter((n) => n.p?.email && n.p.brand_id === msg.brand_id && ["brand", "brand_admin", "brand_user"].includes(n.p.role))
+    .map((n) => ({ notification_id: n.notification_id, kind: n.kind, email: String(n.p.email) }));
+
+  const actor = [author?.first_name, author?.last_name].filter(Boolean).join(" ").trim() || author?.email || "A colleague";
+  return {
+    message: msg as any,
+    thread: { id: thread.id, title: thread.title, context: (thread.context as any) ?? null, first_message_id: first?.id ?? null },
+    recipients,
+    actor,
+  };
 }
 
 function deny(message: string, status: number) {
@@ -958,23 +997,43 @@ Deno.serve(async (req) => {
         break;
       }
 
-      case "team_message": {
+      case "team_notify": {
         const t = team as Exclude<TeamCheck, { error: string }>;
-        const brand = await fetchBrand(t.brandId);
-        const question = String(data?.question ?? "").trim().slice(0, 500);
-        const note = String(data?.note ?? "").trim().slice(0, 2000) || null;
-        const html = teamMessageHtml({
-          sender_name: t.senderName, brand, question, note, answer: String(data?.answer ?? ""),
-        }, brandStyles(brand));
-        result = await resend.emails.send({
-          from: `${(brand?.name ?? "AION").replace(/[<>"]/g, "")} via AION <team@aioncover.com>`,
-          to: t.to,
-          ...(t.senderEmail ? { replyTo: t.senderEmail } : {}),
-          subject: `${devPrefix}${t.senderName}: ${question ? question.slice(0, 90) : "an answer from the assistant"}`,
-          html,
-          text: htmlToText(html),
-        });
-        if ((result as any)?.error) throw new Error((result as any).error.message ?? "Resend refused the message");
+        if (!t.recipients.length) { result = { sent: 0 }; break; }
+        const [brand, { data: b }] = await Promise.all([
+          fetchBrand(t.message.brand_id),
+          supabaseAdmin.from("brands").select("slug, theme_settings").eq("id", t.message.brand_id).maybeSingle(),
+        ]);
+        const it = (b?.theme_settings as any)?.i18n === "it";
+        const appUrl = Deno.env.get("APP_URL") ?? (isProd ? "https://app.aioncover.com" : "https://dev.app.aioncover.com");
+        // Built here from ids we looked up, never taken from the caller.
+        const url = `${appUrl}/${encodeURIComponent(String(b?.slug ?? ""))}/discussions?thread=${t.thread.id}`;
+        // The assistant answer the thread was opened on goes with its FIRST message only:
+        // later replies would repeat a long table in every mail.
+        const context = t.thread.first_message_id === t.message.id ? t.thread.context : null;
+        const sent: string[] = [];
+        for (const r of t.recipients) {
+          const html = teamNotifyHtml({
+            it, brand, kind: r.kind, actor: t.actor, title: t.thread.title,
+            body: t.message.body, context, url,
+          }, brandStyles(brand));
+          const subject = r.kind === "mention"
+            ? (it ? `${t.actor} ti ha menzionato · ${t.thread.title}` : `${t.actor} mentioned you · ${t.thread.title}`)
+            : (it ? `Nuova risposta · ${t.thread.title}` : `New reply · ${t.thread.title}`);
+          const res = await resend.emails.send({
+            from: `${(brand?.name ?? "AION").replace(/[<>"]/g, "")} via AION <team@aioncover.com>`,
+            to: [r.email],
+            subject: `${devPrefix}${subject.slice(0, 150)}`,
+            html,
+            text: htmlToText(html),
+          });
+          if ((res as any)?.error) { console.error("[send-email team_notify]", r.email, (res as any).error); continue; }
+          sent.push(r.notification_id);
+        }
+        if (sent.length) {
+          await supabaseAdmin.from("team_notifications").update({ emailed_at: new Date().toISOString() }).in("id", sent);
+        }
+        result = { sent: sent.length, of: t.recipients.length };
         break;
       }
 

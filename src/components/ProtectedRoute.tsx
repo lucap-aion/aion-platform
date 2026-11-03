@@ -13,8 +13,12 @@ import { knowledgeComingSoon } from "@/lib/environment";
 // than either answer on its own: the link is drawn, it is tapped, and the redirect lands
 // back on the assistant, which on a phone (where the drawer closes on the way) reads as a
 // link that does nothing at all.
+//
+// Discussions too (2026-11-03): the staff room is drawn in that sidebar, and every
+// notification email links straight into a thread — left off this list, both land
+// back on the assistant.
 const ASSISTANT_ONLY_PATHS = [
-  /\/assistant(\/|$)/, /\/knowledge(\/|$)/, /\/profile(\/|$)/, /\/team(\/|$)/,
+  /\/assistant(\/|$)/, /\/knowledge(\/|$)/, /\/profile(\/|$)/, /\/team(\/|$)/, /\/discussions(\/|$)/,
 ];
 
 const ASSISTANT_PATHS = [/\/assistant(\/|$)/, /\/knowledge(\/|$)/];
