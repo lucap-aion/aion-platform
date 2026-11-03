@@ -47,24 +47,6 @@ as $$
      and coalesce((select b.discussions_enabled from public.brands b where b.id = p_brand_id), false)
 $$;
 
--- AION's switch, not the house's. brands carries a "brand: update own brand"
--- policy (their settings page), which would otherwise let a brand's own staff
--- turn this back on with one API call. Only an AION admin, or the server
--- (service role / SQL), may change it.
-create or replace function public.brands_guard_discussions_flag()
-returns trigger
-language plpgsql
-set search_path = public
-as $$
-begin
-  if new.discussions_enabled is distinct from old.discussions_enabled
-     and current_user in ('authenticated', 'anon')
-     and coalesce(public.get_my_role(), '') <> 'admin' then
-    raise exception 'only AION can switch Discussions for a brand' using errcode = '42501';
-  end if;
-  return new;
-end $$;
-
-drop trigger if exists brands_guard_discussions_flag on public.brands;
-create trigger brands_guard_discussions_flag before update of discussions_enabled on public.brands
-  for each row execute function public.brands_guard_discussions_flag();
+-- (A trigger guarding this column from the house's own staff was added here and
+-- removed by 20261103000004: brands_guard_staff_updates already refuses any staff
+-- change outside the house's editable fields.)
