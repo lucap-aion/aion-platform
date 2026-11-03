@@ -302,6 +302,78 @@ function assistantEscalationHtml(e: {
     ${autoNote(S)}`);
 }
 
+// ─── Team message: an assistant answer shared with colleagues ────────────────
+// Lucrezia (Luisa Beccaria, 2026-11-03): "poter mandare mail interne nel team
+// direttamente dalla piattaforma". The ranking she just got is the thing she
+// wants to send, so the mail carries the question, her note and the answer.
+//
+// The answer is the assistant's markdown. Rendered here, escaped first, into
+// the handful of shapes it actually uses: headings, lists, bold, rules and
+// tables. Anything else stays as escaped text, which is safe and readable.
+function inlineMd(t: string): string {
+  return t
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*(?!\s)(.+?)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>");
+}
+
+export function markdownToEmailHtml(md: string): string {
+  const lines = esc(md).split(/\r?\n/);
+  const out: string[] = [];
+  const cellsOf = (l: string) => l.trim().replace(/^\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.trim());
+  const isSep = (l: string) => /^\s*\|?[\s:|-]*-{3,}[\s:|-]*\|?\s*$/.test(l) && l.includes("-");
+  const td = `padding:6px 10px;border:1px solid #e5e5e5;font-size:13px;color:#333333;text-align:left;vertical-align:top`;
+  let list: "ul" | "ol" | null = null;
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^\s*\|/.test(l) && i + 1 < lines.length && isSep(lines[i + 1])) {
+      closeList();
+      const head = cellsOf(l);
+      const body: string[][] = [];
+      i += 2;
+      while (i < lines.length && /^\s*\|/.test(lines[i])) { body.push(cellsOf(lines[i])); i++; }
+      i--;
+      out.push(`<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;margin:8px 0 16px">`
+        + `<tr>${head.map((h) => `<th style="${td};background:#f3f3f3;font-weight:600">${inlineMd(h)}</th>`).join("")}</tr>`
+        + body.map((r) => `<tr>${r.map((c) => `<td style="${td}">${inlineMd(c)}</td>`).join("")}</tr>`).join("")
+        + `</table>`);
+      continue;
+    }
+    const h = l.match(/^\s*(#{1,4})\s+(.*)$/);
+    if (h) { closeList(); out.push(`<p style="margin:18px 0 8px;font-size:${h[1].length <= 2 ? 17 : 15}px;font-weight:700;color:#111111">${inlineMd(h[2])}</p>`); continue; }
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(l)) { closeList(); out.push(`<hr style="border:none;border-top:1px solid #e5e5e5;margin:16px 0">`); continue; }
+    const ul = l.match(/^\s*[-*•]\s+(.*)$/);
+    const ol = l.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (ul || ol) {
+      const kind = ul ? "ul" : "ol";
+      if (list !== kind) { closeList(); out.push(`<${kind} style="margin:0 0 12px;padding-left:22px;font-size:14px;line-height:1.6;color:#333333">`); list = kind; }
+      out.push(`<li>${inlineMd((ul ?? ol)![1])}</li>`);
+      continue;
+    }
+    if (!l.trim()) { closeList(); continue; }
+    closeList();
+    out.push(`<p style="margin:0 0 10px;font-size:14px;line-height:1.6;color:#333333">${inlineMd(l.replace(/^\s*&gt;\s?/, ""))}</p>`);
+  }
+  closeList();
+  return out.join("\n");
+}
+
+function teamMessageHtml(m: {
+  sender_name: string; brand: BrandData | null; question: string; note: string | null; answer: string;
+}, s: ReturnType<typeof makeStyles>): string {
+  return wrap(`
+    ${dualLogo(m.brand?.name ?? "", m.brand?.logo ?? null)}
+    <h1 style="${s.title}">${esc(m.sender_name)} shared an answer from the assistant</h1>
+    ${m.note ? `<p style="${s.text}">${esc(m.note).replace(/\n/g, "<br>")}</p>` : ""}
+    <hr style="${s.rule}">
+    ${m.question ? `<p style="${s.label}">Question</p><p style="${s.value}">${esc(m.question)}</p>` : ""}
+    <p style="${s.label}">Answer</p>
+    ${markdownToEmailHtml(m.answer)}
+    <hr style="${s.rule}">
+    <p style="${s.small}">Sent from the ${esc(m.brand?.name ?? "")} assistant on AION. Reply to this email to answer ${esc(m.sender_name)} directly.</p>`, s);
+}
+
 function supportConfirmationHtml(user: any, brand: any, s: ReturnType<typeof makeStyles>): string {
   const greeting = user.firstName ? `Dear ${user.firstName},` : "Hello,";
   return wrap(`
@@ -403,7 +475,7 @@ type Caller = {
   brandId: number | null;
 };
 
-type Recipients = "internal" | "known" | "self_or_known" | "arbitrary";
+type Recipients = "internal" | "known" | "self_or_known" | "arbitrary" | "team";
 
 const POLICY: Record<string, { kinds: CallerKind[]; recipients: Recipients }> = {
   customer_invite:          { kinds: ["service", "admin", "brand"],                        recipients: "known" },
@@ -416,6 +488,7 @@ const POLICY: Record<string, { kinds: CallerKind[]; recipients: Recipients }> = 
   transfer_request:         { kinds: ["service", "admin", "customer"],                     recipients: "arbitrary" },
   feedback_submitted:       { kinds: ["service", "admin", "brand", "customer"],            recipients: "internal" },
   assistant_escalation:     { kinds: ["service", "admin", "brand"],                        recipients: "internal" },
+  team_message:             { kinds: ["admin", "brand"],                                   recipients: "team" },
 };
 
 function jwtRole(token: string): string | null {
@@ -530,6 +603,40 @@ async function ownsCover(req: Request, caller: Caller, data: any): Promise<boole
   return Boolean(row);
 }
 
+// A team message may only go to STAFF of the sender's own house — never to a
+// client of that house (profiles hold both) and never to another house. The
+// brand is the caller's own, not one the payload names; an AION admin, who has
+// no brand, names it and is then held to that brand's staff.
+const STAFF_ROLES = ["brand", "brand_admin", "brand_user"];
+const MAX_TEAM_RECIPIENTS = 10;
+type TeamCheck =
+  | { brandId: number; to: string[]; senderName: string; senderEmail: string | null }
+  | { error: string; status: number };
+
+async function checkTeam(caller: Caller, data: any): Promise<TeamCheck> {
+  const brandId = caller.kind === "brand" ? caller.brandId : Number(data?.brand_id) || null;
+  if (!brandId) return { error: "no brand to write within", status: 403 };
+  const to = [...new Set((Array.isArray(data?.to) ? data.to : []).map(norm).filter(Boolean))] as string[];
+  if (!to.length) return { error: "choose at least one colleague", status: 400 };
+  if (to.length > MAX_TEAM_RECIPIENTS) return { error: `at most ${MAX_TEAM_RECIPIENTS} colleagues at once`, status: 400 };
+  if (String(data?.answer ?? "").length > 20000) return { error: "that answer is too long to send", status: 400 };
+
+  const { data: staff } = await supabaseAdmin
+    .from("profiles").select("email").eq("brand_id", brandId).in("role", STAFF_ROLES);
+  const allowed = new Set((staff ?? []).map((r: any) => norm(r.email)));
+  if (to.some((e) => !allowed.has(e))) return { error: "that recipient is not one you can write to", status: 403 };
+
+  // Who it is from comes from the session, never from the payload.
+  let senderName = caller.email ?? "A colleague";
+  if (caller.email) {
+    const { data: me } = await supabaseAdmin
+      .from("profiles").select("first_name, last_name").ilike("email", caller.email).limit(1).maybeSingle();
+    const full = [me?.first_name, me?.last_name].filter(Boolean).join(" ").trim();
+    if (full) senderName = full;
+  }
+  return { brandId, to, senderName, senderEmail: caller.email };
+}
+
 function deny(message: string, status: number) {
   return new Response(JSON.stringify({ error: message }), {
     status,
@@ -578,6 +685,11 @@ Deno.serve(async (req) => {
           return deny("that recipient is not one you can write to", 403);
         }
       }
+    }
+    let team: TeamCheck | null = null;
+    if (policy.recipients === "team") {
+      team = await checkTeam(caller, data);
+      if ("error" in team) return deny(team.error, team.status);
     }
     if (policy.recipients === "arbitrary" && !(await ownsCover(req, caller, data))) {
       return deny("that cover is not yours to transfer", 403);
@@ -843,6 +955,26 @@ Deno.serve(async (req) => {
           html,
           text: htmlToText(html),
         });
+        break;
+      }
+
+      case "team_message": {
+        const t = team as Exclude<TeamCheck, { error: string }>;
+        const brand = await fetchBrand(t.brandId);
+        const question = String(data?.question ?? "").trim().slice(0, 500);
+        const note = String(data?.note ?? "").trim().slice(0, 2000) || null;
+        const html = teamMessageHtml({
+          sender_name: t.senderName, brand, question, note, answer: String(data?.answer ?? ""),
+        }, brandStyles(brand));
+        result = await resend.emails.send({
+          from: `${(brand?.name ?? "AION").replace(/[<>"]/g, "")} via AION <team@aioncover.com>`,
+          to: t.to,
+          ...(t.senderEmail ? { replyTo: t.senderEmail } : {}),
+          subject: `${devPrefix}${t.senderName}: ${question ? question.slice(0, 90) : "an answer from the assistant"}`,
+          html,
+          text: htmlToText(html),
+        });
+        if ((result as any)?.error) throw new Error((result as any).error.message ?? "Resend refused the message");
         break;
       }
 
