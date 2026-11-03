@@ -5,9 +5,12 @@ import HeaderControls from "./HeaderControls";
 import { useTenant } from "@/contexts/TenantContext";
 import SmartLogo from "@/components/SmartLogo";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
+import NotificationBell from "@/components/team/NotificationBell";
+import { useAuth } from "@/contexts/AuthContext";
 
 const AppLayout = () => {
   const tenant = useTenant();
+  const { isBrandUser } = useAuth();
 
   return (
     <SidebarProvider>
@@ -31,7 +34,11 @@ const AppLayout = () => {
                   )}
                 </div>
               </div>
-              <HeaderControls />
+              <div className="flex items-center gap-1">
+                {/* Team notifications: staff only — a client has no staff room. */}
+                {isBrandUser && <NotificationBell />}
+                <HeaderControls />
+              </div>
             </header>
           </div>
           {/* overflow-x-hidden for the same reason as the admin shell: one child wider

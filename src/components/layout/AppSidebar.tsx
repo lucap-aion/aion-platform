@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import SignedImage from "@/components/SignedImage";
-import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, Library, Sparkles } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, Library, Sparkles, MessagesSquare } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { knowledgeComingSoon } from "@/lib/environment";
@@ -73,6 +73,8 @@ const brandPaths = [
   // everywhere (Giulio, 2026-10-30).
   { path: "/assistant", icon: Sparkles, labelKey: "nav.assistant" },
   { path: "/knowledge", icon: Library, labelKey: "nav.knowledge" },
+  // The staff room: threads, @mentions, notifications (2026-11-03, Lucrezia at LB).
+  { path: "/discussions", icon: MessagesSquare, labelKey: "nav.discussions" },
   { path: "/customers", icon: Users, labelKey: "nav.customers" },
   { path: "/covers", icon: Shield, labelKey: "nav.covers" },
   { path: "/claims", icon: FileText, labelKey: "nav.claims" },
@@ -127,7 +129,7 @@ const AppSidebar = () => {
   // programme's own. Home goes with them: that page is covers, open claims, renewals and
   // recent claims, so keeping it would put the product we are not demonstrating on the first
   // screen the prospect sees. Still one section, still this order; the flag only removes.
-  const assistantOnlyPaths = new Set(["/assistant", "/knowledge"]);
+  const assistantOnlyPaths = new Set(["/assistant", "/knowledge", "/discussions"]);
   // Assistant off: the navigation the brand had before the assistant existed — the data
   // chat where the Assistant would be, no Knowledge, and Dashboard not Home. The entry is
   // still called AI Assistant, with the same icon: which chat answers behind it is not

@@ -36,6 +36,7 @@ import BrandClaimDetail from "./pages/brand/BrandClaimDetail";
 import BrandCustomerDetail from "./pages/brand/BrandCustomerDetail";
 import BrandCoverDetail from "./pages/brand/BrandCoverDetail";
 import BrandTeam from "./pages/brand/BrandTeam";
+import BrandDiscussions from "./pages/brand/BrandDiscussions";
 import BrandInsights from "./pages/brand/BrandInsights";
 import BrandAIQuery from "./pages/brand/BrandAIQuery";
 import BrandAssistant from "./pages/brand/BrandAssistant";
@@ -300,6 +301,7 @@ const App = () => (
               <Route path="/:slug/ai-query" element={<ProtectedRoute mode="brand"><BrandAIQuery /></ProtectedRoute>} />
               <Route path="/:slug/assistant" element={<ProtectedRoute mode="brand"><BrandAssistant /></ProtectedRoute>} />
               <Route path="/:slug/knowledge" element={<ProtectedRoute mode="brand"><BrandKnowledge /></ProtectedRoute>} />
+              <Route path="/:slug/discussions" element={<ProtectedRoute mode="brand"><BrandDiscussions /></ProtectedRoute>} />
               <Route path="/:slug/shops" element={<ProtectedRoute mode="brand"><BrandShops /></ProtectedRoute>} />
               <Route path="/:slug/shops/:shopId" element={<ProtectedRoute mode="brand"><BrandShopDetail /></ProtectedRoute>} />
               <Route path="/:slug/renewals" element={<ProtectedRoute mode="brand"><BrandRenewals /></ProtectedRoute>} />
