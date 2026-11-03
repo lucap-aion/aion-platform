@@ -17,11 +17,17 @@ import { knowledgeComingSoon } from "@/lib/environment";
 // Discussions too (2026-11-03): the staff room is drawn in that sidebar, and every
 // notification email links straight into a thread — left off this list, both land
 // back on the assistant.
+//
+// Integrations too (2026-11-03): Drive and Shopify feed the knowledge base, and Shopify's
+// approval screen sends the master back to /integrations — left off, the return lands on
+// the assistant and the "connected" notice is lost. It follows the knowledge base in the
+// other direction as well: no assistant, nothing for an integration to feed.
 const ASSISTANT_ONLY_PATHS = [
   /\/assistant(\/|$)/, /\/knowledge(\/|$)/, /\/profile(\/|$)/, /\/team(\/|$)/, /\/discussions(\/|$)/,
+  /\/integrations(\/|$)/,
 ];
 
-const ASSISTANT_PATHS = [/\/assistant(\/|$)/, /\/knowledge(\/|$)/];
+const ASSISTANT_PATHS = [/\/assistant(\/|$)/, /\/knowledge(\/|$)/, /\/integrations(\/|$)/];
 
 interface ProtectedRouteProps {
   children: React.ReactNode;

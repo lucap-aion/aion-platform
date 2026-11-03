@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import SignedImage from "@/components/SignedImage";
-import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, Library, Sparkles, MessagesSquare } from "lucide-react";
+import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, Library, Sparkles, MessagesSquare, Plug } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { knowledgeComingSoon } from "@/lib/environment";
@@ -83,6 +83,9 @@ const brandPaths = [
 
 const brandMasterPaths = [
   { path: "/team", icon: UserCog, labelKey: "nav.team" },
+  // Drive and Shopify, feeding the knowledge base (2026-11-03). Settings, not a daily screen,
+  // so it sits with Team; shown only where there is a knowledge base for it to feed.
+  { path: "/integrations", icon: Plug, labelKey: "nav.integrations" },
 ];
 
 const AppSidebar = () => {
@@ -146,8 +149,9 @@ const AppSidebar = () => {
   // Discussions is switched per brand by AION (off for Roberto Coin).
   const paths = basePaths.filter((p) => p.path !== "/discussions" || tenant.discussionsEnabled);
   // Team is about who can log in, which is still a fair question in an assistant demo.
+  const hasKnowledge = tenant.assistantOnly || tenant.assistantEnabled;
   const masterLinks = (mode === "brand" && canWrite)
-    ? brandMasterPaths.map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }))
+    ? brandMasterPaths.filter((l) => l.path !== "/integrations" || hasKnowledge).map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }))
     : [];
   // On prod the knowledge base is listed but not openable yet: a "Soon" badge, no link.
   const links = paths.map((l) => ({

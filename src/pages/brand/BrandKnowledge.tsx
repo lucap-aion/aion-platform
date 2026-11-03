@@ -4,20 +4,23 @@
 //   • Add specific page URLs, retry failed pages, toggle news
 //   • Upload files (parse-knowledge) or paste text (ingest-knowledge)
 //   • Edit / re-embed (update-knowledge), preview chunks, delete
-//   • Connect Google Drive / Shopify, kept in sync by source-sync
+//   • Connect Google Drive / Shopify, kept in sync by source-sync — on the
+//     Integrations page for the brand; here only in the admin's embedded view
 // Everyone in the brand can view the corpus.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen, Globe, Loader2, Plus, RefreshCw, Trash2, FileText, AlertCircle,
   CheckCircle2, Clock, X, UploadCloud, Link2, Pencil, Eye, Newspaper, RotateCw,
-  Lightbulb, FileSpreadsheet, ThumbsDown, ChevronDown, Search,
+  Lightbulb, FileSpreadsheet, ThumbsDown, ChevronDown, Search, Plug, ChevronRight,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import ConnectedSources from "@/components/knowledge/ConnectedSources";
+import { useAuthSlug } from "@/hooks/useAuthSlug";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
@@ -144,6 +147,7 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
   const { locale } = useLanguage();
   const brandId = brandIdOverride ?? profile?.brand_id ?? null;
   const canWrite = canWriteOverride ?? canWriteProfile;
+  const slugPrefix = useAuthSlug();
 
   const [docs, setDocs] = useState<Doc[]>([]);
   // Search runs SERVER-side, not over the loaded page. With 3,759 documents and
@@ -563,9 +567,22 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
         </div>
       )}
 
-      {canWrite && (
+      {/* Drive and Shopify are connected from Integrations; the brand gets a way there. An AION
+          admin looking at this brand from Admin has no brand sidebar, so the panel stays here. */}
+      {canWrite && (brandIdOverride != null ? (
         <ConnectedSources brandId={brandId} locale={locale} callFn={callFn} onChanged={() => void refresh()} />
-      )}
+      ) : (
+        <Link to={`${slugPrefix}/integrations`}
+          className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:bg-muted/50">
+          <Plug className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{tt(locale, "Google Drive and Shopify", "Google Drive e Shopify")}</span>{" "}
+            {tt(locale, "are connected from Integrations — kept in sync automatically.",
+                        "si collegano da Integrazioni — sincronizzati in automatico.")}
+          </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </Link>
+      ))}
 
       {/* Sources & crawl */}
       {canWrite && (website || failed.length > 0) && (
