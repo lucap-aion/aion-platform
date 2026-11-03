@@ -1,6 +1,7 @@
 // Connected sources — Google Drive and Shopify, kept in sync with the
-// knowledge base by source-sync. Lives on the Knowledge page, for the people
-// who may change the knowledge (brand masters, AION admins).
+// knowledge base by source-sync. Lives on the brand's Integrations page (and on
+// the Knowledge page an AION admin opens from Admin), for the people who may
+// change the knowledge (brand masters, AION admins).
 //
 // Drive: the brand shares a folder with AION's service account and pastes its
 // link — see supabase/functions/_shared/gdrive.ts for why not "Sign in with

@@ -83,9 +83,11 @@ async function appCredentials(brandId: number): Promise<{ clientId: string; clie
   return null;
 }
 
-async function knowledgePath(brandId: number): Promise<string> {
+// Where the master lands after Shopify's approval screen: the Integrations page they
+// started from, which reads ?connected / ?connect_error and kicks off the first sync.
+async function integrationsPath(brandId: number): Promise<string> {
   const { data } = await admin.from("brands").select("slug").eq("id", brandId).maybeSingle();
-  return data?.slug ? `/${data.slug}/knowledge` : "/";
+  return data?.slug ? `/${data.slug}/integrations` : "/";
 }
 
 function withParams(url: string, params: Record<string, string>): string {
@@ -131,7 +133,7 @@ async function start(req: Request, caller: Caller, body: Record<string, unknown>
   }
 
   const origin = req.headers.get("Origin") ?? req.headers.get("origin");
-  const returnTo = safeReturnTo(origin, await knowledgePath(brandId)) ?? `${APP_URL}${await knowledgePath(brandId)}`;
+  const returnTo = safeReturnTo(origin, await integrationsPath(brandId)) ?? `${APP_URL}${await integrationsPath(brandId)}`;
   const state = await signState({
     brand_id: brandId, shop, return_to: returnTo, profile_id: caller.kind === "brand" ? caller.profileId : null,
   }, STATE_SECRET);
@@ -176,7 +178,7 @@ async function installLaunch(params: URLSearchParams) {
     return page("Couldn't verify this request", "It didn't carry a valid Shopify signature. Open the install link again from the email you were sent.", 401);
   }
   const state = await signState({
-    brand_id: brandId, shop, return_to: `${APP_URL}${await knowledgePath(brandId)}`, profile_id: null,
+    brand_id: brandId, shop, return_to: `${APP_URL}${await integrationsPath(brandId)}`, profile_id: null,
   }, STATE_SECRET);
   return redirect(authorizeUrl(shop, app.clientId, REDIRECT_URI, state));
 }
