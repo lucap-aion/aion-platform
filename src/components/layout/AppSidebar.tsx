@@ -139,10 +139,12 @@ const AppSidebar = () => {
     .map((p) => p.path === "/assistant" ? { path: "/ai-query", icon: Sparkles, labelKey: "nav.assistant" }
       : p.path === "/dashboard" ? { ...p, icon: BarChart3, labelKey: "nav.dashboard" }
       : p);
-  const paths = mode === "customer"
+  const basePaths = mode === "customer"
     ? customerPaths
     : tenant.assistantOnly ? brandPaths.filter((p) => assistantOnlyPaths.has(p.path))
     : tenant.assistantEnabled ? brandPaths : classicBrandPaths;
+  // Discussions is switched per brand by AION (off for Roberto Coin).
+  const paths = basePaths.filter((p) => p.path !== "/discussions" || tenant.discussionsEnabled);
   // Team is about who can log in, which is still a fair question in an assistant demo.
   const masterLinks = (mode === "brand" && canWrite)
     ? brandMasterPaths.map((l) => ({ ...l, to: `${slugPrefix}${l.path}`, label: t(l.labelKey) }))

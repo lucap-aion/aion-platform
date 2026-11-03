@@ -238,6 +238,12 @@ export interface TenantConfig {
    * had, until AION turns the assistant on for them (Admin → brand → Assistant).
    */
   assistantEnabled: boolean;
+  /**
+   * Whether this brand's staff get Discussions: threads, @mentions, the notification bell
+   * and the emails (brands.discussions_enabled, Admin → brand → Discussions). Off for
+   * Roberto Coin; the database refuses staff access when it is off, this only hides it.
+   */
+  discussionsEnabled: boolean;
 }
 
 /** Empty — no overrides. index.css defaults apply for any key not set. */
@@ -268,6 +274,8 @@ const DEFAULT_TENANT: TenantConfig = {
   faqIt: null,
   assistantOnly: false,
   assistantEnabled: true,
+  // No brand resolved, no staff room.
+  discussionsEnabled: false,
 };
 
 /** Parse theme_settings JSON — only keeps keys the brand explicitly set. */
@@ -301,13 +309,13 @@ type BrandRow = Database["public"]["Tables"]["brands"]["Row"];
 // from the URL before anyone signs in — so the house's contact address, its
 // registered address and every fee it pays us have no business being in the
 // response. Nothing outside this file ever read them.
-const BRAND_SELECT = "id, slug, name, description, website, logo_big, logo_small, auth_background_image, top_banner_image, theme_settings, faq_en, faq_it, faq_image, feedback_image, damage_image, theft_image, demo_assistant_only, assistant_enabled" as const;
+const BRAND_SELECT = "id, slug, name, description, website, logo_big, logo_small, auth_background_image, top_banner_image, theme_settings, faq_en, faq_it, faq_image, feedback_image, damage_image, theft_image, demo_assistant_only, assistant_enabled, discussions_enabled" as const;
 
 type BrandLookup = Pick<BrandRow,
   | "id" | "slug" | "name" | "description" | "website"
   | "logo_big" | "logo_small" | "auth_background_image" | "top_banner_image" | "theme_settings"
   | "faq_en" | "faq_it" | "faq_image" | "feedback_image" | "damage_image" | "theft_image"
-> & { demo_assistant_only?: boolean | null; assistant_enabled?: boolean | null };
+> & { demo_assistant_only?: boolean | null; assistant_enabled?: boolean | null; discussions_enabled?: boolean | null };
 
 const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
   const { colors: themeColors, fonts: themeFonts } = parseThemeSettings(brand.theme_settings);
@@ -332,6 +340,7 @@ const mergeWithBrandData = (brand: BrandLookup): TenantConfig => {
     assistantOnly: brand.demo_assistant_only === true,
     // An assistant-only demo is nothing but the assistant, so the flag cannot hide it there.
     assistantEnabled: brand.assistant_enabled !== false || brand.demo_assistant_only === true,
+    discussionsEnabled: brand.discussions_enabled !== false,
     faqEn: brand.faq_en ?? null,
     faqIt: brand.faq_it ?? null,
     faqImage: brand.faq_image ?? null,

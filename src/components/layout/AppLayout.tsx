@@ -36,7 +36,7 @@ const AppLayout = () => {
               </div>
               <div className="flex items-center gap-1">
                 {/* Team notifications: staff only — a client has no staff room. */}
-                {isBrandUser && <NotificationBell />}
+                {isBrandUser && tenant.discussionsEnabled && <NotificationBell />}
                 <HeaderControls />
               </div>
             </header>

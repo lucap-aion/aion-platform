@@ -35,7 +35,7 @@ const getSlugPrefix = () => {
 
 const ProtectedRoute = ({ children, mode }: ProtectedRouteProps) => {
   const { user, profile, loading } = useAuth();
-  const { assistantOnly, assistantEnabled } = useTenant();
+  const { assistantOnly, assistantEnabled, discussionsEnabled } = useTenant();
   const location = useLocation();
 
   if (loading) {
@@ -67,6 +67,12 @@ const ProtectedRoute = ({ children, mode }: ProtectedRouteProps) => {
   if (mode === "brand" && assistantOnly
       && !ASSISTANT_ONLY_PATHS.some((re) => re.test(location.pathname))) {
     return <Navigate to={`${getSlugPrefix()}/assistant`} replace />;
+  }
+
+  // Discussions switched off for this brand (Roberto Coin): an old email link or a typed URL
+  // lands on the brand's own start page, not on a screen the database will refuse anyway.
+  if (mode === "brand" && !discussionsEnabled && /\/discussions(\/|$)/.test(location.pathname)) {
+    return <Navigate to={`${getSlugPrefix()}/${assistantOnly ? "assistant" : "dashboard"}`} replace />;
   }
 
   // Assistant switched off for this brand: a bookmark, a typed URL or the chat host's

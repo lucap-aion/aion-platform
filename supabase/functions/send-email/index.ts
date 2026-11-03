@@ -641,6 +641,14 @@ async function checkTeam(caller: Caller, data: any): Promise<TeamCheck> {
     .from("team_messages").select("id, thread_id, brand_id, body, author_profile_id").eq("id", messageId).maybeSingle();
   if (!msg) return { error: "no such message", status: 404 };
 
+  // Switched off for this house (Admin → brand → Discussions): no mail goes out,
+  // whoever asks — an admin's message included.
+  const { data: flag } = await supabaseAdmin
+    .from("brands").select("discussions_enabled").eq("id", msg.brand_id).maybeSingle();
+  if ((flag as { discussions_enabled?: boolean } | null)?.discussions_enabled === false) {
+    return { error: "discussions are off for this brand", status: 403 };
+  }
+
   if (caller.kind !== "admin") {
     if (caller.brandId !== msg.brand_id || !caller.email) return { error: "not your message", status: 403 };
     const { data: me } = await supabaseAdmin
