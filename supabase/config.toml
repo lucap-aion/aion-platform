@@ -36,3 +36,9 @@ verify_jwt = false
 # the credential (see watch-demo/index.ts).
 [functions.watch-demo]
 verify_jwt = false
+
+# Shopify's install redirects (the app URL and the OAuth callback) carry no Supabase session.
+# They are authorised by Shopify's HMAC and our signed state; the POST actions check the
+# caller's session in code (see shopify-oauth/index.ts).
+[functions.shopify-oauth]
+verify_jwt = false

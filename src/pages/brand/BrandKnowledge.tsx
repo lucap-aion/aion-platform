@@ -4,6 +4,7 @@
 //   • Add specific page URLs, retry failed pages, toggle news
 //   • Upload files (parse-knowledge) or paste text (ingest-knowledge)
 //   • Edit / re-embed (update-knowledge), preview chunks, delete
+//   • Connect Google Drive / Shopify, kept in sync by source-sync
 // Everyone in the brand can view the corpus.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,11 +17,25 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import ConnectedSources from "@/components/knowledge/ConnectedSources";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
 const tt = (locale: string, en: string, it: string) => (locale === "it" ? it : en);
+
+const SOURCE_LABEL: Record<string, { en: string; it: string }> = {
+  url: { en: "Website", it: "Sito" },
+  upload: { en: "Upload", it: "Caricato" },
+  manual: { en: "Manual", it: "Manuale" },
+  news: { en: "News", it: "News" },
+  import: { en: "Import", it: "Importato" },
+  gdrive: { en: "Google Drive", it: "Google Drive" },
+  shopify: { en: "Shopify", it: "Shopify" },
+};
+// A synced document is edited at its source; an edit here would be overwritten
+// by the next change there, so the pencil is not offered.
+const SYNCED_SOURCES = new Set(["gdrive", "shopify"]);
 
 type Doc = {
   id: string;
@@ -548,6 +563,10 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
         </div>
       )}
 
+      {canWrite && (
+        <ConnectedSources brandId={brandId} locale={locale} callFn={callFn} onChanged={() => void refresh()} />
+      )}
+
       {/* Sources & crawl */}
       {canWrite && (website || failed.length > 0) && (
         <div className="rounded-xl border border-border bg-card px-4 py-3">
@@ -775,6 +794,8 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
           <option value="upload">{tt(locale, "Upload", "Caricato")}</option>
           <option value="manual">{tt(locale, "Manual", "Manuale")}</option>
           <option value="news">{tt(locale, "News", "News")}</option>
+          <option value="gdrive">Google Drive</option>
+          <option value="shopify">Shopify</option>
         </select>
 
         {(search || categoryFilter || sourceFilter) && (
@@ -880,7 +901,7 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
                     </span>
                   </td>
                   <td className="hidden sm:table-cell px-3 py-2.5 text-xs text-muted-foreground">
-                    {d.source_type === "url" ? tt(locale, "Website", "Sito") : d.source_type === "upload" ? tt(locale, "Upload", "Caricato") : tt(locale, "Manual", "Manuale")}
+                    {SOURCE_LABEL[d.source_type] ? tt(locale, SOURCE_LABEL[d.source_type].en, SOURCE_LABEL[d.source_type].it) : tt(locale, "Manual", "Manuale")}
                   </td>
                   <td className="hidden sm:table-cell px-3 py-2.5 text-right tabular-nums text-foreground">{d.chunk_count}</td>
                   <td className="px-3 py-2.5"><StatusBadge status={d.status} error={d.error} locale={locale} /></td>
@@ -896,15 +917,17 @@ export default function BrandKnowledge({ brandIdOverride, canWriteOverride }: {
                         >
                           <Eye className="h-3.5 w-3.5" />
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditDoc(d)}
-                          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                          aria-label={tt(locale, "Edit", "Modifica")}
-                          title={tt(locale, "Edit", "Modifica")}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
+                        {!SYNCED_SOURCES.has(d.source_type) && (
+                          <button
+                            type="button"
+                            onClick={() => setEditDoc(d)}
+                            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            aria-label={tt(locale, "Edit", "Modifica")}
+                            title={tt(locale, "Edit", "Modifica")}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => void handleDelete(d)}
