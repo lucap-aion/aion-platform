@@ -126,7 +126,7 @@ steps, and the associate gets no answer at all.
     WHERE cand.rn <= 3
     GROUP BY pr.id, pr.first_name, pr.last_name, cand.spend
     ORDER BY cand.spend DESC, pr.id
-   ONE ROW PER CLIENT, on purpose: you are shown only the first 30 rows of a
+   ONE ROW PER CLIENT, on purpose: you are shown only the first 60 rows of a
    result, and four rows per client cut the tenth client off — she then got a
    piece from outside her band that she already owned.
    The line rule is there because nothing on a client record says whether she
@@ -159,6 +159,87 @@ list 1–10 in the query's order: **Name** (city) — quarter spend — what she
 a few words — the suggestion by name and price, and why it fits, in one line. No
 table: the numbered list IS the ranking. If fewer than ten clients bought in the
 window, say how many did. Close by offering generate_report for a version to keep.
+`;
+
+// How many run_sql rows the model gets to read. The UI receives them all.
+const ROWS_PREVIEW = 60;
+
+// Totals and rankings for a house whose clients/products are knowledge CARDS
+// (Luisa Beccaria). One copy, used by the sales-floor SYSTEM, the admin
+// supplement and the knowledge data-home block. Template literal: no backticks.
+// The views behind it: migration 20261103000001_knowledge_card_views.sql.
+const KNOWLEDGE_CARD_TOTALS = `# Totals, rankings and counts over client / product CARDS
+Some houses keep their clients and products as knowledge cards ("Scheda cliente — …",
+"Scheda prodotto — …") instead of CRM rows. search_knowledge returns only the few
+cards that READ most similar, never all of them. So a sum, a ranking, a "how many",
+a "which sells more", a top N or anything per year / country / channel / material
+built from search results is WRONG — it is a sample. (One house was told its
+Bottoncino sold 238 pieces, then 155; the cards add up to 1,083.) For every such
+question use run_sql on these two views, which hold EVERY card as one row:
+- knowledge_client_cards(brand_id, doc_id, client_name, client_code, segment
+    (VIC/Premium/Regular/Entry), loyalty, years_active, country, spend_total,
+    spend_2023, spend_2024, spend_2025, spend_2026, pieces, avg_annual_ticket,
+    channels jsonb {channel: EUR}, primary_channel, wholesale_spend,
+    bridal_channel_spend, bridal_dress_spend, categories jsonb {category: EUR},
+    trunk_shows, sizes_2026, colours_2026, title, clients_with_country,
+    clients_total)
+- knowledge_product_cards(brand_id, doc_id, code, season, description, category,
+    model, model_family, material_code, composition, avg_list_price, units_sold,
+    revenue_total, revenue_2023, revenue_2024, revenue_2025, revenue_2026, buyers,
+    colours, sizes_sold_2026, at_london_trunk_show_2026,
+    at_hamptons_trunk_show_2026, no_sales_history, title)
+How to read them:
+- "The model, not the colour/variant": GROUP BY model_family (40301, 40301CMV and
+  40301MDV are all 40301, the Bottoncino). One card is one code = model + fabric/
+  colour, so never rank cards when the ask is about a model. Name each family by its
+  best-selling description: (array_agg(description ORDER BY units_sold DESC))[1].
+- "Pieces" = SUM(units_sold); "revenue" = SUM(revenue_total). ORDER BY the measure
+  that was asked, DESC, and LIMIT to what was asked (at most 60: you only see the
+  first 60 rows). Add the position in the SQL — row_number() OVER (ORDER BY <that
+  measure> DESC) AS pos — and write the list in pos order, row 1 first, with the
+  query's own figures. Two lists in one answer (private AND wholesale, a top 20
+  each) are TWO queries, one per list — never one query that returns both. The ORDER the associate sees must be the order of the
+  measure she asked for: a pieces ranking is listed by pieces even when another
+  column (revenue) is shown beside it. Never re-sort, merge or re-add rows
+  yourself; if a different order is wanted, run the query again.
+- Clothing vs the rest: filter on category. Ready-to-wear is Abiti, Abiti - Da
+  Sposa, Abiti - Da Giorno, Camicieria, Gonne, Pantaloni, Maglieria, Giacche,
+  Cappotti, Top. Home, Accessori*, Cinture, Calze, Intimo-Costumi, Varie are not.
+  Say which categories you counted.
+- Material / fabric ("pizzo vs velluto"): match the word in description with a
+  word-boundary regex, e.g. description ~* '\\mpizzo' — material_code is a fabric
+  code, not a name. Give pieces AND revenue for each, and say it is read from the
+  product names. Run the comparison as ONE query (unnest an array of the words).
+- Client type: wholesale_spend > 0 or primary_channel = 'Wholesale' is a trade
+  account (a shop / retailer / "diffusione"), not a private client. For "private
+  clients only" filter wholesale_spend = 0. Never guess the type from the name.
+- Brides: bridal_channel_spend > 0 (bought through the Sposa channel);
+  bridal_dress_spend > 0 counts bridal-dress purchases. Count them, do not search.
+  Every figure you quote pairs with its OWN filter, in one query:
+  COUNT(*) FILTER (WHERE bridal_channel_spend > 0) with SUM(bridal_channel_spend),
+  COUNT(*) FILTER (WHERE bridal_dress_spend > 0) with SUM(bridal_dress_spend).
+- A shop or channel ("top client of Store Milano"): rank by
+  (channels->>'Store Milano')::numeric, NOT by spend_total and NOT by country.
+  Channel names: Trunk Show, Ordini Negozio, Sposa, Wholesale, Store Milano,
+  E-Commerce, Store Capri.
+- Country is known only for part of the clients (it is NULL for most). Any
+  per-country answer MUST open with that coverage: select the columns
+  clients_with_country and clients_total (already counted over the whole house,
+  whatever you filter) and say "the country is on file for <clients_with_country>
+  of <clients_total> clients, so this ranks only those". Never compute that count
+  yourself. Filter a country with its exact value (country = 'ITALIA'), not ILIKE.
+- Company revenue per year = SUM(spend_2023..2026) over knowledge_client_cards
+  (named clients) — that matches the house overview card. Product cards add up to
+  MORE because they also hold sales to unnamed / trade accounts: when you quote a
+  product total say "all channels".
+- The period: 2023 to 2026, and 2026 is a PARTIAL year (the export stops in July
+  2026). Say so whenever 2026 appears, and never compare 2026 with a full year
+  as if it were one.
+- The SQL runner refuses some words even inside a string ('set', 'do', 'call',
+  'comment', 'lock', ';'). Filter homeware with category = 'Home', never with
+  ILIKE '%set%'.
+For a NAMED client or product keep using lookup_knowledge_card; for anything about
+a SET of them, use these views.
 `;
 
 // Sales-floor persona + a COMPACT, customer-facing schema. Deliberately omits
@@ -361,6 +442,9 @@ Schema (your brand only):
     INDEXED KNOWLEDGE crawled from the brand's site + news (product/storytelling/
     policy/news/other). Use for the brand STORY, care, policy, craftsmanship — not
     for the product list (storefront_products is the structured product source).
+- knowledge_client_cards / knowledge_product_cards — every client / product
+    knowledge card as one row, for totals and rankings. See "Totals, rankings and
+    counts over client / product CARDS" below.
 - public.brand_customer_segments(<brand_id>) — one row per client: customer_id,
     ltv, protected_value, covers_live, last_purchase_at, latest_satisfaction and
     the Customers page flags. is_vip = bought on 2+ different days OR spent
@@ -670,6 +754,7 @@ on why they fit. Close with ONE concrete next step (renewal, open claim, ask for
 feedback, or the strongest cross-sell). Speak the numbers; never show a raw table.
 
 ${TOP_CLIENTS_PLAYBOOK}
+${KNOWLEDGE_CARD_TOTALS}
 # Product analysis — "who buys <piece> and why"
 When asked who buys a piece / to analyse a product's buyers ("chi compra…",
 "analizza i clienti di…", "che clientela ha <pezzo>"), resolve the piece first
@@ -1287,9 +1372,10 @@ Deno.serve(async (req: Request) => {
   IMPORTANT: outcome/sold_qty/revenue are NULL until the show is reconciled after it closes, and sell_through_pct is NULL while pieces_reconciled = 0. NULL MEANS NOT YET COUNTED, NOT ZERO SALES — never report "0 sold" or "0% sell-through" for an unreconciled event; say it hasn't been reconciled and report what was sent. Quote coverage (reconciled vs sent) before any percentage.
 - event_attendees(id, event_id, brand_id, customer_id, customer_name, segment, invited, attended, influencer, converted, revenue, email, phone, appointment_date, appointment_time, venue, customer_ref, notes) — per-event invite & attribution list, and the agenda: appointment_date/appointment_time/venue give the running order (one show can span several venues). appointment_time NULL = invited but unslotted, not absent. customer_ref NULL = a new prospect with no purchase history, not a client who spent nothing.
 - brand_customer_segments(p_brand_id int) — set-returning function, one row per client with ltv and the Customers page flags (is_vip = 2+ purchase days OR EUR 20,000+ spent; is_lapsed, is_incomplete, is_high_nps_idle). Use it for any VIP / lapsed question; across brands: FROM brands b CROSS JOIN LATERAL brand_customer_segments(b.id::int) s.
-- brand_knowledge_docs(id, brand_id, title, category, source_type, source_url, content) — indexed brand knowledge (story/care/policy, and for some brands client/product "Scheda …" cards). Prefer search_knowledge / lookup_knowledge_card over run_sql for these.
+- brand_knowledge_docs(id, brand_id, title, category, source_type, source_url, content) — indexed brand knowledge (story/care/policy, and for some brands client/product "Scheda …" cards). Prefer search_knowledge / lookup_knowledge_card over run_sql for a NAMED card; for totals and rankings over the cards use the two views below.
 
 ${TOP_CLIENTS_PLAYBOOK}
+${KNOWLEDGE_CARD_TOTALS}
 For an admin: the queries above are written for ONE brand. In single-brand view the
 scope does that for you. In the all-brands view either ask which house, or pin
 every one of them to it — po.brand_id = <id> in q and storefront_products.brand_id
@@ -1535,7 +1621,13 @@ another house's piece.`
                   content: JSON.stringify({
                     columns,
                     row_count: payload.row_count ?? rows.length,
-                    rows_preview: rows.slice(0, 30),
+                    rows_preview: rows.slice(0, ROWS_PREVIEW),
+                    // Said out loud, because a model shown 30 of 40 rows reported
+                    // "only 10 wholesale accounts" — the rest it never saw.
+                    ...(rows.length > ROWS_PREVIEW
+                      ? { rows_not_shown: rows.length - ROWS_PREVIEW,
+                          note: `Only the first ${ROWS_PREVIEW} rows are shown to you. Do not describe the rest; re-query narrower if you need them.` }
+                      : {}),
                   }),
                 });
               }
@@ -2022,22 +2114,47 @@ function makeTableOrderGuard(emitFn: (event: string, data: unknown) => void, que
     recent = (recent + s).slice(-400);
   };
 
-  const amount = (line: string): number | null => {
-    const m = line.match(/€\s?([\d.,]+)/);
+  // The cells of a markdown table row, markup stripped: "| 1 | **40301** |" -> ["1", "40301"].
+  const cells = (line: string): string[] =>
+    line.trim().replace(/^\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.replace(/\*/g, "").trim());
+
+  // A cell's figure: "€ 1.504.617" -> 1504617, "1.083" -> 1083, "~155" -> 155.
+  // No digit (a dash, "n/d") means we can't read the row.
+  const figure = (cell: string): number | null => {
+    const m = cell.match(/-?\d[\d.,]*/);
     if (!m) return null;
-    const n = Number(m[1].replace(/[.,](?=\d{3}\b)/g, ""));
+    const n = Number(m[0].replace(/[.,](?=\d{3}\b)/g, "").replace(",", "."));
     return Number.isFinite(n) ? n : null;
   };
+
+  // WHICH column the ranking is by. This guard first shipped sorting every
+  // ranked table by its first euro figure, so a best-seller list asked "by
+  // number of pieces" — pieces first, revenue beside it — was reshuffled by
+  // revenue and its # column came out 1, 10, 9, 6, 2… (Luisa Beccaria,
+  // 2026-11-03). The ask names the measure; sort by that column.
+  const COUNT_HDR = /pezz|pieces|units|qty|quantit|capi\b|volum/i;
+  const MONEY_HDR = /spend|revenue|total|fatturato|speso|spesa|valore|importo|ricavo/i;
+  const COUNT_ASK = /pezz|pieces|units|quantit|volum|\bcapi\b/i;
+  const MONEY_ASK = /fatturat|spes[ao]|speso|spend|revenue|ricav|valore|€/i;
 
   const ordered = (lines: string[]): string[] => {
     const isSep = (l: string) => /^[\s|:\-]+$/.test(l);
     const header = lines[0];
-    if (!header || !/spend|revenue|total|fatturato|speso|valore|importo/i.test(header)) return lines;
+    if (!header) return lines;
+    const head = cells(header);
+    const countCol = head.findIndex((h) => COUNT_HDR.test(h));
+    const moneyCol = head.findIndex((h) => MONEY_HDR.test(h));
+    // The question decides; the prose above the table only when the question
+    // names no measure ("dammi i primi 20").
+    const askCount = COUNT_ASK.test(question) || (!MONEY_ASK.test(question) && COUNT_ASK.test(recent));
+    const byCount = countCol >= 0 && (askCount || moneyCol < 0);
+    const col = byCount ? countCol : moneyCol;
+    if (col < 0) return lines;
     // Only when a ranking is actually claimed — by the question that was asked,
     // or by the prose just above the table. Match on the STEM: this first
     // shipped with "ranked", and an answer opening "a clear ranking ... doesn't
     // exist" slipped straight past it and published an unsorted table.
-    const CLAIM = /rank|leaderboard|top\b|highest|biggest|most|largest|classifica|migliori|maggior/i;
+    const CLAIM = /rank|leaderboard|top\b|highest|biggest|most|largest|classifica|migliori|maggior|più vendut/i;
     if (!CLAIM.test(recent) && !CLAIM.test(question)) return lines;
 
     const sepIdx = lines.findIndex((l, i) => i > 0 && isSep(l));
@@ -2048,19 +2165,22 @@ function makeTableOrderGuard(emitFn: (event: string, data: unknown) => void, que
     // A table down the page in time order — "| 2024 | €120,000 |" — can carry a
     // money header and sit under the word "most" without being a ranking at all.
     // Reordering that would be a new bug, so leave anything period-shaped alone.
-    const firstCell = (l: string) => (l.split("|")[1] ?? "").replace(/\*/g, "").trim();
+    const firstCell = (l: string) => cells(l)[0] ?? "";
     const TEMPORAL = /^((19|20)\d{2}|Q[1-4]|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|gen|mag|giu|lug|ago|set|ott|dic)/i;
     if (rows.every((l) => TEMPORAL.test(firstCell(l)))) return lines;
 
-    const vals = rows.map(amount);
+    const vals = rows.map((l) => figure(cells(l)[col] ?? ""));
     if (vals.some((v) => v === null)) return lines; // a row we can't read — leave it alone
     const nums = vals as number[];
     if (nums.every((v, i) => i === 0 || v <= nums[i - 1])) return lines; // already right
 
+    // A leading position column (1, 2, 3 … as written) follows the rows to
+    // their new place, so it is renumbered rather than carried along scrambled.
+    const numbered = rows.every((l, i) => /^#?\d+\.?$/.test(firstCell(l)) && figure(firstCell(l)) === i + 1);
     const sorted = rows
       .map((row, i) => ({ row, v: nums[i] }))
       .sort((a, b) => b.v - a.v)
-      .map((r) => r.row);
+      .map((r, i) => numbered ? r.row.replace(/^(\s*\|\s*\**#?)\d+/, `$1${i + 1}`) : r.row);
     return [lines[0], lines[1], ...sorted];
   };
 
@@ -2497,7 +2617,7 @@ function buildBrandBlocks(cfg: AssistantConfig | null, brandName: string | null)
   }
 
   if (cfg.data_home === "knowledge") {
-    blocks.push(`\n\n# Where this brand's data lives (IMPORTANT — internal, never say this out loud)\nFor ${who}, the clients and much of the product knowledge live in the KNOWLEDGE BASE as text cards, NOT in the SQL CRM. For any question about a specific client (history, spend, sizes, preferences, segment) or a style/product recommendation, use search_knowledge / lookup_knowledge_card by name FIRST — profiles/policies are empty for this brand's clients, so run_sql would wrongly return "no customer". Use run_sql on storefront_products for live price / availability / what's online. Combine both when useful. This is INTERNAL ROUTING ONLY: never tell the associate where data is stored (no "CRM", "knowledge base", "database", "client cards") — just answer, or say you can't find the person under that name.`);
+    blocks.push(`\n\n# Where this brand's data lives (IMPORTANT — internal, never say this out loud)\nFor ${who}, the clients and much of the product knowledge live in the KNOWLEDGE BASE as text cards, NOT in the SQL CRM. For any question about a specific client (history, spend, sizes, preferences, segment) or a style/product recommendation, use search_knowledge / lookup_knowledge_card by name FIRST — profiles/policies are empty for this brand's clients, so run_sql on them would wrongly return "no customer". For ANY total, ranking, count or comparison across clients or products (best sellers, top clients, per year / country / channel / material, how many brides, private vs wholesale), use run_sql on knowledge_client_cards / knowledge_product_cards — they hold every card — and NEVER add up search results or say the figure is not available. Use run_sql on storefront_products for live price / availability / what's online. Combine both when useful. This is INTERNAL ROUTING ONLY: never tell the associate where data is stored (no "CRM", "knowledge base", "database", "client cards") — just answer, or say you can't find the person under that name.`);
   } else if (cfg.data_home === "hybrid") {
     blocks.push(`\n\n# Where this brand's data lives (internal, never say this out loud)\nFor ${who}, clients and products may live in BOTH the CRM (run_sql on profiles/policies) and the KNOWLEDGE BASE (search_knowledge cards). Check BOTH before concluding a client or product can't be found. INTERNAL ROUTING ONLY: never tell the associate where data is stored — just answer, or say you can't find the person under that name.`);
   }
