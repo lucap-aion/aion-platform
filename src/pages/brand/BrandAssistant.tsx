@@ -18,7 +18,7 @@ import {
   ArrowUp, BookOpen, ExternalLink, FileSpreadsheet, ImagePlus, Loader2, MessageSquarePlus, Send, ShoppingBag,
   Sparkles, Trash2, Users, ScrollText, X, Settings2, Plus, ThumbsUp, ThumbsDown, LifeBuoy, Check,
   Mic, Square, CalendarDays, History,
-  Info, Lightbulb, ChevronUp,
+  Info, Lightbulb, ChevronUp, Mail,
 } from "lucide-react";
 import { startRecording, isRecordingSupported, extensionFor, type Recorder } from "@/lib/speech";
 import VisitCard, { type Visit } from "@/components/visits/VisitCard";
@@ -979,6 +979,68 @@ export default function BrandAssistant() {
     toast.success(tt(locale, "Sent to AION — they'll come back on it.", "Inviato ad AION — ti risponderanno."));
   };
 
+  // ── Send to the team ───────────────────────────────────────────────────────
+  // Lucrezia (Luisa Beccaria): "poter mandare mail interne nel team direttamente
+  // dalla piattaforma". The answer she has on screen is what she wants to pass
+  // on, so this mails it — with the question and a note — to colleagues of the
+  // same house. The server holds the line: staff of this brand only, never a
+  // client, and replies go straight back to her.
+  type Colleague = { email: string; name: string };
+  const [sharing, setSharing] = useState<number | null>(null);
+  const [colleagues, setColleagues] = useState<Colleague[] | null>(null);
+  const [shareTo, setShareTo] = useState<Set<string>>(new Set());
+  const [shareNote, setShareNote] = useState("");
+  const [sendingShare, setSendingShare] = useState(false);
+  const [shared, setShared] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (sharing == null || colleagues !== null || !brandId) return;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("email, first_name, last_name")
+        .eq("brand_id", brandId)
+        .in("role", ["brand", "brand_admin", "brand_user"])
+        .order("first_name");
+      if (error) { console.error("[brand-assistant colleagues]", error); setColleagues([]); return; }
+      const me = (profile?.email ?? "").toLowerCase();
+      setColleagues(
+        ((data ?? []) as { email: string | null; first_name: string | null; last_name: string | null }[])
+          .filter((r) => r.email && r.email.toLowerCase() !== me)
+          .map((r) => ({
+            email: r.email as string,
+            name: [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || (r.email as string),
+          })),
+      );
+    })();
+  }, [sharing, colleagues, brandId, profile?.email]);
+
+  const closeShare = () => { setSharing(null); setShareTo(new Set()); setShareNote(""); };
+
+  const sendShare = async () => {
+    if (sharing == null || !brandId || shareTo.size === 0) return;
+    const i = sharing;
+    const msg = messages[i];
+    const answer = msg?.role === "assistant" ? msg.summary : "";
+    if (!answer.trim()) { toast.error(tt(locale, "Nothing to send.", "Niente da inviare.")); return; }
+    setSendingShare(true);
+    const err = await sendEmail("team_message", {
+      brand_id: brandId,
+      to: [...shareTo],
+      question: questionBefore(i).trim().slice(0, 500),
+      note: shareNote.trim() || null,
+      answer: answer.slice(0, 20000),
+    });
+    setSendingShare(false);
+    if (err) { toast.error(tt(locale, "Couldn't send it. Try again.", "Invio non riuscito. Riprova.")); return; }
+    setShared((prev) => new Set(prev).add(i));
+    const n = shareTo.size;
+    closeShare();
+    toast.success(n === 1
+      ? tt(locale, "Sent to your colleague.", "Inviato al tuo collega.")
+      : tt(locale, `Sent to ${n} colleagues.`, `Inviato a ${n} colleghi.`));
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
@@ -1107,6 +1169,8 @@ export default function BrandAssistant() {
                       onFeedback={(rating) => void submitFeedback(i, rating)}
                       onEscalate={() => setEscalating(i)}
                       escalated={escalated.has(i)}
+                      onShare={brandId ? () => setSharing(i) : undefined}
+                      shared={shared.has(i)}
                     />,
               )}
             </div>
@@ -1360,6 +1424,95 @@ export default function BrandAssistant() {
           >
             {sendingEscalation && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {tt(locale, "Send to AION", "Invia ad AION")}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={sharing != null} onOpenChange={(o) => { if (!o) closeShare(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{tt(locale, "Send to the team", "Invia al team")}</DialogTitle>
+          <DialogDescription>
+            {tt(
+              locale,
+              "Your colleagues get this answer by email, with your question and note. Their replies come back to you.",
+              "I tuoi colleghi ricevono questa risposta via email, con la tua domanda e la tua nota. Le loro risposte arrivano a te.",
+            )}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {tt(locale, "To", "A")}
+            </p>
+            {colleagues === null ? (
+              <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {tt(locale, "Loading the team…", "Carico il team…")}
+              </div>
+            ) : colleagues.length === 0 ? (
+              <p className="py-2 text-sm text-muted-foreground">
+                {tt(locale, "No colleagues on this account yet.", "Nessun collega su questo account.")}
+              </p>
+            ) : (
+              <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
+                {colleagues.map((c) => {
+                  const on = shareTo.has(c.email);
+                  return (
+                    <label key={c.email} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => setShareTo((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(c.email)) next.delete(c.email); else next.add(c.email);
+                          return next;
+                        })}
+                        className="h-4 w-4 accent-[hsl(var(--primary))]"
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-foreground">{c.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">{c.email}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div>
+            <label htmlFor="share-note" className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {tt(locale, "Note (optional)", "Nota (facoltativa)")}
+            </label>
+            <textarea
+              id="share-note"
+              rows={3}
+              value={shareNote}
+              onChange={(e) => setShareNote(e.target.value)}
+              placeholder={tt(locale, "e.g. have a look before Thursday's meeting", "es. dai un'occhiata prima della riunione di giovedì")}
+              className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={closeShare}
+            className="rounded-lg border border-border px-4 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+          >
+            {tt(locale, "Cancel", "Annulla")}
+          </button>
+          <button
+            type="button"
+            disabled={sendingShare || shareTo.size === 0}
+            onClick={() => void sendShare()}
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {sendingShare && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {tt(locale, "Send", "Invia")}
           </button>
         </DialogFooter>
       </DialogContent>
@@ -1656,9 +1809,9 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
   other: { en: "Doc", it: "Documento" },
 };
 
-const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEscalate, escalated }: {
+const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEscalate, escalated, onShare, shared }: {
   message: AssistantMessage; locale: string; isLast: boolean; onFollowup: (q: string) => void; onFeedback?: (rating: 1 | -1) => void;
-  onEscalate?: () => void; escalated?: boolean;
+  onEscalate?: () => void; escalated?: boolean; onShare?: () => void; shared?: boolean;
 }) => {
   const { summary, sources, columns, rows, activity, followups, report, visit, streaming } = message;
   const [voted, setVoted] = useState<1 | -1 | null>(null);
@@ -1823,6 +1976,24 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
                   </PopoverContent>
                 </Popover>
               </span>
+            )
+          )}
+          {onShare && (
+            shared ? (
+              <span className="ml-1 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-emerald-700">
+                <Check className="h-3.5 w-3.5" />
+                {tt(locale, "Sent to the team", "Inviato al team")}
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={onShare}
+                className="ml-1 flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title={tt(locale, "Email this answer to colleagues", "Invia questa risposta ai colleghi via email")}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                {tt(locale, "Send to team", "Invia al team")}
+              </button>
             )
           )}
         </div>
