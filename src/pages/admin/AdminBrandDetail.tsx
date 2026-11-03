@@ -13,6 +13,7 @@ import ShopifyConnection from "./_components/ShopifyConnection";
 import { StatusBadge } from "./_components/AdminTable";
 import ConfirmDialog from "./_components/ConfirmDialog";
 import AssistantSwitch from "./_components/AssistantSwitch";
+import DiscussionsSwitch from "./_components/DiscussionsSwitch";
 import { knowledgeComingSoon } from "@/lib/environment";
 
 // Everything about one brand, in one place.
@@ -170,6 +171,7 @@ export default function AdminBrandDetail() {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <AssistantSwitch brandId={brand.id} brandName={brand.name ?? "This brand"} />
+          <DiscussionsSwitch brandId={brand.id} brandName={brand.name ?? "This brand"} />
           {brand.status && <StatusBadge status={brand.status} />}
         </div>
       </div>

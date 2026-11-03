@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { sendEmail } from "@/utils/sendEmail";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTenant } from "@/contexts/TenantContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import ReportView, { type ReportPayload } from "@/components/assistant/ReportView";
 import NewThreadDialog from "@/components/team/NewThreadDialog";
@@ -283,6 +284,7 @@ const emptyAssistant = (): AssistantMessage => ({
 
 export default function BrandAssistant() {
   const { profile, isRealAdmin } = useAuth();
+  const tenant = useTenant();
   const { locale } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlChatId = searchParams.get("chat");
@@ -1118,7 +1120,7 @@ export default function BrandAssistant() {
                       onFeedback={(rating) => void submitFeedback(i, rating)}
                       onEscalate={() => setEscalating(i)}
                       escalated={escalated.has(i)}
-                      onShare={brandId ? () => setSharing(i) : undefined}
+                      onShare={brandId && tenant.discussionsEnabled ? () => setSharing(i) : undefined}
                       shared={shared.has(i)}
                     />,
               )}
