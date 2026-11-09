@@ -613,6 +613,21 @@ and Download PDF / Excel buttons.
 After the tool runs, give ONE short sentence ("Here's the report — download it as
 PDF or Excel below.") — never re-list the figures; the report shows them.
 
+# Charts, graphs and exports — ONLY through generate_report
+The chat itself cannot draw a chart and has no download icon. The ONLY way to
+show a chart (grafico, istogramma, torta, bar/line/pie) or give something to
+export (esportabile, Excel, PDF) is generate_report with kind="custom".
+- Any such ask — even a short follow-up like "make it a chart" / "mi fai un
+  grafico esportabile?" — means: call generate_report with a bar (or pie / line)
+  section for the chart AND a table section with the full breakdown (every
+  column the associate asked for, e.g. revenue AND its % share). Rebuild the SQL
+  from the conversation: keep the exact bands, filters and ordering the
+  associate already agreed. A chart section takes 2 columns (label, value), so
+  prefix labels to keep their order ("1. < 1K", "2. 1K-3K"…).
+- NEVER write "here's the chart", "ecco il grafico", "ecco l'istogramma", or
+  mention a download button or icon unless generate_report succeeded in THIS
+  turn. A table in the chat is not a chart — say so if that is all you have.
+
 # "Top / most / best / biggest" — a ranking must be ranked
 search_knowledge is a SIMILARITY search: it returns the handful of cards that
 read most like your query, in no particular order and with no idea who is
@@ -1155,6 +1170,15 @@ const TOOLS = [
 const BRAND_TOOL_NAMES = new Set(["search_knowledge", "lookup_knowledge_card", "shipping_estimate", "run_sql", "generate_report", "report_knowledge_gap", "escalate_to_aion", "file_visit_note"]);
 const ADMIN_TOOL_NAMES = new Set(["run_sql", "search_knowledge", "lookup_knowledge_card", "render_chart", "generate_daily_chubb_export", "generate_monthly_internal_report"]);
 
+// An ask for a chart or an export. On 2026-11-09 a Roberto Coin associate asked
+// for "un istogramma" and then "un grafico esportabile": every turn the model ran
+// run_sql, showed a table and wrote "Ecco il grafico! … icona di download in alto
+// a destra" — there was no chart and no icon. The text streams as it is written,
+// so it can't be taken back afterwards; the only reliable fix is to make the
+// first step generate_report. Kept narrow on purpose: no "pdf"/"scarica", which
+// are just as often about a document in the knowledge base.
+const CHART_ASK = /\b(grafic\w*|istogramm\w*|diagramm\w*|torta|chart\w*|graph\w*|histogram\w*|pie|esport\w*|export\w*|excel|xlsx)\b/i;
+
 /**
  * A voice message, turned into words.
  *
@@ -1551,6 +1575,12 @@ another house's piece.`
             ? [...msgs.slice(0, -1), { role: "user", content: [...last.content, { type: "text", text: nudge }] }]
             : [...msgs, { role: "user", content: nudge }];
         };
+        // A chart or export ask goes straight to generate_report (see CHART_ASK).
+        // Not with an attachment: report sections are SQL, so they can't chart
+        // an attached sheet, and a photo question is about a piece.
+        const forceReport = !image && !sheet?.text && CHART_ASK.test(question) &&
+          activeTools.some((t) => t.name === "generate_report");
+        const reportChoice = { type: "tool", name: "generate_report" } as unknown as Anthropic.MessageCreateParams["tool_choice"];
         for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
           emit("turn_start", { turn });
           answered = false;
@@ -1562,7 +1592,7 @@ another house's piece.`
             max_tokens: MAX_TOKENS,
             system: systemBlocks,
             tools: activeTools as Anthropic.Tool[],
-            ...(lastTurn ? { tool_choice: noTools } : {}),
+            ...(lastTurn ? { tool_choice: noTools } : (turn === 0 && forceReport ? { tool_choice: reportChoice } : {})),
             messages: lastTurn ? closing(messages) : messages,
           });
 
