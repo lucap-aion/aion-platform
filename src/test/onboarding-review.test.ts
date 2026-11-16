@@ -71,6 +71,11 @@ describe("reviewItems", () => {
     expect(texts.some((t) => /5 drafted/.test(t))).toBe(true);
   });
 
+  it("takes the office the branding stage wrote, which lands in hq_address", () => {
+    const hq = reviewItems(rows, { legal_name: null, registered_address: null, hq_address: "Piazza Savonarola 11" }).map((i) => i.text);
+    expect(hq.some((t) => /registered (office|address)/i.test(t))).toBe(false);
+  });
+
   it("says nothing about the record when it is filled", () => {
     const filled = reviewItems(rows, { legal_name: "Shaft S.r.l.", registered_address: "Via Roma 1" }).map((i) => i.text);
     expect(filled.some((t) => /legal entity|registered (office|address)/i.test(t))).toBe(false);

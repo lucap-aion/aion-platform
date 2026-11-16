@@ -18,6 +18,7 @@ const MSB = new Uint8Array(fixture("msb-wordmark.png"));
 const LGR = fixture("lgr-wordmark.svg").toString("utf8");
 const FAVICON = new Uint8Array(fixture("favicon-32.webp"));
 const PHOTO = new Uint8Array(fixture("photo-418x768.jpg"));
+const SHAFT = new Uint8Array(fixture("shaft-wordmark.png"));
 
 type Upload = { bucket: string; path: string; bytes: Uint8Array; contentType?: string };
 function fakeAdmin() {
@@ -59,6 +60,21 @@ describe("the initial of a wordmark", () => {
     for (let i = 3; i < px!.rgba.length; i += 4) if (px!.rgba[i] >= 64) ink++;
     expect(ink).toBeGreaterThan(px!.width * px!.height * 0.05);
     expect(px!.rgba[3]).toBeLessThan(64);
+  });
+
+  it("pads the S of Shaft with nothing — not with the h that stands 48px after it", async () => {
+    // Shaft (2026-11-16): the margin was copied off the wordmark, and a sliver of the "h"
+    // came with it, down the right edge of the collapsed-sidebar monogram.
+    const px = await decodePng((await initialFromPng(SHAFT))!);
+    expect(px!.width).toBe(px!.height);
+    const { width: s, rgba } = px!;
+    const inkAt = (x: number) => { for (let y = 0; y < s; y++) if (rgba[(y * s + x) * 4 + 3] >= 64) return true; return false; };
+    const cols = Array.from({ length: s }, (_, x) => inkAt(x));
+    const left = cols.indexOf(true), right = cols.lastIndexOf(true);
+    // One run of ink, no second piece near the right edge…
+    expect(cols.slice(left, right + 1).every(Boolean)).toBe(true);
+    // …and centred: the margins either side differ by a pixel at most.
+    expect(Math.abs(left - (s - 1 - right))).toBeLessThanOrEqual(1);
   });
 
   it("re-frames an SVG wordmark on its first glyph", () => {

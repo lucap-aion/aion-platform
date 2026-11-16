@@ -31,7 +31,7 @@ import {
 import { harvestBrandIdentity } from "../_shared/brand-identity.ts";
 import { extractProducts } from "../_shared/product-extract.ts";
 import { enrichFromWikidata } from "../_shared/brand-enrich.ts";
-import { legalNameFromDescription, registeredOfficeFrom, nameIsConfirmedBy } from "../_shared/brand-legal.ts";
+import { legalNameFromDescription, legalNameFromSite, registeredOfficeFrom, nameIsConfirmedBy } from "../_shared/brand-legal.ts";
 // When the house's own site does not say: a search engine has already read those pages.
 import { searchIdentity } from "../_shared/brand-search.ts";
 // What a failure actually stops, and why it is not "everything queued behind it".
@@ -600,6 +600,13 @@ async function runStage(
     const siteLegal = await readLegalPages(admin, brandId);
     let office = registeredOfficeFrom(siteLegal);
     let legalName = legalNameFromDescription(id.description);
+    // No encyclopaedia name (a house with no Wikipedia page — Shaft, 2026-11-16): the site's
+    // own legal text, before a search. The house stating who it is outranks a snippet about it.
+    const nameFromSite = !legalName ? legalNameFromSite(siteLegal) : null;
+    if (nameFromSite) {
+      legalName = nameFromSite;
+      id.notes.push(`legal entity "${nameFromSite}", read from the site's own legal text — confirm it before it goes on a contract`);
+    }
 
     // The two fields a website is least reliable about, and the two that go onto a contract
     // and into a Chubb bordereau. Damiani publishes "Sede Legale" as a bare label with the
@@ -647,7 +654,7 @@ async function runStage(
     // A name that came from a SEARCH already said so a few lines up; repeating it here as
     // "NOT found on the brand's own site" would be two notes about one fact, the second of
     // them alarming and redundant.
-    if (legalName && legalName !== searched?.legalName) {
+    if (legalName && legalName !== searched?.legalName && legalName !== nameFromSite) {
       id.notes.push(nameIsConfirmedBy(legalName, siteLegal)
         ? `legal entity "${legalName}", confirmed word for word on the brand's own site`
         : `legal entity "${legalName}" — NOT found on the brand's own site, so check it before it goes on a contract`);

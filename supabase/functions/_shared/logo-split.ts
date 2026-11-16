@@ -457,16 +457,20 @@ export async function initialFromPng(bytes: Uint8Array): Promise<Uint8Array | nu
   const glyph: Box = { top, bottom, left: run.left, right: run.right };
   if (!isGlyph(glyph, name)) return null;
 
+  // The margin is PAINTED, never copied from the source. Copying the padding off the logo
+  // took whatever stood there: Shaft's "h" begins 48px after its "S" and the 78px margin
+  // carried a sliver of it into the monogram (2026-11-16). And clamping that margin at the
+  // image's left edge but not at the neighbour's put the letter off-centre. Only the glyph's
+  // own box is copied; the square is centred on it.
   const pad = Math.max(2, Math.round((glyph.bottom - glyph.top) * 0.12));
-  const x0 = Math.max(0, glyph.left - pad), x1 = Math.min(width, glyph.right + pad);
-  const y0 = Math.max(0, glyph.top - pad), y1 = Math.min(height, glyph.bottom + pad);
-  const w = x1 - x0, h = y1 - y0, s = Math.max(w, h);
-  const ox = (s - w) >> 1, oy = (s - h) >> 1;
+  const gw = glyph.right - glyph.left, gh = glyph.bottom - glyph.top;
+  const s = Math.max(gw, gh) + 2 * pad;
+  const ox = (s - gw) >> 1, oy = (s - gh) >> 1;
   const out = new Uint8Array(s * s * 4);
   // An opaque logo keeps its own background in the padding; a cut-out stays transparent.
   if (opaque) for (let i = 0; i < out.length; i += 4) { out[i] = bg[0]; out[i + 1] = bg[1]; out[i + 2] = bg[2]; out[i + 3] = 255; }
-  for (let y = y0; y < y1; y++) {
-    out.set(rgba.subarray((y * width + x0) * 4, (y * width + x1) * 4), ((y - y0 + oy) * s + ox) * 4);
+  for (let y = glyph.top; y < glyph.bottom; y++) {
+    out.set(rgba.subarray((y * width + glyph.left) * 4, (y * width + glyph.right) * 4), ((y - glyph.top + oy) * s + ox) * 4);
   }
   return await encodePng(s, s, out);
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  legalNameFromDescription, registeredOfficeFrom, splitAddress, nameIsConfirmedBy,
+  legalNameFromDescription, legalNameFromSite, registeredOfficeFrom, splitAddress, nameIsConfirmedBy,
 } from "../../supabase/functions/_shared/brand-legal.ts";
 
 // The two fields the data-request workbook needs and nothing could fill: the legal entity
@@ -246,5 +246,45 @@ describe("a label on one line and its value on the next", () => {
   it("does not swallow a paragraph that merely follows a heading", () => {
     // A label followed by prose is still a label with no address under it.
     expect(registeredOfficeFrom("Sede Legale\nLa nostra storia comincia nel 1924.")).toBe(null);
+  });
+});
+
+describe("the legal entity, from the house's own legal text", () => {
+  // Shaft (2026-11-16): no Wikipedia page, so nothing found a name its terms state 250 times.
+  const shaft = [
+    "Le presenti Condizioni disciplinano la vendita da parte di Manifatture Twins srl, sede legale Piazza Savonarola 11 – 50132 Firenze Italia, capitale sociale € 100.000 iv P.IVA IT 05326400487 (‘Manifatture Twins srl’) – ai consumatori finali.",
+    "In tali circostanze, Manifatture Twins srl rimborserà al Cliente le somme. Il sito è di proprietà di Manifatture Twins srl. (di seguito “Manifatture Twins srl”).",
+    "Iscriviti Manifatture Twins Srl · P.IVA IT 05326400487 Scegli la lingua",
+    "Azienda SHAFT JEANS MANIFATTURE TWINS SRL Sede legale: Piazza Savonarola 11, 50132 Firenze (FI), Italia",
+  ].join(" ");
+
+  it("takes the name the house keeps using, not the heading in front of it", () => {
+    expect(legalNameFromSite(shaft)).toBe("Manifatture Twins srl");
+  });
+
+  it("reads a name whose left edge is a heading, as the description reader would not", () => {
+    const site = "Website Privacy Policy Salvatore Ferragamo S.p.A. with registered offices at Via de' Tornabuoni 2, 50123 Firenze. "
+      + "The data controller is Salvatore Ferragamo S.p.A. and its processors act on behalf of Salvatore Ferragamo S.p.A.";
+    expect(legalNameFromSite(site)).toBe("Salvatore Ferragamo S.p.A.");
+  });
+
+  it("counts every spelling of one company together and writes the dotted one", () => {
+    const site = "The controller is Luisa Beccaria S.r.l with registered offices at Via Formentini 1, Milan. "
+      + "Products are sold directly by Luisa Beccaria S.r.l. (the “Vendor”), with registered office in Milan. "
+      + "All rights belong to Luisa Beccaria srl.";
+    expect(legalNameFromSite(site)).toBe("Luisa Beccaria S.r.l.");
+  });
+
+  it("will not name a company the policy only mentions once, or a bare form", () => {
+    // A processor's identity line, said once, is not the house.
+    expect(legalNameFromSite("Analytics by Google Ireland Limited, with registered office in Dublin.")).toBeNull();
+    expect(legalNameFromSite("venduto da srl, sede legale Via Roma 1")).toBeNull();
+    expect(legalNameFromSite("")).toBeNull();
+    expect(legalNameFromSite(null)).toBeNull();
+  });
+
+  it("does not let a lowercase lead-in into the name", () => {
+    const site = "venduti da parte di Acme Moda S.p.A., sede legale Via Roma 1, 20100 Milano. Garanzia di Acme Moda S.p.A. per due anni.";
+    expect(legalNameFromSite(site)).toBe("Acme Moda S.p.A.");
   });
 });
