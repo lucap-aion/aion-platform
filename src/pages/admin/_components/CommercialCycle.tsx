@@ -332,6 +332,7 @@ export default function CommercialCycle({ brand, brands }: { brand: Brand; brand
         stages={overview?.stages}
         demoAllowed={demo?.allowed === true}
         demoBlockedReason={demo?.reason}
+        record={overview?.brand ? { legal_name: overview.brand.legal_name, registered_address: overview.brand.address } : null}
         onQueued={() => void load()}
       />
 

@@ -129,7 +129,7 @@ export default function NewBrand() {
       // Queue immediately. It runs on the cron tick, so this returns straight
       // away and the work survives closing the tab — the point being that the
       // admin never has to come back and press "start" on anything.
-      const { error: fnErr } = await supabase.functions.invoke("onboard-brand", {
+      const { data: started, error: fnErr } = await supabase.functions.invoke("onboard-brand", {
         body: { brand_id: id, action: "start" },
       });
       if (fnErr) {
@@ -141,7 +141,10 @@ export default function NewBrand() {
       } else {
         toast({
           title: `${name.trim()} created`,
-          description: "Reading the site, pulling the catalogue and drafting the documents. This runs in the background — you can leave the page.",
+          description: "Reading the site, pulling the catalogue and drafting the documents. This runs in the background — you can leave the page"
+            + ((started as { notify?: string | null } | null)?.notify
+              ? `; ${(started as { notify: string }).notify} gets an email when it finishes, with what to check.`
+              : "."),
         });
       }
       // Navigate without clearing `submitting`: this component is on its way out,

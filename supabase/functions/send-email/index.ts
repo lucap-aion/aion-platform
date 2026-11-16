@@ -1,6 +1,9 @@
 import { Resend } from "npm:resend@4";
 import { originAllowed, originRefused } from "../_shared/origin.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  reviewItems, runOutcome, resultLine, stageLabel, stageOrder, type ReviewStageRow,
+} from "../_shared/onboarding-review.ts";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY")!);
 const supabaseAdmin = createClient(
@@ -302,6 +305,53 @@ function assistantEscalationHtml(e: {
     ${autoNote(S)}`);
 }
 
+// ─── Onboarding finished: what was built, and what a person has to look at ───
+// Giulio created Shaft on 2026-11-16 and had to ask Luca to watch the pipeline,
+// because nothing told him when it was done or what it wanted checked. This is
+// written to the admin who started the run, from the stage rows themselves.
+export function onboardingSettledHtml(o: {
+  brand_name: string; started_at: string; url: string;
+  rows: ReviewStageRow[]; review: { label: string; text: string }[];
+  outcome: ReturnType<typeof runOutcome>;
+}): string {
+  const minutes = Math.max(1, Math.round((Date.now() - new Date(o.started_at).getTime()) / 60_000));
+  const { failed, unfinished, skipped } = o.outcome;
+  const headline = failed.length
+    ? `${esc(o.brand_name)}: ${failed.length === 1 ? "one stage" : `${failed.length} stages`} could not finish`
+    : unfinished.length
+    ? `${esc(o.brand_name)} is still being set up`
+    : `${esc(o.brand_name)} is set up`;
+  const lede = unfinished.length
+    ? `It has been running for ${minutes} minutes and ${unfinished.map(stageLabel).join(", ")} ${unfinished.length === 1 ? "has" : "have"} not finished. The rest is below.`
+    : `The pipeline finished after ${minutes} minute${minutes === 1 ? "" : "s"}${failed.length ? ", with a failure to look at first" : skipped.length ? ", with some stages skipped" : ""}.`;
+  const dot = (st: string) => st === "done" ? "#2e7d32" : st === "failed" ? "#c62828" : "#9e9e9e";
+  const stageRows = [...o.rows].sort((a, b) => stageOrder(a.stage, b.stage))
+    .map((r) => {
+      const line = resultLine(r);
+      if (!line) return "";
+      return `<tr><td style="padding:6px 8px 6px 0;vertical-align:top;width:10px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dot(r.status)}"></span></td>`
+        + `<td style="padding:4px 12px 4px 0;font-size:14px;color:#111111;white-space:nowrap;vertical-align:top">${esc(stageLabel(r.stage))}</td>`
+        + `<td style="padding:4px 0;font-size:14px;color:#555555;vertical-align:top">${esc(line)}</td></tr>`;
+    }).join("");
+  const review = o.review.length
+    ? `<p style="${S.label}">Check before a client sees it (${o.review.length})</p>
+       <ul style="margin:8px 0 20px;padding-left:20px">${o.review.map((i) =>
+         `<li style="margin:0 0 10px;font-size:14px;line-height:1.6;color:#333333"><strong>${esc(i.label)}:</strong> ${esc(i.text)}</li>`).join("")}</ul>`
+    : `<p style="${S.text}">Nothing was flagged for a person to check.</p>`;
+  return wrap(`
+    ${soloLogo(AION_LOGO, "AION Cover")}
+    <h1 style="${S.title}">${headline}</h1>
+    <p style="${S.text}">${lede}</p>
+    <div style="${S.btnWrap}"><a href="${o.url}" style="${S.btn}">Open ${esc(o.brand_name)}</a></div>
+    <hr style="${S.rule}">
+    ${review}
+    <hr style="${S.rule}">
+    <p style="${S.label}">What was built</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-top:8px">${stageRows}</table>
+    <p style="${S.small}">You are getting this because you started this brand's pipeline. Single stages re-run from the panel do not send one.</p>
+    ${autoNote(S)}`);
+}
+
 // ─── Team message: an assistant answer shared with colleagues ────────────────
 // Lucrezia (Luisa Beccaria, 2026-11-03): "poter mandare mail interne nel team
 // direttamente dalla piattaforma". The ranking she just got is the thing she
@@ -505,6 +555,7 @@ const POLICY: Record<string, { kinds: CallerKind[]; recipients: Recipients }> = 
   feedback_submitted:       { kinds: ["service", "admin", "brand", "customer"],            recipients: "internal" },
   assistant_escalation:     { kinds: ["service", "admin", "brand"],                        recipients: "internal" },
   team_notify:              { kinds: ["admin", "brand"],                                   recipients: "team" },
+  onboarding_settled:       { kinds: ["service"],                                          recipients: "internal" },
 };
 
 function jwtRole(token: string): string | null {
@@ -1042,6 +1093,58 @@ Deno.serve(async (req) => {
           await supabaseAdmin.from("team_notifications").update({ emailed_at: new Date().toISOString() }).in("id", sent);
         }
         result = { sent: sent.length, of: t.recipients.length };
+        break;
+      }
+
+      case "onboarding_settled": {
+        // Everything comes from the database by run id — the caller names nothing: not the
+        // recipient, not the brand, not a line of the text.
+        const runId = String(data?.run_id ?? "");
+        if (!/^[0-9a-f-]{36}$/i.test(runId)) return deny("run_id required", 400);
+        // The claim. Overlapping ticks, or a pg_net retry, cannot send the same email twice.
+        const { data: run } = await supabaseAdmin.from("brand_onboarding_runs")
+          .update({ notified_at: new Date().toISOString() })
+          .eq("id", runId).is("notified_at", null)
+          .select("id, brand_id, started_by_email, started_at").maybeSingle();
+        if (!run) { result = { sent: 0, reason: "already sent, or no such run" }; break; }
+        const fail = async (why: string) => {
+          await supabaseAdmin.from("brand_onboarding_runs").update({ notice_error: why }).eq("id", runId);
+          return deny(why, 500);
+        };
+        // Only ever to an AION admin: the address was recorded from the admin's own session,
+        // and is checked against the admins table again here.
+        const { data: adm } = await supabaseAdmin.from("admins").select("email")
+          .ilike("email", String(run.started_by_email)).limit(1).maybeSingle();
+        if (!adm?.email) return await fail("the person who started this run is no longer an admin");
+        const [{ data: brand }, { data: rows }] = await Promise.all([
+          supabaseAdmin.from("brands").select("name, legal_name, registered_address, description").eq("id", run.brand_id).maybeSingle(),
+          supabaseAdmin.from("brand_onboarding").select("stage, status, error, detail, queued_at").eq("brand_id", run.brand_id),
+        ]);
+        if (!brand) return await fail(`brand ${run.brand_id} no longer exists`);
+        const stageRows = (rows ?? []) as ReviewStageRow[];
+        const outcome = runOutcome(stageRows);
+        const review = reviewItems(stageRows, brand);
+        const appUrl = Deno.env.get("APP_URL") ?? (isProd ? "https://app.aioncover.com" : "https://dev.app.aioncover.com");
+        const html = onboardingSettledHtml({
+          brand_name: String(brand.name ?? `brand ${run.brand_id}`), started_at: String(run.started_at),
+          url: `${appUrl}/admin/brands/${run.brand_id}?tab=cycle`,
+          rows: stageRows, review, outcome,
+        });
+        const name = String(brand.name ?? "Brand");
+        const subject = outcome.failed.length
+          ? `${name}: ${outcome.failed.map(stageLabel).join(", ")} failed`
+          : outcome.unfinished.length
+          ? `${name} is still being set up — ${outcome.unfinished.map(stageLabel).join(", ")} running`
+          : `${name} is set up${review.length ? ` — ${review.length} thing${review.length === 1 ? "" : "s"} to check` : ""}`;
+        const res = await resend.emails.send({
+          from: "AION Cover <team@aioncover.com>",
+          to: [String(adm.email)],
+          subject: `${devPrefix}${subject.slice(0, 150)}`,
+          html,
+          text: htmlToText(html),
+        });
+        if ((res as any)?.error) return await fail(String((res as any).error?.message ?? "resend refused"));
+        result = { sent: 1, failed: outcome.failed.length, review: review.length };
         break;
       }
 
