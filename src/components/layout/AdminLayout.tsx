@@ -2,6 +2,7 @@ import { Outlet } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import AdminSidebar from "./AdminSidebar";
 import HeaderControls from "./HeaderControls";
+import OnboardingBell from "@/components/admin/OnboardingBell";
 
 const AdminLayout = () => (
   <SidebarProvider>
@@ -20,7 +21,8 @@ const AdminLayout = () => (
           {/* Desktop toggle lives in the sidebar's top-right corner; on mobile
               this trigger opens the off-canvas drawer. */}
           <SidebarTrigger className="md:hidden" />
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-1">
+            <OnboardingBell />
             <HeaderControls />
           </div>
         </header>

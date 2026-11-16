@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { AlertCircle, Check, Circle, Clock, HelpCircle, Loader2, Play, SkipForward } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Circle, ClipboardCheck, Clock, HelpCircle, Loader2, Play, SkipForward } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   PIPELINE_STAGES, type PipelineStage, type StageState,
   stageDisplayState, summarisePipeline,
 } from "@/lib/commercialCycle";
+import { reviewItems, type ReviewBrand } from "../../../../supabase/functions/_shared/onboarding-review";
 
 // What the background pipeline is doing, once.
 //
@@ -29,6 +30,8 @@ type Props = {
   /** Demo stages are hidden entirely where they cannot run — see demoAllowedForBrand. */
   demoAllowed: boolean;
   demoBlockedReason?: string | null;
+  /** The record fields the review list reads (legal entity, registered office). */
+  record?: ReviewBrand | null;
   /** Called once work has been queued, so the parent can reload and start polling. */
   onQueued: () => void;
 };
@@ -58,7 +61,7 @@ const CHIP: Record<string, string> = {
 };
 
 export default function PipelinePanel({
-  brandId, brandName, website, stages, demoAllowed, demoBlockedReason, onQueued,
+  brandId, brandName, website, stages, demoAllowed, demoBlockedReason, record, onQueued,
 }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -73,6 +76,17 @@ export default function PipelinePanel({
     && summary.done === summary.total;
   const [folded, setFolded] = useState(false);
   useEffect(() => { setFolded(settled); }, [settled]);
+
+  // Everything the stages asked a person to look at, in one list — the same list the
+  // finish email carries (supabase/functions/_shared/onboarding-review.ts). It used to be
+  // one note per chip, behind a click on each, and the branding chip showed only its first.
+  const review = stages
+    ? reviewItems(Object.entries(stages).map(([stage, st]) => ({ stage, ...st })), record)
+    : [];
+  const [reviewOpen, setReviewOpen] = useState(false);
+  // Opens by itself once nothing is running — failed or not, that is when it is the work.
+  const atRest = summary.total > 0 && !summary.active;
+  useEffect(() => { if (atRest) setReviewOpen(true); }, [atRest]);
   const at = (s: PipelineStage) => stageDisplayState(stages?.[s.key], busy === s.key);
 
   // Open on the stage that needs a person: a stalled claim first, then the first failure,
@@ -96,13 +110,15 @@ export default function PipelinePanel({
         body: { brand_id: brandId, action: "start", stages: keys },
       });
       if (error) throw new Error(error.message);
-      const d = data as { error?: string; queued?: string[]; skipped?: string[] };
+      const d = data as { error?: string; queued?: string[]; skipped?: string[]; notify?: string | null };
       if (d.error) throw new Error(d.error);
       const skipped = d.skipped ?? [];
       toast({
         title: keys.length === 1 ? "Stage queued" : `${(d.queued ?? []).length} stages queued`,
         description: skipped.length
           ? `${skipped.join(", ")} could not be queued here.`
+          : d.notify
+          ? `It runs on the server. ${d.notify} gets an email when it finishes, with what to check.`
           : "It runs on the server — you can close this and come back.",
       });
       onQueued();
@@ -254,13 +270,40 @@ export default function PipelinePanel({
         </div>
       )}
 
+      {review.length > 0 && summary.total > 0 && (
+        <div className="border-t border-border/60">
+          <button
+            onClick={() => setReviewOpen((o) => !o)}
+            aria-expanded={reviewOpen}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs hover:bg-muted/40"
+          >
+            <ClipboardCheck className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+            <span className="font-medium text-foreground">Check before a client sees it</span>
+            <span className="tabular-nums text-muted-foreground">{review.length}</span>
+            {summary.active && <span className="text-muted-foreground">· more may appear as stages finish</span>}
+            <ChevronDown className={`ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform ${reviewOpen ? "rotate-180" : ""}`} />
+          </button>
+          {reviewOpen && (
+            <ul className="space-y-1.5 px-4 pb-3">
+              {review.map((i, k) => (
+                <li key={k} className="flex gap-2 text-xs leading-relaxed text-muted-foreground">
+                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
+                  <span><span className="font-medium text-foreground">{i.label}:</span> {i.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {!demoAllowed && demoBlockedReason && (
         <p className="border-t border-border/60 px-4 py-2 text-xs text-muted-foreground">{demoBlockedReason}</p>
       )}
       {summary.active && (
         <p className="border-t border-primary/20 px-4 py-2 text-xs text-muted-foreground">
-          This runs on the server — you can leave this page and come back. Steps below stay
-          unavailable until the work they need has landed.
+          This runs on the server — you can leave this page. Whoever started the run gets an
+          email when it finishes, with what to check. Steps below stay unavailable until the
+          work they need has landed.
         </p>
       )}
     </div>

@@ -224,6 +224,8 @@ Deno.serve(async (req: Request) => {
     (KNOWLEDGE_BATCH_SECRET && req.headers.get("x-batch-secret") === KNOWLEDGE_BATCH_SECRET) ||
     token === SUPABASE_SERVICE_ROLE_KEY ||
     jwtRole(token) === "service_role";
+  // Who pressed the button, when a person did: a run they start is reported back to them.
+  let caller: { id: string; email: string } | null = null;
   if (!isBatch) {
     if (!token) return json({ error: "missing bearer token" }, 401);
     const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -233,6 +235,7 @@ Deno.serve(async (req: Request) => {
     if (!user) return json({ error: "invalid session" }, 401);
     const { data: adminRow } = await userClient.from("admins").select("id").eq("user_id", user.id).maybeSingle();
     if (!adminRow) return json({ error: "AION admin only" }, 403);
+    if (user.email) caller = { id: user.id, email: user.email };
   }
 
   const brandId = Number(body.brand_id ?? 0);
@@ -300,7 +303,25 @@ Deno.serve(async (req: Request) => {
           .eq("brand_id", brandId).eq("stage", s);
       }
     }
-    return json({ ok: true, queued: runnable, skipped, status: await status(admin, brandId) });
+    // A whole-pipeline run (a new brand, or "run everything") is reported to whoever started
+    // it once the tick sees nothing of this brand left in flight — see
+    // 20261116000001_onboarding_run_notice.sql. A single stage re-run is not: the panel it
+    // was pressed from already shows it land. Recorded AFTER queueing, so a tick in between
+    // cannot find the run with nothing queued and close it on the spot. An open run for the
+    // brand already exists → the unique index refuses this one and the first email covers it.
+    let notify: string | null = null;
+    if (caller && runnable.length > 1) {
+      const { error: runErr } = await admin.from("brand_onboarding_runs").insert({
+        brand_id: brandId, started_by: caller.id, started_by_email: caller.email, stages: runnable,
+      });
+      if (!runErr) notify = caller.email;
+      else if (runErr.code === "23505") {
+        const { data: open } = await admin.from("brand_onboarding_runs").select("started_by_email")
+          .eq("brand_id", brandId).is("settled_at", null).maybeSingle();
+        notify = (open as { started_by_email?: string } | null)?.started_by_email ?? null;
+      } else console.error("[onboard-brand] could not record the run", runErr.message);
+    }
+    return json({ ok: true, queued: runnable, skipped, notify, status: await status(admin, brandId) });
   }
 
   // Called by the tick: run exactly ONE queued stage, then get out of the way.
