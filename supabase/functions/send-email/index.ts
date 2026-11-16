@@ -1117,7 +1117,7 @@ Deno.serve(async (req) => {
           .ilike("email", String(run.started_by_email)).limit(1).maybeSingle();
         if (!adm?.email) return await fail("the person who started this run is no longer an admin");
         const [{ data: brand }, { data: rows }] = await Promise.all([
-          supabaseAdmin.from("brands").select("name, legal_name, registered_address, description").eq("id", run.brand_id).maybeSingle(),
+          supabaseAdmin.from("brands").select("name, legal_name, registered_address, hq_address, description").eq("id", run.brand_id).maybeSingle(),
           supabaseAdmin.from("brand_onboarding").select("stage, status, error, detail, queued_at").eq("brand_id", run.brand_id),
         ]);
         if (!brand) return await fail(`brand ${run.brand_id} no longer exists`);

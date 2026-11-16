@@ -55,6 +55,83 @@ export function legalNameFromDescription(text: string | null | undefined): strin
   return m ? tidy(m[1]) : null;
 }
 
+/**
+ * The legal entity, from the house's own legal text — for the houses no encyclopaedia covers.
+ *
+ * legalNameFromDescription refuses mid-paragraph names because the LEFT edge is ambiguous:
+ * "Website Privacy Policy Salvatore Ferragamo S.p.A." is as well-formed as the real thing.
+ * But a house names itself in its terms of sale dozens of times, and almost always after a
+ * lowercase word or a comma — "vendita da parte di Manifatture Twins srl", "In tali
+ * circostanze, Manifatture Twins srl" — so the real name is the form that keeps turning up
+ * as a WHOLE name, while a heading glued to its front turns up once. Shaft (2026-11-16)
+ * names its company 250 times across its site and the stage reported "no legal entity
+ * could be established", because Shaft has no Wikipedia page.
+ *
+ * Three guards, because this goes onto a contract:
+ *  - a candidate must sit right before a registered-office statement or a VAT number — a
+ *    house's own identity line, not any company the policy mentions;
+ *  - the chosen form must appear as a whole name at least twice;
+ *  - among the word-trimmed forms of a candidate, the most frequent whole name wins, so a
+ *    heading in front of it ("Iscriviti Manifatture Twins Srl") loses to the name itself.
+ */
+export function legalNameFromSite(text: string | null | undefined): string | null {
+  const site = String(text ?? "").replace(/\s+/g, " ");
+  if (!site) return null;
+  // Capitalised words (accents included), digits, "&". A lowercase word ends the run, which
+  // is what puts "di", "da parte di", "by" outside the name.
+  const word = String.raw`(?:[\p{Lu}\d][\p{L}\d'’&.-]*|&)`;
+  // Sites write the form in lowercase as often as not ("Manifatture Twins srl").
+  const form = String.raw`(?:${SUFFIX}|[sS]\.[rR]\.[lL]\.?|[sS][rR][lL]|[sS]\.[pP]\.[aA]\.?|[sS][pP][aA])`;
+  // Fully dotted or not dotted at all: "srl." is "srl" at the end of a sentence.
+  // Case spelled out rather than an `i` flag: under /iu, \p{Lu} matches lowercase too, and
+  // "da parte di" would join the name.
+  const anchor = String.raw`[\s,]*(?:\([^)]{0,80}\)[\s,]*)?(?:(?:[cC]on\s+)?[sS](?:ede|EDE)\s+[lL](?:egale|EGALE)|(?:with|having)\s+(?:its\s+)?(?:registered|legal)\s+(?:office|seat|address)|[rR]egistered\s+[oO]ffice|[sS]iège\s+social|[·|–—-]?\s*(?:P\.?\s?IVA|Partita\s+IVA|VAT\b|C\.F\.))`;
+  const anchored = new RegExp(String.raw`((?:${word}\s+){1,5})(${form})(?![\p{L}])${anchor}`, "gu");
+
+  const candidates = new Set<string>();
+  for (const m of site.matchAll(anchored)) {
+    const words = m[1].trim().split(" ");
+    for (let k = 0; k < words.length; k++) candidates.add(`${words.slice(k).join(" ")} ${m[2]}`);
+  }
+  if (!candidates.size) return null;
+
+  // How often a form appears as a WHOLE name: not preceded by another capitalised word, not
+  // running on into more letters.
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const whole = (name: string) =>
+    [...site.matchAll(new RegExp(String.raw`(?<![\p{Lu}\d][\p{L}\d'’&.-]*\s)(?<![\p{L}\d])${escape(name)}(?![\p{L}\d])`, "gu"))].length;
+
+  // One company, several spellings: "Luisa Beccaria S.r.l.", "Luisa Beccaria S.r.l",
+  // "Luisa Beccaria srl" are counted together, then written the most formal way the site
+  // writes it — the dotted legal form, in the house's own case rather than a shouted footer.
+  const keyOf = (name: string) => name.toLowerCase().replace(/[.\s]/g, "");
+  const groups = new Map<string, { total: number; spellings: { name: string; n: number }[] }>();
+  for (const name of candidates) {
+    // A form on its own ("srl") or a bare initial is not a name.
+    if (name.split(" ").length < 2) continue;
+    const n = whole(name);
+    if (!n) continue;
+    const g = groups.get(keyOf(name)) ?? { total: 0, spellings: [] };
+    g.spellings.push({ name, n });
+    groups.set(keyOf(name), g);
+  }
+  // The total is the most frequent spelling's count plus the others' — but "S.r.l" also
+  // matches every "S.r.l." (the dot is not a letter), so a spelling that is a prefix of
+  // another is counted once, not twice.
+  for (const g of groups.values()) {
+    g.total = g.spellings
+      .filter((sp) => !g.spellings.some((o) => o.name !== sp.name && sp.name.startsWith(o.name)))
+      .reduce((sum, sp) => sum + sp.n, 0);
+  }
+  const top = [...groups.values()].sort((a, b) => b.total - a.total)[0];
+  if (!top || top.total < 2) return null;
+  const dots = (x: string) => (x.match(/\./g) ?? []).length;
+  const shouted = (x: string) => x === x.toUpperCase();
+  const chosen = [...top.spellings].sort((a, b) =>
+    dots(b.name) - dots(a.name) || Number(shouted(a.name)) - Number(shouted(b.name)) || b.n - a.n)[0];
+  return tidy(chosen.name);
+}
+
 /** Does the house's own site use this exact name? Cheap, and it is the difference between a
  *  name we found and a name we can stand behind. */
 export function nameIsConfirmedBy(legalName: string | null, siteText: string): boolean {

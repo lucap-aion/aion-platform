@@ -21,6 +21,9 @@ export type ReviewStageRow = {
 export type ReviewBrand = {
   legal_name?: string | null;
   registered_address?: string | null;
+  /** Where the branding stage writes the office it reads off the site. The record screen
+   *  shows registered_address when set and this otherwise, so both count. */
+  hq_address?: string | null;
   description?: string | null;
 };
 
@@ -81,7 +84,7 @@ export function reviewItems(rows: ReviewStageRow[], brand?: ReviewBrand | null):
     if (!String(brand.legal_name ?? "").trim()) {
       add("branding", "No legal entity on the brand record — the data request and the ops deck use the trading name until it is filled in.");
     }
-    if (!String(brand.registered_address ?? "").trim()) {
+    if (!String(brand.registered_address ?? "").trim() && !String(brand.hq_address ?? "").trim()) {
       add("branding", "No registered office on the brand record — the data request goes out with it blank.");
     }
   }

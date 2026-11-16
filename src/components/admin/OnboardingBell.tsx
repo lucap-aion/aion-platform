@@ -24,7 +24,7 @@ type Run = {
   id: string; brand_id: number; started_by_email: string;
   started_at: string; settled_at: string | null;
 };
-type BrandRow = { id: number; name: string | null; legal_name: string | null; registered_address: string | null };
+type BrandRow = { id: number; name: string | null; legal_name: string | null; registered_address: string | null; hq_address: string | null };
 
 export type RunView = {
   id: string; brandId: number; brandName: string; startedBy: string;
@@ -59,7 +59,7 @@ async function loadRuns(): Promise<RunView[]> {
   if (!list.length) return [];
   const ids = [...new Set(list.map((r) => r.brand_id))];
   const [{ data: brands }, { data: stages }] = await Promise.all([
-    db.from("brands").select("id, name, legal_name, registered_address").in("id", ids),
+    db.from("brands").select("id, name, legal_name, registered_address, hq_address").in("id", ids),
     db.from("brand_onboarding").select("brand_id, stage, status, error, detail, queued_at").in("brand_id", ids),
   ]);
   const brandOf = new Map(((brands ?? []) as BrandRow[]).map((b) => [b.id, b]));
