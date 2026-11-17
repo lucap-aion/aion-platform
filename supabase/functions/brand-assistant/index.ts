@@ -1473,6 +1473,32 @@ another house's piece.`
     (isAdmin ? ADMIN_TOOL_NAMES : BRAND_TOOL_NAMES).has(t.name)
   );
 
+  // What this turn costs, per model — assistant_usage (migration 20261117000003). Pricing
+  // per token was proposed before anything counted one.
+  const meter = new Map<string, { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number }>();
+  let toolCallCount = 0;
+  const meterAdd = (model: string, u?: { input_tokens?: number | null; output_tokens?: number | null; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null } | null) => {
+    if (!u) return;
+    const m = meter.get(model) ?? { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    m.calls += 1;
+    m.input += u.input_tokens ?? 0;
+    m.output += u.output_tokens ?? 0;
+    m.cacheRead += u.cache_read_input_tokens ?? 0;
+    m.cacheWrite += u.cache_creation_input_tokens ?? 0;
+    meter.set(model, m);
+  };
+  const recordUsage = async () => {
+    if (!meter.size) return;
+    const rows = [...meter].map(([model, m]) => ({
+      brand_id: brandId, profile_id: profileId, is_admin: isAdmin, chat_id: chatId, model,
+      model_calls: m.calls, tool_calls: model === MODEL ? toolCallCount : 0,
+      input_tokens: m.input, output_tokens: m.output, cache_read_tokens: m.cacheRead, cache_write_tokens: m.cacheWrite,
+    }));
+    // Best-effort: a missing table or a failed write must never cost the associate the answer.
+    const { error } = await serviceClient.from("assistant_usage").insert(rows);
+    if (error) console.warn("[brand-assistant usage]", error.message);
+  };
+
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (event: string, data: unknown) => {
@@ -1621,6 +1647,8 @@ another house's piece.`
           }
 
           const finalMessage = await llmStream.finalMessage();
+          meterAdd(MODEL, finalMessage.usage);
+          toolCallCount += finalMessage.content.filter((b) => b.type === "tool_use").length;
           messages.push({ role: "assistant", content: finalMessage.content });
           if (finalMessage.stop_reason !== "tool_use") break;
 
@@ -1956,7 +1984,7 @@ another house's piece.`
                 if (text) { textGuard.push(text); answered = true; }
               }
             }
-            await recovery.finalMessage();
+            meterAdd(MODEL, (await recovery.finalMessage()).usage);
           } catch (e) {
             console.warn("[brand-assistant recovery]", e instanceof Error ? e.message : e);
           }
@@ -1968,7 +1996,7 @@ another house's piece.`
         // Suggest 3 natural follow-ups the associate might tap next (cheap, fast
         // model). Best-effort — never block the answer on it.
         try {
-          const followups = await generateFollowups(anthropic, messages, locale);
+          const followups = await generateFollowups(anthropic, messages, locale, (u) => meterAdd(FOLLOWUP_MODEL, u));
           if (followups.length) emit("followups", { followups });
         } catch (e) {
           console.warn("[brand-assistant followups]", e instanceof Error ? e.message : e);
@@ -1981,6 +2009,7 @@ another house's piece.`
         console.error("[brand-assistant]", err);
         emit("error", { message: "Something went wrong on our side — please try again in a moment." });
       } finally {
+        await recordUsage().catch((e) => console.warn("[brand-assistant usage]", e instanceof Error ? e.message : e));
         controller.close();
       }
     },
@@ -2979,6 +3008,7 @@ async function buildPerformanceReport(
 // Suggest 3 follow-up questions the associate might tap next.
 async function generateFollowups(
   anthropic: Anthropic, messages: Anthropic.MessageParam[], locale: string,
+  onUsage?: (u: Anthropic.Usage) => void,
 ): Promise<string[]> {
   const lastUser = [...messages].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content as string | undefined;
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
@@ -2993,6 +3023,7 @@ async function generateFollowups(
     system: `You suggest what a luxury-boutique sales associate might ask their in-store AI assistant NEXT, given the last exchange. Output STRICT JSON only: an array of exactly 3 short, distinct, useful follow-up questions (each <= 60 characters), written in ${lang}, phrased as the associate would type them. They must build naturally on the conversation (a related product, the client, a care/policy detail, a cross-sell). No preamble, no markdown fences — just the JSON array.`,
     messages: [{ role: "user", content: `Last question: ${lastUser ?? ""}\n\nAssistant answer: ${answer.slice(0, 1400)}\n\nReturn the JSON array of 3 follow-ups.` }],
   });
+  onUsage?.(res.usage);
   const text = res.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("").trim();
   try {
     const arr = JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim());
