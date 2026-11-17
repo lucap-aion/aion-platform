@@ -134,9 +134,10 @@ describe("which film the recorder makes", () => {
   });
 
   it("reads the mode off the same sidebar rule that hides the programme", () => {
-    // An assistant-only sidebar keeps exactly these two, so "no Covers link" means
-    // assistant-only. If that rule changes, this is where the recorder learns of it.
-    expect(sidebar).toContain(`const assistantOnlyPaths = new Set(["/assistant", "/knowledge"]);`);
+    // An assistant-only sidebar keeps exactly these — Discussions joined them on 2026-11-03 —
+    // and never Covers, so "no Covers link" means assistant-only. If that rule changes, this is
+    // where the recorder learns of it.
+    expect(sidebar).toContain(`const assistantOnlyPaths = new Set(["/assistant", "/knowledge", "/discussions"]);`);
     expect(recorder).toMatch(/async function modeFromPortal[\s\S]*?SIDEBAR_LINK\("\/covers"\)[\s\S]*?"portal" : "assistant"/);
     expect(sidebarUi).toContain(`data-sidebar="sidebar"`);
     expect(recorder).toContain(`const SIDEBAR_LINK = (path) => \`[data-sidebar="sidebar"] a[href="/\${slug}\${path}"]\`;`);
