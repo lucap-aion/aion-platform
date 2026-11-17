@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { isBrandRole, isCustomerRole, useAuth } from "@/contexts/AuthContext";
+import { landingFor, roleAllows, useStaffRole } from "@/hooks/useStaffRole";
 import { useTenant } from "@/contexts/TenantContext";
 import { knowledgeComingSoon } from "@/lib/environment";
 
@@ -43,8 +44,9 @@ const ProtectedRoute = ({ children, mode }: ProtectedRouteProps) => {
   const { user, profile, loading } = useAuth();
   const { assistantOnly, assistantEnabled, discussionsEnabled } = useTenant();
   const location = useLocation();
+  const staff = useStaffRole();
 
-  if (loading) {
+  if (loading || (mode === "brand" && staff.loading)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -85,6 +87,17 @@ const ProtectedRoute = ({ children, mode }: ProtectedRouteProps) => {
   // landing lands on the dashboard instead of a screen the brand cannot see in its sidebar.
   if (mode === "brand" && !assistantEnabled && ASSISTANT_PATHS.some((re) => re.test(location.pathname))) {
     return <Navigate to={`${getSlugPrefix()}/dashboard`} replace />;
+  }
+
+  // A staff role's screens (brand_staff_roles). Last, so every rule above has already moved
+  // the person to a screen the brand has; this only narrows it further.
+  if (mode === "brand" && staff.role) {
+    const prefix = getSlugPrefix();
+    const rel = prefix && location.pathname.startsWith(prefix) ? location.pathname.slice(prefix.length) : location.pathname;
+    if (!roleAllows(staff.role, rel)) {
+      const to = landingFor(staff.role, { assistantFirst: assistantOnly, assistantAvailable: assistantOnly || assistantEnabled });
+      if (to !== rel) return <Navigate to={`${prefix}${to}`} replace />;
+    }
   }
 
   return <>{children}</>;

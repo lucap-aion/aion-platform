@@ -10,6 +10,7 @@
 // charts, reports, or analytics playbooks — just answer text, the knowledge
 // sources behind it, and an optional compact data table.
 
+import { presetText, roleAllows, useStaffRole, type PresetQuestion } from "@/hooks/useStaffRole";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import AssistantMarkdown from "@/components/assistant/AssistantMarkdown";
@@ -284,6 +285,10 @@ const emptyAssistant = (): AssistantMessage => ({
 
 export default function BrandAssistant() {
   const { profile, isRealAdmin } = useAuth();
+  // A role limited to the brand's approved questions (brand_staff_roles). The server takes
+  // only the preset's id and asks the role's own words; this page just shows the choices.
+  const staff = useStaffRole();
+  const presets = staff.role?.assistant_mode === "preset" ? staff.role.preset_questions : null;
   const tenant = useTenant();
   const { locale } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -769,7 +774,9 @@ export default function BrandAssistant() {
   };
 
   // ── Send ─────────────────────────────────────────────────────────────────
-  const send = async (question: string, voice?: { path: string; url: string; seconds: number }) => {
+  const send = async (question: string, voice?: { path: string; url: string; seconds: number }, presetId?: string) => {
+    // Preset mode sends nothing typed: no attachment, no history, only which preset.
+    if (presets && !presetId) return;
     const text = question.trim();
     const attached = image; // a photo alone is a valid turn (visual search)
     const attachedSheet = sheet; // an Excel/CSV alone is a valid turn (analyse it)
@@ -782,7 +789,7 @@ export default function BrandAssistant() {
     // Asking is always a wish to see the answer, wherever the reader had scrolled.
     followRef.current = true;
 
-    const priorHistory = messages.map((m) =>
+    const priorHistory = presets ? [] : messages.map((m) =>
       m.role === "user"
         ? { role: "user", content: m.content }
         : { role: "assistant", content: m.summary },
@@ -831,7 +838,11 @@ export default function BrandAssistant() {
         signal: ac.signal,
         // brand_id is used only when the caller is an admin (e.g. viewing-as a
         // brand user); real brand users are pinned to their own brand server-side.
-        body: JSON.stringify({ question: text, history: priorHistory, locale, brand_id: profile?.brand_id, chat_id: chatId ?? undefined, image: attached ?? undefined, spreadsheet: attachedSheet ? { name: attachedSheet.name, text: attachedSheet.text } : undefined, audio_path: voice?.path }),
+        body: JSON.stringify(presetId
+          // staff_role_id is read only for an admin viewing-as: the restricted user's own
+          // role comes from their profile on the server, whatever this says.
+          ? { preset_id: presetId, staff_role_id: staff.role?.id, locale, brand_id: profile?.brand_id, chat_id: chatId ?? undefined }
+          : { question: text, history: priorHistory, locale, brand_id: profile?.brand_id, chat_id: chatId ?? undefined, image: attached ?? undefined, spreadsheet: attachedSheet ? { name: attachedSheet.name, text: attachedSheet.text } : undefined, audio_path: voice?.path }),
       });
 
       if (!res.ok || !res.body) {
@@ -1105,7 +1116,10 @@ export default function BrandAssistant() {
               {tt(locale, "Loading…", "Caricamento…")}
             </div>
           ) : messages.length === 0 ? (
-            <EmptyState locale={locale} prompts={suggestions} onPick={(q) => void send(q)} />
+            presets
+              ? <PresetState locale={locale} presets={presets} shopName={staff.shopName} roleName={staff.role?.name ?? null}
+                  disabled={loading} onPick={(p) => void send(presetText(p.question, staff.shopName), undefined, p.id)} />
+              : <EmptyState locale={locale} prompts={suggestions} onPick={(q) => void send(q)} />
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-6">
               {messages.map((m, i) =>
@@ -1116,11 +1130,11 @@ export default function BrandAssistant() {
                       message={m}
                       locale={locale}
                       isLast={i === messages.length - 1}
-                      onFollowup={(q) => void send(q)}
+                      onFollowup={presets ? undefined : (q) => void send(q)}
                       onFeedback={(rating) => void submitFeedback(i, rating)}
                       onEscalate={() => setEscalating(i)}
                       escalated={escalated.has(i)}
-                      onShare={brandId && tenant.discussionsEnabled ? () => setSharing(i) : undefined}
+                      onShare={brandId && tenant.discussionsEnabled && roleAllows(staff.role, "/discussions") ? () => setSharing(i) : undefined}
                       shared={shared.has(i)}
                     />,
               )}
@@ -1129,6 +1143,14 @@ export default function BrandAssistant() {
         </div>
 
         <div className="border-t border-border bg-background px-6 py-4">
+          {presets ? (
+            <div className="mx-auto max-w-3xl">
+              {messages.length > 0 && (
+                <PresetChips presets={presets} shopName={staff.shopName} disabled={loading}
+                  onPick={(p) => void send(presetText(p.question, staff.shopName), undefined, p.id)} />
+              )}
+            </div>
+          ) : (
           <div className="mx-auto max-w-3xl">
             {image && (
               <div className="mb-2 flex items-center gap-2">
@@ -1313,6 +1335,7 @@ export default function BrandAssistant() {
               </button>
             </div>
           </div>
+          )}
           <p className="mx-auto mt-2 max-w-3xl text-center text-[11px] text-muted-foreground/60">
             {tt(locale,
               "AION Assistant can make mistakes. Verify prices, policies and client details before acting.",
@@ -1547,6 +1570,73 @@ function buildSuggestions(
   ];
 }
 
+// A role limited to approved questions opens on them — they are the whole of what it can ask,
+// so they are not tucked behind a button the way the examples are.
+const PresetState = ({ locale, presets, shopName, roleName, disabled, onPick }: {
+  locale: string; presets: PresetQuestion[]; shopName: string | null; roleName: string | null;
+  disabled: boolean; onPick: (p: PresetQuestion) => void;
+}) => (
+  <div className="mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center pb-8 text-center">
+    <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+      <Sparkles className="h-7 w-7 text-primary" />
+    </div>
+    <h2 className="font-serif text-3xl font-medium tracking-tight text-foreground">
+      {tt(locale, "How can I help?", "Come posso aiutarti?")}
+    </h2>
+    <p className="mt-2 max-w-md text-sm text-muted-foreground">
+      {presets.length
+        ? tt(locale,
+            `${roleName ? `As ${roleName}, you` : "You"} can ask these questions.`,
+            `${roleName ? `Come ${roleName} puoi` : "Puoi"} fare queste domande.`)
+        : tt(locale,
+            "No questions have been set up for your role yet. Ask a master user on your team.",
+            "Non ci sono ancora domande per il tuo ruolo. Chiedi a un utente master del tuo team.")}
+    </p>
+    {presets.length > 0 && (
+      <div className="mt-6 grid w-full grid-cols-1 gap-2 text-left sm:grid-cols-2">
+        {presets.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            data-assistant-preset={p.id}
+            disabled={disabled}
+            onClick={() => onPick(p)}
+            className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-4 py-3 text-left text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-muted disabled:opacity-50"
+          >
+            <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <span className="flex-1">
+              <span className="block font-medium">{p.label || presetText(p.question, shopName)}</span>
+              {p.label && p.label !== p.question && (
+                <span className="mt-0.5 block text-xs text-muted-foreground">{presetText(p.question, shopName)}</span>
+              )}
+            </span>
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
+/** Under a conversation: the same questions, one tap each. There is no text field to fall back on. */
+const PresetChips = ({ presets, shopName, disabled, onPick }: {
+  presets: PresetQuestion[]; shopName: string | null; disabled: boolean; onPick: (p: PresetQuestion) => void;
+}) => (
+  <div className="flex flex-wrap gap-2">
+    {presets.map((p) => (
+      <button
+        key={p.id}
+        type="button"
+        data-assistant-preset={p.id}
+        disabled={disabled}
+        onClick={() => onPick(p)}
+        className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary/40 hover:bg-muted disabled:opacity-50"
+      >
+        {p.label || presetText(p.question, shopName)}
+      </button>
+    ))}
+  </div>
+);
+
 // A quiet first screen: a greeting, one line, and the examples behind a single button.
 //
 // It used to open on all nine prompts at once. Lucrezia (2026-10-30): "vedere tutte quelle
@@ -1682,7 +1772,7 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
 };
 
 const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEscalate, escalated, onShare, shared }: {
-  message: AssistantMessage; locale: string; isLast: boolean; onFollowup: (q: string) => void; onFeedback?: (rating: 1 | -1) => void;
+  message: AssistantMessage; locale: string; isLast: boolean; onFollowup?: (q: string) => void; onFeedback?: (rating: 1 | -1) => void;
   onEscalate?: () => void; escalated?: boolean; onShare?: () => void; shared?: boolean;
 }) => {
   const { summary, sources, columns, rows, activity, followups, report, visit, streaming } = message;
@@ -1871,7 +1961,7 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
         </div>
       )}
 
-      {isLast && !streaming && followups.length > 0 && (
+      {isLast && !streaming && followups.length > 0 && onFollowup && (
         <div className="flex flex-wrap gap-2 pt-1">
           {followups.map((f, i) => (
             <button

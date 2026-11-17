@@ -1,3 +1,4 @@
+import { roleAllows, useStaffRole } from "@/hooks/useStaffRole";
 import { useRef, useState } from "react";
 import SignedImage from "@/components/SignedImage";
 import { Home, Shield, FileText, Users, BarChart3, HelpCircle, UserCircle, LogOut, BookOpen, Search, Send, ChevronsUpDown, UserCog, LineChart, Store, Library, Sparkles, MessagesSquare, Plug } from "lucide-react";
@@ -126,6 +127,7 @@ const AppSidebar = () => {
   })();
 
   const { profile, signOut, user } = useAuth();
+  const { role: staffRole } = useStaffRole();
   const navigate = useNavigate();
   const slugPrefix = useAuthSlug();
   // An assistant-only demo keeps the two screens the demo is about and drops the insurance
@@ -147,7 +149,10 @@ const AppSidebar = () => {
     : tenant.assistantOnly ? brandPaths.filter((p) => assistantOnlyPaths.has(p.path))
     : tenant.assistantEnabled ? brandPaths : classicBrandPaths;
   // Discussions is switched per brand by AION (off for Roberto Coin).
-  const paths = basePaths.filter((p) => p.path !== "/discussions" || tenant.discussionsEnabled);
+  // A staff role narrows it again (brand_staff_roles); no role, no change.
+  const paths = basePaths
+    .filter((p) => p.path !== "/discussions" || tenant.discussionsEnabled)
+    .filter((p) => mode !== "brand" || roleAllows(staffRole, p.path));
   // Team is about who can log in, which is still a fair question in an assistant demo.
   const hasKnowledge = tenant.assistantOnly || tenant.assistantEnabled;
   const masterLinks = (mode === "brand" && canWrite)
