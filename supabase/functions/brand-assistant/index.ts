@@ -17,6 +17,7 @@
 //   event: done         {}
 //   event: error        { message }
 
+import { presetForViewer, resolveRestrictedQuestion, staffAccess, UNRESTRICTED, type StaffAccess } from "../_shared/staff-access.ts";
 import Anthropic from "npm:@anthropic-ai/sdk@0.32.1";
 import { originAllowed, originRefused } from "../_shared/origin.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -1270,6 +1271,7 @@ Deno.serve(async (req: Request) => {
   let profileId: string | null = null;
   let isAdmin = false;
   let crossBrand = false;
+  let access: StaffAccess = UNRESTRICTED;
 
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const { data: adminRow } = await userClient
@@ -1305,6 +1307,9 @@ Deno.serve(async (req: Request) => {
     if (!profileRow?.brand_id) return jsonError("admin or brand role required", 403);
     brandId = profileRow.brand_id as number;
     profileId = (profileRow.id as string) ?? null;
+    // A staff role may limit the assistant to approved questions, or switch it off. Read here,
+    // on the server, from the role's own row — see staff-access.ts.
+    if (profileId) access = await staffAccess(userClient as never, profileId);
     const rel = (profileRow as { brands?: { name?: string } | { name?: string }[] }).brands;
     brandName = (Array.isArray(rel) ? rel[0]?.name : rel?.name) ?? null;
   }
@@ -1317,6 +1322,15 @@ Deno.serve(async (req: Request) => {
   let question = String(body.question ?? "").trim();
   let voiceError: string | null = null;
   const history = Array.isArray(body.history) ? body.history : [];
+  if (access.mode !== "full") {
+    // Preset id in, the role's own words out; anything else in the request is refused.
+    const resolved = resolveRestrictedQuestion(access, body, body.locale === "it" ? "it" : "en");
+    if ("error" in resolved) return jsonError(resolved.error, resolved.status);
+    // They cannot reply, so an answer ending "would you like…?" offers what the role refuses.
+    question = `${resolved.question}\n\n(Answer exactly this. This person can only pick from fixed questions and cannot reply, so do not offer to do more or ask a follow-up question.)`;
+  } else if (!question && body.preset_id && body.staff_role_id) {
+    question = (await presetForViewer(userClient as never, Number(body.staff_role_id), brandId, String(body.preset_id))) ?? "";
+  }
   // The thread this turn belongs to, so an escalation can be read in context.
   const chatId = typeof body.chat_id === "string" && body.chat_id ? body.chat_id : null;
   const locale = body.locale === "it" ? "it" : "en";

@@ -8,6 +8,12 @@ import { useTenant } from "@/contexts/TenantContext";
 import { sendEmail } from "@/utils/sendEmail";
 import { siteUrl } from "@/utils/siteUrl";
 import { toast } from "sonner";
+import StaffRoles from "@/components/brand/StaffRoles";
+import { describeRole, useBrandRoles } from "@/hooks/useStaffRole";
+
+// profiles.staff_role_id is newer than the generated types (as in team.ts).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const db = supabase as any;
 
 type TeamMember = {
   id: string;
@@ -16,6 +22,8 @@ type TeamMember = {
   email: string;
   is_master: boolean | null;
   status: string | null;
+  staff_role_id: number | null;
+  shop_id: number | null;
 };
 
 type MemberForm = {
@@ -24,6 +32,9 @@ type MemberForm = {
   email: string;
   isMaster: boolean;
   status: string;
+  /** "" = no role: full access. */
+  roleId: string;
+  shopId: string;
 };
 
 const EMPTY_FORM: MemberForm = {
@@ -32,6 +43,8 @@ const EMPTY_FORM: MemberForm = {
   email: "",
   isMaster: false,
   status: "pending",
+  roleId: "",
+  shopId: "",
 };
 
 const inputCls =
@@ -62,9 +75,9 @@ const BrandTeam = () => {
   const { data: members, isLoading } = useQuery({
     queryKey: ["brand-team", profile?.brand_id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("profiles")
-        .select("id, first_name, last_name, email, is_master, status")
+        .select("id, first_name, last_name, email, is_master, status, staff_role_id, shop_id")
         .eq("brand_id", profile?.brand_id)
         .eq("role", "brand")
         .order("first_name");
@@ -73,6 +86,22 @@ const BrandTeam = () => {
     },
     enabled: !!profile?.brand_id,
     staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: roles = [] } = useBrandRoles(profile?.brand_id);
+  const roleById = new Map(roles.map((r) => [r.id, r]));
+  const memberCounts = new Map<number, number>();
+  for (const m of members ?? []) {
+    if (m.staff_role_id != null && !m.is_master) memberCounts.set(m.staff_role_id, (memberCounts.get(m.staff_role_id) ?? 0) + 1);
+  }
+  // A preset may name "{{shop}}", which is the member's own store.
+  const { data: shops = [] } = useQuery({
+    queryKey: ["brand-team-shops", profile?.brand_id],
+    enabled: !!profile?.brand_id,
+    queryFn: async () => {
+      const { data } = await supabase.from("shops").select("id, name").eq("brand_id", profile!.brand_id!).order("name");
+      return (data ?? []) as { id: number; name: string | null }[];
+    },
   });
 
   const filtered = members?.filter((m) => {
@@ -94,6 +123,8 @@ const BrandTeam = () => {
       email: m.email,
       isMaster: m.is_master ?? false,
       status: m.status || "active",
+      roleId: m.staff_role_id != null ? String(m.staff_role_id) : "",
+      shopId: m.shop_id != null ? String(m.shop_id) : "",
     });
     setModalOpen(true);
   };
@@ -106,14 +137,20 @@ const BrandTeam = () => {
     }
     setIsSaving(true);
 
+    // A master is never restricted, so a role on one would only mislead whoever reads the list.
+    const access = {
+      staff_role_id: form.isMaster || !form.roleId ? null : Number(form.roleId),
+      shop_id: form.shopId ? Number(form.shopId) : null,
+    };
     if (editingId) {
-      const { error } = await supabase
+      const { error } = await db
         .from("profiles")
         .update({
           first_name: form.firstName || null,
           last_name: form.lastName || null,
           is_master: form.isMaster,
           status: form.status || null,
+          ...access,
         })
         .eq("id", editingId);
       if (error) {
@@ -123,7 +160,7 @@ const BrandTeam = () => {
       }
       toast.success("Team member updated.");
     } else {
-      const { error } = await supabase.from("profiles").insert({
+      const { error } = await db.from("profiles").insert({
         brand_id: profile.brand_id,
         first_name: form.firstName || null,
         last_name: form.lastName || null,
@@ -131,6 +168,7 @@ const BrandTeam = () => {
         role: "brand",
         is_master: form.isMaster,
         status: "pending",
+        ...access,
       });
       if (error) {
         toast.error(error.message);
@@ -154,6 +192,7 @@ const BrandTeam = () => {
     setIsSaving(false);
     setModalOpen(false);
     queryClient.invalidateQueries({ queryKey: ["brand-team"] });
+    queryClient.invalidateQueries({ queryKey: ["staff-role"] });
   };
 
   const handleDelete = async (id: string) => {
@@ -319,9 +358,16 @@ const BrandTeam = () => {
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
                             <Crown className="h-3 w-3" /> Master
                           </span>
+                        ) : m.staff_role_id != null && roleById.get(m.staff_role_id) ? (
+                          <span
+                            className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium text-foreground"
+                            title={describeRole(roleById.get(m.staff_role_id)!)}
+                          >
+                            <UserCheck className="h-3 w-3" /> {roleById.get(m.staff_role_id)!.name}
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
-                            <UserCheck className="h-3 w-3" /> Staff
+                            <UserCheck className="h-3 w-3" /> Staff · full access
                           </span>
                         )}
                       </td>
@@ -374,6 +420,8 @@ const BrandTeam = () => {
           </table>
         </div>
       </motion.div>
+
+      {profile?.brand_id && <StaffRoles brandId={profile.brand_id} memberCounts={memberCounts} />}
 
       {/* Add / Edit Modal */}
       {modalOpen && (
@@ -469,6 +517,33 @@ const BrandTeam = () => {
                       className="h-4 w-4 rounded border-input accent-primary"
                     />
                   </label>
+                  {!form.isMaster && (
+                    <Field label="Role">
+                      <select
+                        value={form.roleId}
+                        onChange={(e) => setForm((p) => ({ ...p, roleId: e.target.value }))}
+                        className={inputCls}
+                      >
+                        <option value="">No role — full access</option>
+                        {roles.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
+                      </select>
+                      {form.roleId && roleById.get(Number(form.roleId)) && (
+                        <p className="mt-1.5 text-xs text-muted-foreground">{describeRole(roleById.get(Number(form.roleId))!)}</p>
+                      )}
+                    </Field>
+                  )}
+                  {shops.length > 0 && (
+                    <Field label="Store">
+                      <select
+                        value={form.shopId}
+                        onChange={(e) => setForm((p) => ({ ...p, shopId: e.target.value }))}
+                        className={inputCls}
+                      >
+                        <option value="">No store</option>
+                        {shops.map((sh) => <option key={sh.id} value={String(sh.id)}>{sh.name ?? `Store ${sh.id}`}</option>)}
+                      </select>
+                    </Field>
+                  )}
                   {editingId && (
                     <Field label="Status">
                       <select

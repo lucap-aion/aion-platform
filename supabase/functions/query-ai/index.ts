@@ -8,6 +8,7 @@
 // Client renders the table/chart as soon as they arrive and types the
 // summary in progressively.
 
+import { staffAccess } from "../_shared/staff-access.ts";
 import Anthropic from "npm:@anthropic-ai/sdk@0.32.1";
 import { originAllowed, originRefused } from "../_shared/origin.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -986,6 +987,15 @@ Deno.serve(async (req: Request) => {
       );
     }
     brandId = profileRow.brand_id as number;
+    // A restricted staff role asks only its preset questions, and only the Assistant serves
+    // those (staff-access.ts). This free-form chat is for unrestricted users.
+    const access = await staffAccess(userClient as never, profileRow.id as string);
+    if (access.mode !== "full") {
+      return new Response(
+        JSON.stringify({ error: "Your role can only ask the preset questions, in the Assistant." }),
+        { status: 403, headers: { "Content-Type": "application/json", ...CORS } },
+      );
+    }
     const brandRel = (profileRow as any).brands;
     brandName = (Array.isArray(brandRel) ? brandRel[0]?.name : brandRel?.name) ?? null;
     mode = "brand";
