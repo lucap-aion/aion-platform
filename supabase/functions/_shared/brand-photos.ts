@@ -161,6 +161,32 @@ function localeFreeKey(url: string): string {
   } catch { return url; }
 }
 
+/**
+ * The pages that are the house's own: on the domain of its website, or of the host most of
+ * its crawl is on (the website field can be empty, or name the .it while the crawl is on the
+ * .com). Everything else in the queue — the news feed's articles — is someone else's.
+ */
+export function ownSitePages<T extends CrawledPage>(pages: T[], website?: string | null): T[] {
+  const site = (u: string) => {
+    try {
+      const host = new URL(/^https?:\/\//i.test(u) ? u : `https://${u}`).host.toLowerCase().replace(/^www\./, "");
+      // The name before the public suffix: armani.com and armani.it are one house, while
+      // news.google.com and wwd.com are not it.
+      const parts = host.split(".");
+      const tld2 = parts.length > 2 && /^(co|com|org|net)$/.test(parts[parts.length - 2]);
+      return parts[parts.length - (tld2 ? 3 : 2)] ?? host;
+    } catch { return null; }
+  };
+  const counts = new Map<string, number>();
+  for (const p of pages) { const k = site(p.url); if (k) counts.set(k, (counts.get(k) ?? 0) + 1); }
+  const own = new Set<string>();
+  const top = [...counts].sort((a, b) => b[1] - a[1])[0];
+  if (top) own.add(top[0]);
+  const fromRecord = website ? site(website) : null;
+  if (fromRecord) own.add(fromRecord);
+  return pages.filter((p) => own.has(site(p.url) ?? ""));
+}
+
 function depth(url: string): number {
   try { return new URL(url).pathname.split("/").filter(Boolean).length; } catch { return 9; }
 }

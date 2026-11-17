@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  rankPages, imageUrlsFrom, plausiblePhotoUrl, findBrandPhotos, pickForFrame, photoKey,
+  rankPages, imageUrlsFrom, plausiblePhotoUrl, findBrandPhotos, pickForFrame, photoKey, ownSitePages,
   type PhotoVerdict,
 } from "../../supabase/functions/_shared/brand-photos.ts";
 
@@ -279,5 +279,29 @@ describe("escaped markup", () => {
     const urls = imageUrlsFrom(html, "https://s.it/p");
     expect(urls).toContain("https://s.it/cdn/shop/files/DENIM.jpg?v=1&width=800");
     expect(urls).toContain("https://s.it/a.jpg?x=1&y=2");
+  });
+});
+
+describe("whose pages they are", () => {
+  // Armani's queue on PROD, 2026-11-17: 522 pages of armani.com and the news feed's articles.
+  const queue = [
+    ...Array.from({ length: 5 }, (_, i) => ({ url: `https://www.armani.com/en-it/world/campaign-${i}` })),
+    { url: "https://wwd.com/runway/mens-spring-2026/milan/giorgio-armani/review/" },
+    { url: "https://news.google.com/rss/articles/abc" },
+    { url: "https://www.vogue.com/fashion-shows/spring-2026-menswear/giorgio-armani" },
+    { url: "https://www.armani.it/it/stores" },
+  ];
+
+  it("keeps the house's own domain and drops the press", () => {
+    const hosts = ownSitePages(queue, "https://www.armani.com").map((p) => new URL(p.url).host);
+    expect(hosts).not.toContain("wwd.com");
+    expect(hosts).not.toContain("www.vogue.com");
+    expect(hosts).not.toContain("news.google.com");
+    expect(hosts).toContain("www.armani.it");
+    expect(hosts).toHaveLength(6);
+  });
+
+  it("finds the house from its crawl when the record has no website", () => {
+    expect(ownSitePages(queue, null)).toHaveLength(6);
   });
 });

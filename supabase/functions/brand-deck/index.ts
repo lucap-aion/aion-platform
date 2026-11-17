@@ -38,7 +38,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import JSZip from "npm:jszip@3.10.1";
 import { focusMatcher } from "../_shared/brand-defaults.ts";
 import { sniffFormat, imageSize, EMBEDDABLE, MEDIA_TYPES } from "../_shared/image-bytes.ts";
-import { findBrandPhotos, photoKey, pickForFrame, type FoundPhoto, type PhotoRole } from "../_shared/brand-photos.ts";
+import { findBrandPhotos, ownSitePages, photoKey, pickForFrame, type FoundPhoto, type PhotoRole } from "../_shared/brand-photos.ts";
 import { judgePhotoBytes, judgePhotoUrl } from "../_shared/photo-judge.ts";
 import { mergeTwinRuns, slideText } from "../_shared/pptx-text.ts";
 import { fitPictureInSlide, frameOf, PACKSHOT, PHOTOGRAPH } from "../_shared/picture-fit.ts";
@@ -107,7 +107,7 @@ Deno.serve(async (req: Request) => {
   // A read that failed is not a brand that does not exist — see the same fix in
   // onboard-brand. 503 says "try again", which is what the tick does.
   const { data: brand, error: brandErr } = await admin.from("brands")
-    .select("id, name, slug, logo_big, logo_small, product_focus, top_banner_image, auth_background_image")
+    .select("id, name, slug, website, logo_big, logo_small, product_focus, top_banner_image, auth_background_image")
     .eq("id", brandId).maybeSingle();
   if (brandErr) return json({ error: `could not read brand ${brandId}: ${brandErr.message}` }, 503);
   if (!brand) return json({ error: `brand ${brandId} not found` }, 404);
@@ -195,7 +195,10 @@ Deno.serve(async (req: Request) => {
     // the site was indexed.
     const { data: crawled } = await admin.from("knowledge_crawl_queue")
       .select("url, title").eq("brand_id", brandId).limit(2000);
-    const pages = (crawled ?? []) as { url: string; title: string | null }[];
+    // The house's own pages only. The queue also holds the news feed's articles — Armani's
+    // deck took four WWD runway photographs and My Style Bags' "boutique" came off a magazine
+    // — and a press photograph is the publisher's copyright, never ours to put in a deck.
+    const pages = ownSitePages((crawled ?? []) as { url: string; title: string | null }[], brand.website);
     if (pages.length) {
       const out = await findBrandPhotos({
         pages, roles: photoRoles,
