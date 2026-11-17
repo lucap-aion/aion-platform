@@ -10,6 +10,7 @@
 // charts, reports, or analytics playbooks — just answer text, the knowledge
 // sources behind it, and an optional compact data table.
 
+import { saveDashboard } from "@/lib/dashboards";
 import { presetText, roleAllows, useStaffRole, type PresetQuestion } from "@/hooks/useStaffRole";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -1135,6 +1136,14 @@ export default function BrandAssistant() {
                       onEscalate={() => setEscalating(i)}
                       escalated={escalated.has(i)}
                       onShare={brandId && tenant.discussionsEnabled && roleAllows(staff.role, "/discussions") ? () => setSharing(i) : undefined}
+                      // A dashboard is a saved report that re-runs. Only for someone who may ask
+                      // anything (the table refuses the rest) and who has Insights to keep it in.
+                      onSaveReport={brandId && profile?.id && (!staff.role || staff.role.assistant_mode === "full") && roleAllows(staff.role, "/insights")
+                        ? async (r) => {
+                            await saveDashboard({ brandId, profileId: profile.id, title: r.title || "Dashboard", spec: r.spec! });
+                            toast.success(tt(locale, "Saved — it's in Insights → My dashboards.", "Salvata — la trovi in Insights → Le mie dashboard."));
+                          }
+                        : undefined}
                       shared={shared.has(i)}
                     />,
               )}
@@ -1771,7 +1780,8 @@ const CATEGORY_LABEL: Record<string, { en: string; it: string }> = {
   other: { en: "Doc", it: "Documento" },
 };
 
-const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEscalate, escalated, onShare, shared }: {
+const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEscalate, escalated, onShare, shared, onSaveReport }: {
+  onSaveReport?: (r: ReportPayload) => Promise<void>;
   message: AssistantMessage; locale: string; isLast: boolean; onFollowup?: (q: string) => void; onFeedback?: (rating: 1 | -1) => void;
   onEscalate?: () => void; escalated?: boolean; onShare?: () => void; shared?: boolean;
 }) => {
@@ -1828,7 +1838,7 @@ const AssistantBlock = ({ message, locale, isLast, onFollowup, onFeedback, onEsc
         </div>
       )}
 
-      {hasReport && report && <ReportView report={report} locale={locale} />}
+      {hasReport && report && <ReportView report={report} locale={locale} onSave={report.spec && onSaveReport ? () => onSaveReport(report) : undefined} />}
 
       {/* A visit the assistant just filed from what was said. Draft until the
           manager confirms it right here. */}
