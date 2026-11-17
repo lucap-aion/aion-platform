@@ -1314,6 +1314,37 @@ Deno.serve(async (req: Request) => {
     brandName = (Array.isArray(rel) ? rel[0]?.name : rel?.name) ?? null;
   }
 
+  // ── A saved dashboard, re-run ──────────────────────────────────────────────
+  // By id only: the row is read through the caller's own RLS (their own, or shared with the
+  // brand's staff), so who may run what is the table's policy, not this request's say-so. No
+  // model call — the spec is SQL that runs again, so a dashboard is always current.
+  if (body.action === "run_dashboard") {
+    const id = Number(body.dashboard_id ?? 0);
+    if (!id) return jsonError("dashboard_id is required", 400);
+    const { data: row } = await userClient.from("brand_dashboards")
+      .select("id, brand_id, title, spec").eq("id", id).maybeSingle();
+    const dash = row as { id: number; brand_id: number; title: string; spec: Record<string, unknown> } | null;
+    if (!dash) return jsonError("dashboard not found", 404);
+    // A brand user is pinned to their own brand, whatever the row says.
+    if (!isAdmin && dash.brand_id !== brandId) return jsonError("dashboard not found", 404);
+    let dashBrandName = brandName;
+    if (isAdmin && dash.brand_id !== brandId) {
+      const { data: b } = await userClient.from("brands").select("name").eq("id", dash.brand_id).maybeSingle();
+      dashBrandName = (b as { name?: string } | null)?.name ?? null;
+    }
+    try {
+      const report = await buildReport(userClient, dash.brand_id, dashBrandName, dash.spec as never);
+      if ((report as { error?: string }).error) return jsonError((report as { error: string }).error, 422);
+      const { warnings, ...payload } = report as Record<string, unknown> & { warnings?: string };
+      return new Response(JSON.stringify({ report: { ...payload, title: dash.title }, warnings: warnings ?? null }), {
+        headers: { "Content-Type": "application/json", ...CORS },
+      });
+    } catch (e) {
+      console.error("[brand-assistant dashboard]", e);
+      return jsonError("This dashboard could not be run.", 500);
+    }
+  }
+
   // A voice message arrives as a path, not as words. The transcript becomes the
   // question for this turn and is emitted to the client, so the bubble the
   // associate just sent can show what we heard — and they can see immediately
@@ -1898,7 +1929,9 @@ another house's piece.`
                   toolResults.push({ type: "tool_result", tool_use_id: block.id, content: (report as { error: string }).error });
                 } else {
                   const { warnings, ...payload } = report as Record<string, unknown> & { warnings?: string };
-                  emit("report", payload);
+                  // The spec travels with it, so the page can offer to save it as a dashboard
+                  // that re-runs later. Never for a restricted role: a spec is SQL.
+                  emit("report", access.mode === "full" ? { ...payload, spec: block.input } : payload);
                   toolResults.push({
                     type: "tool_result",
                     tool_use_id: block.id,

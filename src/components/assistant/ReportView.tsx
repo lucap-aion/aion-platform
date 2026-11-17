@@ -6,7 +6,7 @@ import { useMemo, useRef, useState } from "react";
 import {
   Bar, BarChart, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
+import { Check, Download, FileSpreadsheet, FileText, LayoutDashboard, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { downloadXlsx, type Sheet } from "@/lib/reportExport";
 import { downloadReportPdf } from "@/lib/reportPdf";
@@ -28,6 +28,8 @@ export type ReportSection =
 export type ReportPayload = {
   title: string; subtitle?: string | null; generated_at: string;
   brand: string | null; brand_logo?: string | null; sections: ReportSection[];
+  /** What built it (generate_report's input) — saved as a dashboard, it is run again. */
+  spec?: Record<string, unknown>;
 };
 
 // A section with nothing in it is worse than no section at all: on screen it
@@ -160,9 +162,23 @@ const Kpis = ({ s }: { s: Extract<ReportSection, { type: "kpis" }> }) => (
   </div>
 );
 
-export default function ReportView({ report, locale }: { report: ReportPayload; locale: string }) {
+export default function ReportView({ report, locale, onSave, extraActions }: {
+  report: ReportPayload; locale: string;
+  /** Keep this report as a dashboard. Shown only when given. */
+  onSave?: () => Promise<void>;
+  /** Anything the host adds to the footer (a dashboard's own controls). */
+  extraActions?: React.ReactNode;
+}) {
   const printRef = useRef<HTMLDivElement>(null);
-  const [busy, setBusy] = useState<null | "pdf" | "xlsx">(null);
+  const [busy, setBusy] = useState<null | "pdf" | "xlsx" | "save">(null);
+  const [saved, setSaved] = useState(false);
+  const onSaveClick = async () => {
+    if (!onSave) return;
+    setBusy("save");
+    try { await onSave(); setSaved(true); }
+    catch (e) { toast.error(`${tt(locale, "Could not save", "Salvataggio non riuscito")}: ${e instanceof Error ? e.message : "error"}`); }
+    finally { setBusy(null); }
+  };
   const fileBase = (report.title || "report").replace(/\s+/g, "_");
   const sections = useMemo(() => (report.sections ?? []).filter(sectionHasData), [report.sections]);
   const shown = useMemo(() => ({ ...report, sections }), [report, sections]);
@@ -234,6 +250,16 @@ export default function ReportView({ report, locale }: { report: ReportPayload; 
           className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50">
           {busy === "xlsx" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />} Excel
         </button>
+        {onSave && (
+          <button type="button" onClick={() => void onSaveClick()} disabled={busy !== null || saved}
+            title={tt(locale, "Keep it in Insights → My dashboards, where it re-runs with today's data", "Tienilo in Insights → Le mie dashboard, dove si aggiorna con i dati di oggi")}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-60">
+            {busy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : saved ? <Check className="h-3.5 w-3.5 text-primary" /> : <LayoutDashboard className="h-3.5 w-3.5" />}
+            {saved ? tt(locale, "Saved", "Salvata") : tt(locale, "Save as dashboard", "Salva come dashboard")}
+          </button>
+        )}
+        {extraActions}
       </div>
     </div>
   );
