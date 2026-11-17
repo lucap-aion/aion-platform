@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  rankPages, imageUrlsFrom, plausiblePhotoUrl, findBrandPhotos, pickForFrame,
+  rankPages, imageUrlsFrom, plausiblePhotoUrl, findBrandPhotos, pickForFrame, photoKey,
+  type PhotoVerdict,
 } from "../../supabase/functions/_shared/brand-photos.ts";
 
 // The URLs are real ones out of a crawled site, because the whole module is a bet on how
@@ -200,5 +201,83 @@ describe("which photograph belongs in which frame", () => {
   it("ignores a candidate whose dimensions never got read", () => {
     const unmeasured = { ...PORTRAIT, url: "x", width: 0, height: 0, score: 99 };
     expect(pickForFrame([unmeasured, SQUARE], 1.11)?.url).toBe("s");
+  });
+});
+
+// Giulio, 2026-11-09: the generated deck "does not select relevant images". Two of the
+// failures, as they came out of Shaft's deck on 2026-11-16.
+describe("looking at the pictures before choosing", () => {
+  const pages = [
+    { url: "https://shop.it/pages/store-locator" },
+    { url: "https://shop.it/collections/capsule" },
+  ];
+  const markup: Record<string, string> = {
+    // The largest picture on the store-locator page was a campaign graphic with a headline.
+    "https://shop.it/pages/store-locator":
+      `<img src="/files/Grafica_DONNA_High.jpg"><img src="/files/milano-boutique.jpg">`,
+    // The same photograph linked over http and https.
+    "https://shop.it/collections/capsule":
+      `<img src="http://shop.it/collections/mia.webp?v=1"><img src="https://shop.it/collections/mia.webp?v=1&width=3360"><img src="/files/look-2.jpg">`,
+  };
+  const heads: Record<string, Uint8Array> = {
+    "https://shop.it/files/Grafica_DONNA_High.jpg": png(3000, 2000),
+    "https://shop.it/files/milano-boutique.jpg": png(1600, 1100),
+    "http://shop.it/collections/mia.webp?v=1": png(2000, 1600),
+    "https://shop.it/collections/mia.webp?v=1&width=3360": png(2000, 1600),
+    "https://shop.it/files/look-2.jpg": png(1400, 1400),
+  };
+  const verdicts: Record<string, PhotoVerdict> = {
+    "https://shop.it/files/Grafica_DONNA_High.jpg": { kind: "graphic", text: true, quality: 4 },
+    "https://shop.it/files/milano-boutique.jpg": { kind: "store", text: false, quality: 4 },
+    "http://shop.it/collections/mia.webp?v=1": { kind: "worn", text: false, quality: 5 },
+    "https://shop.it/collections/mia.webp?v=1&width=3360": { kind: "worn", text: false, quality: 5 },
+    "https://shop.it/files/look-2.jpg": { kind: "portrait", text: false, quality: 4 },
+  };
+  const io = {
+    readPage: (u: string) => Promise.resolve(markup[u] ?? null),
+    readImageHead: (u: string) => Promise.resolve(heads[u] ?? null),
+    judge: (u: string) => Promise.resolve(verdicts[u] ?? null),
+  };
+
+  it("puts the boutique, not the bigger banner, in the store slot", async () => {
+    const { photos, notes } = await findBrandPhotos({ pages, roles: ["store", "lifestyle", "ambassador"], ...io });
+    const store = photos.filter((p) => p.role === "store").map((p) => p.url);
+    expect(store).toEqual(["https://shop.it/files/milano-boutique.jpg"]);
+    expect(notes.join(" ")).toMatch(/turned down \(1 words over it\)/);
+  });
+
+  it("counts one photograph once, whatever scheme or size it was linked at", async () => {
+    const { photos } = await findBrandPhotos({ pages, roles: ["lifestyle"], ...io });
+    const keys = photos.map((p) => photoKey(p.url));
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys.filter((k) => k === "shop.it/collections/mia.webp")).toHaveLength(1);
+  });
+
+  it("moves a portrait found on a collection page to the portrait role", async () => {
+    const { photos } = await findBrandPhotos({ pages, roles: ["lifestyle", "ambassador"], ...io });
+    expect(photos.find((p) => p.url.endsWith("look-2.jpg"))?.role).toBe("ambassador");
+  });
+
+  it("ranks a picture it could not look at after every one it could", async () => {
+    const { photos } = await findBrandPhotos({
+      pages, roles: ["lifestyle"], ...io,
+      judge: (u) => Promise.resolve(u.endsWith("look-2.jpg") ? null : verdicts[u]),
+    });
+    expect(photos[0].url).toContain("mia.webp");
+    expect(photos[photos.length - 1].url).toContain("look-2.jpg");
+  });
+
+  it("behaves as before when nothing can look", async () => {
+    const { photos } = await findBrandPhotos({ pages, roles: ["store"], readPage: io.readPage, readImageHead: io.readImageHead });
+    expect(photos[0].url).toContain("Grafica_DONNA");
+  });
+});
+
+describe("escaped markup", () => {
+  it("reads &amp; in a picture's URL as &", () => {
+    const html = `<img src="/cdn/shop/files/DENIM.jpg?v=1&amp;width=800"><meta property="og:image" content="https://s.it/a.jpg?x=1&amp;y=2">`;
+    const urls = imageUrlsFrom(html, "https://s.it/p");
+    expect(urls).toContain("https://s.it/cdn/shop/files/DENIM.jpg?v=1&width=800");
+    expect(urls).toContain("https://s.it/a.jpg?x=1&y=2");
   });
 });
