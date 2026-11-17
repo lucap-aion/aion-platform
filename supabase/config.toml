@@ -42,3 +42,8 @@ verify_jwt = false
 # caller's session in code (see shopify-oauth/index.ts).
 [functions.shopify-oauth]
 verify_jwt = false
+
+# The weekly luxury-CX digest is posted by a claude.ai cloud routine, which has no Supabase
+# session; the x-digest-secret header is the credential (see digest-mail/index.ts).
+[functions.digest-mail]
+verify_jwt = false
