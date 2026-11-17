@@ -36,7 +36,46 @@ export type FoundPhoto = {
   height: number;
   format: string;
   score: number;
+  /** What a look at the picture said it shows, when it was looked at. */
+  seen?: PhotoKind;
 };
+
+/**
+ * What a picture actually shows, as one look at it answers.
+ *
+ * The URL and the pixel count are all the finder knows otherwise, and on Shaft's deck that
+ * put a campaign graphic with a headline across it in the "boutique" slot because it was the
+ * largest picture on the store-locator page, and put two menu thumbnails from Prada's
+ * navigation into the lifestyle slots. Only looking tells a boutique from a banner.
+ */
+export type PhotoKind = "store" | "portrait" | "worn" | "packshot" | "graphic" | "other";
+
+export type PhotoVerdict = {
+  kind: PhotoKind;
+  /** Typeset words laid over the picture — a headline, a price, a button. A shop sign is not. */
+  text: boolean;
+  /** 1–5: how well it would read as a full editorial photograph on a slide. */
+  quality: number;
+};
+
+/** The role a kind of picture can fill, or null when it fills none of them. */
+export function roleForKind(kind: PhotoKind): PhotoRole | null {
+  return kind === "store" ? "store" : kind === "portrait" ? "ambassador" : kind === "worn" ? "lifestyle" : null;
+}
+
+/**
+ * One picture, whatever URL it was reached by: no scheme, no www, no query.
+ *
+ * Shaft's deck put the SAME photograph in both lifestyle tiles, because one page linked it
+ * as http:// and the other as https://, and a Shopify CDN serves one file under any number
+ * of ?width= variants. Compared as strings those are different pictures.
+ */
+export function photoKey(url: string): string {
+  try {
+    const u = new URL(url);
+    return (u.host.replace(/^www\./, "") + u.pathname).toLowerCase();
+  } catch { return url.toLowerCase(); }
+}
 
 /** What a page about each of these looks like, in the URLs these houses actually use. */
 const PAGE_PATTERNS: Record<PhotoRole, RegExp> = {
@@ -138,7 +177,8 @@ export function imageUrlsFrom(html: string, pageUrl: string): string[] {
   const out: string[] = [];
   const push = (raw: string | undefined) => {
     if (!raw) return;
-    const abs = absolute(raw.trim(), pageUrl);
+    // HTML-escaped wherever it came from — an attribute, og:image, a style.
+    const abs = absolute(decodeEntities(raw.trim()), pageUrl);
     if (abs) out.push(abs);
   };
 
@@ -192,6 +232,12 @@ function attrValue(tag: string, name: string): string | undefined {
   return value || undefined;
 }
 
+/** Shopify writes `?v=1&amp;width=800`; fetched as written that asks for "amp;width". */
+function decodeEntities(s: string): string {
+  return s.replace(/&(amp|quot|#39|apos|lt|gt);/g, (_, e: string) =>
+    ({ amp: "&", quot: '"', "#39": "'", apos: "'", lt: "<", gt: ">" } as Record<string, string>)[e]);
+}
+
 /** "a.jpg 400w, b.jpg 1600w" -> "b.jpg". The first entry is the phone's. Never split on
  *  commas — a Cloudinary URL has one in it (see srcsetCandidates). */
 function largestInSrcset(srcset: string): string | undefined {
@@ -227,6 +273,13 @@ export async function findBrandPhotos(opts: {
   pagesPerRole?: number;
   /** Candidate images measured per role. Each one is a request. */
   measurePerRole?: number;
+  /**
+   * A look at the picture itself. Without it the finder ranks on URL and size alone, which is
+   * what it always did; with it, anything that is not a photograph of the right thing is out.
+   */
+  judge?: (url: string) => Promise<PhotoVerdict | null>;
+  /** Pictures looked at per role, best-ranked first. Each one is a model call. */
+  judgePerRole?: number;
 }): Promise<{ photos: FoundPhoto[]; notes: string[] }> {
   const notes: string[] = [];
   const photos: FoundPhoto[] = [];
@@ -240,11 +293,17 @@ export async function findBrandPhotos(opts: {
     }
 
     const candidates: { url: string; page: string; hint: number }[] = [];
+    const seenHere = new Set<string>();
     for (const page of pages) {
       const html = await opts.readPage(page.url);
       if (!html) { notes.push(`${page.url} could not be read`); continue; }
       for (const url of imageUrlsFrom(html, page.url)) {
         if (!plausiblePhotoUrl(url)) continue;
+        // The same file linked twice — over http and https, or at two ?width= sizes — is
+        // measured once and can fill one slot, not two.
+        const key = photoKey(url);
+        if (seenHere.has(key)) continue;
+        seenHere.add(key);
         candidates.push({ url, page: page.url, hint: IMAGE_HINTS[role].test(url) ? 1 : 0 });
       }
     }
@@ -281,7 +340,84 @@ export async function findBrandPhotos(opts: {
   }
 
   photos.sort((a, b) => b.score - a.score);
-  return { photos, notes };
+  if (!opts.judge || !photos.length) return { photos, notes };
+  return judged(photos, opts.roles, opts.judge, opts.judgePerRole ?? 5, notes);
+}
+
+/**
+ * The shortlist, after a look at each picture.
+ *
+ * The best few per role are looked at (in parallel: they are independent calls) and then:
+ *
+ *   - a graphic, a packshot, or anything with words laid over it is OUT. A slot keeping the
+ *     template's stock photograph is a visible gap somebody fills; a banner with a headline
+ *     in the boutique slot looks deliberate.
+ *   - a photograph found on one role's page that shows another role's subject MOVES there. A
+ *     campaign page full of portraits is where the lifestyle shots are too, and a boutique
+ *     interior on a "world" page is still a boutique.
+ *   - quality scales the score, so a sharp editorial frame beats a larger soft one.
+ *   - a picture the look could not be had for (too big, a failed call) stays, ranked after
+ *     every picture that was seen and passed — what the finder did before is the floor.
+ *
+ * Pictures beyond the shortlist are dropped: unseen, they would be the next pick after the
+ * shortlist failed, which is exactly the picture this exists to stop choosing blind.
+ */
+async function judged(
+  photos: FoundPhoto[], roles: PhotoRole[],
+  judge: (url: string) => Promise<PhotoVerdict | null>, perRole: number, notes: string[],
+): Promise<{ photos: FoundPhoto[]; notes: string[] }> {
+  const shortlist: FoundPhoto[] = [];
+  const keys = new Set<string>();
+  for (const role of roles) {
+    for (const p of photos.filter((x) => x.role === role)) {
+      if (shortlist.filter((x) => x.role === role).length >= perRole) break;
+      const k = photoKey(p.url);
+      // Found under two roles: looked at once, and the look decides which it belongs to.
+      if (keys.has(k)) continue;
+      keys.add(k);
+      shortlist.push(p);
+    }
+  }
+
+  // Three at a time: each look holds a downloaded photograph and its base64 copy in memory,
+  // and fifteen at once is what ran the worker out.
+  const verdicts: (PhotoVerdict | null)[] = new Array(shortlist.length).fill(null);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(3, shortlist.length) }, async () => {
+    while (next < shortlist.length) {
+      const i = next++;
+      verdicts[i] = await judge(shortlist[i].url).catch(() => null);
+    }
+  }));
+  const kept: FoundPhoto[] = [];
+  const refused: string[] = [];
+  shortlist.forEach((p, i) => {
+    const v = verdicts[i];
+    if (!v) { kept.push({ ...p, score: p.score * 0.25 }); return; }
+    const role = roleForKind(v.kind);
+    if (!role || v.text || !roles.includes(role)) {
+      refused.push(v.text ? "words over it" : v.kind);
+      return;
+    }
+    const q = Math.max(1, Math.min(5, Math.round(v.quality || 3)));
+    // Seen and passed always ranks above unseen: the 0.25 above and the +1 here keep them apart.
+    kept.push({ ...p, role, seen: v.kind, score: (p.score + 1) * (0.4 + q * 0.2) });
+  });
+
+  if (refused.length) {
+    const counts = new Map<string, number>();
+    for (const r of refused) counts.set(r, (counts.get(r) ?? 0) + 1);
+    notes.push(`${refused.length} picture${refused.length === 1 ? "" : "s"} looked at and turned down (${
+      [...counts].map(([k, n]) => `${n} ${k}`).join(", ")})`);
+  }
+  for (const role of roles) {
+    if (!kept.some((p) => p.role === role) && shortlist.some((p) => p.role === role)) {
+      notes.push(`nothing on the ${role} pages was a photograph of ${
+        role === "store" ? "a boutique" : role === "ambassador" ? "a person" : "the pieces being worn"}`);
+    }
+  }
+  kept.sort((a, b) => b.score - a.score);
+  return { photos: kept, notes };
 }
 
 /**

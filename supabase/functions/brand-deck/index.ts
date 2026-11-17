@@ -38,7 +38,9 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import JSZip from "npm:jszip@3.10.1";
 import { focusMatcher } from "../_shared/brand-defaults.ts";
 import { sniffFormat, imageSize, EMBEDDABLE, MEDIA_TYPES } from "../_shared/image-bytes.ts";
-import { findBrandPhotos, pickForFrame, type FoundPhoto, type PhotoRole } from "../_shared/brand-photos.ts";
+import { findBrandPhotos, photoKey, pickForFrame, type FoundPhoto, type PhotoRole } from "../_shared/brand-photos.ts";
+import { judgePhotoBytes, judgePhotoUrl } from "../_shared/photo-judge.ts";
+import { mergeTwinRuns, slideText } from "../_shared/pptx-text.ts";
 import { fitPictureInSlide, frameOf, PACKSHOT, PHOTOGRAPH } from "../_shared/picture-fit.ts";
 import { findFocalPoint } from "../_shared/focal-point.ts";
 
@@ -166,7 +168,7 @@ Deno.serve(async (req: Request) => {
     (brief.images ?? []).filter((i) => i?.slide && i?.url).map((i) => [Number(i.slide), String(i.url)]));
 
   const products: Piece[] = Array.isArray(body.image_urls) && body.image_urls.length
-    ? (body.image_urls as string[]).map((image_url) => ({ image_url, name: null }))
+    ? (body.image_urls as string[]).map((image_url) => ({ image_url, name: null, category: null }))
     : await pickBrandImages(admin, brandId, slots.length, wanted);
   const campaign = campaignImages(brand);
 
@@ -220,6 +222,25 @@ Deno.serve(async (req: Request) => {
           if (!res || (!res.ok && res.status !== 206)) return null;
           try { return new Uint8Array(await res.arrayBuffer()); } catch { return null; }
         },
+        // A look at each shortlisted picture: a boutique, a person, the pieces worn — or a
+        // banner with a headline on it, which is out. See photo-judge.ts.
+        judge: ANTHROPIC_API_KEY && body.judge_photos !== false
+          ? async (url) => {
+            const opts = { apiKey: ANTHROPIC_API_KEY, model: VISION_MODEL };
+            // By URL first: nothing downloaded, nothing encoded — see photo-judge.ts.
+            try {
+              return await judgePhotoUrl(smallerForALook(url), opts);
+            } catch (e) {
+              console.warn("[brand-deck] judge by url:", (e as Error).message);
+            }
+            // The API's fetcher was turned away. One download of our own, through the same
+            // fetcher the rest of the deck uses, and only if it is small enough to be cheap.
+            const got = await fetchImageOrWhyNot(smallerForALook(url));
+            if (!got.image || got.image.bytes.byteLength > 1_500_000) return null;
+            return await judgePhotoBytes(got.image.bytes, MEDIA_TYPES[got.image.ext] ?? `image/${got.image.ext}`, opts)
+              .catch((e) => { console.error("[brand-deck] judge:", (e as Error).message); return null; });
+          }
+          : undefined,
       });
       found = out.photos;
       photoNotes.push(...out.notes);
@@ -229,11 +250,19 @@ Deno.serve(async (req: Request) => {
   }
   // Each slot takes a different picture: the same portrait three times is worse than two
   // slots left as the template had them.
+  // Keyed by photoKey, not the URL: one file reached over http and https is one picture.
   const takenPhotos = new Set<string>();
+  const taken = (url: string) => takenPhotos.has(photoKey(url));
+  const take = (url: string) => takenPhotos.add(photoKey(url));
   // Not simply the best photograph left, but the best one for the shape of THIS slot's frame
   // — see pickForFrame. A slot whose frame could not be measured falls back to the ranking.
-  const nextPhoto = (role: PhotoRole, frameAspect?: number): FoundPhoto | null =>
-    pickForFrame(found.filter((p) => p.role === role && !takenPhotos.has(p.url)), frameAspect);
+  // A portrait slot with no portrait left takes a photograph of the pieces worn, and the other
+  // way round: both are people, and either reads better than the template's stock picture.
+  const nextPhoto = (role: PhotoRole, frameAspect?: number): FoundPhoto | null => {
+    const pick = (r: PhotoRole) => pickForFrame(found.filter((p) => p.role === r && !taken(p.url)), frameAspect);
+    return pick(role)
+      ?? (role === "ambassador" ? pick("lifestyle") : role === "lifestyle" ? pick("ambassador") : null);
+  };
 
   let nextProduct = 0;
   const unfilled: string[] = [];
@@ -245,15 +274,15 @@ Deno.serve(async (req: Request) => {
     if (role === "store" || role === "ambassador" || role === "lifestyle") {
       const photo = nextPhoto(role, frames.get(slotIndex));
       if (photo) {
-        takenPhotos.add(photo.url);
-        return { ...s, image_url: photo.url, piece_name: null, from: "site", source_page: photo.page };
+        take(photo.url);
+        return { ...s, image_url: photo.url, piece_name: null, from: "site", source_page: photo.page, seen: photo.seen ?? null };
       }
       // The portal's own hero images, for the two roles they can serve. A store is never one
       // of them — onboarding chooses those for a portal header, not for a boutique.
       if (role !== "store") {
         const url = campaign.length ? campaign[roleOrdinal(slots, s) % campaign.length] : null;
-        if (url && !takenPhotos.has(url)) {
-          takenPhotos.add(url);
+        if (url && !taken(url)) {
+          take(url);
           return { ...s, image_url: url, piece_name: null, from: "campaign" };
         }
       }
@@ -266,8 +295,12 @@ Deno.serve(async (req: Request) => {
     }
     const piece = products.length ? products[nextProduct++ % products.length] : null;
     if (!piece) unfilled.push(`slide ${s.slide}: a piece from the catalogue — none read yet`);
-    return { ...s, image_url: piece?.image_url ?? null, piece_name: piece?.name ?? null, from: piece ? "catalogue" : "none" };
+    return {
+      ...s, image_url: piece?.image_url ?? null, piece_name: piece?.name ?? null,
+      piece_category: piece?.category ?? null, from: piece ? "catalogue" : "none",
+    };
   });
+
 
   if (plan.every((p) => !p.image_url)) {
     return json({
@@ -284,7 +317,7 @@ Deno.serve(async (req: Request) => {
   // ── Rewrite the deck ───────────────────────────────────────────────────────
   const filled: {
     media: string; slide: number; role: string; from: string;
-    source_page: string | null; image_url: string; bytes: number; fit: string;
+    source_page: string | null; image_url: string; bytes: number; fit: string; seen?: string | null;
   }[] = [];
   // How each swapped picture had to be fitted, for the review notes: a centre-crop is worth
   // a glance, a shrunk frame leaves a gap somebody has to look at.
@@ -353,7 +386,9 @@ Deno.serve(async (req: Request) => {
             .catch((e) => { console.error("[brand-deck] focal point:", (e as Error).message); return null; });
           if (focus) { fitted = fitPictureInSlide(slideXml, relId, size, rule, focus); aroundSubject = true; }
         }
-        zip.file(slidePath, fitted.xml);
+        // The template's alt text describes the template's picture — the new teaser's "Data"
+        // tile shipped described as another house's campaign. It goes with the picture.
+        zip.file(slidePath, clearAltText(fitted.xml, relId));
         fitMode = fitted.fit?.mode ?? "unfitted";
         if (fitted.fit?.mode === "crop") cropped.push(`slide ${s.slide} (${Math.round(fitted.fit.cropped * 100)}%${aroundSubject ? ", around its subject" : ""})`);
         else if (fitted.fit?.mode === "shrink") shrunk.push(`slide ${s.slide}`);
@@ -366,6 +401,7 @@ Deno.serve(async (req: Request) => {
         // and overridden rather than argued about.
         source_page: (s as { source_page?: string }).source_page ?? null,
         image_url: s.image_url, bytes: img.bytes.byteLength, fit: fitMode,
+        seen: (s as { seen?: string | null }).seen ?? null,
       });
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
@@ -399,8 +435,13 @@ Deno.serve(async (req: Request) => {
   // landed in the first product slot, so the screenshot is internally consistent.
   const firstPiece = shortProductName(
     plan.find((p) => p.from === "catalogue" && p.piece_name)?.piece_name ?? null);
+  const firstCategory = productCategoryLabel(
+    (plan.find((p) => p.from === "catalogue" && p.piece_name) as { piece_category?: string | null } | undefined)?.piece_category ?? null);
   const tokens: Record<string, string | null> = {
     "{{PRODUCT_NAME}}": firstPiece,
+    // The line above the name on the mockup ("Leather bag") — a ring under that label is the
+    // same inconsistency the product name had.
+    "{{PRODUCT_CATEGORY}}": firstCategory,
     "{{BRAND_NAME}}": String(brand.name ?? "") || null,
   };
 
@@ -423,6 +464,13 @@ Deno.serve(async (req: Request) => {
       const xml = await zip.file(path)?.async("string");
       if (!xml) continue;
       let next = xml;
+      // PowerPoint splits a phrase into runs for reasons that do not show — a spell-check
+      // flag on one word is enough, and the new teaser's "Leather bag" is "Leather " + "bag".
+      // Merged only when a phrase this slide is asked to change is in its text but not in
+      // one run, so untouched slides go out byte for byte as the template had them.
+      if (requested.some((e) => e?.find && !next.includes(e.find) && slideText(next).includes(e.find))) {
+        next = mergeTwinRuns(next);
+      }
       for (const e of requested) {
         if (e?.find && e?.replace_with && next.includes(e.find)) {
           next = next.replaceAll(e.find, escapeXml(e.replace_with));
@@ -502,8 +550,11 @@ Deno.serve(async (req: Request) => {
         : "No categories asked for and none on the brand record, so product slots took the most valuable pieces in the catalogue. Give a focus if the deck should show one part of the range.",
       ...(filled.some((f) => f.from === "site")
         ? [`${filled.filter((f) => f.from === "site").length} photograph${filled.filter((f) => f.from === "site").length === 1 ? " was" : "s were"} taken off the house's own site — ` +
-           filled.filter((f) => f.from === "site").map((f) => `slide ${f.slide} from ${f.source_page}`).join("; ") +
-           ". Open each one on the slide: the page said what it was about, nothing here looked at the picture."]
+           filled.filter((f) => f.from === "site").map((f) =>
+             `slide ${f.slide} from ${f.source_page}${f.seen ? ` (seen as ${f.seen === "worn" ? "the pieces worn" : f.seen === "store" ? "a boutique" : "a portrait"})` : " (NOT looked at)"}`).join("; ") +
+           (filled.some((f) => f.from === "site" && !f.seen)
+             ? ". The ones marked NOT looked at were chosen on their page alone — open them on the slide."
+             : ". Each was looked at before it was chosen; the look cannot tell an old campaign from this season's.")]
         : []),
       ...(photoNotes.length ? [`Looking for photography: ${photoNotes.join("; ")}.`] : []),
       ...(unfilled.length
@@ -927,7 +978,7 @@ function roleOrdinal(slots: Slot[], slot: Slot): number {
 
 // Hero slots want a tall editorial shot; product slots want the pieces that
 // carry the house. Both come from the brand's own catalogue.
-type Piece = { image_url: string; name: string | null };
+type Piece = { image_url: string; name: string | null; category: string | null };
 
 async function pickBrandImages(
   admin: ReturnType<typeof createClient>, brandId: number, want: number, categories: string[] = [],
@@ -972,7 +1023,7 @@ async function pickBrandImages(
     // The NAME travels with the picture. The deck names a product on the app mockup, and a
     // deck whose screenshot says one house's piece next to another house's photograph is
     // worse than one that names nothing.
-    out.push({ image_url: r.image_url, name: r.name });
+    out.push({ image_url: r.image_url, name: r.name, category: r.category });
     if (out.length >= want) break;
   }
   return out;
@@ -1024,6 +1075,43 @@ async function fetchImageOrWhyNot(url: string): Promise<{ image: Fetched | null;
     };
   }
   return { image: { bytes, ext: format } };
+}
+
+/**
+ * The same picture at a size that is enough to say what it shows. Only where the CDN is known
+ * to resize on request (Shopify's, which is most of these houses); anything else as it is.
+ */
+function smallerForALook(url: string): string {
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)cdn\.shopify\.com$/.test(u.host) && !u.pathname.includes("/cdn/shop/")) return url;
+    u.searchParams.set("width", "1000");
+    return u.toString();
+  } catch { return url; }
+}
+
+/** Empties the descr/title of the picture embedding `relId`, leaving every other shape alone. */
+function clearAltText(slideXml: string, relId: string): string {
+  return slideXml.replace(/<p:pic>[\s\S]*?<\/p:pic>/g, (pic) => {
+    if (!pic.includes(`r:embed="${relId}"`)) return pic;
+    return pic.replace(/(<p:cNvPr\b[^>]*?)\s(?:descr|title)="[^"]*"/g, "$1").replace(/(<p:cNvPr\b[^>]*?)\s(?:descr|title)="[^"]*"/g, "$1");
+  });
+}
+
+/**
+ * A catalogue category as a mockup label: "RINGS" → "Ring", "handbags" → "Handbags".
+ * Null for nothing, or for something too long to sit on one line of a phone screen.
+ */
+function productCategoryLabel(raw: string | null): string | null {
+  const c = String(raw ?? "").trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  if (!c || c.length > 18 || /^(home|other|misc|all|default)$/i.test(c)) return null;
+  const lower = c.toLowerCase();
+  // Plural to singular only where it is unambiguous; "Glasses" and "Accessories" stay.
+  const single = /^(rings|necklaces|bracelets|earrings|watches|bags|wallets|belts|scarves|shoes|pendants)$/.test(lower)
+    ? lower.replace(/(ches)$/, "ch").replace(/(ves)$/, "f").replace(/s$/, "")
+    : lower;
+  return single === "earring" || single === "shoe" ? c.charAt(0).toUpperCase() + lower.slice(1)
+    : single.charAt(0).toUpperCase() + single.slice(1);
 }
 
 function escapeXml(s: string): string {
