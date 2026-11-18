@@ -1,6 +1,8 @@
 // Native, vector jsPDF report generator — crisp text and charts drawn directly
 // (not an html2canvas screenshot), for a designed, branded document.
 import type { ReportPayload, ReportSection } from "@/components/assistant/ReportView";
+import { capSlices, eur, eurAxis, fmtCell, grp, isDateCol, isNumericCol } from "@/lib/reportFormat";
+import { sanitizeFilename } from "@/lib/reportExport";
 
 const INK: [number, number, number] = [26, 26, 26];
 const MUTED: [number, number, number] = [140, 140, 140];
@@ -12,14 +14,22 @@ const CHART: [number, number, number][] = [
   [76, 158, 122], [199, 154, 59], [167, 203, 188], [228, 200, 126],
 ];
 
-// Italian grouping by hand: it-IT leaves four-digit numbers ungrouped ("€9800" next
-// to "€53.333" in the same column).
-const grp = (v: number) => {
-  const [i, d] = (Math.round(v * 100) / 100).toString().split(".");
-  return `${i.replace(/\B(?=(\d{3})+(?!\d))/g, ".")}${d ? `,${d}` : ""}`;
+// jsPDF's built-in fonts only know Windows-1252. Anything else was dropped or garbled
+// without a trace: "Pečečnik" printed as "Peenik". Accents outside that set are folded
+// to their letter ("Pececnik"), and a character with no Latin form becomes "?" rather
+// than mojibake. (Embedding a Unicode font would keep them; not worth 500 kB per PDF
+// while no live client has such names.)
+const CP1252_EXTRA = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ";
+const inCp1252 = (ch: string) => {
+  const c = ch.charCodeAt(0);
+  return (c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff) || CP1252_EXTRA.includes(ch);
 };
-const eur = (v: number) => `€${grp(Math.round(v))}`;
-const looksMoney = (c: string) => /(price|revenue|spend|ticket|value|amount|premium|cost|total|prezz|ricav|spesa|scontrin|fatturat|incass|importo|valore|(^|_)eur(o)?$)/i.test(c);
+export const pdfSafe = (t: string) =>
+  [...String(t).replace(/[\r\n\t]+/g, " ")].map((ch) => {
+    if (inCp1252(ch)) return ch;
+    const folded = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return [...folded].every(inCp1252) && folded ? folded : "?";
+  }).join("");
 
 type Img = { data: string; w: number; h: number };
 type ChartSection = Extract<ReportSection, { type: "bar" | "line" | "pie" }>;
@@ -75,17 +85,26 @@ async function trimTransparent(img: Img): Promise<Img> {
   } catch { return img; }
 }
 
-export async function downloadReportPdf(report: ReportPayload, filename: string) {
-  const doc = await buildReportDoc(report);
-  doc.save(`${(filename || report.title || "report").replace(/[^a-z0-9-_. ]/gi, "").replace(/\s+/g, "_").slice(0, 80) || "report"}.pdf`);
+export async function downloadReportPdf(report: ReportPayload, filename: string, locale = "it") {
+  const doc = await buildReportDoc(report, locale);
+  doc.save(`${sanitizeFilename(filename || report.title || "report")}.pdf`);
 }
 
 // Build the jsPDF document (no save) — split out so it can be rendered headless
 // for design iteration.
-export async function buildReportDoc(report: ReportPayload) {
+export async function buildReportDoc(report: ReportPayload, locale = "it") {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = 210, H = 297, M = 16, CW = W - 2 * M;
+  // Every string goes through pdfSafe — measured the same way it is drawn.
+  {
+    const d = doc as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const safe = (t: unknown) => (Array.isArray(t) ? t.map((x) => pdfSafe(String(x))) : pdfSafe(String(t)));
+    const text = d.text.bind(doc), width = d.getTextWidth.bind(doc), split = d.splitTextToSize.bind(doc);
+    d.text = (t: unknown, ...a: unknown[]) => text(safe(t), ...a);
+    d.getTextWidth = (t: unknown) => width(safe(t));
+    d.splitTextToSize = (t: unknown, ...a: unknown[]) => split(safe(t), ...a);
+  }
 
   // Preload all images (logo + product photos) up front, in parallel.
   const urls = new Set<string>();
@@ -102,6 +121,13 @@ export async function buildReportDoc(report: ReportPayload) {
     doc.text(String(page), W - M, H - 8, { align: "right" });
   };
   const addPage = () => { footer(); doc.addPage(); page++; y = M; };
+  // Fit a string to a width, cutting with an ellipsis (jsPDF has no clipping).
+  const fit = (txt: string, w: number) => {
+    if (doc.getTextWidth(txt) <= w) return txt;
+    let t = txt;
+    while (t.length > 1 && doc.getTextWidth(`${t}…`) > w) t = t.slice(0, -1);
+    return `${t.trimEnd()}…`;
+  };
   const ensure = (need: number) => { if (y + need > H - M - 6) addPage(); };
   const setColor = (c: [number, number, number]) => doc.setTextColor(c[0], c[1], c[2]);
   const pt = (cx: number, cy: number, r: number, deg: number): [number, number] => {
@@ -125,12 +151,15 @@ export async function buildReportDoc(report: ReportPayload) {
     if (report.brand) { doc.setFont("helvetica", "bold"); doc.setFontSize(11); setColor(GOLD); doc.text(report.brand.toUpperCase(), M, y + 5); }
     y += 12;
   }
+  // Long titles wrap (they ran off the right edge), and the space below follows the lines.
   doc.setFont("times", "bold"); doc.setFontSize(19); setColor(INK);
-  doc.text(report.title, M, y);
-  y += 6;
+  const titleLines = (doc.splitTextToSize(report.title, CW) as string[]).slice(0, 3);
+  doc.text(titleLines, M, y);
+  y += 6 + (titleLines.length - 1) * 7.5;
   if (report.subtitle) {
     doc.setFont("helvetica", "normal"); doc.setFontSize(9); setColor(MUTED);
-    doc.text(report.subtitle, M, y, { maxWidth: CW }); y += 5;
+    const subLines = (doc.splitTextToSize(report.subtitle, CW) as string[]).slice(0, 3);
+    doc.text(subLines, M, y); y += 5 + (subLines.length - 1) * 4;
   }
   doc.setDrawColor(...GOLD); doc.setLineWidth(0.5); doc.line(M, y, W - M, y); y += 8;
 
@@ -141,7 +170,7 @@ export async function buildReportDoc(report: ReportPayload) {
     ensure(reserve);
     y += 2;
     doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); setColor(GOLD); doc.setCharSpace(0.6);
-    doc.text(t.toUpperCase(), M, y); doc.setCharSpace(0);
+    doc.text(fit(t.toUpperCase(), CW - 10), M, y); doc.setCharSpace(0);
     y += 5.5;
   };
 
@@ -168,13 +197,6 @@ export async function buildReportDoc(report: ReportPayload) {
     }
   };
 
-  // Fit a string to a width, cutting with an ellipsis (jsPDF has no clipping).
-  const fit = (txt: string, w: number) => {
-    if (doc.getTextWidth(txt) <= w) return txt;
-    let t = txt;
-    while (t.length > 1 && doc.getTextWidth(`${t}…`) > w) t = t.slice(0, -1);
-    return `${t.trimEnd()}…`;
-  };
 
   // Columns are sized to what they hold. They used to be one wide first column and
   // equal narrow ones, every one but the first right-aligned with no limit, so a
@@ -184,16 +206,11 @@ export async function buildReportDoc(report: ReportPayload) {
   const drawTable = (s: Extract<ReportSection, { type: "table" }>) => {
     const cols = s.columns, n = cols.length;
     if (!n) return;
-    const cell = (c: { key: string; header: string }, v: unknown) => {
-      const money = looksMoney(c.key) || looksMoney(c.header);
-      return v == null ? "—"
-        : money && v !== "" && Number.isFinite(Number(v)) ? eur(Number(v))
-        : typeof v === "number" ? grp(v) : String(v);
-    };
-    const numeric = cols.map((c) => s.rows.every((r) => {
-      const v = r[c.key];
-      return v == null || typeof v === "number" || (v !== "" && Number.isFinite(Number(v)));
-    }));
+    const cell = (c: { key: string; header: string; unit?: "eur" | "num" }, v: unknown) => fmtCell(c.key, c.header, v, c.unit);
+    const numeric = cols.map((c) => isNumericCol(s.rows, c.key));
+    // Dates neither shrink nor cut: "2026-06-…" told nobody anything. They are fixed
+    // width like numbers, but read left-aligned.
+    const fixed = cols.map((c, i) => numeric[i] || isDateCol(s.rows, c.key));
     const fontSize = n > 6 ? 7.5 : 8.5, pad = 3;
     // Natural width: the longest cell (or header), capped so one long column can't take the page.
     const natural = cols.map((c, i) => {
@@ -201,13 +218,13 @@ export async function buildReportDoc(report: ReportPayload) {
       let w = doc.getTextWidth(c.header);
       doc.setFont("helvetica", "normal"); doc.setFontSize(fontSize);
       for (const r of s.rows.slice(0, 200)) w = Math.max(w, doc.getTextWidth(cell(c, r[c.key])));
-      return Math.min(w + pad, numeric[i] ? 40 : 75);
+      return Math.min(w + pad, fixed[i] ? 40 : 75);
     });
     const total = natural.reduce((a, b) => a + b, 0);
     let widths: number[];
     if (total <= CW) {
       // Spare room goes to the text columns (or all, if there are none).
-      const grow = numeric.some((x) => !x) ? numeric.map((x) => !x) : numeric.map(() => true);
+      const grow = fixed.some((x) => !x) ? fixed.map((x) => !x) : fixed.map(() => true);
       const growW = natural.reduce((a, w, i) => a + (grow[i] ? w : 0), 0) || 1;
       widths = natural.map((w, i) => grow[i] ? w + (CW - total) * (w / growW) : w);
     } else {
@@ -215,16 +232,16 @@ export async function buildReportDoc(report: ReportPayload) {
       // The widest text columns give way first, down to a common cap, so a short
       // column (a city) keeps its width while a long one (categories) is cut. If the
       // numbers alone would take most of the page, everything shrinks alike.
-      const numW = natural.reduce((a, w, i) => a + (numeric[i] ? w : 0), 0);
-      if (natural.some((_, i) => !numeric[i]) && numW <= CW * 0.6) {
+      const numW = natural.reduce((a, w, i) => a + (fixed[i] ? w : 0), 0);
+      if (natural.some((_, i) => !fixed[i]) && numW <= CW * 0.6) {
         const room = CW - numW;
         let lo = 0, hi = Math.max(...natural);
         for (let k = 0; k < 30; k++) {
           const cap = (lo + hi) / 2;
-          const used = natural.reduce((a, w, i) => a + (numeric[i] ? 0 : Math.min(w, cap)), 0);
+          const used = natural.reduce((a, w, i) => a + (fixed[i] ? 0 : Math.min(w, cap)), 0);
           if (used > room) hi = cap; else lo = cap;
         }
-        widths = natural.map((w, i) => numeric[i] ? w : Math.min(w, lo));
+        widths = natural.map((w, i) => fixed[i] ? w : Math.min(w, lo));
       } else {
         widths = natural.map((w) => (w / total) * CW);
       }
@@ -250,7 +267,7 @@ export async function buildReportDoc(report: ReportPayload) {
 
   const drawProducts = (items: Extract<ReportSection, { type: "products" }>["items"]) => {
     const per = 4, gap = 4, cw = (CW - gap * (per - 1)) / per, imgS = cw, cardH = imgS + 15;
-    const list = items.slice(0, 8);
+    const list = items.slice(0, 12); // as many as the screen shows
     for (let r = 0; r < list.length; r += per) {
       const row = list.slice(r, r + per);
       ensure(cardH + 3);
@@ -284,6 +301,8 @@ export async function buildReportDoc(report: ReportPayload) {
     doc.setFont("helvetica", "bold"); doc.setFontSize(7);
     const valW = Math.max(...data.map((d) => doc.getTextWidth(fmtVal(d.value)))) + 3;
     const bx = M + labW, bw = CW - labW - valW, rowH = 5.6, barH = 3.4;
+    // A negative value gets no bar (its figure still prints) rather than a bar drawn
+    // backwards over its own label.
     const max = Math.max(...data.map((d) => d.value), 1);
     data.forEach((d) => {
       ensure(rowH);
@@ -305,44 +324,59 @@ export async function buildReportDoc(report: ReportPayload) {
     if (s.type === "bar") {
       doc.setFont("helvetica", "normal"); doc.setFontSize(6.5);
       const slot = Math.min(bw, data.length * 34) / data.length;
-      if (data.length > 8 || data.some((d) => doc.getTextWidth(String(d.label)) > slot - 1)) return drawHBar(s);
+      // Twelve months fit upright; client names or a long tail don't.
+      if (data.length > 16 || data.some((d) => doc.getTextWidth(String(d.label)) > slot - 1)) return drawHBar(s);
     }
     ensure(bh + 10);
-    const by = y, max = Math.max(...data.map((d) => d.value), 1);
+    // The scale spans zero to the extremes, both ways: a negative value used to draw a bar
+    // down over the labels, and an all-negative chart ran through the footer.
+    const by = y;
+    const max = Math.max(0, ...data.map((d) => d.value)), min = Math.min(0, ...data.map((d) => d.value));
+    const span = max - min || 1;
+    const yAt = (v: number) => by + bh - bh * ((v - min) / span);
     doc.setFontSize(6.5); setColor(MUTED); doc.setDrawColor(...HAIR); doc.setLineWidth(0.2);
     [0, 0.5, 1].forEach((f) => {
-      const yy = by + bh - bh * f;
+      const v = min + span * f, yy = yAt(v);
       doc.line(bx, yy, bx + bw, yy);
-      doc.text(money ? `€${Math.round((max * f) / 1000)}k` : grp(Math.round(max * f)), bx - 2, yy + 1, { align: "right" });
+      doc.text(money ? eurAxis(v) : grp(Math.round(v)), bx - 2, yy + 1, { align: "right" });
     });
-    const fmtVal = (v: number) => money ? (v >= 1000 ? `€${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : eur(v)) : grp(v);
+    if (min < 0) { doc.setDrawColor(...MUTED); doc.line(bx, yAt(0), bx + bw, yAt(0)); }
+    const fmtVal = (v: number) => money ? (Math.abs(v) >= 1000 ? `${v < 0 ? "-" : ""}€${grp(Math.abs(v) / 1000, Math.abs(v) >= 10000 ? 0 : 1)}k` : eur(v)) : grp(v);
     if (s.type === "bar") {
       // Centre the bars in a band so a few points don't float far apart.
       const areaW = Math.min(bw, data.length * 34), x0 = bx + (bw - areaW) / 2;
       const slot = areaW / data.length, barW = Math.min(slot * 0.5, 24);
       data.forEach((d, i) => {
-        const hh = bh * (d.value / max), x = x0 + i * slot + (slot - barW) / 2;
-        doc.setFillColor(...GOLD); doc.rect(x, by + bh - hh, barW, hh, "F");
+        const x = x0 + i * slot + (slot - barW) / 2;
+        const top = Math.min(yAt(d.value), yAt(0)), hh = Math.abs(yAt(d.value) - yAt(0));
+        doc.setFillColor(...GOLD); doc.rect(x, top, barW, hh, "F");
         doc.setFont("helvetica", "bold"); doc.setFontSize(6.5); setColor(INK);
-        doc.text(fmtVal(d.value), x + barW / 2, by + bh - hh - 1.5, { align: "center" });
+        doc.text(fmtVal(d.value), x + barW / 2, d.value >= 0 ? top - 1.5 : top + hh + 3, { align: "center" });
         doc.setFont("helvetica", "normal"); doc.setFontSize(6.5); setColor(MUTED);
         doc.text(String(d.label), x + barW / 2, by + bh + 4, { align: "center" });
       });
     } else {
       doc.setDrawColor(...CHART[0]); doc.setLineWidth(0.6);
-      const pts = data.map((d, i) => [bx + (bw / Math.max(1, data.length - 1)) * i, by + bh - bh * (d.value / max)] as [number, number]);
+      const pts = data.map((d, i) => [bx + (bw / Math.max(1, data.length - 1)) * i, yAt(d.value)] as [number, number]);
       for (let i = 1; i < pts.length; i++) doc.line(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
       doc.setFillColor(...CHART[0]); pts.forEach((p) => doc.circle(p[0], p[1], 0.8, "F"));
-      setColor(MUTED); doc.setFontSize(6.5);
-      data.forEach((d, i) => doc.text(String(d.label), pts[i][0], by + bh + 4, { align: "center" }));
+      setColor(MUTED); doc.setFont("helvetica", "normal"); doc.setFontSize(6.5);
+      // Thirty daily points can't all be labelled: every k-th, so they never overlap.
+      const labW = Math.max(...data.map((d) => doc.getTextWidth(String(d.label)))) + 2;
+      const every = Math.max(1, Math.ceil((data.length * labW) / bw));
+      data.forEach((d, i) => {
+        if (i % every === 0 || i === data.length - 1 && (data.length - 1) % every >= every / 2)
+          doc.text(String(d.label), pts[i][0], by + bh + 4, { align: "center" });
+      });
     }
     y = by + bh + 10;
   };
 
   const drawPie = (s: ChartSection) => {
-    const data = [...s.data].sort((a, b) => b.value - a.value); if (!data.length) return;
+    // Past eight slices the colours repeat and the legend outgrows its space: the tail is "Altro".
+    const data = capSlices(s.data.filter((d) => d.value > 0), locale); if (!data.length) return;
     const money = s.unit === "eur", total = data.reduce((a, d) => a + d.value, 0) || 1;
-    const r = 19; ensure(2 * r + 4);
+    const r = 19; ensure(Math.max(2 * r, data.length * 5.5) + 4);
     const cx = M + r, cy = y + r;
     let a0 = -90;
     data.forEach((d, i) => {
@@ -359,7 +393,7 @@ export async function buildReportDoc(report: ReportPayload) {
       const col = CHART[i % CHART.length];
       doc.setFillColor(col[0], col[1], col[2]); doc.rect(lx, ly - 2.4, 3, 3, "F");
       doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); setColor(INK);
-      doc.text(String(d.label), lx + 5, ly, { maxWidth: W - M - (lx + 5) - 34 });
+      doc.text(fit(String(d.label), W - M - (lx + 5) - 36), lx + 5, ly);
       doc.text(`${money ? eur(d.value) : grp(d.value)} · ${Math.round((d.value / total) * 100)}%`, W - M, ly, { align: "right" });
       ly += 5.5;
     });
@@ -367,7 +401,7 @@ export async function buildReportDoc(report: ReportPayload) {
   };
 
   const reserveFor = (t: ReportSection["type"]) =>
-    t === "bar" || t === "line" ? 54 : t === "pie" ? 46 : t === "products" ? 62 : t === "kpis" ? 24 : t === "table" ? 20 : 14;
+    t === "bar" || t === "line" ? 54 : t === "pie" ? 50 : t === "products" ? 62 : t === "kpis" ? 24 : t === "table" ? 20 : 18;
   for (const s of report.sections) {
     sectionTitle(s.title, reserveFor(s.type));
     if (s.type === "kpis") drawKpis(s.items);
@@ -376,9 +410,14 @@ export async function buildReportDoc(report: ReportPayload) {
     else if (s.type === "bar" || s.type === "line") drawBarLine(s);
     else if (s.type === "pie") drawPie(s);
     else if (s.type === "note") {
+      // Line by line, so a long note continues on the next page instead of running off this one.
       doc.setFont("times", "italic"); doc.setFontSize(9.5); setColor(MUTED);
-      const lines = doc.splitTextToSize(s.body, CW) as string[];
-      ensure(lines.length * 4.5 + 2); doc.text(lines, M, y); y += lines.length * 4.5;
+      const lines = String(s.body).split(/\r?\n/).flatMap((para) => para.trim() ? doc.splitTextToSize(para, CW) as string[] : [""]);
+      for (const line of lines) {
+        if (y + 4.5 > H - M - 6) { addPage(); doc.setFont("times", "italic"); doc.setFontSize(9.5); setColor(MUTED); }
+        if (line) doc.text(line, M, y);
+        y += 4.5;
+      }
     }
     y += 7;
   }

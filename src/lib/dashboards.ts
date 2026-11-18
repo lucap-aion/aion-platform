@@ -52,14 +52,14 @@ export async function deleteDashboard(id: number) {
 }
 
 /** Runs the saved spec again on the server; no model call, today's data. */
-export async function runDashboard(id: number): Promise<{ report: ReportPayload; warnings: string | null }> {
+export async function runDashboard(id: number, locale = "it"): Promise<{ report: ReportPayload; warnings: string | null }> {
   const { data: s } = await supabase.auth.getSession();
   const token = s.session?.access_token;
   if (!token) throw new Error("Not signed in");
   const res = await fetch(`${SUPABASE_URL}/functions/v1/brand-assistant`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "run_dashboard", dashboard_id: id }),
+    body: JSON.stringify({ action: "run_dashboard", dashboard_id: id, locale }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body?.error ?? `Request failed (${res.status})`);

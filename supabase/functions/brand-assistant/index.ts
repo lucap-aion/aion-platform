@@ -290,10 +290,15 @@ the brand, or a policy.
 
 ## run_sql(sql) — live client & sales data (your brand only)
 Use for what a client bought and when, average ticket, lifetime value, claims,
-feedback, and data-driven cross-sell. Resolve a client by name with ILIKE; if
-several match, list them and ask which one before going deeper. If ILIKE returns
-NOBODY, say plainly you can't find them under that name and ask for the spelling
+feedback, and data-driven cross-sell. Resolve a client by name, accent-insensitively
+(below); if several match, list them and ask which one before going deeper. If that
+returns NOBODY, say plainly you can't find them under that name and ask for the spelling
 or email — never answer about the nearest different person.
+Names often carry accents the associate doesn't type (Pečečnik, Králová, Müller):
+match them accent-insensitively, with a lower-case unaccented pattern —
+  translate(lower(first_name || ' ' || last_name), 'àáâãäåèéêëìíîïòóôõöùúûüýÿçćčďđłľńňñŕřśšşťţźžż', 'aaaaaaeeeeiiiiooooouuuuyycccddllnnnrrsssttzzz') LIKE '%pececnik%'
+(and the same with last_name first, for "Rossi Anna"). Only after that
+comes back empty is the client not there.
 Renewals / expiring covers (a core strength): a cover is active when
 status='live'; "expiring this month / soon" = expiration_date BETWEEN
 CURRENT_DATE AND CURRENT_DATE + interval '30 days'. Use today's date for any
@@ -1075,13 +1080,19 @@ const TOOLS = [
     description:
       "Build a downloadable report (PDF + Excel, with charts) shown to the " +
       "associate with download buttons. Two presets: kind='client' (needs the " +
-      "client's name) and kind='performance' (period week|month). For ANYTHING " +
+      "client's name; if several clients match, call again with the id you are given) and " +
+      "kind='performance' — set `range` to the period ASKED FOR (\"mese scorso\"/last month = " +
+      "last_month, \"questo mese\" = this_month, \"questa settimana\" = this_week, " +
+      "\"settimana scorsa\" = last_week, \"da inizio anno\" = year_to_date), or give " +
+      "start_date/end_date for any other period. Its figures cover exactly that period; " +
+      "never describe it as a different one. For ANYTHING " +
       "else — sales by collection, claims this month, renewals expiring, a shop's " +
       "numbers, a period comparison, etc. — use kind='custom' and build it from " +
       "`sections`. Each section has a `type` and a `sql` SELECT that returns rows " +
       "shaped for that type:\n" +
       "  • kpis — one row; each column becomes a KPI card (money columns auto-€).\n" +
-      "  • bar | line | pie — 2 columns: first = label, second = numeric value.\n" +
+      "  • bar | line | pie — a label column, then ONE numeric value column (the first " +
+      "number after the label is charted; put the value you mean right after the label).\n" +
       "  • table — any columns; rendered as a small table (money auto-€).\n" +
       "  • products — columns among name, collection/category, price, image_url, " +
       "product_url; renders as photo cards.\n" +
@@ -1093,7 +1104,10 @@ const TOOLS = [
       properties: {
         kind: { type: "string", enum: ["client", "performance", "custom"], description: "Report type." },
         client: { type: "string", description: "For kind=client: the client's full name." },
-        period: { type: "string", enum: ["week", "month"], description: "For kind=performance: bucket size (default month)." },
+        range: { type: "string", enum: ["this_month", "last_month", "this_week", "last_week", "last_30_days", "year_to_date"], description: "For kind=performance: the period the figures cover (default last_month). Relative, so a saved dashboard rolls forward." },
+        start_date: { type: "string", description: "For kind=performance, instead of range: first day, YYYY-MM-DD (Rome)." },
+        end_date: { type: "string", description: "For kind=performance, instead of range: last day included, YYYY-MM-DD." },
+        period: { type: "string", enum: ["week", "month"], description: "Deprecated — use range. week = last_week, month = last_month." },
         title: { type: "string", description: "For kind=custom: the report title." },
         subtitle: { type: "string", description: "For kind=custom: optional subtitle." },
         sections: {
@@ -1178,7 +1192,13 @@ const ADMIN_TOOL_NAMES = new Set(["run_sql", "search_knowledge", "lookup_knowled
 // so it can't be taken back afterwards; the only reliable fix is to make the
 // first step generate_report. Kept narrow on purpose: no "pdf"/"scarica", which
 // are just as often about a document in the knowledge base.
-const CHART_ASK = /\b(grafic\w*|istogramm\w*|diagramm\w*|torta|chart\w*|graph\w*|histogram\w*|pie|esport\w*|export\w*|excel|xlsx)\b/i;
+// "esport…" alone is not enough: "documenti per esportare i gioielli negli USA" is a
+// customs question, and forcing a report there answered it with a note. An export word
+// counts only with something to export.
+const CHART_WORDS = /\b(grafic\w*|istogramm\w*|diagramm\w*|torta|chart\w*|graph\w*|histogram\w*|pie|excel|xlsx|spreadsheet|foglio di calcolo|esportabil\w*|exportable)\b/i;
+const EXPORT_WORD = /\b(esport\w*|export\w*|scaricabil\w*|downloadable)\b/i;
+const DATA_WORD = /\b(dati|lista|elenco|tabella|report|clienti|vendite|polizze|ordini|csv|file|data|list|table|clients|customers|sales|orders|policies)\b/i;
+const CHART_ASK = { test: (q: string) => CHART_WORDS.test(q) || (EXPORT_WORD.test(q) && DATA_WORD.test(q)) };
 
 /**
  * A voice message, turned into words.
@@ -1342,7 +1362,7 @@ Deno.serve(async (req: Request) => {
       dashBrandName = (b as { name?: string } | null)?.name ?? null;
     }
     try {
-      const report = await buildReport(userClient, dash.brand_id, dashBrandName, dash.spec as never);
+      const report = await buildReport(userClient, dash.brand_id, dashBrandName, dash.spec as never, body.locale === "it" ? "it" : "en");
       if ((report as { error?: string }).error) return jsonError((report as { error: string }).error, 422);
       const { warnings, ...payload } = report as Record<string, unknown> & { warnings?: string };
       return new Response(JSON.stringify({ report: { ...payload, title: dash.title }, warnings: warnings ?? null }), {
@@ -1933,9 +1953,9 @@ another house's piece.`
                 content: JSON.stringify(est),
               });
             } else if (block.name === "generate_report") {
-              const input = block.input as { kind?: string; client?: string; period?: string };
+              const input = block.input as ReportInput;
               try {
-                const report = await buildReport(userClient, brandId, brandName, input);
+                const report = await buildReport(userClient, brandId, brandName, input, locale);
                 if ((report as { error?: string }).error) {
                   toolResults.push({ type: "tool_result", tool_use_id: block.id, content: (report as { error: string }).error });
                 } else {
@@ -2764,6 +2784,103 @@ function buildBrandBlocks(cfg: AssistantConfig | null, brandName: string | null)
 // charts + PDF/Excel download.
 type Row = Record<string, unknown>;
 
+const q = (s: string) => s.replace(/'/g, "''"); // escape single quotes
+const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+const isNumericVal = (v: unknown) =>
+  (typeof v === "number" && Number.isFinite(v)) || (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v.trim()));
+// Italian grouping by hand: it-IT leaves four-digit numbers ungrouped ("€9800" beside "€53.333").
+const grpNum = (v: number, decimals = 2) => {
+  const f = 10 ** decimals;
+  const [i, d] = (Math.round(Math.abs(v) * f) / f).toString().split(".");
+  return `${v < 0 ? "-" : ""}${i.replace(/\B(?=(\d{3})+(?!\d))/g, ".")}${d ? `,${d}` : ""}`;
+};
+const eurFmt = (v: unknown) => { const n = num(v); return `${n < 0 ? "-" : ""}€${grpNum(Math.round(Math.abs(n)), 0)}`; };
+const humanize = (c: string) => c.replace(/_/g, " ").replace(/\b\w/g, (x) => x.toUpperCase());
+
+// Twin of looksMoney/isRawNumberCol in src/lib/reportFormat.ts — keep the two in step.
+// A count word wins over a money word ("numero_scontrini", "total_policies" are counts;
+// "spesa_clienti" is spend). "total" alone is neither: it made "Total Policies = €468".
+const nameTokens = (c: string) => c.toLowerCase().split(/[^a-z0-9àèéìòù€]+/).filter(Boolean);
+const COUNT_WORD = /^(count|conteggio|numero|num|nr|n|qty|quantity|quantita|quantità|pezzi|pieces|units|unita|unità|rank|ranking|posizione|year|anno|month|mese|week|settimana|days|giorni|pct|perc|percent|percentage|percentuale|share|quota|rate|tasso|ratio)$/;
+const MONEY_WORD = /^(price|prices|revenue|revenues|spend|spent|sales|ticket|value|amount|premium|premiums|cost|costs|ltv|eur|euro|€|prezzo|prezzi|ricavi|ricavo|spesa|fatturato|scontrino|incasso|incassi|importo|valore|vendite|budget|margine|margin|aov)$/;
+const MONEY_STEM = /^(prezz|ricav|fatturat|scontrin|incass|vendit|revenue|premium)/;
+const RAW_WORD = /^(label|voce|year|anno|rank|posizione|code|codice|sku|cap|zip|phone|telefono|tel|cellulare|mobile|id|vat|piva|iva)$/;
+const isCountName = (c: string) => nameTokens(c).some((w) => COUNT_WORD.test(w));
+const looksMoney = (c: string) =>
+  !isCountName(c) && nameTokens(c).some((w) => MONEY_WORD.test(w) || MONEY_STEM.test(w));
+const isRawName = (c: string) => nameTokens(c).some((w) => RAW_WORD.test(w));
+
+// What a column IS, read off the SQL that made it — surer than its name. "COUNT(po.id)
+// AS total_sales" is a count however much "sales" sounds like money (it showed as
+// "Total Sales = €468"); "ROUND(SUM(selling_price)/COUNT(*)) AS avg" is euros.
+// sum/avg/min/max over a price-like column (allowing a cast or table prefix inside).
+// The whole argument of each aggregate (two levels of parentheses deep), then a price
+// word anywhere inside it: SUM(COALESCE(po.selling_price, 0)) is still a sum of prices.
+const AGG_CALL = /\b(?:sum|avg|min|max)\s*\(((?:[^()]|\((?:[^()]|\([^()]*\))*\))*)\)/gi;
+const PRICE_WORD = /(price|prezz|revenue|ricav|amount|importo|premium|cost|spesa|spend|valore|fatturat)/i;
+const aggOfPrice = (expr: string) => [...expr.matchAll(AGG_CALL)].some((m) => PRICE_WORD.test(m[1]));
+function sqlColumnUnits(sql: string): Map<string, "eur" | "num"> {
+  const out = new Map<string, "eur" | "num">();
+  for (const m of sql.matchAll(/\bas\s+"?([\p{L}_][\p{L}\p{N}_]*)"?/giu)) {
+    // Walk back to the start of this select item: the previous top-level comma or "(".
+    let i = (m.index ?? 0) - 1, depth = 0;
+    for (; i >= 0; i--) {
+      const ch = sql[i];
+      // ...or the SELECT this item belongs to. Without this a CTE in front was taken as
+      // part of the first column: "WITH t AS (… SUM(price) …) SELECT COUNT(*) AS clienti"
+      // made the client count euros.
+      if (depth === 0 && /\s/.test(ch) && /\bselect(\s+distinct)?$/i.test(sql.slice(Math.max(0, i - 20), i))) break;
+      if (ch === ")") depth++;
+      else if (ch === "(") { if (depth === 0) break; depth--; }
+      else if (ch === "," && depth === 0) break;
+    }
+    const expr = sql.slice(i + 1, m.index).replace(/^\s*select\s+(distinct\s+)?/i, "").trim();
+    const alias = m[1].toLowerCase(); // unquoted aliases fold to lower case in Postgres
+    if (/^\(?\s*count\s*\(/i.test(expr)) out.set(alias, "num");
+    else if (aggOfPrice(expr)) out.set(alias, "eur");
+  }
+  return out;
+}
+
+// Rome calendar days. Sales are timestamptz; "this month" is a month in Italy, not in UTC.
+const ROME = "Europe/Rome";
+const romeDay = (d: Date) => {
+  const [dd, mm, yy] = d.toLocaleDateString("en-GB", { timeZone: ROME }).split("/");
+  return `${yy}-${mm}-${dd}`;
+};
+const isoDay = (v: unknown): string | null => {
+  if (typeof v !== "string") return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(v.trim());
+  if (!m) return null;
+  if (!m[4]) return `${m[1]}-${m[2]}-${m[3]}`;
+  const d = new Date(v.trim().replace(" ", "T"));
+  return Number.isNaN(d.getTime()) ? null : romeDay(d);
+};
+const MONTHS = {
+  it: ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"],
+  en: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+};
+const MONTHS_LONG = {
+  it: ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"],
+  en: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+};
+type Lang = "it" | "en";
+const dmy = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}`;
+const dayShort = (day: string, lang: Lang) => `${Number(day.slice(8, 10))} ${MONTHS[lang][Number(day.slice(5, 7)) - 1]} ${day.slice(0, 4)}`;
+const addDays = (day: string, n: number) => {
+  const d = new Date(`${day}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10);
+};
+// A chart label that is a date: the 1st of every month reads as the month ("ott 2026"),
+// anything else as the day — never "2026-10-01T00:00:00+00:00".
+const chartLabels = (values: unknown[], lang: Lang): string[] => {
+  const days = values.map(isoDay);
+  if (!days.every((d) => d != null)) return values.map((v) => tidy(String(v ?? "—")) as string);
+  const monthly = (days as string[]).every((d) => d.endsWith("-01"));
+  return (days as string[]).map((d) => monthly ? `${MONTHS[lang][Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}` : dmy(d));
+};
+// Shop names arrive padded ("Roberto Coin S.P.A. Roma      Boutique"); every string is tidied.
+const tidy = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : v);
+
 // Every report query runs pinned to brandId (the scoped runner), so an admin
 // viewing-as a brand can't pull another brand's rows even via a model-authored
 // custom section. brandId null = cross-brand admin → the unscoped admin runner.
@@ -2775,22 +2892,19 @@ async function runReportSql(client: ReturnType<typeof createClient>, brandId: nu
 // off Object.keys made a chart take the amount as its label and the name as its
 // value (every bar 0) and shuffled table columns (Roberto Coin, 2026-11-18). The
 // runner returns the SELECT order separately in `columns`.
-async function runReportSqlCols(client: ReturnType<typeof createClient>, brandId: number | null, sql: string): Promise<{ rows: Row[]; columns: string[] }> {
+// The runner also stops at 1,000 rows (`limit 1000` inside it): `capped` says when a
+// result hit that, so an export is never silently short.
+const RUNNER_ROW_CAP = 1000;
+async function runReportSqlCols(client: ReturnType<typeof createClient>, brandId: number | null, sql: string): Promise<{ rows: Row[]; columns: string[]; capped: boolean }> {
   const { data, error } = brandId == null
     ? await client.rpc("ai_run_query", { p_sql: sql })
     : await client.rpc("ai_run_query_scoped", { p_sql: sql, p_brand_id: brandId });
   if (error) throw new Error(error.message);
   const d = data as { rows?: Row[]; columns?: string[] } | null;
-  const rows = d?.rows ?? [];
+  const rows = (d?.rows ?? []).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, tidy(v)])) as Row);
   const columns = Array.isArray(d?.columns) && d.columns.length ? d.columns : (rows.length ? Object.keys(rows[0]) : []);
-  return { rows, columns };
+  return { rows, columns, capped: rows.length >= RUNNER_ROW_CAP };
 }
-const q = (s: string) => s.replace(/'/g, "''"); // escape single quotes
-const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-// By hand: it-IT leaves four-digit numbers ungrouped ("€9800" beside "€53.333").
-const eurFmt = (v: unknown) => `€${String(Math.round(num(v))).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
-const humanize = (c: string) => c.replace(/_/g, " ").replace(/\b\w/g, (x) => x.toUpperCase());
-const looksMoney = (c: string) => /(price|revenue|spend|ticket|value|amount|premium|cost|total|selling|prezz|spesa|fatturat|scontrin|ricav|incass|importo|valore|(^|_)eur(o)?$)/i.test(c);
 
 // Every report — the client & performance presets AND any ad-hoc request — is a
 // generic list of sections the frontend renders (and exports to PDF/Excel).
@@ -2799,13 +2913,18 @@ const looksMoney = (c: string) => /(price|revenue|spend|ticket|value|amount|prem
 type Section =
   | { type: "kpis"; title?: string; items: { label: string; value: string }[] }
   | { type: "bar" | "line" | "pie"; title?: string; unit?: "eur" | "num"; data: { label: string; value: number }[] }
-  | { type: "table"; title?: string; columns: { key: string; header: string }[]; rows: Row[] }
+  | { type: "table"; title?: string; columns: { key: string; header: string; unit?: "eur" | "num" }[]; rows: Row[] }
   | { type: "products"; title?: string; items: { name: string; subtitle?: string | null; price?: number | null; image_url?: string | null; url?: string | null }[] }
   | { type: "note"; title?: string; body: string };
 
+type ReportInput = {
+  kind?: string; client?: string; period?: string; range?: string; start_date?: string; end_date?: string;
+  title?: string; subtitle?: string; sections?: unknown;
+};
+
 async function buildReport(
   client: ReturnType<typeof createClient>, brandId: number | null, brandName: string | null,
-  input: { kind?: string; client?: string; period?: string; title?: string; subtitle?: string; sections?: unknown },
+  input: ReportInput, lang: Lang = "it",
 ) {
   const generated_at = new Date().toISOString();
   const isCustom = input.kind === "custom" || Array.isArray(input.sections);
@@ -2815,10 +2934,10 @@ async function buildReport(
     return { error: "Pick a brand for a client or performance report, or build a custom report (its SQL can group across brands)." };
   }
   const result = input.kind === "performance"
-    ? await buildPerformanceReport(client, brandId as number, brandName, input.period === "week" ? "week" : "month", generated_at)
+    ? await buildPerformanceReport(client, brandId as number, brandName, input, generated_at, lang)
     : isCustom
-      ? await buildCustomReport(client, brandId, brandName, input, generated_at)
-      : await buildClientReport(client, brandId as number, brandName, input.client ?? "", generated_at);
+      ? await buildCustomReport(client, brandId, brandName, input, generated_at, lang)
+      : await buildClientReport(client, brandId as number, brandName, input.client ?? "", generated_at, lang);
   // Brand the report with the requesting brand's logo (optional).
   if (brandId != null && !(result as { error?: string }).error) {
     try {
@@ -2829,11 +2948,19 @@ async function buildReport(
   return result;
 }
 
+// Foreign keys and row ids mean nothing to a reader and are left out. Business
+// identifiers that happen to end in _id (a receipt number "brand_sale_id", an article
+// code "brand_item_id", "shopify_order_id") stay: they are what the associate looks up.
+const HIDDEN_COL = /^(id|uuid|brand_id|customer_id|profile_id|user_id|item_id|shop_id|policy_id|catalogue_id|product_id|variant_id|order_id|event_id|chat_id|claim_id|dashboard_id|doc_id|card_id|staff_role_id)$/i;
+const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/i;
+const hiddenCol = (c: string, rows: Row[]) =>
+  HIDDEN_COL.test(c) || (/(^|_)id$/i.test(c) && rows.every((r) => r[c] == null || UUIDISH.test(String(r[c]))));
+
 // Ad-hoc report: the model supplies a title + sections, each with a SQL query and
 // a type; we run each query (RLS-safe) and shape the rows to the section type.
 async function buildCustomReport(
   client: ReturnType<typeof createClient>, brandId: number | null, brandName: string | null,
-  input: { title?: string; subtitle?: string; sections?: unknown }, generated_at: string,
+  input: { title?: string; subtitle?: string; sections?: unknown }, generated_at: string, lang: Lang,
 ) {
   const title = String(input.title ?? "Report").trim() || "Report";
   const specs = Array.isArray(input.sections) ? input.sections : [];
@@ -2841,7 +2968,8 @@ async function buildCustomReport(
 
   const sections: Section[] = [];
   const empty: string[] = [];   // ran fine, returned nothing
-  const failed: string[] = [];  // the SQL errored
+  const failed: string[] = [];  // the SQL errored, or its shape can't make this section
+  const capped: string[] = [];  // hit the runner's 1,000-row stop
   let asked = 0;                // data (non-note) sections requested
   for (const raw of specs) {
     const spec = raw as { type?: string; title?: string; sql?: string; unit?: string; body?: string };
@@ -2852,38 +2980,73 @@ async function buildCustomReport(
     const label = (spec.title ?? "").trim() || type;
     let rows: Row[] = [];
     let selected: string[] = [];
-    try { ({ rows, columns: selected } = await runReportSqlCols(client, brandId, spec.sql)); }
+    let hitCap = false;
+    try { ({ rows, columns: selected, capped: hitCap } = await runReportSqlCols(client, brandId, spec.sql)); }
     catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("[custom section]", label, msg);
       failed.push(`${label} (${msg})`);
       continue;
     }
-    const cols = rows.length ? selected.filter((c) => !/(^|_)id$/i.test(c)) : [];
-    // A section with no rows — or with nothing left after the id columns are
-    // dropped — used to be pushed anyway. On screen it drew a headerless table
-    // and in the workbook it became a sheet with no columns and no rows: the
-    // associate asked for a spreadsheet and downloaded an empty file, while the
-    // model, told only "report ready", promised data that was never there.
-    // Leave it out and name it below, so the answer says what's missing.
-    if (rows.length === 0 || (cols.length === 0 && type !== "products")) { empty.push(label); continue; }
+    // A section with no rows used to be pushed anyway. On screen it drew a headerless
+    // table and in the workbook a sheet with nothing in it, while the model, told only
+    // "report ready", promised data that was never there. Leave it out and name it.
+    if (rows.length === 0) { empty.push(label); continue; }
+    if (hitCap) capped.push(label);
+    const shown = selected.filter((c) => !hiddenCol(c, rows));
+    const cols = shown.length ? shown : selected;
     const unit = spec.unit === "eur" ? "eur" : (spec.unit === "num" ? "num" : undefined);
+    const fromSql = sqlColumnUnits(spec.sql);
+    const sqlUnit = (c: string) => fromSql.get(c.toLowerCase());
+    // Money or not: what the SQL computes, then the section's unit (which never makes a
+    // count into euros), then the column's name.
+    const isMoney = (c: string) => {
+      const u = sqlUnit(c);
+      if (u) return u === "eur";
+      if (unit === "num") return false;
+      if (unit === "eur") return !isCountName(c);
+      return looksMoney(c);
+    };
+    const numericCols = cols.filter((c) => rows.some((r) => r[c] != null && r[c] !== "") && rows.every((r) => r[c] == null || r[c] === "" || isNumericVal(r[c])));
 
     if (type === "kpis") {
       const r = rows[0] ?? {};
-      sections.push({ type: "kpis", title: spec.title, items: cols.map((c) => ({ label: humanize(c), value: looksMoney(c) || unit === "eur" ? eurFmt(r[c]) : String(r[c] ?? "—") })) });
+      sections.push({ type: "kpis", title: spec.title, items: cols.map((c) => {
+        const v = r[c];
+        const money = isMoney(c);
+        const value = v == null || v === "" ? "—"
+          : isNumericVal(v) ? (isRawName(c) ? String(v) : money ? eurFmt(v) : grpNum(num(v)))
+          : typeof v === "boolean" ? (v ? "✓" : "—")
+          : isoDay(v) ? dmy(isoDay(v) as string)
+          : String(v);
+        return { label: humanize(c), value };
+      }) });
     } else if (type === "bar" || type === "line" || type === "pie") {
-      const [labCol, valCol] = [cols[0], cols[1]];
-      sections.push({ type, title: spec.title, unit: unit ?? (valCol && looksMoney(valCol) ? "eur" : "num"), data: rows.map((r) => ({ label: String(r[labCol] ?? "—"), value: num(r[valCol]) })) });
+      // Label = the first column that is not a number, value = the first number after
+      // it — never just "first and second": "collezione, categoria, totale" or an id in
+      // front charted words as values, and every bar came out 0.
+      const labCol = cols.find((c) => !numericCols.includes(c)) ?? cols[0];
+      const valCol = cols.find((c) => c !== labCol && numericCols.includes(c));
+      if (!valCol) { failed.push(`${label} (no numeric column to chart)`); continue; }
+      const labels = chartLabels(rows.map((r) => r[labCol]), lang);
+      const data = rows.map((r, i) => ({ label: labels[i] || "—", value: num(r[valCol]) }));
+      if (!data.some((d) => d.value !== 0)) { empty.push(label); continue; }
+      sections.push({ type, title: spec.title, unit: isMoney(valCol) ? "eur" : "num", data });
     } else if (type === "products") {
       sections.push({ type: "products", title: spec.title, items: rows.map((r) => shapeProduct(r)) });
     } else {
-      sections.push({ type: "table", title: spec.title, columns: cols.map((c) => ({ key: c, header: humanize(c) })), rows });
+      // The unit travels with the column when the SQL settles it, so the screen, the PDF
+      // and the workbook don't have to guess from the name.
+      sections.push({ type: "table", title: spec.title, columns: cols.map((c) => {
+        const u = numericCols.includes(c) ? sqlUnit(c) : undefined;
+        return u ? { key: c, header: humanize(c), unit: u } : { key: c, header: humanize(c) };
+      }), rows });
     }
   }
   const why = [
-    failed.length ? `queries that errored: ${failed.join("; ")}` : "",
-    empty.length ? `sections that returned no rows: ${empty.join(", ")}` : "",
+    failed.length ? `sections that failed: ${failed.join("; ")}` : "",
+    empty.length ? `sections that returned no data: ${empty.join(", ")}` : "",
+    capped.length ? `sections cut at the first ${RUNNER_ROW_CAP.toLocaleString("en")} rows (there are more; the Excel holds only these): ${capped.join(", ")}` : "",
   ].filter(Boolean).join("; ");
   // Nothing to show at all (a note-only report is legitimate — e.g. a
   // knowledge-card client's purchases written out — but only when notes were
@@ -2898,14 +3061,19 @@ async function buildCustomReport(
   return why ? { ...report, warnings: why } : report;
 }
 
-// Map a result row to a product card (detect the usual columns).
+// Map a result row to a product card. By exact name first, in order of preference:
+// Object.keys is jsonb's length order, so "first key that matches" picked image_url as
+// the link and the list price (online_price) over what the client paid (selling_price).
 function shapeProduct(r: Row) {
-  const pick = (re: RegExp) => Object.keys(r).find((k) => re.test(k));
-  const nameC = pick(/^(name|title|product|prodotto)$/i) ?? pick(/name/i);
-  const subC = pick(/^(collection|collezione|category|categoria)$/i);
-  const priceC = pick(/(^|_)(price|selling_price|value)$/i);
-  const imgC = pick(/(^|_)(image_url|picture|photo|image)$/i);
-  const urlC = pick(/(^|_)(product_url|url|link)$/i);
+  const keys = Object.keys(r);
+  const pick = (exact: string[], loose?: RegExp, not?: RegExp) =>
+    exact.map((e) => keys.find((k) => k.toLowerCase() === e)).find(Boolean)
+      ?? (loose ? keys.find((k) => loose.test(k) && !(not?.test(k))) : undefined);
+  const nameC = pick(["name", "product", "prodotto", "title", "product_name", "nome"], /name|nome/i);
+  const subC = pick(["collection", "collezione", "category", "categoria"]);
+  const priceC = pick(["selling_price", "price", "prezzo", "online_price", "value"], /(^|_)(price|prezzo)$/i);
+  const imgC = pick(["image_url", "picture", "photo", "image", "immagine"], /image|photo|picture/i);
+  const urlC = pick(["product_url", "url", "link"], /(^|_)(url|link)$/i, /image|photo|picture/i);
   return {
     name: nameC ? String(r[nameC] ?? "—") : "—",
     subtitle: subC ? (r[subC] as string ?? null) : null,
@@ -2915,33 +3083,61 @@ function shapeProduct(r: Row) {
   };
 }
 
+// Accent-insensitive matching without the unaccent extension: both sides go through
+// the same translate(). The name travels hex-encoded, so no quote and no word in it can
+// reach the runner's keyword filter ("Maria do Carmo", "Hugh Grant" were refused).
+const FOLD_FROM = "àáâãäåāăąèéêëēėęěìíîïīįòóôõöøōőùúûüūůűųýÿçćčďđğłľĺńňñŕřśšşșťţțźžż";
+const FOLD_TO   = "aaaaaaaaaeeeeeeeeiiiiiioooooooouuuuuuuuyycccddglllnnnrrsssstttzzz";
+const foldSql = (expr: string) => `translate(lower(${expr}), '${FOLD_FROM}', '${FOLD_TO}')`;
+const hexOf = (s: string) => Array.from(new TextEncoder().encode(s)).map((b) => b.toString(16).padStart(2, "0")).join("");
+
 async function buildClientReport(
-  client: ReturnType<typeof createClient>, brandId: number, brandName: string | null, who: string, generated_at: string,
+  client: ReturnType<typeof createClient>, brandId: number, brandName: string | null, who: string, generated_at: string, lang: Lang,
 ) {
-  who = who.trim();
+  const L = (it: string, en: string) => (lang === "it" ? it : en);
+  who = who.trim().replace(/\s+/g, " ");
   if (!who) return { error: "Ask the associate which client the report is for." };
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(who);
+  const fields = "p.id, p.first_name, p.last_name, p.email, p.phone_number, p.city, p.country, p.date_of_birth, p.registered_at";
   // Scope to this brand explicitly — RLS is unscoped for an admin caller, so an
   // admin "viewing-as" a brand must not resolve another brand's client.
-  const where = isUuid
-    ? `id = '${who}' AND brand_id = ${brandId}`
-    : `brand_id = ${brandId} AND (role IS NULL OR role = 'customer') AND (coalesce(first_name,'') || ' ' || coalesce(last_name,'')) ILIKE '%${q(who)}%'`;
-  const people = await runReportSql(client, brandId,
-    `SELECT id, first_name, last_name, email, phone_number, city, country, date_of_birth, registered_at FROM profiles WHERE ${where} LIMIT 6`);
+  const firstLast = foldSql(`coalesce(p.first_name,'') || ' ' || coalesce(p.last_name,'')`);
+  const lastFirst = foldSql(`coalesce(p.last_name,'') || ' ' || coalesce(p.first_name,'')`);
+  const people = isUuid
+    ? await runReportSql(client, brandId, `SELECT ${fields} FROM profiles p WHERE p.id = '${who}' AND p.brand_id = ${brandId} LIMIT 1`)
+    : await runReportSql(client, brandId, `
+        WITH n AS (SELECT ${foldSql(`convert_from(decode('${hexOf(who)}', 'hex'), 'UTF8')`)} AS q)
+        SELECT ${fields}, (${firstLast} = n.q OR ${lastFirst} = n.q) AS exact
+        FROM profiles p, n
+        WHERE p.brand_id = ${brandId} AND (p.role IS NULL OR p.role = 'customer')
+          AND (${firstLast} LIKE '%' || n.q || '%' OR ${lastFirst} LIKE '%' || n.q || '%')
+        ORDER BY exact DESC LIMIT 12`);
   if (people.length === 0) return { error: `No client matches "${who}". Ask the associate to check the name.` };
-  if (people.length > 1) {
-    const names = people.map((p) => `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim()).join(", ");
-    return { error: `Several clients match "${who}": ${names}. Ask which one before generating the report.` };
+  // "Anna Rossi" is a substring of "Marianna Rossi": an exact (accent- and order-
+  // insensitive) match wins outright, so a short name can always be reached.
+  const exact = people.filter((p) => p.exact === true);
+  const chosen = isUuid ? people : exact.length === 1 ? exact : exact.length > 1 ? exact : people;
+  if (chosen.length > 1) {
+    const list = chosen.slice(0, 8).map((p) =>
+      `${`${p.first_name ?? ""} ${p.last_name ?? ""}`.trim()} (${[p.email, p.city].filter(Boolean).join(", ") || "no email"}; id ${p.id})`).join("; ");
+    return { error: `Several clients match "${who}": ${list}. Ask which one; then call generate_report again with client set to that client's id.` };
   }
-  const c = people[0];
+  const c = chosen[0];
   const id = String(c.id);
 
+  // Cancelled sales are not spend: the same rule as the Customers page
+  // (brand_customer_segments), so the two never disagree about a client.
   const purchases = await runReportSql(client, brandId, `
     SELECT c.name, c.collection, COALESCE(s.image_url, c.picture) AS image_url,
            s.price AS online_price, po.selling_price, po.start_date, po.status
     FROM policies po JOIN catalogues c ON c.id = po.item_id
-    LEFT JOIN storefront_products s ON s.brand_id = po.brand_id AND s.sku = c.sku
-    WHERE po.customer_id = '${id}' AND po.brand_id = ${brandId} ORDER BY po.start_date DESC`);
+    LEFT JOIN LATERAL (
+      SELECT sp.image_url, sp.price FROM storefront_products sp
+      WHERE sp.brand_id = po.brand_id AND sp.sku = c.sku LIMIT 1
+    ) s ON true
+    WHERE po.customer_id = '${id}' AND po.brand_id = ${brandId}
+      AND po.status IS DISTINCT FROM 'cancelled'
+    ORDER BY po.start_date DESC`);
   // Claims + feedback are best-effort — a hiccup here must never sink the report.
   let claims: Row[] = [];
   try {
@@ -2964,29 +3160,30 @@ async function buildClientReport(
   } catch (e) { console.warn("[report feedback]", e instanceof Error ? e.message : e); }
 
   const spend = purchases.reduce((s, p) => s + num(p.selling_price), 0);
-  const dates = purchases.map((p) => String(p.start_date ?? "")).filter(Boolean).sort();
-  const openClaims = claims.filter((c) => !/closed|resolved|rejected|settled/i.test(String(c.status ?? ""))).length;
+  const days = purchases.map((p) => isoDay(p.start_date)).filter((d): d is string => !!d).sort();
+  // Statuses are open | in_review | closed | cancelled: only the first two are open.
+  const openClaims = claims.filter((c) => /^(open|in_review)$/i.test(String(c.status ?? ""))).length;
   const byYear = new Map<string, number>();
   for (const p of purchases) {
-    const y = String(p.start_date ?? "").slice(0, 4);
+    const y = isoDay(p.start_date)?.slice(0, 4);
     if (y) byYear.set(y, (byYear.get(y) ?? 0) + num(p.selling_price));
   }
 
   const name = `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "—";
-  const since = dates[0] ? dates[0].slice(0, 10) : (c.registered_at ? String(c.registered_at).slice(0, 10) : null);
+  const since = days[0] ?? isoDay(c.registered_at);
   const sections: Section[] = [];
   sections.push({ type: "kpis", items: [
-    { label: "Spesa totale", value: eurFmt(spend) },
-    { label: "Pezzi", value: String(purchases.length) },
-    { label: "Scontrino medio", value: eurFmt(purchases.length ? spend / purchases.length : 0) },
-    { label: "Claim aperti", value: String(openClaims) },
+    { label: L("Spesa totale", "Total spend"), value: eurFmt(spend) },
+    { label: L("Pezzi", "Pieces"), value: grpNum(purchases.length) },
+    { label: L("Scontrino medio", "Average ticket"), value: eurFmt(purchases.length ? spend / purchases.length : 0) },
+    { label: L("Claim aperti", "Open claims"), value: String(openClaims) },
   ] });
   if (byYear.size > 1) {
-    sections.push({ type: "bar", title: "Spesa per anno", unit: "eur",
+    sections.push({ type: "bar", title: L("Spesa per anno", "Spend by year"), unit: "eur",
       data: [...byYear.entries()].sort().map(([label, value]) => ({ label, value: Math.round(value) })) });
   }
   if (purchases.length) {
-    sections.push({ type: "products", title: "Pezzi acquistati", items: purchases.map((p) => ({
+    sections.push({ type: "products", title: L("Pezzi acquistati", "Pieces bought"), items: purchases.map((p) => ({
       name: String(p.name ?? "—"), subtitle: (p.collection as string) ?? null,
       price: num(p.selling_price) || (p.online_price != null ? num(p.online_price) : null),
       image_url: (p.image_url as string) ?? null, url: null,
@@ -2995,71 +3192,138 @@ async function buildClientReport(
   const fb = fbRows[0];
   if (fb) {
     sections.push({ type: "kpis", title: "Feedback", items: [
-      { label: "Soddisfazione", value: `${num(fb.satisfaction_rate)}/5` },
-      { label: "Raccomandazione", value: `${num(fb.recommendation_rate)}/5` },
-      { label: "Serenità", value: `${num(fb.peace_of_mind_rate)}/5` },
+      { label: L("Soddisfazione", "Satisfaction"), value: `${num(fb.satisfaction_rate)}/5` },
+      { label: L("Raccomandazione", "Recommendation"), value: `${num(fb.recommendation_rate)}/5` },
+      { label: L("Serenità", "Peace of mind"), value: `${num(fb.peace_of_mind_rate)}/5` },
     ] });
     if (fb.comment) sections.push({ type: "note", body: `“${String(fb.comment)}”` });
   }
-  const meta = [ [c.city, c.country].filter(Boolean).join(", "), since ? `cliente dal ${since}` : "", c.email ?? "" ].filter(Boolean).join(" · ");
-  return { title: `Report cliente — ${name}`, subtitle: meta || null, generated_at, brand: brandName, sections };
+  const meta = [
+    [c.city, c.country].filter(Boolean).join(", "),
+    since ? L(`cliente dal ${dmy(since)}`, `client since ${dmy(since)}`) : "",
+    c.email ?? "",
+  ].filter(Boolean).join(" · ");
+  return { title: L(`Report cliente — ${name}`, `Client report — ${name}`), subtitle: meta || null, generated_at, brand: brandName, sections };
 }
 
-async function buildPerformanceReport(
-  client: ReturnType<typeof createClient>, brandId: number, brandName: string | null, period: "week" | "month", generated_at: string,
-) {
-  const interval = period === "week" ? "84 days" : "365 days";
-  // Explicit brand scope (RLS is unscoped for an admin caller).
-  const win = `brand_id = ${brandId} AND start_date >= (CURRENT_DATE - interval '${interval}')`;
+// The period a performance report covers, as Rome calendar days [from, to).
+// It used to be the last 365 (or 84) days whatever was asked: "last month" came back
+// as twelve months of revenue under a title the model called "October" (2026-11-18).
+// A relative range stays relative, so a saved dashboard rolls forward.
+type PerfRange = { from: string; to: string; bucket: "month" | "week"; label: string };
+function resolvePerfRange(input: ReportInput, lang: Lang): PerfRange | { error: string } {
+  const today = romeDay(new Date());
+  const monthStart = (d: string) => `${d.slice(0, 7)}-01`;
+  const prevMonthStart = (d: string) => monthStart(addDays(monthStart(d), -1));
+  const nextMonthStart = (d: string) => monthStart(addDays(monthStart(d), 32));
+  const weekStart = (d: string) => addDays(d, -((new Date(`${d}T00:00:00Z`).getUTCDay() + 6) % 7)); // Monday
+  const monthName = (d: string) => `${MONTHS_LONG[lang][Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
+  const span = (from: string, toExcl: string) => `${dayShort(from, lang)} – ${dayShort(addDays(toExcl, -1), lang)}`;
 
-  const series = await runReportSql(client, brandId, `
-    SELECT to_char(date_trunc('${period}', start_date), 'YYYY-MM-DD') AS bucket,
-           count(*) AS covers, COALESCE(SUM(selling_price),0) AS revenue
-    FROM policies WHERE ${win} GROUP BY 1 ORDER BY 1`);
+  const valid = (d?: string) => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d));
+  if (valid(input.start_date) || valid(input.end_date)) {
+    const from = valid(input.start_date) ? input.start_date as string : monthStart(today);
+    const to = addDays(valid(input.end_date) ? input.end_date as string : today, 1);
+    if (to <= from) return { error: "end_date is before start_date." };
+    const days = (Date.parse(to) - Date.parse(from)) / 86_400_000;
+    // A whole calendar month reads as the month ("June 2026") and trends by month.
+    const wholeMonth = from.endsWith("-01") && to === nextMonthStart(from);
+    return { from, to, bucket: days <= 8 ? "week" : "month", label: wholeMonth ? monthName(from) : span(from, to) };
+  }
+  const range = input.range ?? (input.period === "week" ? "last_week" : "last_month");
+  switch (range) {
+    case "this_month": return { from: monthStart(today), to: addDays(today, 1), bucket: "month", label: `${monthName(today)} (${L(lang, "al", "to")} ${dayShort(today, lang)})` };
+    case "last_month": { const f = prevMonthStart(today); return { from: f, to: nextMonthStart(f), bucket: "month", label: monthName(f) }; }
+    case "this_week": { const f = weekStart(today); return { from: f, to: addDays(today, 1), bucket: "week", label: span(f, addDays(today, 1)) }; }
+    case "last_week": { const f = addDays(weekStart(today), -7); return { from: f, to: addDays(f, 7), bucket: "week", label: span(f, addDays(f, 7)) }; }
+    case "last_30_days": { const f = addDays(today, -29); return { from: f, to: addDays(today, 1), bucket: "week", label: span(f, addDays(today, 1)) }; }
+    case "year_to_date": { const f = `${today.slice(0, 4)}-01-01`; return { from: f, to: addDays(today, 1), bucket: "month", label: span(f, addDays(today, 1)) }; }
+    default: return { error: `Unknown range "${range}".` };
+  }
+}
+const L = (lang: Lang, it: string, en: string) => (lang === "it" ? it : en);
+
+async function buildPerformanceReport(
+  client: ReturnType<typeof createClient>, brandId: number, brandName: string | null,
+  input: ReportInput, generated_at: string, lang: Lang,
+) {
+  const r = resolvePerfRange(input, lang);
+  if ("error" in r) return r;
+  const { from, to, bucket } = r;
+  // Rome days → instants; cancelled sales are not revenue (same rule as the Customers page).
+  const inRange = (col: string) =>
+    `${col} >= (DATE '${from}')::timestamp AT TIME ZONE '${ROME}' AND ${col} < (DATE '${to}')::timestamp AT TIME ZONE '${ROME}'`;
+  const live = `po.brand_id = ${brandId} AND po.status IS DISTINCT FROM 'cancelled'`;
+
   const kpiRow = (await runReportSql(client, brandId, `
-    SELECT COALESCE(SUM(selling_price),0) AS revenue, count(*) AS covers,
-           count(DISTINCT customer_id) AS customers
-    FROM policies WHERE ${win}`))[0] ?? {};
+    SELECT COALESCE(SUM(po.selling_price),0) AS revenue, count(*) AS covers, count(DISTINCT po.customer_id) AS customers
+    FROM policies po WHERE ${live} AND ${inRange("po.start_date")}`))[0] ?? {};
+  const covers = num(kpiRow.covers), revenue = num(kpiRow.revenue);
+  if (covers === 0) {
+    return { error: `No sales between ${from} and ${addDays(to, -1)} for this brand, so there is no report to show. ` +
+      `Do NOT say a report is ready: tell the associate plainly that there were no sales in that period.` };
+  }
+  // Twelve buckets ending with the one the period is in, every bucket present (a month
+  // with no sales is a 0, not a gap that makes the trend lie).
+  const lastBucket = addDays(to, -1);
+  const series = await runReportSql(client, brandId, `
+    WITH b AS (
+      SELECT generate_series(date_trunc('${bucket}', (DATE '${lastBucket}')::timestamp) - interval '11 ${bucket}s',
+                             date_trunc('${bucket}', (DATE '${lastBucket}')::timestamp), interval '1 ${bucket}')::date AS bucket
+    )
+    SELECT to_char(b.bucket, 'YYYY-MM-DD') AS bucket, COALESCE(SUM(po.selling_price),0) AS revenue
+    FROM b LEFT JOIN policies po ON ${live}
+      AND date_trunc('${bucket}', po.start_date AT TIME ZONE '${ROME}')::date = b.bucket
+    GROUP BY b.bucket ORDER BY b.bucket`);
   const claimsRow = (await runReportSql(client, brandId, `
     SELECT count(*) AS claims FROM claims cl JOIN policies po ON po.id = cl.policy_id
-    WHERE po.brand_id = ${brandId} AND cl.incident_date >= (CURRENT_DATE - interval '${interval}')`))[0] ?? {};
+    WHERE po.brand_id = ${brandId} AND cl.incident_date >= DATE '${from}' AND cl.incident_date < DATE '${to}'`))[0] ?? {};
+  // All categories: the pie's shares must add up to the period, not to its top eight
+  // (the page folds the tail into "Altro").
   const categoryMix = await runReportSql(client, brandId, `
-    SELECT c.category AS label, count(*) AS count, COALESCE(SUM(po.selling_price),0) AS revenue
+    SELECT c.category AS label, COALESCE(SUM(po.selling_price),0) AS revenue
     FROM policies po JOIN catalogues c ON c.id = po.item_id
-    WHERE po.${win} GROUP BY 1 ORDER BY revenue DESC LIMIT 8`);
+    WHERE ${live} AND ${inRange("po.start_date")} GROUP BY 1 ORDER BY revenue DESC`);
   const topCollections = await runReportSql(client, brandId, `
     SELECT c.collection AS label, count(*) AS count, COALESCE(SUM(po.selling_price),0) AS revenue
     FROM policies po JOIN catalogues c ON c.id = po.item_id
-    WHERE po.${win} AND c.collection IS NOT NULL GROUP BY 1 ORDER BY revenue DESC LIMIT 6`);
+    WHERE ${live} AND ${inRange("po.start_date")} AND c.collection IS NOT NULL
+    GROUP BY 1 ORDER BY revenue DESC LIMIT 10`);
+  // By person, not by name: namesakes stay apart and nameless profiles don't pool.
   const topClients = await runReportSql(client, brandId, `
-    SELECT trim(coalesce(p.first_name,'') || ' ' || coalesce(p.last_name,'')) AS label,
+    SELECT NULLIF(trim(coalesce(p.first_name,'') || ' ' || coalesce(p.last_name,'')), '') AS label,
            count(*) AS count, COALESCE(SUM(po.selling_price),0) AS revenue
     FROM policies po JOIN profiles p ON p.id = po.customer_id
-    WHERE po.${win} GROUP BY 1 ORDER BY revenue DESC LIMIT 6`);
+    WHERE ${live} AND ${inRange("po.start_date")} GROUP BY p.id, 1 ORDER BY revenue DESC LIMIT 10`);
 
-  const revenue = num(kpiRow.revenue), covers = num(kpiRow.covers);
-  const rangeLabel = period === "week" ? "ultime 12 settimane" : "ultimi 12 mesi";
-  const tableRows = (rows: Row[]) => rows.map((r) => ({ label: r.label ?? "—", count: num(r.count), revenue: num(r.revenue) }));
+  const labels = chartLabels(series.map((s) => s.bucket), lang);
+  const tableRows = (rows: Row[]) => rows.map((x) => ({ label: x.label ?? "—", count: num(x.count), revenue: num(x.revenue) }));
   const sections: Section[] = [
     { type: "kpis", items: [
-      { label: "Ricavi", value: eurFmt(revenue) },
-      { label: "Pezzi venduti", value: String(covers) },
-      { label: "Scontrino medio", value: eurFmt(covers ? revenue / covers : 0) },
-      { label: "Clienti", value: String(num(kpiRow.customers)) },
-      { label: "Claim", value: String(num(claimsRow.claims)) },
+      { label: L(lang, "Ricavi", "Revenue"), value: eurFmt(revenue) },
+      { label: L(lang, "Pezzi venduti", "Pieces sold"), value: grpNum(covers) },
+      { label: L(lang, "Scontrino medio", "Average ticket"), value: eurFmt(revenue / covers) },
+      { label: L(lang, "Clienti", "Clients"), value: grpNum(num(kpiRow.customers)) },
+      { label: L(lang, "Claim", "Claims"), value: grpNum(num(claimsRow.claims)) },
     ] },
-    { type: "bar", title: "Andamento ricavi", unit: "eur",
-      data: series.map((r) => ({ label: String(r.bucket).slice(period === "month" ? 0 : 5, period === "month" ? 7 : 10), value: num(r.revenue) })) },
-    { type: "pie", title: "Mix categorie (ricavi)", unit: "eur",
-      data: categoryMix.map((r) => ({ label: String(r.label ?? "—"), value: num(r.revenue) })) },
-    { type: "table", title: "Top collezioni",
-      columns: [{ key: "label", header: "Collezione" }, { key: "count", header: "Pezzi" }, { key: "revenue", header: "Ricavi" }],
+    { type: "bar", title: bucket === "month" ? L(lang, "Ricavi per mese (ultimi 12)", "Revenue by month (last 12)") : L(lang, "Ricavi per settimana (ultime 12)", "Revenue by week (last 12)"),
+      unit: "eur", data: series.map((s, i) => ({ label: labels[i], value: num(s.revenue) })) },
+    { type: "pie", title: L(lang, "Mix categorie (ricavi)", "Category mix (revenue)"), unit: "eur",
+      data: categoryMix.map((x) => ({ label: String(x.label ?? "—"), value: num(x.revenue) })) },
+    { type: "table", title: L(lang, "Top collezioni", "Top collections"),
+      columns: [{ key: "label", header: L(lang, "Collezione", "Collection") }, { key: "count", header: L(lang, "Pezzi", "Pieces") }, { key: "revenue", header: L(lang, "Ricavi", "Revenue") }],
       rows: tableRows(topCollections) },
-    { type: "table", title: "Top clienti",
-      columns: [{ key: "label", header: "Cliente" }, { key: "count", header: "Pezzi" }, { key: "revenue", header: "Ricavi" }],
+    { type: "table", title: L(lang, "Top clienti", "Top clients"),
+      columns: [{ key: "label", header: L(lang, "Cliente", "Client") }, { key: "count", header: L(lang, "Pezzi", "Pieces") }, { key: "revenue", header: L(lang, "Ricavi", "Revenue") }],
       rows: tableRows(topClients) },
   ];
-  return { title: `Performance ${period === "week" ? "settimanale" : "mensile"}`, subtitle: `${brandName ?? ""} · ${rangeLabel}`.trim(), generated_at, brand: brandName, sections };
+  return {
+    title: `Performance — ${r.label}`,
+    // The dates once: in the subtitle only when the title is a name ("ottobre 2026").
+    subtitle: [brandName, r.label.includes(" – ") ? "" : `${dayShort(from, lang)} – ${dayShort(addDays(to, -1), lang)}`,
+      L(lang, "vendite annullate escluse", "cancelled sales excluded")].filter(Boolean).join(" · "),
+    generated_at, brand: brandName, sections,
+  };
 }
 
 // Suggest 3 follow-up questions the associate might tap next.
