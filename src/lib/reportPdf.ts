@@ -12,9 +12,14 @@ const CHART: [number, number, number][] = [
   [76, 158, 122], [199, 154, 59], [167, 203, 188], [228, 200, 126],
 ];
 
-const eur = (v: number) => `€${Math.round(v).toLocaleString("it-IT")}`;
-const grp = (v: number) => v.toLocaleString("it-IT", { maximumFractionDigits: 2 });
-const looksMoney = (c: string) => /(price|revenue|spend|ticket|value|amount|premium|cost|total|prezzo|ricav|spesa|scontrino)/i.test(c);
+// Italian grouping by hand: it-IT leaves four-digit numbers ungrouped ("€9800" next
+// to "€53.333" in the same column).
+const grp = (v: number) => {
+  const [i, d] = (Math.round(v * 100) / 100).toString().split(".");
+  return `${i.replace(/\B(?=(\d{3})+(?!\d))/g, ".")}${d ? `,${d}` : ""}`;
+};
+const eur = (v: number) => `€${grp(Math.round(v))}`;
+const looksMoney = (c: string) => /(price|revenue|spend|ticket|value|amount|premium|cost|total|prezz|ricav|spesa|scontrin|fatturat|incass|importo|valore|(^|_)eur(o)?$)/i.test(c);
 
 type Img = { data: string; w: number; h: number };
 type ChartSection = Extract<ReportSection, { type: "bar" | "line" | "pie" }>;
@@ -163,33 +168,82 @@ export async function buildReportDoc(report: ReportPayload) {
     }
   };
 
+  // Fit a string to a width, cutting with an ellipsis (jsPDF has no clipping).
+  const fit = (txt: string, w: number) => {
+    if (doc.getTextWidth(txt) <= w) return txt;
+    let t = txt;
+    while (t.length > 1 && doc.getTextWidth(`${t}…`) > w) t = t.slice(0, -1);
+    return `${t.trimEnd()}…`;
+  };
+
+  // Columns are sized to what they hold. They used to be one wide first column and
+  // equal narrow ones, every one but the first right-aligned with no limit, so a
+  // client name or "COLLARS, EARRINGS, RINGS" in a narrow column ran across its
+  // neighbours (Roberto Coin's top-clients export, 2026-11-18). Now text is
+  // left-aligned and cut to its column, numbers right-aligned.
   const drawTable = (s: Extract<ReportSection, { type: "table" }>) => {
     const cols = s.columns, n = cols.length;
-    const firstW = n > 1 ? CW * 0.52 : CW, restW = n > 1 ? (CW - firstW) / (n - 1) : 0;
-    const colX = (i: number) => (i === 0 ? M : M + firstW + (i - 1) * restW);
-    const colW = (i: number) => (i === 0 ? firstW : restW);
+    if (!n) return;
+    const cell = (c: { key: string; header: string }, v: unknown) => {
+      const money = looksMoney(c.key) || looksMoney(c.header);
+      return v == null ? "—"
+        : money && v !== "" && Number.isFinite(Number(v)) ? eur(Number(v))
+        : typeof v === "number" ? grp(v) : String(v);
+    };
+    const numeric = cols.map((c) => s.rows.every((r) => {
+      const v = r[c.key];
+      return v == null || typeof v === "number" || (v !== "" && Number.isFinite(Number(v)));
+    }));
+    const fontSize = n > 6 ? 7.5 : 8.5, pad = 3;
+    // Natural width: the longest cell (or header), capped so one long column can't take the page.
+    const natural = cols.map((c, i) => {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(7.5);
+      let w = doc.getTextWidth(c.header);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(fontSize);
+      for (const r of s.rows.slice(0, 200)) w = Math.max(w, doc.getTextWidth(cell(c, r[c.key])));
+      return Math.min(w + pad, numeric[i] ? 40 : 75);
+    });
+    const total = natural.reduce((a, b) => a + b, 0);
+    let widths: number[];
+    if (total <= CW) {
+      // Spare room goes to the text columns (or all, if there are none).
+      const grow = numeric.some((x) => !x) ? numeric.map((x) => !x) : numeric.map(() => true);
+      const growW = natural.reduce((a, w, i) => a + (grow[i] ? w : 0), 0) || 1;
+      widths = natural.map((w, i) => grow[i] ? w + (CW - total) * (w / growW) : w);
+    } else {
+      // Too wide: numbers keep their width (they can't be cut), text shares what's left.
+      // The widest text columns give way first, down to a common cap, so a short
+      // column (a city) keeps its width while a long one (categories) is cut. If the
+      // numbers alone would take most of the page, everything shrinks alike.
+      const numW = natural.reduce((a, w, i) => a + (numeric[i] ? w : 0), 0);
+      if (natural.some((_, i) => !numeric[i]) && numW <= CW * 0.6) {
+        const room = CW - numW;
+        let lo = 0, hi = Math.max(...natural);
+        for (let k = 0; k < 30; k++) {
+          const cap = (lo + hi) / 2;
+          const used = natural.reduce((a, w, i) => a + (numeric[i] ? 0 : Math.min(w, cap)), 0);
+          if (used > room) hi = cap; else lo = cap;
+        }
+        widths = natural.map((w, i) => numeric[i] ? w : Math.min(w, lo));
+      } else {
+        widths = natural.map((w) => (w / total) * CW);
+      }
+    }
+    const xs: number[] = []; widths.reduce((x, w, i) => { xs[i] = x; return x + w; }, M);
     const rowH = 6.5;
+    const place = (txt: string, i: number) => numeric[i]
+      ? doc.text(fit(txt, widths[i] - pad), xs[i] + widths[i] - pad, y, { align: "right" })
+      : doc.text(fit(txt, widths[i] - pad), xs[i], y);
     const header = () => {
       doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); setColor(MUTED);
-      cols.forEach((c, i) => i === 0
-        ? doc.text(c.header, colX(0), y)
-        : doc.text(c.header, colX(i) + colW(i) - 1, y, { align: "right" }));
+      cols.forEach((c, i) => place(c.header, i));
       y += 2; doc.setDrawColor(...HAIR); doc.setLineWidth(0.2); doc.line(M, y, W - M, y); y += 4;
     };
     ensure(rowH * 2); header();
     for (const r of s.rows) {
       if (y + rowH > H - M - 6) { addPage(); header(); }
-      doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); setColor(INK);
-      cols.forEach((c, i) => {
-        const v = r[c.key];
-        const money = looksMoney(c.key) || looksMoney(c.header);
-        const txt = v == null ? "—"
-          : money && Number.isFinite(Number(v)) ? eur(Number(v))
-          : typeof v === "number" ? grp(v) : String(v);
-        i === 0
-          ? doc.text(txt, colX(0), y, { maxWidth: colW(0) - 2 })
-          : doc.text(txt, colX(i) + colW(i) - 1, y, { align: "right" });
-      });
+      doc.setFont("helvetica", "normal"); doc.setFontSize(fontSize); setColor(INK);
+      cols.forEach((c, i) => place(cell(c, r[c.key]), i));
       y += 1.6; doc.setDrawColor(243, 243, 243); doc.line(M, y, W - M, y); y += rowH - 1.6;
     }
   };
@@ -220,16 +274,46 @@ export async function buildReportDoc(report: ReportPayload) {
     }
   };
 
+  // Many bars, or names under them: a vertical chart would overlap its labels
+  // (15 client names under 11 mm slots), so it is drawn sideways, label first.
+  const drawHBar = (s: ChartSection) => {
+    const data = s.data, money = s.unit === "eur";
+    const fmtVal = (v: number) => money ? eur(v) : grp(v);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5);
+    const labW = Math.min(62, Math.max(...data.map((d) => doc.getTextWidth(String(d.label)))) + 3);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(7);
+    const valW = Math.max(...data.map((d) => doc.getTextWidth(fmtVal(d.value)))) + 3;
+    const bx = M + labW, bw = CW - labW - valW, rowH = 5.6, barH = 3.4;
+    const max = Math.max(...data.map((d) => d.value), 1);
+    data.forEach((d) => {
+      ensure(rowH);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); setColor(INK);
+      doc.text(fit(String(d.label), labW - 3), M, y + barH - 0.6);
+      const len = Math.max(0, bw * (d.value / max));
+      doc.setFillColor(...GOLD); doc.rect(bx, y, len, barH, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(7); setColor(INK);
+      doc.text(fmtVal(d.value), bx + len + 1.5, y + barH - 0.6);
+      y += rowH;
+    });
+    y += 3;
+  };
+
   const drawBarLine = (s: ChartSection) => {
     const data = s.data; if (!data.length) return;
     const money = s.unit === "eur";
-    const bx = M + 16, bw = CW - 16, bh = 40; ensure(bh + 10);
+    const bx = M + 16, bw = CW - 16, bh = 40;
+    if (s.type === "bar") {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(6.5);
+      const slot = Math.min(bw, data.length * 34) / data.length;
+      if (data.length > 8 || data.some((d) => doc.getTextWidth(String(d.label)) > slot - 1)) return drawHBar(s);
+    }
+    ensure(bh + 10);
     const by = y, max = Math.max(...data.map((d) => d.value), 1);
     doc.setFontSize(6.5); setColor(MUTED); doc.setDrawColor(...HAIR); doc.setLineWidth(0.2);
     [0, 0.5, 1].forEach((f) => {
       const yy = by + bh - bh * f;
       doc.line(bx, yy, bx + bw, yy);
-      doc.text(money ? `€${Math.round((max * f) / 1000)}k` : String(Math.round(max * f)), bx - 2, yy + 1, { align: "right" });
+      doc.text(money ? `€${Math.round((max * f) / 1000)}k` : grp(Math.round(max * f)), bx - 2, yy + 1, { align: "right" });
     });
     const fmtVal = (v: number) => money ? (v >= 1000 ? `€${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : eur(v)) : grp(v);
     if (s.type === "bar") {
