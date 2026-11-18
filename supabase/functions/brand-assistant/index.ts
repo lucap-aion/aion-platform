@@ -2768,17 +2768,29 @@ type Row = Record<string, unknown>;
 // viewing-as a brand can't pull another brand's rows even via a model-authored
 // custom section. brandId null = cross-brand admin → the unscoped admin runner.
 async function runReportSql(client: ReturnType<typeof createClient>, brandId: number | null, sql: string): Promise<Row[]> {
+  return (await runReportSqlCols(client, brandId, sql)).rows;
+}
+// The rows come back as jsonb, and jsonb orders an object's keys by LENGTH, not as
+// selected: "SELECT cliente, spesa" arrives as {spesa, cliente}. Reading the order
+// off Object.keys made a chart take the amount as its label and the name as its
+// value (every bar 0) and shuffled table columns (Roberto Coin, 2026-11-18). The
+// runner returns the SELECT order separately in `columns`.
+async function runReportSqlCols(client: ReturnType<typeof createClient>, brandId: number | null, sql: string): Promise<{ rows: Row[]; columns: string[] }> {
   const { data, error } = brandId == null
     ? await client.rpc("ai_run_query", { p_sql: sql })
     : await client.rpc("ai_run_query_scoped", { p_sql: sql, p_brand_id: brandId });
   if (error) throw new Error(error.message);
-  return ((data as { rows?: Row[] })?.rows) ?? [];
+  const d = data as { rows?: Row[]; columns?: string[] } | null;
+  const rows = d?.rows ?? [];
+  const columns = Array.isArray(d?.columns) && d.columns.length ? d.columns : (rows.length ? Object.keys(rows[0]) : []);
+  return { rows, columns };
 }
 const q = (s: string) => s.replace(/'/g, "''"); // escape single quotes
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-const eurFmt = (v: unknown) => `€${Math.round(num(v)).toLocaleString("it-IT")}`;
+// By hand: it-IT leaves four-digit numbers ungrouped ("€9800" beside "€53.333").
+const eurFmt = (v: unknown) => `€${String(Math.round(num(v))).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
 const humanize = (c: string) => c.replace(/_/g, " ").replace(/\b\w/g, (x) => x.toUpperCase());
-const looksMoney = (c: string) => /(price|revenue|spend|ticket|value|amount|premium|cost|total|selling)/i.test(c);
+const looksMoney = (c: string) => /(price|revenue|spend|ticket|value|amount|premium|cost|total|selling|prezz|spesa|fatturat|scontrin|ricav|incass|importo|valore|(^|_)eur(o)?$)/i.test(c);
 
 // Every report — the client & performance presets AND any ad-hoc request — is a
 // generic list of sections the frontend renders (and exports to PDF/Excel).
@@ -2839,14 +2851,15 @@ async function buildCustomReport(
     asked++;
     const label = (spec.title ?? "").trim() || type;
     let rows: Row[] = [];
-    try { rows = await runReportSql(client, brandId, spec.sql); }
+    let selected: string[] = [];
+    try { ({ rows, columns: selected } = await runReportSqlCols(client, brandId, spec.sql)); }
     catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn("[custom section]", label, msg);
       failed.push(`${label} (${msg})`);
       continue;
     }
-    const cols = rows.length ? Object.keys(rows[0]).filter((c) => !/(^|_)id$/i.test(c)) : [];
+    const cols = rows.length ? selected.filter((c) => !/(^|_)id$/i.test(c)) : [];
     // A section with no rows — or with nothing left after the id columns are
     // dropped — used to be pushed anyway. On screen it drew a headerless table
     // and in the workbook it became a sheet with no columns and no rows: the
