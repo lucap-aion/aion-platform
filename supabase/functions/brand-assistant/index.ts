@@ -1271,6 +1271,14 @@ Deno.serve(async (req: Request) => {
   let profileId: string | null = null;
   let isAdmin = false;
   let crossBrand = false;
+  // An admin on the BRAND assistant page, viewing-as one of the brand's staff. That
+  // page is the only caller that sends brand_id (the admin "Ask the data" page sends
+  // impersonate_profile_id), and there the admin is checking what the brand sees —
+  // so they get the brand's persona and tools, not the analyst's. On 2026-11-18
+  // Giulio, viewing-as Kaycee (Roberto Coin) on PROD, asked for "un grafico
+  // esportabile" and got a table plus a promised download icon: the analyst toolset
+  // has no generate_report, and its render_chart isn't drawn on the brand page.
+  let brandView = false;
   let access: StaffAccess = UNRESTRICTED;
 
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
@@ -1294,6 +1302,7 @@ Deno.serve(async (req: Request) => {
       const { data: b } = await userClient
         .from("brands").select("name").eq("id", brandId).maybeSingle();
       brandName = b?.name ?? null;
+      brandView = Number(body.brand_id ?? 0) === brandId;
     } else {
       crossBrand = true; // admin, no brand chosen → all brands
     }
@@ -1419,8 +1428,10 @@ Deno.serve(async (req: Request) => {
 
   // Role-switch the whole persona. Brand users get the sales-floor SYSTEM; AION
   // admins get the analyst ANALYST_SYSTEM (full schema + glossary + playbooks).
-  const baseSystem = isAdmin ? ANALYST_SYSTEM : SYSTEM;
-  const scopeNote = !isAdmin
+  // An admin viewing-as on the brand page is the brand's (see brandView).
+  const analyst = isAdmin && !brandView;
+  const baseSystem = analyst ? ANALYST_SYSTEM : SYSTEM;
+  const scopeNote = !analyst
     ? (brandName
         ? `\n\n# Your brand\nYou work for "${brandName}" (brand_id = ${brandId}). All data and knowledge is scoped to this brand. You cannot see or compare other brands.`
         : `\n\n# Your brand\nbrand_id = ${brandId}. All data is scoped to this brand.`)
@@ -1429,7 +1440,7 @@ Deno.serve(async (req: Request) => {
     : `\n\n# Scope — one brand\nYou are focused on "${brandName}" (brand_id = ${brandId}). Your data access is filtered to this brand, so queries on brands / cross-brand aggregates will only ever RETURN this one brand — that is the scope filter, NOT evidence that other brands don't exist. Never say "only one brand is in the database" or "the only active brand". If asked to rank or compare brands, reply that you're in single-brand view for ${brandName} and cross-brand comparison needs the all-brands view — then give this brand's own numbers.`;
   // The analyst prompt predates these tables; admins need them or they answer
   // catalogue/event questions against the wrong (or empty) table.
-  const adminSchemaSupplement = isAdmin
+  const adminSchemaSupplement = analyst
     ? `\n\n# Additional tables (NOT in the schema above — use these)
 - storefront_products(id, brand_id, name, category, collection, description, sku, price, price_currency, compare_at_price, available, image_url, product_url) — the brand's FULL live e-commerce catalogue (complete range, photos, prices). For "how many products / what's in the catalogue / the online range / price / availability", query THIS — NOT catalogues (catalogues is only the sales-synced subset that links a policy to its item, and is empty for brands whose range lives online, e.g. Luisa Beccaria). Brand-scoped by brand_id.
 - storefront_variants(id, brand_id, product_id, title, option_name, sku, price, compare_at_price, available, position) — ONE ROW PER SIZE of a storefront product (title is the size: '38', 'M', '42 / Nero'; option_name is what the shop calls the axis). Join on product_id = storefront_products.id. Use it for any question about a SIZE — "do we have it in 42", "which sizes are left", "what's still available in the blouse". storefront_products.available is true when ANY size is in stock, so it can never answer this; a size that is sold out still carries its price. Brand-scoped by brand_id.
@@ -1476,7 +1487,7 @@ another house's piece.`
   // Per-brand customization (name, data-home, signature moves) only applies to a
   // brand USER. Admins use the analyst persona and query directly, so no brand
   // config blocks.
-  const brandBlocks = isAdmin
+  const brandBlocks = analyst
     ? []
     : buildBrandBlocks(
         (await loadAssistantConfig(userClient, brandId)) ?? await autoAssistantConfig(serviceClient, brandId),
@@ -1501,7 +1512,7 @@ another house's piece.`
   ];
 
   const activeTools = TOOLS.filter((t) =>
-    (isAdmin ? ADMIN_TOOL_NAMES : BRAND_TOOL_NAMES).has(t.name)
+    (analyst ? ADMIN_TOOL_NAMES : BRAND_TOOL_NAMES).has(t.name)
   );
 
   // What this turn costs, per model — assistant_usage (migration 20261117000003). Pricing
