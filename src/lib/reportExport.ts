@@ -2,15 +2,22 @@
 // (exceljs, jspdf, html2canvas) are imported dynamically so they only load when
 // the user actually downloads something — the chat stays light.
 
-export type SheetColumn = { key: string; header: string; width?: number };
+import { fmtCell, isDateCol, isNumericCol, isRawNumberCol, looksMoney, parseDisplayNumber, parseIsoDate } from "@/lib/reportFormat";
+
+export type SheetColumn = { key: string; header: string; width?: number; unit?: "eur" | "num" };
 export type Sheet = {
   name: string;
   columns: SheetColumn[];
   rows: Record<string, unknown>[];
+  /** The KPI summary: its values are display strings ("€3.159.612") to read back as numbers. */
+  kpi?: boolean;
 };
 
-const sanitizeFilename = (name: string) =>
-  name.replace(/[^a-z0-9-_. ]/gi, "").replace(/\s+/g, "_").slice(0, 80) || "report";
+// Accents are folded, not dropped ("Città" → "Citta", where it used to become "Citt"),
+// and other scripts are kept: a Chinese title no longer turns into "report".
+export const sanitizeFilename = (name: string) =>
+  name.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\-_. ]/gu, "").trim().replace(/\s+/g, "_").slice(0, 80) || "report";
 
 export const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
@@ -23,8 +30,10 @@ export const downloadBlob = (blob: Blob, filename: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
-// Multi-sheet XLSX. Each sheet: humanized headers, sensible widths, numbers and
-// ISO dates coerced by ExcelJS.
+// Multi-sheet XLSX. ExcelJS does NOT coerce: a string stays a text cell. So numbers
+// that arrive as strings (Postgres numeric), ISO dates and the KPI band's "€3.159.612"
+// are turned into real numbers and dates here — otherwise none of it sums, sorts or
+// filters — and money gets a € format. Widths follow the content, not the header.
 export const downloadXlsx = async (sheets: Sheet[], filename: string) => {
   // Saving a workbook with no rows in it looks like a broken download, not an
   // empty result — fail loudly (the caller shows a toast) instead of handing
@@ -37,13 +46,44 @@ export const downloadXlsx = async (sheets: Sheet[], filename: string) => {
   wb.created = new Date();
   for (const sheet of withRows) {
     const ws = wb.addWorksheet(sheet.name.slice(0, 31) || "Sheet");
-    ws.columns = sheet.columns.map((c) => ({
-      header: c.header,
-      key: c.key,
-      width: c.width ?? Math.min(40, Math.max(12, c.header.length + 4)),
-    }));
+    const typed = sheet.columns.map((c) => {
+      const values = sheet.rows.map((r) => r[c.key]);
+      const isNum = isNumericCol(sheet.rows, c.key);
+      const isDate = !isNum && isDateCol(sheet.rows, c.key);
+      const money = isNum && (c.unit ? c.unit === "eur" : looksMoney(c.key, c.header));
+      const decimals = isNum && values.some((v) => v != null && v !== "" && !Number.isInteger(Number(v)));
+      const numFmt = isDate ? "dd/mm/yyyy"
+        : money ? (decimals ? '"€"#,##0.00' : '"€"#,##0')
+        : isNum && !isRawNumberCol(c.key, c.header) ? (decimals ? "#,##0.##" : "#,##0")
+        : undefined;
+      return { c, isNum, isDate, numFmt };
+    });
+    const cellValue = (t: (typeof typed)[number], v: unknown): unknown => {
+      if (v == null || v === "") return null;
+      if (t.isNum) return Number(v);
+      if (t.isDate) return parseIsoDate(v);
+      if (typeof v === "string") {
+        // The KPI band arrives formatted for reading; give the workbook the number back.
+        const parsed = sheet.kpi ? parseDisplayNumber(v) : null;
+        if (parsed) return parsed.value;
+        return v.replace(/\s+/g, " ").trim();
+      }
+      if (typeof v === "object") return Array.isArray(v) ? v.join(", ") : JSON.stringify(v);
+      return v;
+    };
+    const rows = sheet.rows.map((r) => Object.fromEntries(typed.map((t) => [t.c.key, cellValue(t, r[t.c.key])])));
+    ws.columns = typed.map((t) => {
+      const longest = Math.max(t.c.header.length, ...sheet.rows.slice(0, 500).map((r) => fmtCell(t.c.key, t.c.header, r[t.c.key], t.c.unit).length));
+      return { header: t.c.header, key: t.c.key, width: t.c.width ?? Math.min(48, Math.max(10, longest + 2)), style: t.numFmt ? { numFmt: t.numFmt } : undefined };
+    });
     ws.getRow(1).font = { bold: true };
-    ws.addRows(sheet.rows);
+    ws.addRows(rows);
+    // A KPI value given back as a number keeps its € (the column holds mixed metrics).
+    sheet.rows.forEach((r, i) => typed.forEach((t, j) => {
+      const v = r[t.c.key];
+      const parsed = sheet.kpi && typeof v === "string" && !t.isNum && !t.isDate ? parseDisplayNumber(v) : null;
+      if (parsed) ws.getRow(i + 2).getCell(j + 1).numFmt = parsed.money ? '"€"#,##0' : "#,##0";
+    }));
   }
   const buf = await wb.xlsx.writeBuffer();
   downloadBlob(

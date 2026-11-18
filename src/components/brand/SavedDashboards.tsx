@@ -50,8 +50,8 @@ function DashboardCard({ d, mine, isMaster, locale }: { d: Dashboard; mine: bool
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const run = useQuery({
-    queryKey: ["brand-dashboard-run", d.id],
-    queryFn: () => runDashboard(d.id),
+    queryKey: ["brand-dashboard-run", d.id, locale],
+    queryFn: () => runDashboard(d.id, locale),
     staleTime: 5 * 60_000,
     retry: false,
   });
@@ -118,7 +118,16 @@ function DashboardCard({ d, mine, isMaster, locale }: { d: Dashboard; mine: bool
           <div className="mt-3 flex gap-2">{controls}</div>
         </div>
       ) : run.data ? (
-        <ReportView report={run.data.report} locale={locale} extraActions={controls} />
+        <>
+          {/* A section whose query fails today disappears from the report; say so, or the
+              dashboard silently shows less than it did yesterday. */}
+          {run.data.warnings && (
+            <p className="mb-2 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              {tt(locale, "Part of this dashboard could not be refreshed: ", "Una parte di questa dashboard non si è aggiornata: ")}{run.data.warnings}
+            </p>
+          )}
+          <ReportView report={run.data.report} locale={locale} extraActions={controls} />
+        </>
       ) : null}
     </div>
   );

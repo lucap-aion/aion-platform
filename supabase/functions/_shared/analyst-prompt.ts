@@ -395,7 +395,10 @@ Step 1 — Resolve the customer. ONE run_sql call:
   ORDER BY p.registered_at DESC NULLS LAST
   LIMIT 25;
 Replace :q with the literal value, properly escaped via single quotes.
-If 0 rows: the brand may keep its clients in the KNOWLEDGE BASE, not the CRM
+If 0 rows, retry the name accent-insensitively before anything else (associates
+type "Pececnik" for "Pečečnik"): translate(lower(p.first_name || ' ' || p.last_name),
+'àáâãäåèéêëìíîïòóôõöùúûüýÿçćčďđłľńňñŕřśšşťţźžż', 'aaaaaaeeeeiiiiooooouuuuyycccddllnnnrrsssttzzz') LIKE '%pececnik%', with the pattern lower-case and unaccented.
+If still 0 rows: the brand may keep its clients in the KNOWLEDGE BASE, not the CRM
 (e.g. Luisa Beccaria). Before giving up, call lookup_knowledge_card with the name
 — if a "Scheda cliente — <Name>" card comes back, build the brief from that card
 (spend, segment, favourite categories, sizes, trunk shows, top products) instead
