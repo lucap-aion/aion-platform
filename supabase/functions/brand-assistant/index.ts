@@ -23,7 +23,7 @@ import { originAllowed, originRefused } from "../_shared/origin.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 // Analyst persona + full schema/glossary/playbooks, used for ADMIN callers (the
 // merged assistant serves both the sales floor and the admin analyst).
-import { ANALYST_SYSTEM } from "../_shared/analyst-prompt.ts";
+import { ANALYST_SYSTEM, RETURNING_CUSTOMERS } from "../_shared/analyst-prompt.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -164,6 +164,33 @@ window, say how many did. Close by offering generate_report for a version to kee
 
 // How many run_sql rows the model gets to read. The UI receives them all.
 const ROWS_PREVIEW = 60;
+
+// Tables whose rows belong to a house. Prospects carry an invented demo book in
+// every one of them (2,917 of PROD's 3,791 covers on 2026-11-19).
+const BRAND_OWNED = /\b(policies|profiles|claims|feedback|shops|catalogues|support_messages|store_visits|returns|customer_purchase_stats|brand_customer_segments)\b/;
+/**
+ * For the all-brands admin runner only. A query over house-owned tables must either
+ * say what it does about prospects (mention is_prospect / source = 'demo'), or be
+ * pinned to a house or to one record. Otherwise it is sent back with the reason.
+ */
+function prospectScopeRefusal(sql: string): string | null {
+  const s = sql.toLowerCase().replace(/--[^\n]*/g, " ").replace(/\s+/g, " ");
+  if (!BRAND_OWNED.test(s)) return null;
+  if (/\b(is_prospect|is_client_brand)\b/.test(s)) return null;
+  // Pinned to a house: brand_id = 2, brand_id in (...), brand_id = (select ...),
+  // or a brand looked up by name/slug.
+  if (/\bbrand_id\s*(=|in\b)/.test(s)) return null;
+  if (/\b(name|slug)\s*(=|i?like)\s*'/.test(s) && /\bbrands\b/.test(s)) return null;
+  // Pinned to one record: an id compared to a literal or a list.
+  if (/\b(id|customer_id|user_id|item_id|policy_id|shop_id)\s*(=|in\s*\()\s*('|\d)/.test(s)) return null;
+  // Looking one person or product up by what the user typed.
+  if (/\b(email|first_name|last_name|phone_number|sku|brand_item_id)\b[^;]*\b(=|i?like)\s*'/.test(s)) return null;
+  return "Refused: this query reads every house, and prospects (brands.is_prospect = true) hold an " +
+    "INVENTED demo book that must not be counted as business. Join brands and add " +
+    "b.is_prospect = false AND b.status = 'verified' (customer_purchase_stats has its own column: WHERE is_client_brand), " +
+    "or pin the query to one house with brand_id = <id>. Only include prospects when the user asked for a prospect's demo, " +
+    "and then name it. Re-run the corrected query.";
+}
 
 // Totals and rankings for a house whose clients/products are knowledge CARDS
 // (Luisa Beccaria). One copy, used by the sales-floor SYSTEM, the admin
@@ -315,7 +342,7 @@ Schema (your brand only):
     date_of_birth, registered_at, role, avatar) — CLIENTS have role IS NULL or 'customer'.
 - policies(id, customer_id->profiles.id, item_id->catalogues.id, shop_id,
     start_date, expiration_date, status, selling_price, recommended_retail_price,
-    quantity) — a purchased cover. status: live/expired/cancelled/pending.
+    quantity) — a purchased cover. status: live/expired/cancelled/blocked.
     selling_price = what the client paid. Use start_date for "when".
 - storefront_products(id, name, category, collection, description, sku, price,
     -- category = WHAT THE PIECE IS (DRESSES, SKIRTS, TOPS, KNITWEAR, OUTERWEAR,
@@ -470,6 +497,8 @@ whole query. Separate with ' / ' or ', '.
 Dates are timestamps: for a SINGLE calendar day always filter start_date::date =
 'YYYY-MM-DD' (a bare start_date = 'YYYY-MM-DD' matches only midnight and silently
 misses the day — never use it). For a month use date_trunc('month', start_date).
+
+${RETURNING_CUSTOMERS}
 
 # Attachments — the associate can attach a spreadsheet
 When a turn includes an "--- ATTACHED SPREADSHEET … ---" block, that is a file the
@@ -1071,6 +1100,13 @@ const TOOLS = [
       type: "object",
       properties: {
         sql: { type: "string", description: "A single SELECT or WITH query." },
+        show: {
+          type: "boolean",
+          description:
+            "true when these rows are the table the user should see (the list or breakdown " +
+            "they asked for). It stays on screen even if you run more queries after it. " +
+            "Leave it out for look-ups and supporting counts.",
+        },
       },
       required: ["sql"],
     },
@@ -1726,6 +1762,15 @@ another house's piece.`
 
             if (block.name === "run_sql") {
               const sql = String((block.input as { sql?: string })?.sql ?? "");
+              const show = (block.input as { show?: boolean })?.show === true;
+              // An all-brands figure that silently includes the prospects' demo books
+              // is the worst answer this tool can give: it looks like business. The
+              // prompt says so; this makes sure.
+              const refusal = crossBrand ? prospectScopeRefusal(sql) : null;
+              if (refusal) {
+                toolResults.push({ type: "tool_result", tool_use_id: block.id, is_error: true, content: refusal });
+                continue;
+              }
               // Cross-brand admin → unscoped admin runner (all brands). Everyone
               // else (brand user, or admin focused on one brand) → the brand-scoped
               // runner, which pins RLS to THIS brand so the model's unfiltered SQL
@@ -1748,7 +1793,7 @@ another house's piece.`
                 };
                 const columns = payload.columns ?? [];
                 const rows = payload.rows ?? [];
-                emit("sql_result", { sql, columns, rows, row_count: payload.row_count ?? rows.length });
+                emit("sql_result", { sql, columns, rows, row_count: payload.row_count ?? rows.length, show });
                 toolResults.push({
                   type: "tool_result",
                   tool_use_id: block.id,

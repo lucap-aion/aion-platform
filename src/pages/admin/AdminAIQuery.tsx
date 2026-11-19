@@ -53,6 +53,8 @@ type AssistantMessage = {
   chart: ChartSpec | null;
   reports: ReportFile[];
   sqlSteps: SqlStep[];
+  /** The table on screen is one the assistant marked to be shown; keep it. */
+  tableMarked?: boolean;
   streaming: boolean;
 };
 
@@ -866,13 +868,22 @@ function handleEvent(
           ? data.rows.length
           : 0;
     const stepLabel = summarizeSql(sql);
-    patch((m) => ({
-      ...m,
-      sql: data?.sql ?? m.sql,
-      columns: data?.columns ?? [],
-      rows: data?.rows ?? [],
-      sqlSteps: [...(m.sqlSteps ?? []), { label: stepLabel, rowCount }],
-    }));
+    // One table is shown. A result the assistant marked `show` is the one the
+    // user asked to see, and a later supporting count must not replace it —
+    // "list the returning customers" used to end on a one-row total.
+    const marked = data?.show === true;
+    patch((m) => {
+      const steps = [...(m.sqlSteps ?? []), { label: stepLabel, rowCount }];
+      if (m.tableMarked && !marked) return { ...m, sqlSteps: steps };
+      return {
+        ...m,
+        sql: data?.sql ?? m.sql,
+        columns: data?.columns ?? [],
+        rows: data?.rows ?? [],
+        tableMarked: marked,
+        sqlSteps: steps,
+      };
+    });
   } else if (event === "chart") {
     patch((m) => ({ ...m, chart: data as ChartSpec }));
   } else if (event === "report_files") {
