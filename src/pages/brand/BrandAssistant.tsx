@@ -58,6 +58,8 @@ type AssistantMessage = {
   sql: string | null;
   columns: string[];
   rows: Record<string, unknown>[];
+  /** The table on screen is one the assistant marked to be shown; keep it. */
+  tableMarked?: boolean;
   activity: string | null;
   followups: string[];
   report: ReportPayload | null;
@@ -1496,7 +1498,13 @@ function handleEvent(
       if (currentHasImage && !incomingHasImage && m.rows.length > 0) {
         return { ...m, sql: data?.sql ?? m.sql };
       }
-      return { ...m, sql: data?.sql ?? m.sql, columns: cols.length ? cols : m.columns, rows: rows.length ? rows : m.rows };
+      // A table the assistant marked `show` is the one the associate asked to see;
+      // a later supporting count must not replace it.
+      const marked = data?.show === true;
+      if (m.tableMarked && !marked && m.rows.length > 0) {
+        return { ...m, sql: data?.sql ?? m.sql };
+      }
+      return { ...m, sql: data?.sql ?? m.sql, columns: cols.length ? cols : m.columns, rows: rows.length ? rows : m.rows, tableMarked: rows.length ? marked : m.tableMarked };
     });
   } else if (event === "done") {
     patch((m) => ({ ...m, streaming: false, activity: null }));

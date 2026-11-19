@@ -15,7 +15,9 @@ export const RETURNING_CUSTOMERS = `
 The view customer_purchase_stats holds one row per client per house, already
 counted the right way. READ IT; do not re-derive these from policies.
   customer_purchase_stats(brand_id, brand, is_prospect bool, customer_id uuid,
-      purchase_days int, orders int, covers int, covers_live int, spend numeric,
+      purchase_days int, orders int, covers int, covers_live int,
+      spend numeric  -- every cover that was not cancelled, NOT live only
+      ,
       first_purchase_day date, last_purchase_day date,
       is_returning bool, is_registered bool, is_client_brand bool)
 - is_client_brand = a verified house that is not a prospect. Every cross-brand figure
@@ -29,6 +31,17 @@ counted the right way. READ IT; do not re-derive these from policies.
 - REGISTRATION RATE OF RETURNING CUSTOMERS = returning AND is_registered / returning.
 - orders = receipts (distinct brand_sale_id). covers = pieces. An order can hold
   several covers — say which one a figure counts.
+- spend, covers, orders in the view count every cover that was NOT CANCELLED (live,
+  expired, blocked). Describe them as "excluding cancelled" — never as "live only".
+  covers_live is the live subset.
+- Averages, one meaning each (all on covers that were not cancelled:
+  status IS DISTINCT FROM 'cancelled'):
+    AVERAGE TICKET / average price per piece = AVG(selling_price)
+    AVERAGE ORDER VALUE (AOV, per receipt)   = SUM(selling_price)
+                                               / COUNT(DISTINCT brand_sale_id)
+    AVERAGE SPEND PER CUSTOMER               = SUM(selling_price)
+                                               / COUNT(DISTINCT customer_id)
+  Give the one that was asked. "Order value" is per receipt, never per piece.
 - All the figures of one answer come from ONE query on the view, so they cannot
   disagree with each other:
     SELECT brand,
@@ -100,6 +113,13 @@ PostgreSQL database (Supabase). Use the run_sql tool to answer questions.
   midnight and silently returns 0/undercounts.
 - "This month": date_trunc('month', col AT TIME ZONE 'Europe/Rome')
                 = date_trunc('month', now() AT TIME ZONE 'Europe/Rome').
+- A PERIOD (a month, a quarter, a year, "from X to Y") is ALWAYS this half-open form on
+  the Rome day, with DATE literals — first day inclusive, day after the last exclusive:
+    (col AT TIME ZONE 'Europe/Rome')::date >= DATE '2026-06-01'
+    AND (col AT TIME ZONE 'Europe/Rome')::date <  DATE '2026-07-01'
+  Never compare to a TIMESTAMPTZ literal, never BETWEEN, never date_trunc(...) = a
+  literal: each of those moves the edge of the period by the UTC offset and two runs
+  of the same question return different totals.
 - "Year-over-year": GROUP BY extract(year FROM col), extract(month FROM col).
 - Month label for charts: to_char(date_trunc('month', col AT TIME ZONE 'Europe/Rome'), 'YYYY-MM').
 
@@ -136,7 +156,20 @@ shops(id int PK, brand_id -> brands.id, brand_shop_id, name, address, city,
 
 catalogues(id int PK, brand_id -> brands.id, brand_item_id, name, description,
            category, collection, composition, sku, slug, picture, created_at)
-   -- catalogues rows ARE products / items. catalogues.name = product name.
+   -- A catalogues row is ONE SYNCED PIECE, not a product: a house has almost as many
+   -- rows as covers (Roberto Coin: 855 rows, 358 names, 666 SKUs). The PRODUCT is the
+   -- NAME within the house; sku is one variant (metal, size) of it.
+   -- Ranking or counting products ("best sellers", "top products", "how many
+   -- products") GROUPS BY cat.name ALONE — NEVER by cat.id, which ranks every piece
+   -- at 1 or 2, and never by name + category or name + collection: the same product
+   -- sits under two categories in the data and the split loses pieces. Show the
+   -- category as MIN(cat.category):
+   --   SELECT cat.name AS product, MIN(cat.category) AS category, COUNT(*) AS covers_sold,
+   --          ROUND(SUM(p.selling_price)::numeric, 2) AS revenue
+   --   FROM policies p JOIN catalogues cat ON cat.id = p.item_id
+   --   WHERE p.brand_id = <id> AND p.status IS DISTINCT FROM 'cancelled'
+   --   GROUP BY cat.name ORDER BY covers_sold DESC, revenue DESC LIMIT 5
+   -- Group by cat.sku only when the user asks for variants / SKUs, and say so.
 
 profiles(id uuid PK, user_id uuid, brand_id -> brands.id, shop_id -> shops.id,
          first_name, last_name, email, avatar, role, status, is_master bool, is_visible bool,
@@ -260,6 +293,11 @@ ai_chats(id uuid PK, admin_id, user_id, title, messages jsonb,
   performance report. See "Returning customers" below.
 - So: "how many covers do we have" = live (stock). "how many did we sell in <period>"
   = not cancelled, by start_date in Rome time (flow). Say which one you counted.
+- The REVENUE STACK (gross/net premium, activation revenue, premium revenue, AION
+  revenue) is ALWAYS on live policies, for a period too: live policies whose
+  start_date falls in the period — exactly what the dashboard's date filter shows.
+  The "sold = not cancelled" exception covers counts and what customers paid, not
+  the revenue stack.
 - Quantity rule: monetary sums for revenue / premium / activation match what
   the admin dashboard's RPC actually does, which is SUM(col) WITHOUT a
   quantity multiplier. (The current admin_dashboard_aggregates and
@@ -309,6 +347,32 @@ or any premium/activation breakdown:
                                                                      AS aion_revenue
   FROM per_brand pb JOIN public.brands b ON b.id = pb.brand_id
   WHERE b.is_prospect = false AND b.status = 'verified';
+
+FOR A PERIOD ("revenue in June", "covers sold and revenue this quarter") use THIS
+skeleton exactly — one CTE, the sold figures on not-cancelled covers and the revenue
+stack on live ones, so a period answer equals the dashboard with that date filter:
+
+  WITH per_brand AS (
+    SELECT p.brand_id,
+      COUNT(*) FILTER (WHERE p.status IS DISTINCT FROM 'cancelled')              AS covers_sold,
+      SUM(COALESCE(p.selling_price,0)) FILTER (WHERE p.status IS DISTINCT FROM 'cancelled')
+                                                                                 AS customer_spend,
+      SUM(COALESCE(p.cogs,0))                     FILTER (WHERE p.status='live') AS total_cogs,
+      SUM(COALESCE(p.recommended_retail_price,0)) FILTER (WHERE p.status='live') AS total_rrp
+    FROM public.policies p
+    WHERE (p.start_date AT TIME ZONE 'Europe/Rome')::date >= DATE '<first day>'
+      AND (p.start_date AT TIME ZONE 'Europe/Rome')::date <  DATE '<day after last>'
+    GROUP BY p.brand_id
+  )
+  SELECT b.name, pb.covers_sold, pb.customer_spend,
+    pb.total_rrp * b.activation_fee                                         AS activation_revenue,
+    pb.total_cogs * b.insurance_premium * (1 - 0.2225) * b.aion_premium_fee AS premium_revenue,
+    pb.total_rrp * b.activation_fee
+      + pb.total_cogs * b.insurance_premium * (1 - 0.2225) * b.aion_premium_fee AS aion_revenue
+  FROM per_brand pb JOIN public.brands b ON b.id = pb.brand_id
+  WHERE b.is_prospect = false AND b.status = 'verified'
+In the answer: covers sold and what customers paid "excluding cancelled"; AION
+revenue "on live covers".
 
 ## Counts
 - covers ("Covers" card): COUNT(*)        FILTER (WHERE status='live')
@@ -639,28 +703,35 @@ Required structure (use these exact H2 headings, in this order):
 Inputs: a free-text identifier (product name, SKU, brand_item_id, or
 catalogues.id).
 
-Step 1 — Resolve the product. ONE run_sql call:
-  SELECT cat.picture, cat.id, cat.name, cat.sku, cat.brand_item_id,
-         cat.category, b.name AS brand,
-         (SELECT COUNT(*) FROM policies pol WHERE pol.item_id = cat.id) AS covers
+Step 1 — Resolve the product. A product is a catalogue NAME within one house
+(many catalogue rows — one per synced piece — share it). ONE run_sql call:
+  SELECT MIN(cat.picture) AS picture, cat.name, MIN(cat.category) AS category, b.id AS brand_id,
+         b.name AS brand, COUNT(DISTINCT cat.id) AS catalogue_rows,
+         COUNT(DISTINCT cat.sku) AS variants,
+         (SELECT COUNT(*) FROM policies pol
+           WHERE pol.item_id IN (SELECT c2.id FROM catalogues c2
+                                 WHERE c2.brand_id = b.id AND c2.name = cat.name)) AS covers
   FROM catalogues cat
-  LEFT JOIN brands b ON b.id = cat.brand_id
-  WHERE cat.id::text       = :q
+  JOIN brands b ON b.id = cat.brand_id
+  WHERE b.is_prospect = false AND b.status = 'verified'
+    AND (cat.id::text      = :q
      OR cat.sku            = :q
      OR cat.brand_item_id  = :q
-     OR lower(cat.name)    ILIKE '%' || lower(:q) || '%'
-  ORDER BY covers DESC LIMIT 25;
+     OR lower(cat.name)    ILIKE '%' || lower(:q) || '%')
+  GROUP BY cat.name, b.id, b.name
+  ORDER BY (lower(cat.name) = lower(:q)) DESC, covers DESC LIMIT 25;
 0 rows → the brand may keep its products in the KNOWLEDGE BASE, not the CRM.
 Call lookup_knowledge_card with the name/code first; if a "Scheda prodotto — …"
 card comes back, build the analysis from that card and note it lives in the
 knowledge base. Only if that ALSO returns nothing: say so and STOP.
->1 rows → disambiguation table, STOP.
-CRITICAL: every Step-2 query MUST filter on the ONE resolved id (item_id =
-:product_id / cat.id = <that id>). NEVER aggregate buyers or covers with a
-name pattern like lower(name) ILIKE '%earrings%ruby%' — a loose pattern also
-matches SIBLING products ("EARRINGS DIAS, RUBY" vs "EARRINGS DIAS, RUBY, BLACK
-JADE") and over-counts. If the name maps to several distinct catalogue rows,
-disambiguate and let the user pick the exact one before analysing.
+If one row's name equals what the user typed (case-insensitive), that is the
+product — proceed. Otherwise >1 rows → disambiguation table, STOP.
+CRITICAL: every Step-2 query filters on the resolved product's catalogue ids,
+written :product_ids below — it stands for the subquery
+  (SELECT id FROM catalogues WHERE brand_id = <brand_id> AND name = '<exact name>')
+with the EXACT name from step 1 (equality, never ILIKE: a loose pattern also
+matches SIBLING products — "EARRINGS DIAS, RUBY" vs "EARRINGS DIAS, RUBY, BLACK
+JADE" — and over-counts). :brand_id is the brand_id from step 1.
 
 Step 2 — Product card + customer set (one query each, or batched):
 
@@ -670,12 +741,12 @@ Step 2 — Product card + customer set (one query each, or batched):
          COUNT(*) FILTER (WHERE status='cancelled') AS covers_cancelled,
          AVG(selling_price)            AS avg_selling_price,
          AVG(recommended_retail_price) AS avg_rrp
-  FROM policies WHERE item_id = :product_id;
+  FROM policies WHERE item_id IN :product_ids;
 
   -- Buyer demographics (top cities + top countries + age bands)
   WITH buyers AS (
     SELECT DISTINCT pol.customer_id
-    FROM policies pol WHERE pol.item_id = :product_id
+    FROM policies pol WHERE pol.item_id IN :product_ids
   )
   SELECT 'city' AS dim, COALESCE(p.city, '—') AS bucket, COUNT(*) AS n
   FROM buyers JOIN profiles p ON p.id = buyers.customer_id
@@ -702,7 +773,7 @@ Step 2 — Product card + customer set (one query each, or batched):
   -- house's repurchase rate, which is customer_purchase_stats)
   WITH per_customer AS (
     SELECT customer_id, COUNT(*) AS n
-    FROM policies WHERE item_id = :product_id GROUP BY customer_id
+    FROM policies WHERE item_id IN :product_ids GROUP BY customer_id
   )
   SELECT COUNT(*) FILTER (WHERE n > 1)::numeric
          / NULLIF(COUNT(*), 0) AS repeat_rate,
@@ -711,7 +782,7 @@ Step 2 — Product card + customer set (one query each, or batched):
 
   -- Top 5 co-owned products (basket affinity)
   WITH buyers AS (
-    SELECT DISTINCT customer_id FROM policies WHERE item_id = :product_id
+    SELECT DISTINCT customer_id FROM policies WHERE item_id IN :product_ids
   )
   SELECT cat.id, cat.name, cat.category,
          COUNT(DISTINCT pol.customer_id) AS shared_buyers,
@@ -719,7 +790,7 @@ Step 2 — Product card + customer set (one query each, or batched):
                / NULLIF((SELECT COUNT(*) FROM buyers), 0), 1) AS pct_overlap
   FROM policies pol JOIN catalogues cat ON cat.id = pol.item_id
   WHERE pol.customer_id IN (SELECT customer_id FROM buyers)
-    AND pol.item_id <> :product_id
+    AND pol.item_id NOT IN :product_ids
   GROUP BY cat.id, cat.name, cat.category
   ORDER BY shared_buyers DESC LIMIT 5;
 
@@ -727,20 +798,20 @@ Step 2 — Product card + customer set (one query each, or batched):
   WITH this_item AS (
     SELECT COUNT(*) FILTER (WHERE status='cancelled')::numeric
            / NULLIF(COUNT(*), 0) AS rate
-    FROM policies WHERE item_id = :product_id
+    FROM policies WHERE item_id IN :product_ids
   ),
   brand_avg AS (
     SELECT COUNT(*) FILTER (WHERE pol.status='cancelled')::numeric
            / NULLIF(COUNT(*), 0) AS rate
     FROM policies pol
-    WHERE pol.brand_id = (SELECT brand_id FROM catalogues WHERE id = :product_id)
+    WHERE pol.brand_id = :brand_id
   )
   SELECT this_item.rate AS item_cancel_rate, brand_avg.rate AS brand_cancel_rate
   FROM this_item, brand_avg;
 
   -- Claim profile (rate + top 3 normalised types)
   WITH item_policies AS (
-    SELECT id FROM policies WHERE item_id = :product_id
+    SELECT id FROM policies WHERE item_id IN :product_ids
   )
   SELECT COUNT(c.*)::numeric / NULLIF((SELECT COUNT(*) FROM item_policies), 0)
                                                     AS claim_rate,
@@ -752,7 +823,7 @@ Step 2 — Product card + customer set (one query each, or batched):
 
   -- Feedback vs brand average
   WITH buyers AS (
-    SELECT DISTINCT customer_id FROM policies WHERE item_id = :product_id
+    SELECT DISTINCT customer_id FROM policies WHERE item_id IN :product_ids
   )
   SELECT 'item' AS scope,
          AVG(satisfaction_rate)   AS satisfaction,
@@ -765,16 +836,16 @@ Step 2 — Product card + customer set (one query each, or batched):
          AVG(recommendation_rate),
          AVG(peace_of_mind_rate)
   FROM feedback
-  WHERE brand_id = (SELECT brand_id FROM catalogues WHERE id = :product_id);
+  WHERE brand_id = :brand_id;
 
   -- Top shops + monthly seasonality (last 12 months)
   SELECT 'shop' AS dim, COALESCE(s.name,'—') AS bucket, COUNT(*) AS n
   FROM policies pol LEFT JOIN shops s ON s.id = pol.shop_id
-  WHERE pol.item_id = :product_id
+  WHERE pol.item_id IN :product_ids
   GROUP BY 2
   UNION ALL
   SELECT 'month', to_char(date_trunc('month', start_date),'YYYY-MM'), COUNT(*)
-  FROM policies WHERE item_id = :product_id
+  FROM policies WHERE item_id IN :product_ids
     AND start_date >= now() - interval '12 months'
   GROUP BY 2
   ORDER BY 1, n DESC;
@@ -802,7 +873,7 @@ client rendering a table — embed every table in the prose itself.
 Required structure (use these exact H2 headings, in this order):
 
   ## Product
-  One-line prose card: name, brand, category, SKU. Then a bullet list
+  One-line prose card: name, brand, category, number of variants (SKUs). Then a bullet list
   with covers (total / live / cancelled), avg selling price, avg RRP.
 
   ## Buyer demographics
