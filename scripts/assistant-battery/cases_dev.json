@@ -1,0 +1,540 @@
+[
+ {
+  "name": "returning count RC",
+  "turns": [
+   "How many returning customers does Roberto Coin have?"
+  ],
+  "says": [
+   "\\b19\\b"
+  ],
+  "avoids": [
+   "\\b(66|39|47|184)\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "repurchase rate RC",
+  "turns": [
+   "What is the repurchase rate of Roberto Coin?"
+  ],
+  "says": [
+   "5\\.7"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "riacquisto IT all brands",
+  "turns": [
+   "quanti clienti hanno riacquistato?"
+  ],
+  "says": [
+   "\\b19\\b"
+  ],
+  "sql_avoids": [],
+  "runs": 2
+ },
+ {
+  "name": "repeat buyers platform",
+  "turns": [
+   "How many repeat buyers are there on the platform?"
+  ],
+  "says": [
+   "\\b19\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "reg rate of returning",
+  "turns": [
+   "What share of our returning customers registered on the platform?"
+  ],
+  "says": [
+   "26\\.3",
+   "\\b5\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "list bought more than once",
+  "turns": [
+   "List the customers who came back and bought again"
+  ],
+  "says": [
+   "\\b19\\b"
+  ],
+  "min_shown": 19,
+  "runs": 2
+ },
+ {
+  "name": "giulio full conversation",
+  "turns": [
+   "can you list returning customers and show the ones that registered to aion platform? What is the registration rate of returning customers? what is the repurchase rate of roberto coin?",
+   "as a returning customer, I mean someone who has repurchased in a second instance (not the same day)",
+   "the previous stats are wrong",
+   "This is so bad. everytime you give me a different number.\n\nnumber of returning customer: number of unique customers who have purchased on at least 2 different days\n% of returning customers that registerd: number of returning customer who registered/ number of returning cusomer\n\nIs it this difficult?\n\nrepurchase rate: total number of orders/ total number of returning customers"
+  ],
+  "says": [
+   "\\b19\\b",
+   "26\\.3"
+  ],
+  "avoids": [
+   "\\b(66|39|47|184)\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "covers total",
+  "turns": [
+   "How many covers do we have in total?"
+  ],
+  "says": [
+   "\\b497\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "customers total",
+  "turns": [
+   "How many customers do we have?"
+  ],
+  "says": [
+   "\\b335\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "top brands by covers",
+  "turns": [
+   "Rank the brands by number of covers"
+  ],
+  "says": [
+   "Roberto Coin"
+  ],
+  "avoids": [
+   "Prada",
+   "Eberhard",
+   "Maison Ardea",
+   "Shaft"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "registration rate",
+  "turns": [
+   "What is the registration rate for Roberto Coin?"
+  ],
+  "says": [
+   "12\\.2"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "covers sold per month 2026",
+  "turns": [
+   "How many covers did Roberto Coin sell per month in 2026?"
+  ],
+  "says": [
+   "\\b131\\b",
+   "\\b119\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "aion revenue RC",
+  "turns": [
+   "What is AION revenue for Roberto Coin?"
+  ],
+  "says": [
+   "16[,.]?98[01]"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "brand user returning",
+  "as": "BRAND_USER",
+  "turns": [
+   "How many returning customers do we have and what is our repurchase rate?"
+  ],
+  "says": [
+   "\\b19\\b",
+   "5\\.7"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "view-as returning",
+  "turns": [
+   "How many of our clients bought on more than one occasion?"
+  ],
+  "extra": {
+   "brand_id": 2
+  },
+  "says": [
+   "\\b19\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "top products",
+  "turns": [
+   "What are the top 5 best-selling Roberto Coin products?"
+  ],
+  "says": [
+   "\\b34\\b",
+   "\\b28\\b",
+   "\\b26\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "top products IT",
+  "turns": [
+   "quali sono i prodotti più venduti di Roberto Coin?"
+  ],
+  "says": [
+   "\\b34\\b",
+   "\\b28\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "Q2 spend",
+  "turns": [
+   "How much did Roberto Coin customers spend in Q2 2026?"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "may vs june",
+  "turns": [
+   "Compare Roberto Coin sales in May and June 2026"
+  ],
+  "says": [
+   "\\b131\\b",
+   "\\b119\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "product playbook",
+  "turns": [
+   "Product analysis for: EARRINGS DIAS, RUBY"
+  ],
+  "says": [
+   "## Product",
+   "34"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "B june pieces",
+  "as": "BRAND_USER",
+  "turns": [
+   "How many pieces did we sell in June 2026 and for how much?"
+  ],
+  "says": [
+   "\\b119\\b",
+   "779[,.]?049"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "B best sellers",
+  "as": "BRAND_USER",
+  "turns": [
+   "Which are our best-selling pieces?"
+  ],
+  "says": [
+   "\\b34\\b",
+   "\\b28\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "B top products IT",
+  "as": "BRAND_USER",
+  "turns": [
+   "quali sono i pezzi che vendiamo di più?"
+  ],
+  "says": [
+   "\\b34\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "viewas best sellers",
+  "turns": [
+   "What are our top selling products?"
+  ],
+  "extra": {
+   "brand_id": 2
+  },
+  "says": [
+   "\\b34\\b"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "AOV",
+  "turns": [
+   "What is the average order value for Roberto Coin?"
+  ],
+  "says": [
+   "8168"
+  ],
+  "avoids": [
+   "8163"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "avg ticket admin",
+  "turns": [
+   "What is the average ticket for Roberto Coin?"
+  ],
+  "says": [
+   "5914"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "B avg ticket",
+  "as": "BRAND_USER",
+  "turns": [
+   "What is our average ticket?"
+  ],
+  "says": [
+   "5[,.]?914"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "B AOV",
+  "as": "BRAND_USER",
+  "turns": [
+   "What is our average order value?"
+  ],
+  "says": [
+   "8[,.]?169|8[,.]?168"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "june sold+revenue",
+  "turns": [
+   "How many covers were sold in June 2026 and what was the revenue?"
+  ],
+  "says": [
+   "\\b119\\b",
+   "779049",
+   "4478"
+  ],
+  "avoids": [
+   "4479"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "aion revenue june",
+  "turns": [
+   "What was AION revenue in June 2026?"
+  ],
+  "says": [
+   "4478"
+  ],
+  "avoids": [
+   "4479"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "aion revenue RC total",
+  "turns": [
+   "What is AION revenue for Roberto Coin?"
+  ],
+  "says": [
+   "16[,.]?98[01]"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "top5 spend",
+  "turns": [
+   "Who are the top 5 Roberto Coin customers by spend?"
+  ],
+  "says": [
+   "132800"
+  ],
+  "avoids": [
+   "live covers only",
+   "on live covers"
+  ],
+  "runs": 2
+ },
+ {
+  "name": "B scontrino medio",
+  "as": "BRAND_USER",
+  "turns": [
+   "qual è lo scontrino medio?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: What is the average cover value for Roberto Coin?",
+  "turns": [
+   "What is the average cover value for Roberto Coin?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: What is the total protected value on the platform?",
+  "turns": [
+   "What is the total protected value on the platform?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: How many claims do we have, how many are open, and what is the claim rate?",
+  "turns": [
+   "How many claims do we have, how many are open, and what is the claim rate?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: What is the average satisfaction score for Roberto Coin and what is the feedback rate?",
+  "turns": [
+   "What is the average satisfaction score for Roberto Coin and what is the feedback rate?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: What is the profilation rate for Roberto Coin?",
+  "turns": [
+   "What is the profilation rate for Roberto Coin?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: How many VIP customers does Roberto Coin have?",
+  "turns": [
+   "How many VIP customers does Roberto Coin have?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: Show Roberto Coin sales by shop",
+  "turns": [
+   "Show Roberto Coin sales by shop"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: How many new customers did Roberto Coin get in June 2026?",
+  "turns": [
+   "How many new customers did Roberto Coin get in June 2026?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: What is the cancellation rate for Roberto Coin?",
+  "turns": [
+   "What is the cancellation rate for Roberto Coin?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: Break down Roberto Coin customers by country",
+  "turns": [
+   "Break down Roberto Coin customers by country"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: How many lapsed customers does Roberto Coin have?",
+  "turns": [
+   "How many lapsed customers does Roberto Coin have?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: What is AION total revenue across the platform?",
+  "turns": [
+   "What is AION total revenue across the platform?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: How much did customers spend with Roberto Coin in 2026?",
+  "turns": [
+   "How much did customers spend with Roberto Coin in 2026?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: How many covers expire in the next 30 days?",
+  "turns": [
+   "How many covers expire in the next 30 days?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: How many registered customers do we have?",
+  "turns": [
+   "How many registered customers do we have?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: What is the average number of covers per customer?",
+  "turns": [
+   "What is the average number of covers per customer?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: How many customers bought only once?",
+  "turns": [
+   "How many customers bought only once?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "A: What is the average spend per customer for Roberto Coin?",
+  "turns": [
+   "What is the average spend per customer for Roberto Coin?"
+  ],
+  "runs": 3
+ },
+ {
+  "name": "B: How many clients do we have and how many are registered?",
+  "turns": [
+   "How many clients do we have and how many are registered?"
+  ],
+  "as": "BRAND_USER",
+  "runs": 3
+ },
+ {
+  "name": "B: Who are our top 5 clients by spend?",
+  "turns": [
+   "Who are our top 5 clients by spend?"
+  ],
+  "as": "BRAND_USER",
+  "runs": 3
+ },
+ {
+  "name": "B: How many pieces did we sell in June 2026?",
+  "turns": [
+   "How many pieces did we sell in June 2026?"
+  ],
+  "as": "BRAND_USER",
+  "runs": 3
+ },
+ {
+  "name": "B: How many VIP clients do we have?",
+  "turns": [
+   "How many VIP clients do we have?"
+  ],
+  "as": "BRAND_USER",
+  "runs": 3
+ }
+]
