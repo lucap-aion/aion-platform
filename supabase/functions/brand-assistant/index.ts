@@ -341,8 +341,10 @@ Schema (your brand only):
 - profiles(id, first_name, last_name, email, phone_number, city, country,
     date_of_birth, registered_at, role, avatar) — CLIENTS have role IS NULL or 'customer'.
 - policies(id, customer_id->profiles.id, item_id->catalogues.id, shop_id,
-    start_date, expiration_date, status, selling_price, recommended_retail_price,
-    quantity) — a purchased cover. status: live/expired/cancelled/blocked.
+    brand_sale_id, start_date, expiration_date, status, selling_price,
+    recommended_retail_price, quantity) — a purchased cover (one PIECE).
+    brand_sale_id = the receipt: pieces bought together share it, so an ORDER is one
+    distinct brand_sale_id. status: live/expired/cancelled/blocked.
     selling_price = what the client paid. Use start_date for "when".
 - storefront_products(id, name, category, collection, description, sku, price,
     -- category = WHAT THE PIECE IS (DRESSES, SKIRTS, TOPS, KNITWEAR, OUTERWEAR,
@@ -408,6 +410,19 @@ Schema (your brand only):
     SUBSET of products synced into AION from sales; join target for policies (what
     a specific client owns). Use it to resolve a client's purchased items, NOT to
     browse the range — storefront_products is the full catalogue.
+    A catalogues row is ONE SYNCED PIECE, not a product: the PRODUCT is the name.
+    "Best sellers" / "top pieces" / "what sells most" = what WE SOLD, one way only:
+      SELECT c.name, MIN(c.category) AS category, COUNT(*) AS pieces_sold,
+             ROUND(SUM(po.selling_price)::numeric) AS revenue
+      FROM policies po JOIN catalogues c ON c.id = po.item_id
+      WHERE po.status IS DISTINCT FROM 'cancelled'
+      GROUP BY c.name ORDER BY pieces_sold DESC, revenue DESC LIMIT 10
+    GROUP BY c.name alone — never c.id (every piece would rank at 1 or 2), never
+    name + collection (it splits one product in two); by c.sku only for variants.
+    A storefront collection called "Bestsellers" is the website's own label, not
+    our sales: never answer a best-seller question from it. The card views
+    (knowledge_product_cards) are for houses with no sales in policies — if policies
+    has rows, the ranking comes from policies.
 - policies(...) above link item_id -> catalogues.id.
   When listing what a CLIENT BOUGHT, ALWAYS show the pieces with photos: join the
   catalogue AND left-join the storefront for a clean image + price, e.g.
@@ -496,7 +511,11 @@ Never write a semicolon anywhere in the SQL — not at the end, not inside a str
 whole query. Separate with ' / ' or ', '.
 Dates are timestamps: for a SINGLE calendar day always filter start_date::date =
 'YYYY-MM-DD' (a bare start_date = 'YYYY-MM-DD' matches only midnight and silently
-misses the day — never use it). For a month use date_trunc('month', start_date).
+misses the day — never use it). Days and months are ROME time. A period (month,
+quarter, year) is always this half-open form with DATE literals:
+(start_date AT TIME ZONE 'Europe/Rome')::date >= DATE '2026-06-01' AND
+(start_date AT TIME ZONE 'Europe/Rome')::date < DATE '2026-07-01' — never BETWEEN,
+never a comparison to a timestamp literal: those shift the edge of the period.
 
 ${RETURNING_CUSTOMERS}
 
