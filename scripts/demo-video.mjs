@@ -379,6 +379,30 @@ if (slow > 1) {
     const st = window.setTimeout.bind(window), si = window.setInterval.bind(window);
     window.setTimeout = ((fn, ms, ...a) => st(fn, (Number(ms) || 0) * factor, ...a));
     window.setInterval = ((fn, ms, ...a) => si(fn, (Number(ms) || 0) * factor, ...a));
+
+    // AN ANIMATION THAT STARTS "NOW" STARTS NOW. Framer Motion (every card that fades in:
+    // `motion.div initial={{ opacity: 0 }}`) lines its animations up by writing
+    // `animation.startTime` itself, from performance.now(). On an ordinary page that clock
+    // and the document's timeline are the same clock. Under Animation.setPlaybackRate the
+    // timeline runs at 1/factor and performance.now() does not, so the start it writes is
+    // in the timeline's future — by seven eighths of the document's age, and a portal is
+    // one document from the sign-in to the last page. The card sat at opacity 0 for 25 real
+    // seconds on the first page and longer on every one after: the Damiani film of
+    // 2026-11-23 toured a platform of headings over empty space, on both runners, with
+    // nothing in the log. A start time written by the page is replaced with the timeline's
+    // own present; the animation's delay is a separate option and still applies.
+    const startTime = Object.getOwnPropertyDescriptor(Animation.prototype, "startTime");
+    if (startTime?.set) {
+      Object.defineProperty(Animation.prototype, "startTime", {
+        configurable: true,
+        enumerable: startTime.enumerable,
+        get() { return startTime.get.call(this); },
+        set(v) {
+          const now = document.timeline.currentTime;
+          startTime.set.call(this, v == null || now == null ? v : Math.min(Number(v), Number(now)));
+        },
+      });
+    }
   }, slow);
 }
 const page = await context.newPage();
